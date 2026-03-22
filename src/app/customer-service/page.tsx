@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { isAuthenticated } from "@/lib/admin-auth";
-import KPITabBar from "@/components/admin/KPITabBar";
 import CustomerServiceDashboard from "@/components/admin/CustomerServiceDashboard";
 
 export const metadata: Metadata = {
@@ -15,7 +14,6 @@ export default async function CustomerServicePage() {
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
-      <KPITabBar />
       <CustomerServiceDashboard />
     </div>
   );
