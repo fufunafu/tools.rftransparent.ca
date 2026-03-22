@@ -1,0 +1,284 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    html {
+      scroll-behavior: smooth;
+    }
+  }
+
+  body {
+    @apply bg-sand-50 text-sand-900 font-sans;
+  }
+
+  ::selection {
+    @apply bg-accent/15 text-sand-900;
+  }
+
+  /* Focus styles for accessibility */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-accent;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-serif;
+  }
+}
+
+@layer components {
+  /* Prose styling for MDX content */
+  .prose {
+    @apply text-sand-800 leading-relaxed;
+  }
+
+  .prose h1 {
+    @apply text-display-sm font-serif text-sand-900 mt-12 mb-6;
+  }
+
+  .prose h2 {
+    @apply text-2xl font-serif text-sand-900 mt-10 mb-4;
+  }
+
+  .prose h3 {
+    @apply text-xl font-serif text-sand-900 mt-8 mb-3;
+  }
+
+  .prose p {
+    @apply mb-5 text-base leading-[1.75];
+  }
+
+  .prose a {
+    @apply text-accent underline underline-offset-2 hover:text-accent-dark transition-colors;
+  }
+
+  .prose ul, .prose ol {
+    @apply mb-5 pl-6;
+  }
+
+  .prose ul {
+    @apply list-disc;
+  }
+
+  .prose ol {
+    @apply list-decimal;
+  }
+
+  .prose li {
+    @apply mb-2;
+  }
+
+  .prose blockquote {
+    @apply border-l-2 border-accent/30 pl-5 italic text-sand-600 my-6;
+  }
+
+  .prose code {
+    @apply bg-sand-100 px-1.5 py-0.5 rounded text-sm;
+  }
+
+  .prose pre {
+    @apply bg-sand-900 text-sand-100 rounded-xl p-5 overflow-x-auto my-6;
+  }
+
+  .prose pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .prose img {
+    @apply rounded-xl my-8;
+  }
+
+  .prose hr {
+    @apply border-sand-200 my-10;
+  }
+}
+
+/* Mobile nav animation */
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: slideDown 0.15s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-in {
+    animation: none;
+  }
+}
+
+/* Chat widget slide-up animation */
+@keyframes chatUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-chat-up {
+  animation: chatUp 0.2s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-chat-up {
+    animation: none;
+  }
+}
+
+/* ─── Scroll-triggered animations ─── */
+
+.animate-hidden {
+  opacity: 0;
+}
+
+.animate-base {
+  will-change: opacity, transform;
+}
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.6s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.5s ease-out forwards;
+}
+
+@keyframes fadeRight {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-fade-right {
+  animation: fadeRight 0.5s ease-out forwards;
+}
+
+/* Stagger grid */
+.stagger-hidden .stagger-child {
+  opacity: 0;
+  transform: translateY(16px);
+}
+
+.stagger-animate .stagger-child {
+  animation: fadeUp 0.5s ease-out forwards;
+  animation-delay: var(--stagger-delay, 0ms);
+}
+
+/* Hero entrance */
+@keyframes heroEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* LCP-safe variant: starts fully visible, only animates transform.
+   Use on the primary h1 / above-the-fold LCP text so Lighthouse can
+   register it immediately without waiting for an opacity fade. */
+@keyframes heroSlideUp {
+  from {
+    transform: translateY(24px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-hero {
+  animation: heroSlideUp 0.7s ease-out forwards;
+}
+
+.animate-hero-delay-1 {
+  opacity: 0;
+  animation: heroEntrance 0.7s ease-out 0.15s forwards;
+}
+
+.animate-hero-delay-2 {
+  opacity: 0;
+  animation: heroEntrance 0.7s ease-out 0.3s forwards;
+}
+
+.animate-hero-delay-3 {
+  opacity: 0;
+  animation: heroEntrance 0.6s ease-out 0.45s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-hidden,
+  .stagger-hidden .stagger-child {
+    opacity: 1;
+    transform: none;
+  }
+
+  .animate-fade-up,
+  .animate-fade-in,
+  .animate-fade-right,
+  .stagger-animate .stagger-child,
+  .animate-hero,
+  .animate-hero-delay-1,
+  .animate-hero-delay-2,
+  .animate-hero-delay-3 {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Placeholder image styling */
+.placeholder-image {
+  @apply bg-accent-50 flex items-center justify-center text-accent-200;
+  background-image: linear-gradient(135deg, theme("colors.accent.50") 0%, theme("colors.accent.100") 100%);
+}
+
+/* Print styles for report export */
+@media print {
+  body { background: white !important; }
+  .print\:hidden, button, select, [class*="border-b border-sand"] { display: none !important; }
+  .fixed { position: static !important; }
+  .overflow-auto { overflow: visible !important; }
+  .h-52, .h-16 { height: auto !important; min-height: 150px; }
+  @page { size: landscape; margin: 1cm; }
+}
