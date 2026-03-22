@@ -130,7 +130,7 @@ export default function HealthCheckDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-xl font-serif font-semibold text-sand-900">System Health</h2>
+          <h2 className="text-xl font-semibold text-sand-900">System Health</h2>
           {initData && (
             <p className="text-sm text-sand-400 mt-0.5">
               Last checked: {formatDate(initData.checked_at)}

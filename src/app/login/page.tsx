@@ -8,9 +8,9 @@ export const metadata: Metadata = {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-sand-50">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100">
       <div className="w-full max-w-sm mx-auto px-6">
-        <h1 className="text-xl font-serif font-semibold text-sand-900 mb-6 text-center">
+        <h1 className="text-xl font-semibold text-slate-900 mb-6 text-center">
           RF Transparent Tools
         </h1>
         <LoginForm />

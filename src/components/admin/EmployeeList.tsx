@@ -79,7 +79,7 @@ export default function EmployeeList() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-xl font-serif font-semibold text-sand-900">
+        <h2 className="text-xl font-semibold text-sand-900">
           Employees
         </h2>
         <span className="text-sm text-sand-400">{employees.length} total</span>

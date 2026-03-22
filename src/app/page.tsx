@@ -37,7 +37,7 @@ const sections = [
         description: "Google Ads campaigns and analytics.",
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 1 1 0-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38a.75.75 0 0 1-1.021-.27 18.634 18.634 0 0 1-1.088-2.16c-.047-.114-.085-.23-.124-.346m2.368-7.858a18.657 18.657 0 0 1-.985-2.783.75.75 0 0 1 .463-1.511l.657-.38c.384-.22.867-.077 1.021.27.27.623.508 1.263.714 1.917.073.23.14.463.199.698m-2.069 5.847c.688.06 1.386.09 2.09.09h.75a4.5 4.5 0 1 0 0-9h-.75c-.704 0-1.402.03-2.09.09" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
           </svg>
         ),
       },
@@ -120,62 +120,38 @@ export default async function HomePage() {
   if (!authenticated) redirect("/login");
 
   return (
-    <div className="fixed inset-0 z-50 bg-sand-50 flex flex-col">
-      {/* Header */}
-      <div className="border-b border-sand-200/60 bg-white px-6 py-3 shrink-0">
-        <div className="flex items-center justify-between max-w-[1600px] mx-auto">
-          <div className="flex items-center gap-3">
-            <span className="text-lg font-serif font-semibold text-sand-900">
-              RF Transparent
-            </span>
-            <span className="text-sand-300">/</span>
-            <h1 className="text-sm font-medium text-sand-600">Tools</h1>
-          </div>
-          <a
-            href="/login"
-            className="text-xs text-sand-400 hover:text-sand-700 transition-colors"
-          >
-            Sign out
-          </a>
-        </div>
+    <div className="max-w-3xl mx-auto space-y-10">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-900">Tools</h2>
+        <p className="text-sm text-slate-500 mt-1">Dashboards and internal tools for RF Transparent.</p>
       </div>
 
-      {/* Body */}
-      <div className="flex-1 overflow-auto p-8">
-        <div className="max-w-3xl mx-auto space-y-10">
-          <div>
-            <h2 className="text-2xl font-serif font-semibold text-sand-900">Tools</h2>
-            <p className="text-sm text-sand-400 mt-1">Dashboards and internal tools for RF Transparent.</p>
+      {sections.map((section) => (
+        <div key={section.group}>
+          <p className="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">
+            {section.group}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {section.items.map((item) => (
+              <a
+                key={item.href}
+                href={item.href}
+                className="flex items-start gap-4 p-5 bg-white rounded-xl border border-slate-200 hover:shadow-soft hover:border-blue-300 transition-all group"
+              >
+                <div className="mt-0.5 text-slate-400 group-hover:text-blue-500 transition-colors shrink-0">
+                  {item.icon}
+                </div>
+                <div className="min-w-0">
+                  <p className="font-medium text-slate-900 group-hover:text-blue-600 transition-colors">
+                    {item.label}
+                  </p>
+                  <p className="text-sm text-slate-500 mt-0.5 leading-snug">{item.description}</p>
+                </div>
+              </a>
+            ))}
           </div>
-
-          {sections.map((section) => (
-            <div key={section.group}>
-              <p className="text-xs font-semibold uppercase tracking-widest text-sand-400 mb-3">
-                {section.group}
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {section.items.map((item) => (
-                  <a
-                    key={item.href}
-                    href={item.href}
-                    className="flex items-start gap-4 p-5 bg-white rounded-xl border border-sand-200/60 hover:shadow-soft hover:border-sand-300 transition-all group"
-                  >
-                    <div className="mt-0.5 text-sand-400 group-hover:text-accent transition-colors shrink-0">
-                      {item.icon}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-medium text-sand-900 group-hover:text-accent transition-colors">
-                        {item.label}
-                      </p>
-                      <p className="text-sm text-sand-400 mt-0.5 leading-snug">{item.description}</p>
-                    </div>
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
         </div>
-      </div>
+      ))}
     </div>
   );
 }

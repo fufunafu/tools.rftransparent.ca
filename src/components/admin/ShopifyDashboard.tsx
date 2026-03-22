@@ -277,7 +277,7 @@ export default function ShopifyDashboard() {
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-serif font-semibold text-sand-900">Shopify</h2>
+        <h2 className="text-xl font-semibold text-sand-900">Shopify</h2>
         <button onClick={refreshAll} className="px-3 py-1.5 text-xs bg-sand-100 text-sand-600 rounded-lg hover:bg-sand-200 transition-colors">
           Refresh all
         </button>

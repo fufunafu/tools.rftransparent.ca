@@ -15,7 +15,7 @@
   }
 
   body {
-    @apply bg-sand-50 text-sand-900 font-sans;
+    @apply bg-slate-100 text-slate-900 font-sans;
   }
 
   ::selection {
@@ -28,7 +28,7 @@
   }
 
   h1, h2, h3, h4 {
-    @apply font-serif;
+    @apply font-sans;
   }
 }
 
@@ -39,15 +39,15 @@
   }
 
   .prose h1 {
-    @apply text-display-sm font-serif text-sand-900 mt-12 mb-6;
+    @apply text-display-sm font-sans text-sand-900 mt-12 mb-6;
   }
 
   .prose h2 {
-    @apply text-2xl font-serif text-sand-900 mt-10 mb-4;
+    @apply text-2xl font-sans text-sand-900 mt-10 mb-4;
   }
 
   .prose h3 {
-    @apply text-xl font-serif text-sand-900 mt-8 mb-3;
+    @apply text-xl font-sans text-sand-900 mt-8 mb-3;
   }
 
   .prose p {

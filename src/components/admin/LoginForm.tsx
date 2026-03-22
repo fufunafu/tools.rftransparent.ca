@@ -58,7 +58,7 @@ export default function LoginForm() {
       <div>
         <label
           htmlFor="admin-password"
-          className="block text-sm font-medium text-sand-700 mb-1.5"
+          className="block text-sm font-medium text-slate-700 mb-1.5"
         >
           Password
         </label>
@@ -67,7 +67,7 @@ export default function LoginForm() {
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-xl border border-sand-300 bg-white px-4 py-2.5 text-sm text-sand-900 placeholder:text-sand-400 focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent"
+          className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           placeholder="Enter password"
           autoFocus
           autoComplete="current-password"
@@ -89,7 +89,7 @@ export default function LoginForm() {
       <button
         type="submit"
         disabled={loading || !password.trim()}
-        className="w-full rounded-xl bg-sand-900 px-6 py-2.5 text-sm font-medium text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-60"
+        className="w-full rounded-xl bg-blue-500 px-6 py-2.5 text-sm font-medium text-white hover:bg-blue-600 transition-colors disabled:opacity-60"
       >
         {loading ? "Signing in..." : "Sign in"}
       </button>

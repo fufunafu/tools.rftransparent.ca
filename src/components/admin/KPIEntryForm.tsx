@@ -83,7 +83,7 @@ export default function KPIEntryForm({ onSave, onCancel }: Props) {
         onSubmit={handleSubmit}
         className="bg-white rounded-xl border border-sand-200 shadow-lg w-full max-w-md p-6 space-y-4"
       >
-        <h3 className="text-lg font-serif font-semibold text-sand-900">
+        <h3 className="text-lg font-semibold text-sand-900">
           Add KPI Entry
         </h3>
         <p className="text-xs text-sand-400">

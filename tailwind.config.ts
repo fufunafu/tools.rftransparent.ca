@@ -7,28 +7,28 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        // Warm cream palette
+        // Slate palette (mapped from sand)
         sand: {
-          50: "#fefdfb",
-          100: "#faf8f4",
-          200: "#f0ebe3",
-          300: "#e2ddd4",
-          400: "#c0b9ab",
-          500: "#969082",
-          600: "#706b5f",
-          700: "#504c43",
-          800: "#383530",
-          900: "#242220",
+          50: '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          800: '#1e293b',
+          900: '#0f172a',
         },
-        // Forest green accent
+        // Blue accent
         accent: {
-          DEFAULT: "#2d3a2e",
-          light: "#4a6b4e",
-          dark: "#1a2b1c",
-          50: "#f0f5f0",
-          100: "#dce8dc",
-          200: "#b8d4b8",
-          300: "#8bba8b",
+          DEFAULT: '#3b82f6',
+          light: '#60a5fa',
+          dark: '#2563eb',
+          50: '#eff6ff',
+          100: '#dbeafe',
+          200: '#bfdbfe',
+          300: '#93c5fd',
         },
       },
       fontFamily: {
@@ -39,13 +39,6 @@ const config: Config = {
           "BlinkMacSystemFont",
           "Segoe UI",
           "sans-serif",
-        ],
-        serif: [
-          "var(--font-lora)",
-          "Georgia",
-          "Cambria",
-          "Times New Roman",
-          "serif",
         ],
       },
       fontSize: {

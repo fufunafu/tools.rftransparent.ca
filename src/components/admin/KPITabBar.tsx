@@ -16,7 +16,7 @@ export default function KPITabBar() {
   const pathname = usePathname();
 
   return (
-    <div className="flex border-b border-sand-200">
+    <div className="flex border-b border-slate-200">
       {TABS.map((t) => {
         const active = pathname === t.href;
         return (
@@ -25,13 +25,13 @@ export default function KPITabBar() {
             href={t.href}
             className={`px-5 py-3 text-sm font-medium transition-colors relative ${
               active
-                ? "text-sand-900"
-                : "text-sand-400 hover:text-sand-600"
+                ? "text-blue-600"
+                : "text-slate-400 hover:text-slate-600"
             }`}
           >
             {t.label}
             {active && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-sand-900 rounded-full" />
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-blue-500 rounded-full" />
             )}
           </Link>
         );

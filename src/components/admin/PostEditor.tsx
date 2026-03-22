@@ -135,7 +135,7 @@ export default function PostEditor({ slug }: Props) {
           placeholder="Post title"
           value={form.title}
           onChange={(e) => set("title", e.target.value)}
-          className="w-full text-2xl font-serif font-semibold text-sand-900 border-0 focus:outline-none placeholder:text-sand-300 bg-transparent"
+          className="w-full text-2xl font-semibold text-sand-900 border-0 focus:outline-none placeholder:text-sand-300 bg-transparent"
         />
         <input
           type="text"
