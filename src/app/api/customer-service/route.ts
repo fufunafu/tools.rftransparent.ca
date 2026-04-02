@@ -51,17 +51,19 @@ function computeMetrics(records: CallRecord[]) {
   }
 
   // Also track answered inbound calls per number (caller called back and got through)
+  // Exclude voicemail — leaving a VM is not a real recovery
   const answeredInboundByNumber = new Map<string, string[]>();
   for (const r of inbound) {
-    if (r.endpoint) {
+    if (r.endpoint && !r.endpoint.toLowerCase().includes("vm")) {
       const times = answeredInboundByNumber.get(r.from_number) ?? [];
       times.push(r.call_start);
       answeredInboundByNumber.set(r.from_number, times);
     }
   }
 
-  // Find all unanswered inbound calls (no endpoint = not picked up, not VM)
-  const unansweredCalls = inbound.filter((r) => !r.endpoint);
+  // Missed = inbound calls that were not answered by a person (no endpoint, or voicemail)
+  const isVm = (r: CallRecord) => r.endpoint?.toLowerCase().includes("vm");
+  const unansweredCalls = inbound.filter((r) => !r.endpoint || isVm(r));
 
   // For each unanswered call, check if there was a resolution
   const responseTimes: number[] = [];
@@ -76,12 +78,17 @@ function computeMetrics(records: CallRecord[]) {
     const answeredCbs = answeredInboundByNumber.get(call.from_number);
     const answeredAfter = answeredCbs?.filter((t) => t > call.call_start).sort() ?? [];
 
-    // Take the earliest resolution from either source
-    const allResolutions = [...outboundAfter, ...answeredAfter].sort();
-    if (allResolutions.length > 0) {
+    // Check if resolved by either outbound callback or answered inbound
+    const hasOutbound = outboundAfter.length > 0;
+    const hasAnsweredInbound = answeredAfter.length > 0;
+    if (hasOutbound || hasAnsweredInbound) {
       recoveredCount++;
-      const diffMin = (new Date(allResolutions[0]).getTime() - new Date(call.call_start).getTime()) / 60000;
-      responseTimes.push(diffMin);
+      // Response time only measures outbound callbacks (team effort),
+      // not when the customer happens to call back
+      if (hasOutbound) {
+        const diffMin = (new Date(outboundAfter[0]).getTime() - new Date(call.call_start).getTime()) / 60000;
+        responseTimes.push(diffMin);
+      }
     } else {
       missedCalls.push(call);
     }
@@ -95,34 +102,55 @@ function computeMetrics(records: CallRecord[]) {
     ? Math.round((recoveredCount / unansweredCalls.length) * 1000) / 10
     : 0;
 
-  // Miss rate: truly missed calls (not recovered) / all inbound
+  // Miss rate: all unanswered inbound calls / all inbound
   const missRate =
     inbound.length > 0
-      ? Math.round((missedCalls.length / inbound.length) * 1000) / 10
+      ? Math.round((unansweredCalls.length / inbound.length) * 1000) / 10
       : 0;
 
-  // Avg handle time: only count answered calls with duration > 0
-  const answeredCalls = records.filter(
-    (r) => r.endpoint && !r.endpoint.toLowerCase().includes("vm") && Number(r.duration_min || 0) > 0
+  // Avg handle time — inbound (answered, not VM, duration > 0)
+  const answeredInbound = records.filter(
+    (r) => r.direction === "inbound" && r.endpoint && !r.endpoint.toLowerCase().includes("vm") && Number(r.duration_min || 0) > 0
   );
-  const totalDuration = answeredCalls.reduce(
-    (sum, r) => sum + Number(r.duration_min || 0),
-    0
-  );
+  const avgDurationInbound =
+    answeredInbound.length > 0
+      ? Math.round((answeredInbound.reduce((s, r) => s + Number(r.duration_min || 0), 0) / answeredInbound.length) * 10) / 10
+      : 0;
+
+  // Avg handle time — outbound (duration > 0)
+  const answeredOutbound = outbound.filter((r) => Number(r.duration_min || 0) > 0);
+  const avgDurationOutbound =
+    answeredOutbound.length > 0
+      ? Math.round((answeredOutbound.reduce((s, r) => s + Number(r.duration_min || 0), 0) / answeredOutbound.length) * 10) / 10
+      : 0;
+
+  // Combined avg (backwards compat)
+  const allAnswered = [...answeredInbound, ...answeredOutbound];
   const avgDuration =
-    answeredCalls.length > 0 ? Math.round((totalDuration / answeredCalls.length) * 10) / 10 : 0;
+    allAnswered.length > 0
+      ? Math.round((allAnswered.reduce((s, r) => s + Number(r.duration_min || 0), 0) / allAnswered.length) * 10) / 10
+      : 0;
+
+  // Outbound callback rate: % of unanswered calls where team made an outbound callback
+  const outboundCallbackRate = unansweredCalls.length > 0
+    ? Math.round((responseTimes.length / unansweredCalls.length) * 1000) / 10
+    : 0;
 
   return {
     total_calls: total,
     inbound_calls: inbound.length,
     outbound_calls: outbound.length,
     vm_calls: vmCalls.length,
-    missed_calls: missedCalls.length,
+    missed_calls: unansweredCalls.length,
     miss_rate: missRate,
     callbacks_needed: unansweredCalls.length,
     avg_duration: avgDuration,
+    avg_duration_inbound: avgDurationInbound,
+    avg_duration_outbound: avgDurationOutbound,
     avg_response_time: avgResponseTime,
     recovery_rate: recoveryRate,
+    outbound_callback_rate: outboundCallbackRate,
+    outbound_callbacks_made: responseTimes.length,
   };
 }
 
@@ -345,7 +373,7 @@ export async function GET(req: NextRequest) {
       // Status filter (derived from endpoint field)
       const status = req.nextUrl.searchParams.get("status") || "all";
       if (status === "missed") {
-        query = query.is("endpoint", null).eq("direction", "inbound");
+        query = query.eq("direction", "inbound").or("endpoint.is.null,endpoint.ilike.%vm%");
       } else if (status === "voicemail") {
         query = query.ilike("endpoint", "%vm%");
       } else if (status === "answered") {
@@ -539,18 +567,10 @@ export async function GET(req: NextRequest) {
     // --- Patterns view: hourly + daily aggregates ---
     if (view === "patterns") {
       const records = await fetchRecords(from, to, storeId, source);
-      const outbound = records.filter((r) => r.direction === "outbound");
-      const outboundByNumber = new Map<string, string[]>();
-      for (const r of outbound) {
-        const times = outboundByNumber.get(r.to_number) ?? [];
-        times.push(r.call_start);
-        outboundByNumber.set(r.to_number, times);
-      }
 
+      // Missed = inbound call not answered by a person (no endpoint, or voicemail)
       const isMissed = (r: CallRecord) => {
-        if (r.direction !== "inbound" || r.endpoint) return false;
-        const cbs = outboundByNumber.get(r.from_number);
-        return !cbs || !cbs.some((t) => t > r.call_start);
+        return r.direction === "inbound" && (!r.endpoint || r.endpoint.toLowerCase().includes("vm"));
       };
 
       // Hourly aggregation
@@ -581,11 +601,14 @@ export async function GET(req: NextRequest) {
         hourly[h].total_calls++;
         if (r.direction === "inbound") {
           hourly[h].inbound++;
-          if (isMissed(r)) hourly[h].missed++;
+          if (isMissed(r)) {
+            hourly[h].missed++;
+          } else if (r.endpoint && !r.endpoint.toLowerCase().includes("vm")) {
+            hourly[h].answered++;
+          }
         }
       }
       for (const h of hourly) {
-        h.answered = h.total_calls - h.missed;
         h.miss_rate = h.inbound > 0 ? Math.round((h.missed / h.inbound) * 1000) / 10 : 0;
       }
 
@@ -633,6 +656,14 @@ export async function GET(req: NextRequest) {
         { total: number; inbound: number; outbound: number; missed: number; vm: number }
       >();
 
+      // Pre-fill all dates in range so days with zero calls still appear
+      const rangeStart = new Date(from + "T00:00:00");
+      const rangeEnd = new Date(to + "T00:00:00");
+      for (let d = new Date(rangeStart); d <= rangeEnd; d.setDate(d.getDate() + 1)) {
+        const key = d.toISOString().split("T")[0];
+        byDate.set(key, { total: 0, inbound: 0, outbound: 0, missed: 0, vm: 0 });
+      }
+
       // Group records by date
       for (const r of records) {
         const d = r.call_start.split("T")[0];
@@ -655,25 +686,13 @@ export async function GET(req: NextRequest) {
         byDate.set(d, day);
       }
 
-      // Calculate missed calls per day (need outbound context)
-      const outbound = records.filter((r) => r.direction === "outbound");
-      const outboundByNumber = new Map<string, string[]>();
-      for (const r of outbound) {
-        const times = outboundByNumber.get(r.to_number) ?? [];
-        times.push(r.call_start);
-        outboundByNumber.set(r.to_number, times);
-      }
-
+      // Calculate missed calls per day: inbound with no endpoint or voicemail
       for (const r of records) {
-        if (r.direction !== "inbound" || r.endpoint) continue;
-        const callbacks = outboundByNumber.get(r.from_number);
-        const isMissed =
-          !callbacks || !callbacks.some((t) => t > r.call_start);
-        if (isMissed) {
-          const d = r.call_start.split("T")[0];
-          const day = byDate.get(d);
-          if (day) day.missed++;
-        }
+        if (r.direction !== "inbound") continue;
+        if (r.endpoint && !r.endpoint.toLowerCase().includes("vm")) continue;
+        const d = r.call_start.split("T")[0];
+        const day = byDate.get(d);
+        if (day) day.missed++;
       }
 
       // Convert to sorted daily array
@@ -690,9 +709,9 @@ export async function GET(req: NextRequest) {
         }));
 
       // Smooth data based on date range span to reduce noise
-      // 7 days or less: daily points, 8-30 days: 3-day rolling avg, 31+: weekly rolling avg
+      // Up to 14 days: daily points, 15-60 days: 3-day rolling avg, 61+: weekly rolling avg
       const totalDays = dailyHistory.length;
-      const bucketSize = totalDays <= 7 ? 1 : totalDays <= 30 ? 3 : 7;
+      const bucketSize = totalDays <= 14 ? 1 : totalDays <= 60 ? 3 : 7;
 
       const history = [];
       for (let i = 0; i < dailyHistory.length; i += bucketSize) {
@@ -769,6 +788,9 @@ export async function GET(req: NextRequest) {
           previous.callbacks_needed
         ),
         avg_duration: pctChange(current.avg_duration, previous.avg_duration),
+        avg_duration_inbound: pctChange(current.avg_duration_inbound, previous.avg_duration_inbound),
+        avg_duration_outbound: pctChange(current.avg_duration_outbound, previous.avg_duration_outbound),
+        outbound_callback_rate: pctChange(current.outbound_callback_rate, previous.outbound_callback_rate),
       },
       dateRange: {
         current: { from, to },

@@ -27,8 +27,12 @@ interface Metrics {
   miss_rate: number;
   callbacks_needed: number;
   avg_duration: number;
+  avg_duration_inbound: number;
+  avg_duration_outbound: number;
   avg_response_time: number | null;
   recovery_rate: number;
+  outbound_callback_rate: number;
+  outbound_callbacks_made: number;
   first_time_callers: number;
   returning_callers: number;
 }
@@ -279,7 +283,8 @@ const METRIC_CARDS: {
   { key: "miss_rate", label: "Miss Rate", format: (v) => `${v}%`, invert: true, tooltip: "Percentage of inbound calls that were missed. Calculated as: missed calls \u00f7 inbound calls \u00d7 100. Industry average is 10\u201320%." },
   { key: "vm_calls", label: "Voicemails", format: formatNumber, tooltip: "Calls that went to voicemail." },
   { key: "avg_response_time", label: "Avg Response", format: formatResponseTime, tooltip: "Average time (in minutes) between a missed call and the first outbound callback to that number." },
-  { key: "avg_duration", label: "Avg Duration", format: (v) => `${v} min`, tooltip: "Average length of answered calls. Also known as Average Handle Time (AHT). Industry average is 4\u20136 minutes." },
+  { key: "avg_duration_inbound", label: "Avg Inbound", format: (v) => `${v} min`, tooltip: "Average duration of answered inbound calls (excludes missed and voicemail)." },
+  { key: "avg_duration_outbound", label: "Avg Outbound", format: (v) => `${v} min`, tooltip: "Average duration of outbound calls." },
   { key: "first_time_callers", label: "New Callers", format: formatNumber, tooltip: "Unique phone numbers calling for the first time in this period." },
   { key: "returning_callers", label: "Returning", format: formatNumber, tooltip: "Phone numbers that have called more than once in this period." },
 ];
@@ -386,8 +391,31 @@ function getBenchmarkInsight(label: string, value: number, low: number, high: nu
   return `Your ${label.toLowerCase()} of ${value} is significantly above the industry average of ${industry} — needs attention.`;
 }
 
-export default function CustomerServiceDashboard() {
-  const [store, setStore] = useState(STORE_OPTIONS[0].id);
+type Mode = "staff" | "admin";
+
+export default function CustomerServiceDashboard({ defaultStore }: { defaultStore?: string }) {
+  const [store, setStore] = useState(defaultStore || STORE_OPTIONS[0].id);
+  const [mode, setMode] = useState<Mode>("staff");
+  const [mounted, setMounted] = useState(false);
+
+  // Restore saved preferences on mount (after hydration)
+  useEffect(() => {
+    const savedStore = localStorage.getItem("cs_store");
+    if (savedStore && STORE_OPTIONS.some((s) => s.id === savedStore)) {
+      setStore(savedStore);
+    }
+    const savedMode = localStorage.getItem("cs_mode");
+    if (savedMode === "staff" || savedMode === "admin") {
+      setMode(savedMode);
+    }
+    setMounted(true);
+  }, []);
+
+  const handleModeChange = (m: Mode) => {
+    setMode(m);
+    localStorage.setItem("cs_mode", m);
+  };
+
   const [source, setSource] = useState<Source>("all");
   const [range, setRange] = useState<Range>("7d");
   const [customFrom, setCustomFrom] = useState(daysAgoStr(30));
@@ -414,6 +442,8 @@ export default function CustomerServiceDashboard() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ghDiagnostics, setGhDiagnostics] = useState<any>(null);
   const [syncKey, setSyncKey] = useState(0);
+  const [syncSchedule, setSyncSchedule] = useState<{ enabled: boolean; hours: number[]; timezone: string } | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
 
   const from = range === "custom" ? customFrom : range === "today" ? todayStr() : daysAgoStr(RANGE_OPTIONS.find((r) => r.value === range)?.days ?? 7);
   const to = range === "custom" ? customTo : todayStr();
@@ -478,6 +508,30 @@ export default function CustomerServiceDashboard() {
       setLoading(false)
     );
   }, [loadSummary, loadHistory, loadCallbacks, loadPatterns]);
+
+  // Load sync schedule
+  useEffect(() => {
+    fetch("/api/settings/sync-schedule").then((r) => r.ok ? r.json() : null).then((s) => {
+      if (s) setSyncSchedule(s);
+    }).catch(() => {});
+  }, []);
+
+  const saveSyncSchedule = async (updated: { enabled: boolean; hours: number[]; timezone: string }) => {
+    setSyncSchedule(updated);
+    await fetch("/api/settings/sync-schedule", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+  };
+
+  const toggleScheduleHour = (hour: number) => {
+    if (!syncSchedule) return;
+    const hours = syncSchedule.hours.includes(hour)
+      ? syncSchedule.hours.filter((h) => h !== hour)
+      : [...syncSchedule.hours, hour];
+    saveSyncSchedule({ ...syncSchedule, hours });
+  };
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -681,12 +735,12 @@ export default function CustomerServiceDashboard() {
   return (
     <div className="mt-6 space-y-5">
       {/* Controls bar */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           {/* Store selector */}
           <select
             value={store}
-            onChange={(e) => setStore(e.target.value)}
+            onChange={(e) => { setStore(e.target.value); localStorage.setItem("cs_store", e.target.value); }}
             className="px-3 py-1.5 text-xs font-medium bg-white border border-sand-200 rounded-lg text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
           >
             {STORE_OPTIONS.map((s) => (
@@ -696,30 +750,13 @@ export default function CustomerServiceDashboard() {
             ))}
           </select>
 
-          {/* Source filter */}
-          <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
-            {SOURCE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setSource(opt.value)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  source === opt.value
-                    ? "bg-white text-sand-900 shadow-sm"
-                    : "text-sand-500 hover:text-sand-700"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
           {/* Range selector */}
           <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
           {RANGE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => setRange(opt.value)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
                 range === opt.value
                   ? "bg-white text-sand-900 shadow-sm"
                   : "text-sand-500 hover:text-sand-700"
@@ -730,7 +767,7 @@ export default function CustomerServiceDashboard() {
           ))}
             <button
               onClick={() => setRange("custom")}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
                 range === "custom"
                   ? "bg-white text-sand-900 shadow-sm"
                   : "text-sand-500 hover:text-sand-700"
@@ -756,33 +793,46 @@ export default function CustomerServiceDashboard() {
               />
             </div>
           )}
-        </div>
 
-        <div className="flex items-center gap-3">
-          {/* Sub-tabs */}
-          <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
-            {(["overview", "call-log", "callbacks"] as Tab[]).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  tab === t
-                    ? "bg-white text-sand-900 shadow-sm"
-                    : "text-sand-500 hover:text-sand-700"
-                }`}
-              >
-                {t === "call-log" ? "Call Log" : t.charAt(0).toUpperCase() + t.slice(1)}
-                {t === "callbacks" && callbacks.length > 0 && (
-                  <span className="ml-1.5 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px]">
-                    {callbacks.length}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          {/* Source filter (admin only) */}
+          {mounted && mode === "admin" && (
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as Source)}
+              className="px-3 py-1.5 text-xs font-medium bg-white border border-sand-200 rounded-lg text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
+            >
+              {SOURCE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          )}
 
-          {/* Sync & actions */}
-          <div className="flex items-center gap-2">
+          {/* Admin tabs */}
+          {mounted && mode === "admin" && (
+            <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
+              {(["overview", "call-log", "callbacks"] as Tab[]).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                    tab === t
+                      ? "bg-white text-sand-900 shadow-sm"
+                      : "text-sand-500 hover:text-sand-700"
+                  }`}
+                >
+                  {t === "call-log" ? "Call Log" : t.charAt(0).toUpperCase() + t.slice(1)}
+                  {t === "callbacks" && callbacks.length > 0 && (
+                    <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px]">
+                      {callbacks.length}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Sync & actions (admin only) */}
+          {mounted && mode === "admin" && <div className="flex items-center gap-2">
             <button
               onClick={() => window.print()}
               className="px-3 py-1.5 text-xs font-medium text-sand-500 border border-sand-200 rounded-lg hover:bg-sand-50 transition-colors print:hidden"
@@ -790,30 +840,75 @@ export default function CustomerServiceDashboard() {
             >
               Download Report
             </button>
-            <div className="text-center">
+            <button
+              onClick={handleSyncAll}
+              disabled={syncAllRunning || refreshing || ghScraping}
+              className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+              title={[data?.lastSync?.cik && `CIK: ${formatSyncTime(data.lastSync.cik)}`, data?.lastSync?.grasshopper && `GH: ${formatSyncTime(data.lastSync.grasshopper)}`].filter(Boolean).join(" · ") || "Sync all data sources"}
+            >
+              {syncAllRunning ? "Syncing..." : "Sync All"}
+            </button>
+            <div className="relative">
               <button
-                onClick={handleSyncAll}
-                disabled={syncAllRunning || refreshing || ghScraping}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+                onClick={() => setShowSchedule(!showSchedule)}
+                className={`px-2 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
+                  syncSchedule?.enabled
+                    ? "text-emerald-600 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
+                    : "text-sand-400 border-sand-200 hover:bg-sand-50"
+                }`}
+                title="Auto-sync schedule"
               >
-                {syncAllRunning ? "Syncing..." : "Sync All"}
+                {syncSchedule?.enabled ? `Auto: ${syncSchedule.hours.map((h) => `${h % 12 || 12}${h < 12 ? "a" : "p"}`).join(", ")}` : "Auto: Off"}
               </button>
-              <div className="flex gap-3 mt-0.5 justify-center">
-                {data?.lastSync?.cik && (
-                  <p className="text-[10px] text-sand-400" title={data.lastSync.cik}>CIK: {formatSyncTime(data.lastSync.cik)}</p>
-                )}
-                {data?.lastSync?.grasshopper && (
-                  <p className="text-[10px] text-emerald-400" title={data.lastSync.grasshopper}>GH: {formatSyncTime(data.lastSync.grasshopper)}</p>
-                )}
-              </div>
+              {showSchedule && syncSchedule && (
+                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-sand-200 rounded-xl shadow-lg p-4 w-72">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-xs font-semibold text-sand-700">Auto-Sync Schedule</p>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={syncSchedule.enabled}
+                        onChange={() => saveSyncSchedule({ ...syncSchedule, enabled: !syncSchedule.enabled })}
+                        className="rounded border-sand-300"
+                      />
+                      <span className="text-xs text-sand-600">{syncSchedule.enabled ? "On" : "Off"}</span>
+                    </label>
+                  </div>
+                  <p className="text-[10px] text-sand-400 mb-2">Tap hours to toggle (Eastern Time)</p>
+                  <div className="grid grid-cols-6 gap-1">
+                    {Array.from({ length: 24 }, (_, h) => (
+                      <button
+                        key={h}
+                        onClick={() => toggleScheduleHour(h)}
+                        className={`px-1 py-1 text-[10px] rounded transition-colors ${
+                          syncSchedule.hours.includes(h)
+                            ? "bg-sand-900 text-white"
+                            : "bg-sand-50 text-sand-400 hover:bg-sand-100"
+                        }`}
+                      >
+                        {h % 12 || 12}{h < 12 ? "a" : "p"}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setShowSchedule(false)} className="mt-3 w-full text-xs text-sand-500 hover:text-sand-700">Done</button>
+                </div>
+              )}
             </div>
-          </div>
+          </div>}
+
+          {/* Mode toggle */}
+          <button
+            onClick={() => handleModeChange(mode === "staff" ? "admin" : "staff")}
+            className="px-2.5 py-1 text-[11px] text-sand-400 hover:text-sand-600 border border-sand-200 rounded-md hover:bg-sand-50 transition-colors"
+          >
+            {mode === "staff" ? "Admin" : "Staff"} view
+          </button>
         </div>
       </div>
 
-      {/* Sync All progress */}
-      {syncAllRunning && <SyncInProgress label="Syncing All (CIK + Grasshopper)" elapsed={syncAllElapsed} color="sand" />}
-      {!syncAllRunning && syncAllStatus && (
+      {/* Sync progress & status (admin only) */}
+      {mounted && mode === "admin" && syncAllRunning && <SyncInProgress label="Syncing All (CIK + Grasshopper)" elapsed={syncAllElapsed} color="sand" />}
+      {mounted && mode === "admin" && !syncAllRunning && syncAllStatus && (
         <div className={`rounded-xl border p-4 text-sm ${
           syncAllStatus.startsWith("Done") ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"
         }`}>
@@ -836,9 +931,9 @@ export default function CustomerServiceDashboard() {
         </div>
       )}
 
-      {/* CIK refresh progress / result (for individual syncs) */}
-      {refreshing && <SyncInProgress label="Syncing CIK" elapsed={refreshElapsed} color="sand" />}
-      {!refreshing && refreshStatus && (
+      {/* CIK refresh progress / result (admin only) */}
+      {mounted && mode === "admin" && refreshing && <SyncInProgress label="Syncing CIK" elapsed={refreshElapsed} color="sand" />}
+      {mounted && mode === "admin" && !refreshing && refreshStatus && (
         <div className={`rounded-xl border p-4 text-sm ${
           refreshStatus.startsWith("Done")
             ? "bg-emerald-50 border-emerald-200"
@@ -873,19 +968,19 @@ export default function CustomerServiceDashboard() {
         </div>
       )}
 
-      {/* Grasshopper progress */}
-      {ghScraping && (
+      {/* Grasshopper progress (admin only) */}
+      {mounted && mode === "admin" && ghScraping && (
         <SyncInProgress label="Syncing Grasshopper" elapsed={ghElapsed} color="emerald" />
       )}
 
-      {/* Grasshopper 2FA prompt */}
-      {gh2faNeeded && (
+      {/* Grasshopper 2FA prompt (admin only) */}
+      {mounted && mode === "admin" && gh2faNeeded && (
         <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 space-y-2">
           <p className="text-sm text-emerald-800 font-medium">
             Grasshopper requires email verification
           </p>
           <p className="text-xs text-emerald-600">
-            Check your email (fuanne@glass-railing.com) for a verification code, then enter it below.
+            Check your email for a verification code, then enter it below.
           </p>
           <div className="flex items-center gap-2">
             <input
@@ -920,8 +1015,8 @@ export default function CustomerServiceDashboard() {
         </div>
       )}
 
-      {/* Grasshopper sync result */}
-      {!ghScraping && ghStatus && !gh2faNeeded && (
+      {/* Grasshopper sync result (admin only) */}
+      {mounted && mode === "admin" && !ghScraping && ghStatus && !gh2faNeeded && (
         <div className={`rounded-xl border p-4 text-sm ${
           ghError
             ? "bg-red-50 border-red-200"
@@ -1023,8 +1118,8 @@ export default function CustomerServiceDashboard() {
         </div>
       )}
 
-      {/* Last scrape error */}
-      {data?.lastScrape?.status === "error" && (
+      {/* Last scrape error (admin only) */}
+      {mounted && mode === "admin" && data?.lastScrape?.status === "error" && (
         <p className="text-[11px] text-red-500">
           Last CIK scrape error: {data.lastScrape.errorMessage}
         </p>
@@ -1040,6 +1135,19 @@ export default function CustomerServiceDashboard() {
         <div className="flex items-center justify-center py-20">
           <div className="w-6 h-6 border-2 border-sand-300 border-t-sand-600 rounded-full animate-spin" />
         </div>
+      ) : mode === "staff" ? (
+        <StaffView
+          data={data}
+          callbackData={callbackData}
+          store={store}
+          source={source}
+          from={from}
+          to={to}
+          loadCallbacks={loadCallbacks}
+          selectedNumber={selectedNumber}
+          setSelectedNumber={setSelectedNumber}
+          syncKey={syncKey}
+        />
       ) : tab === "overview" ? (
         <OverviewTab data={data} history={history} hourly={hourly} daily={daily} />
       ) : tab === "callbacks" ? (
@@ -1321,6 +1429,162 @@ function BenchmarkPanel({ metrics, previous }: { metrics: Metrics; previous?: Me
   );
 }
 
+function StaffView({
+  data,
+  callbackData,
+  store,
+  source,
+  from,
+  to,
+  loadCallbacks,
+  selectedNumber,
+  setSelectedNumber,
+  syncKey,
+}: {
+  data: SummaryResponse | null;
+  callbackData: CallbacksResponse | null;
+  store: string;
+  source: Source;
+  from: string;
+  to: string;
+  loadCallbacks: () => Promise<void>;
+  selectedNumber: string | null;
+  setSelectedNumber: (n: string | null) => void;
+  syncKey: number;
+}) {
+  const metrics = data?.current;
+  const change = data?.change;
+
+  const MISS_RATE_TARGET = 15;
+  const CALLBACK_RATE_TARGET = 90;
+
+  const missRate = metrics?.miss_rate ?? 0;
+  const callbackRate = metrics?.outbound_callback_rate ?? 0;
+  const missedCount = metrics?.missed_calls ?? 0;
+  const pendingCallbacks = (callbackData?.callbacks ?? []).filter((c) => c.note_status !== "done").length;
+
+  const missOnTrack = missRate <= MISS_RATE_TARGET;
+  const callbackOnTrack = callbackRate >= CALLBACK_RATE_TARGET;
+  const allOnTrack = missOnTrack && callbackOnTrack;
+
+  const inboundCount = metrics?.inbound_calls ?? 0;
+
+  const staffCards: { label: string; value: number; prev: number; change: number | null | undefined; format: (n: number) => string; target?: number; invert?: boolean; higherIsBetter?: boolean; tooltip?: string; subtitle?: string }[] = [
+    { label: "Inbound", value: inboundCount, prev: data?.previous?.inbound_calls ?? 0, change: change?.inbound_calls, format: formatNumber },
+    { label: "Outbound", value: metrics?.outbound_calls ?? 0, prev: data?.previous?.outbound_calls ?? 0, change: change?.outbound_calls, format: formatNumber },
+    { label: "Miss Rate", value: missRate, prev: data?.previous?.miss_rate ?? 0, change: change?.miss_rate, format: (n: number) => `${n}%`, target: MISS_RATE_TARGET, invert: true, tooltip: "Missed calls (unanswered + voicemail) ÷ total inbound × 100.", subtitle: `${missedCount} missed out of ${inboundCount} inbound` },
+    { label: "Called Back", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Missed calls your team called back ÷ total missed × 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} missed` },
+  ];
+
+  return (
+    <div className="space-y-4">
+      {/* Status banner */}
+      {allOnTrack ? (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-3">
+          <span className="text-emerald-600 text-lg">&#10003;</span>
+          <div>
+            <p className="text-sm font-medium text-emerald-800">All targets met</p>
+            <p className="text-xs text-emerald-600">Miss rate {missRate}% (target: &le;{MISS_RATE_TARGET}%) &middot; Callback rate {callbackRate}% (target: &ge;{CALLBACK_RATE_TARGET}%)</p>
+          </div>
+        </div>
+      ) : (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <div className="flex items-start gap-3">
+            <span className="text-amber-500 text-lg mt-0.5">&#9888;</span>
+            <div className="space-y-1">
+              {!missOnTrack && (
+                <p className="text-sm text-amber-800">
+                  <span className="font-medium">Miss rate is {missRate}%</span>
+                  <span className="text-amber-600"> — target is &le;{MISS_RATE_TARGET}%. {missedCount} missed call{missedCount !== 1 ? "s" : ""} this period.</span>
+                </p>
+              )}
+              {!callbackOnTrack && (
+                <p className="text-sm text-amber-800">
+                  <span className="font-medium">Callback rate is {callbackRate}%</span>
+                  <span className="text-amber-600"> — target is &ge;{CALLBACK_RATE_TARGET}%.{pendingCallbacks > 0 ? ` ${pendingCallbacks} caller${pendingCallbacks !== 1 ? "s" : ""} still need a callback.` : ""}</span>
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Key metrics with progress bars */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {staffCards.map((c) => {
+          const hasTarget = c.target != null;
+          const target = c.target ?? 0;
+          let progress = 0;
+          let onTrack = true;
+          if (hasTarget) {
+            if (c.higherIsBetter) {
+              progress = target > 0 ? Math.min(c.value / target, 1) : 0;
+              onTrack = c.value >= target;
+            } else {
+              progress = target > 0 ? Math.min(c.value / target, 1) : 0;
+              onTrack = c.value <= target;
+            }
+          }
+          return (
+            <div key={c.label} className="bg-white rounded-xl border border-sand-200/60 p-4">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1">
+                  <p className="text-[11px] text-sand-400 uppercase tracking-wider">{c.label}</p>
+                  {c.tooltip && <InfoTip text={c.tooltip} />}
+                </div>
+                {hasTarget && (
+                  <span className={`text-[10px] font-medium ${onTrack ? "text-emerald-500" : "text-amber-500"}`}>
+                    {onTrack ? "✓" : "!"} {c.higherIsBetter ? "≥" : "≤"}{c.target}%
+                  </span>
+                )}
+              </div>
+              <p className="text-xl font-semibold text-sand-900">{c.format(c.value)}</p>
+              {c.subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{c.subtitle}</p>}
+              {hasTarget && (
+                <div className="mt-2 h-1.5 bg-sand-100 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${onTrack ? "bg-emerald-400" : "bg-amber-400"}`}
+                    style={{ width: `${Math.max(progress * 100, 4)}%` }}
+                  />
+                </div>
+              )}
+              <div className="flex items-center gap-2 mt-1.5">
+                <span className="text-xs text-sand-400">prev: {c.format(c.prev)}</span>
+                <ChangeBadge value={c.change ?? null} invert={c.invert} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Callbacks */}
+      <div>
+        <h2 className="text-sm font-semibold text-sand-700 mb-2">Missed — Action Needed</h2>
+        <CallbacksTab
+          data={callbackData}
+          store={store}
+          loadCallbacks={loadCallbacks}
+          selectedNumber={selectedNumber}
+          setSelectedNumber={setSelectedNumber}
+        />
+      </div>
+
+      {/* Call log */}
+      <div>
+        <h2 className="text-sm font-semibold text-sand-700 mb-2">Call Log</h2>
+        <CallLogTab
+        store={store}
+        source={source}
+        from={from}
+        to={to}
+        onNumberClick={setSelectedNumber}
+        syncKey={syncKey}
+      />
+      </div>
+    </div>
+  );
+}
+
 function OverviewTab({
   data,
   history,
@@ -1597,9 +1861,9 @@ function CallbacksTab({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
       {/* Summary bar */}
-      <div className="bg-white rounded-xl border border-sand-200/60 p-4 flex items-center gap-4 flex-wrap">
+      <div className="p-4 border-b border-sand-100 flex items-center gap-4 flex-wrap">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-sand-900">{data?.uniqueCallers ?? 0}</span>
           <span className="text-xs text-sand-500">unique callers need callbacks</span>
@@ -1643,7 +1907,7 @@ function CallbacksTab({
       </div>
 
       {/* Callback table */}
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
+      <div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -1865,15 +2129,17 @@ function CallLogTab({
   // Filters
   const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
   const [status, setStatus] = useState<"all" | "answered" | "missed" | "voicemail">("all");
+  const [localSource, setLocalSource] = useState<Source>(source);
   const [minDuration, setMinDuration] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
   const [phone, setPhone] = useState("");
 
-  const hasFilters = direction !== "all" || status !== "all" || minDuration !== "" || maxDuration !== "" || phone !== "";
+  const hasFilters = direction !== "all" || status !== "all" || localSource !== source || minDuration !== "" || maxDuration !== "" || phone !== "";
 
   const clearFilters = () => {
     setDirection("all");
     setStatus("all");
+    setLocalSource(source);
     setMinDuration("");
     setMaxDuration("");
     setPhone("");
@@ -1894,7 +2160,7 @@ function CallLogTab({
     try {
       const filterStr = buildFilterParams();
       const res = await fetch(
-        `/api/customer-service?view=call-log&store=${store}&source=${source}&from=${from}&to=${to}&page=${p}${filterStr ? `&${filterStr}` : ""}`
+        `/api/customer-service?view=call-log&store=${store}&source=${localSource}&from=${from}&to=${to}&page=${p}${filterStr ? `&${filterStr}` : ""}`
       );
       const data = await res.json();
       setRecords(data.records ?? []);
@@ -1905,7 +2171,7 @@ function CallLogTab({
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, source, from, to, direction, status, minDuration, maxDuration, phone, syncKey]);
+  }, [store, localSource, from, to, direction, status, minDuration, maxDuration, phone, syncKey]);
 
   useEffect(() => {
     fetchPage(1);
@@ -1975,9 +2241,9 @@ function CallLogTab({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
       {/* Filter bar */}
-      <div className="bg-white rounded-xl border border-sand-200/60 p-4 space-y-3">
+      <div className="p-4 space-y-3 border-b border-sand-100">
         <div className="flex flex-wrap items-center gap-3">
           {/* Direction */}
           <div className="flex rounded-lg border border-sand-200 overflow-hidden">
@@ -2009,6 +2275,23 @@ function CallLogTab({
                 }`}
               >
                 {s === "all" ? "All Status" : s.charAt(0).toUpperCase() + s.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          {/* Source */}
+          <div className="flex rounded-lg border border-sand-200 overflow-hidden">
+            {SOURCE_OPTIONS.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setLocalSource(opt.value)}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
+                  localSource === opt.value
+                    ? "bg-sand-900 text-sand-50"
+                    : "bg-white text-sand-600 hover:bg-sand-50"
+                }`}
+              >
+                {opt.label}
               </button>
             ))}
           </div>
@@ -2059,7 +2342,7 @@ function CallLogTab({
       </div>
 
       {/* Summary & pagination */}
-      <div className="bg-white rounded-xl border border-sand-200/60 p-4 flex items-center justify-between">
+      <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
         <span className="text-sm text-sand-600">
           {total.toLocaleString()} calls
           {hasFilters && <span className="ml-1.5 px-1.5 py-0.5 bg-sand-100 text-sand-500 rounded text-[10px] font-medium">filtered</span>}
@@ -2092,7 +2375,7 @@ function CallLogTab({
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
+      <div>
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <div className="w-5 h-5 border-2 border-sand-300 border-t-sand-600 rounded-full animate-spin" />
