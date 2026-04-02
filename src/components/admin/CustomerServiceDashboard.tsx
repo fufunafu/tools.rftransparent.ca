@@ -840,14 +840,23 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
             >
               Download Report
             </button>
-            <button
-              onClick={handleSyncAll}
-              disabled={syncAllRunning || refreshing || ghScraping}
-              className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
-              title={[data?.lastSync?.cik && `CIK: ${formatSyncTime(data.lastSync.cik)}`, data?.lastSync?.grasshopper && `GH: ${formatSyncTime(data.lastSync.grasshopper)}`].filter(Boolean).join(" · ") || "Sync all data sources"}
-            >
-              {syncAllRunning ? "Syncing..." : "Sync All"}
-            </button>
+            <div className="text-center">
+              <button
+                onClick={handleSyncAll}
+                disabled={syncAllRunning || refreshing || ghScraping}
+                className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+              >
+                {syncAllRunning ? "Syncing..." : "Sync All"}
+              </button>
+              <div className="flex gap-3 mt-0.5 justify-center">
+                {data?.lastSync?.cik && (
+                  <p className="text-[10px] text-sand-400" title={data.lastSync.cik}>CIK: {formatSyncTime(data.lastSync.cik)}</p>
+                )}
+                {data?.lastSync?.grasshopper && (
+                  <p className="text-[10px] text-emerald-400" title={data.lastSync.grasshopper}>GH: {formatSyncTime(data.lastSync.grasshopper)}</p>
+                )}
+              </div>
+            </div>
             <div className="relative">
               <button
                 onClick={() => setShowSchedule(!showSchedule)}
