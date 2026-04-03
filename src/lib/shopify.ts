@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@/lib/fetch-retry";
+
 export interface ShopifyStoreConfig {
   id: string;
   label: string;
@@ -41,7 +43,7 @@ async function getToken(config: ShopifyStoreConfig): Promise<string> {
     return cached.token;
   }
 
-  const res = await fetch(`https://${config.store}/admin/oauth/access_token`, {
+  const res = await fetchWithRetry(`https://${config.store}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -74,7 +76,7 @@ export async function shopifyGraphQL<T = unknown>(
 
   const token = await getToken(config);
 
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `https://${config.store}/admin/api/2026-01/graphql.json`,
     {
       method: "POST",
@@ -92,8 +94,15 @@ export async function shopifyGraphQL<T = unknown>(
   }
 
   const json = await res.json();
-  if (json.errors) {
+  if (json.errors && !json.data) {
+    // Total failure — no usable data returned
     throw new Error(json.errors.map((e: { message: string }) => e.message).join(", "));
+  }
+  if (json.errors && json.data) {
+    // Partial failure — some fields (e.g. staffMember) may be null due to missing scopes.
+    // Log but continue with whatever data we got.
+    const uniqueMessages = [...new Set(json.errors.map((e: { message: string }) => e.message))];
+    console.warn(`[shopify] Partial GraphQL errors (${config.label}): ${uniqueMessages.join("; ")}`);
   }
 
   return json.data as T;

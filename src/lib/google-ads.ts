@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@/lib/fetch-retry";
+
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ADS_API_URL = "https://googleads.googleapis.com/v20";
 
@@ -8,7 +10,7 @@ async function getAccessToken(): Promise<string> {
     return accessTokenCache.token;
   }
 
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchWithRetry(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -44,7 +46,7 @@ async function queryGoogleAds(gaql: string): Promise<any[]> {
 
   const token = await getAccessToken();
 
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `${ADS_API_URL}/customers/${customerId}/googleAds:searchStream`,
     {
       method: "POST",

@@ -2,10 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Status = "done" | "wip" | "todo";
 
-const NAV_ITEMS: { href: string; label: string; status: Status; icon: React.ReactNode }[] = [
+interface NavItem {
+  href: string;
+  label: string;
+  status: Status;
+  icon: React.ReactNode;
+  children?: { href: string; label: string; status: Status }[];
+}
+
+const NAV_ITEMS: NavItem[] = [
   {
     href: "/sales",
     label: "Sales",
@@ -19,7 +28,7 @@ const NAV_ITEMS: { href: string; label: string; status: Status; icon: React.Reac
   {
     href: "/pipeline",
     label: "Pipeline",
-    status: "wip" as Status,
+    status: "done" as Status,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
@@ -55,6 +64,10 @@ const NAV_ITEMS: { href: string; label: string; status: Status; icon: React.Reac
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
       </svg>
     ),
+    children: [
+      { href: "/customer-service/phones", label: "Phones", status: "done" as Status },
+      { href: "/customer-service/emails", label: "Emails", status: "wip" as Status },
+    ],
   },
   {
     href: "/accounting",
@@ -87,6 +100,16 @@ const NAV_ITEMS: { href: string; label: string; status: Status; icon: React.Reac
     ),
   },
   {
+    href: "/todos",
+    label: "To-Do List",
+    status: "done" as Status,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+      </svg>
+    ),
+  },
+  {
     href: "/employees",
     label: "Employees",
     status: "wip" as Status,
@@ -100,6 +123,45 @@ const NAV_ITEMS: { href: string; label: string; status: Status; icon: React.Reac
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+  const [width, setWidth] = useState(240);
+  const isResizing = useRef(false);
+  const sidebarRef = useRef<HTMLDivElement>(null);
+
+  const MIN_WIDTH = 180;
+  const MAX_WIDTH = 400;
+  const COLLAPSED_WIDTH = 64;
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing.current) return;
+      const newWidth = e.clientX;
+      if (newWidth < COLLAPSED_WIDTH + 20) {
+        setCollapsed(true);
+      } else {
+        setCollapsed(false);
+        setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth)));
+      }
+    };
+    const handleMouseUp = () => {
+      isResizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   // No sidebar on the login page
   if (pathname === "/login") {
@@ -109,59 +171,116 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   return (
     <div className="flex h-screen">
       {/* Sidebar */}
-      <aside className="w-60 shrink-0 bg-white border-r border-slate-200 flex flex-col">
-        {/* Logo */}
-        <div className="px-5 py-5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center">
+      <aside
+        ref={sidebarRef}
+        style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
+        className="shrink-0 bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200 relative"
+      >
+        {/* Logo + collapse toggle */}
+        <div className="px-3 py-5 flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
             <span className="text-white text-xs font-bold">RF</span>
           </div>
-          <span className="text-sm font-semibold text-slate-900">RF Transparent</span>
+          {!collapsed && <span className="text-sm font-semibold text-slate-900 flex-1">RF Transparent</span>}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            </svg>
+          </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
           {NAV_ITEMS.map((item) => {
-            const active = pathname === item.href;
+            const active = pathname === item.href || pathname.startsWith(item.href + "/");
+            const hasChildren = item.children && item.children.length > 0;
+
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  active
-                    ? "bg-blue-50 text-blue-600"
-                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                }`}
-              >
-                <span className={active ? "text-blue-500" : "text-slate-400"}>
-                  {item.icon}
-                </span>
-                <span className="flex-1">{item.label}</span>
-                {item.status === "done" && (
-                  <span className="w-2 h-2 rounded-full bg-green-500" title="Ready" />
+              <div key={item.href} className="group">
+                <Link
+                  href={hasChildren ? item.children![0].href : item.href}
+                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    active
+                      ? "bg-blue-50 text-blue-600"
+                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                  }`}
+                  title={collapsed ? item.label : undefined}
+                >
+                  <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
+                    {item.icon}
+                  </span>
+                  {!collapsed && (
+                    <>
+                      <span className="flex-1">{item.label}</span>
+                      {item.status === "done" && (
+                        <span className="w-2 h-2 rounded-full bg-green-500" title="Ready" />
+                      )}
+                      {item.status === "wip" && (
+                        <span className="w-2 h-2 rounded-full bg-amber-400" title="In progress" />
+                      )}
+                      {item.status === "todo" && (
+                        <span className="w-2 h-2 rounded-full bg-slate-300" title="Not started" />
+                      )}
+                    </>
+                  )}
+                </Link>
+                {hasChildren && !collapsed && (
+                  <div className={`overflow-hidden transition-all ${
+                    active ? "max-h-40" : "max-h-0 group-hover:max-h-40"
+                  }`}>
+                    {item.children!.map((child) => {
+                      const childActive = pathname === child.href || pathname.startsWith(child.href + "/");
+                      return (
+                        <Link
+                          key={child.href}
+                          href={child.href}
+                          className={`flex items-center gap-3 pl-11 pr-3 py-1.5 text-[13px] font-medium rounded-lg transition-colors ${
+                            childActive
+                              ? "text-blue-600"
+                              : "text-slate-400 hover:text-slate-700"
+                          }`}
+                        >
+                          <span className="flex-1">{child.label}</span>
+                          {child.status === "done" && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                          )}
+                          {child.status === "wip" && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 )}
-                {item.status === "wip" && (
-                  <span className="w-2 h-2 rounded-full bg-amber-400" title="In progress" />
-                )}
-                {item.status === "todo" && (
-                  <span className="w-2 h-2 rounded-full bg-slate-300" title="Not started" />
-                )}
-              </Link>
+              </div>
             );
           })}
         </nav>
 
         {/* Sign out */}
-        <div className="px-3 py-4 border-t border-slate-200">
+        <div className="px-2 py-4 border-t border-slate-200">
           <a
             href="/api/logout"
             className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            title={collapsed ? "Sign out" : undefined}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5 shrink-0">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
             </svg>
-            Sign out
+            {!collapsed && "Sign out"}
           </a>
         </div>
+        {/* Resize handle */}
+        {!collapsed && (
+          <div
+            onMouseDown={handleMouseDown}
+            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors"
+          />
+        )}
       </aside>
 
       {/* Main content */}

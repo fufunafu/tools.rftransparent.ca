@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getStores } from "@/lib/shopify";
 import { getSupabase } from "@/lib/supabase";
-import { getPipelineMetrics, getRepLeaderboard } from "@/lib/kpi-sales";
+import { getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics } from "@/lib/kpi-sales";
 
 const VALID_DAYS = [30, 90, 180, 365, 730];
 
@@ -36,48 +36,54 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No stores configured" }, { status: 503 });
 
   try {
-    // Fetch pipeline data and employee names in parallel
-    const [metrics, leaderboard, empResult] = await Promise.all([
-      getPipelineMetrics(storeIds, fromDate),
-      getRepLeaderboard(storeIds, fromDate),
-      getSupabase()
-        .from("employees")
-        .select("name, shopify_tags")
-        .eq("department", "sales")
-        .eq("active", true),
-    ]);
+    // Fetch employee tags first (fast Supabase query)
+    const empResult = await getSupabase()
+      .from("employees")
+      .select("name, shopify_tags")
+      .eq("department", "sales")
+      .eq("active", true);
 
-    console.log("[Pipeline Debug]", {
-      storeIds,
-      days,
-      totalDrafts: metrics.totalDrafts,
-      completedDrafts: metrics.completedDrafts,
-      openDrafts: metrics.openDrafts,
-      leaderboardRaw: leaderboard.length,
-      employeesFound: empResult.data?.length ?? 0,
-    });
-
-    // Build tag → employee name map
+    // Build tag → employee name map and known rep tags list
     const tagToName = new Map<string, string>();
+    const knownRepTags: string[] = [];
     if (empResult.data) {
       for (const emp of empResult.data) {
-        const tags: string[] = emp.shopify_tags ?? [];
-        for (const t of tags) {
-          if (t) tagToName.set(t.toLowerCase(), emp.name);
+        for (const t of (emp.shopify_tags ?? []) as string[]) {
+          if (t) {
+            const lower = t.toLowerCase();
+            tagToName.set(lower, emp.name);
+            knownRepTags.push(lower);
+          }
         }
       }
     }
 
-    // Enrich leaderboard with employee names, filter to known reps
-    const enrichedLeaderboard = leaderboard
-      .filter((r) => tagToName.has(r.repTag))
-      .map((r) => ({
-        ...r,
-        repName: tagToName.get(r.repTag) ?? r.repTag,
-      }));
+    // Metrics + prediction + channel split in parallel
+    const [{ metrics, leaderboard }, prediction, channelMetrics] = await Promise.all([
+      getFullPipelineData(storeIds, fromDate, toDate, knownRepTags),
+      getPipelinePrediction(storeIds),
+      getOrderChannelMetrics(storeIds, fromDate, toDate, knownRepTags),
+    ]);
+
+    // Enrich leaderboard with employee names
+    const enrichedLeaderboard = leaderboard.map((r) => ({
+      ...r,
+      repName: tagToName.get(r.repTag) ?? r.repTag,
+    }));
+
+    // Enrich channel employee breakdown with names
+    const enrichedChannelMetrics = {
+      ...channelMetrics,
+      employeeBreakdown: channelMetrics.employeeBreakdown.map((e) => ({
+        ...e,
+        repName: tagToName.get(e.repTag) ?? e.repTag,
+      })),
+    };
 
     return NextResponse.json({
       metrics,
+      prediction,
+      channelMetrics: enrichedChannelMetrics,
       leaderboard: enrichedLeaderboard,
       stores: allStores.map((s) => ({ id: s.id, label: s.label })),
       period: {

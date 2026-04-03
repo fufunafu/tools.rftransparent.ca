@@ -1,3 +1,5 @@
+import { fetchWithRetry } from "@/lib/fetch-retry";
+
 const GA4_API_URL = "https://analyticsdata.googleapis.com/v1beta";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -9,7 +11,7 @@ async function getGAAccessToken(): Promise<string> {
   }
 
   // Reuse the same Google OAuth credentials as Google Ads
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchWithRetry(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -56,7 +58,7 @@ export async function getDailySessions(
 
   const token = await getGAAccessToken();
 
-  const res = await fetch(
+  const res = await fetchWithRetry(
     `${GA4_API_URL}/properties/${propertyId}:runReport`,
     {
       method: "POST",
