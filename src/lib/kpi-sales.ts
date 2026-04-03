@@ -605,9 +605,11 @@ export interface MonthlyForecast {
   month: string;        // "2026-05"
   monthLabel: string;   // "May '26"
   forecast: number;     // projected total revenue
-  lastYearRevenue: number | null; // same month last year (null if no data)
+  prevMonthRevenue: number; // the month before this (actual or forecasted)
+  momRate: number;      // MoM growth rate applied (e.g. 0.20 for +20%)
+  momRateCapped: boolean; // true if rate was capped at ±200%
   fromPipeline: number; // revenue already quoted/invoiced for this month
-  isFallback: boolean;  // true if no prior year data, used avg instead
+  isFallback: boolean;  // true if no prior year MoM data, used avg growth instead
 }
 
 export interface SeasonalMonth {
@@ -617,24 +619,15 @@ export interface SeasonalMonth {
   momGrowth: number | null; // month-over-month % change, null for first month
 }
 
-export interface GrowthBasisMonth {
-  month: string;       // "2026-01"
-  monthLabel: string;  // "Jan '26"
-  revenue: number;
-  priorYearMonth: string;
-  priorYearRevenue: number;
-}
-
 export interface PipelinePrediction {
   totalPipelineValue: number;
   totalPredictedRevenue: number;
   avgMonthlyRevenue: number;
   avgCycleTimeDays: number;
-  yoyGrowthRate: number;          // e.g. 0.286 for +28.6%
-  yoyGrowthBasis: string;         // e.g. "Jan–Mar '26 vs Jan–Mar '25"
-  growthBasisMonths: GrowthBasisMonth[]; // the 3 months used to compute YoY
+  startingMonth: string;       // "Mar '26"
+  startingRevenue: number;     // actual revenue of last completed month
   monthlyForecasts: MonthlyForecast[]; // next 12 months
-  annualForecast: number;          // sum of monthly forecasts
+  annualForecast: number;       // sum of monthly forecasts
   buckets: AgeBucket[];
   seasonalPattern: SeasonalMonth[]; // last ~24 months of MoM changes
 }
@@ -684,42 +677,12 @@ export async function getPipelinePrediction(
   const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 
-  // ── 2. YoY growth from last 3 completed months ─────────────────────────
-  // Find last completed month (the month before current)
-  const lastCompletedDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const recentKeys: string[] = [];
-  const priorYearKeys: string[] = [];
-  for (let i = 0; i < 3; i++) {
-    const d = new Date(lastCompletedDate.getFullYear(), lastCompletedDate.getMonth() - i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    recentKeys.push(key);
-    const py = new Date(d.getFullYear() - 1, d.getMonth(), 1);
-    priorYearKeys.push(`${py.getFullYear()}-${String(py.getMonth() + 1).padStart(2, "0")}`);
-  }
-
-  const recentTotal = recentKeys.reduce((s, k) => s + (monthlyRevenue.get(k) ?? 0), 0);
-  const priorTotal = priorYearKeys.reduce((s, k) => s + (monthlyRevenue.get(k) ?? 0), 0);
-  const yoyGrowthRate = priorTotal > 0 ? (recentTotal - priorTotal) / priorTotal : 0;
-
-  // Human-readable basis label
-  const basisStart = recentKeys[recentKeys.length - 1]; // earliest
-  const basisEnd = recentKeys[0]; // latest
-  const fmtBasis = (k: string) => {
+  // ── 2. Seasonal pattern from historical data ─────────────────────────
+  const fmtMonthLabel = (k: string) => {
     const [y, m] = k.split("-");
     return `${MONTH_LABELS[parseInt(m, 10) - 1]} '${y.slice(2)}`;
   };
-  const yoyGrowthBasis = `${fmtBasis(basisStart)}–${fmtBasis(basisEnd)} vs prior year`;
 
-  // Build detailed basis for calculation display
-  const growthBasisMonths: GrowthBasisMonth[] = recentKeys.map((key, i) => ({
-    month: key,
-    monthLabel: fmtBasis(key),
-    revenue: Math.round((monthlyRevenue.get(key) ?? 0) * 100) / 100,
-    priorYearMonth: priorYearKeys[i],
-    priorYearRevenue: Math.round((monthlyRevenue.get(priorYearKeys[i]) ?? 0) * 100) / 100,
-  })).reverse(); // chronological order
-
-  // ── 3. Seasonal pattern from historical data ────────────────────────────
   const sortedMonths = [...monthlyRevenue.entries()]
     .filter(([m]) => m < currentMonth)
     .sort(([a], [b]) => a.localeCompare(b));
@@ -727,14 +690,12 @@ export async function getPipelinePrediction(
   const seasonalPattern: SeasonalMonth[] = [];
   for (let i = 0; i < sortedMonths.length; i++) {
     const [monthKey, revenue] = sortedMonths[i];
-    const [y, m] = monthKey.split("-");
-    const label = `${MONTH_LABELS[parseInt(m, 10) - 1]} '${y.slice(2)}`;
     let momGrowth: number | null = null;
     if (i > 0) {
       const prevRev = sortedMonths[i - 1][1];
       if (prevRev > 0) momGrowth = Math.round(((revenue - prevRev) / prevRev) * 1000) / 10;
     }
-    seasonalPattern.push({ month: monthKey, monthLabel: label, revenue: Math.round(revenue * 100) / 100, momGrowth });
+    seasonalPattern.push({ month: monthKey, monthLabel: fmtMonthLabel(monthKey), revenue: Math.round(revenue * 100) / 100, momGrowth });
   }
 
   // Average monthly revenue from last 6 completed months (fallback)
@@ -743,30 +704,60 @@ export async function getPipelinePrediction(
     ? last6.reduce((s, [, r]) => s + r, 0) / last6.length
     : 0;
 
-  // ── 4. Month-by-month forecast for next 12 months ──────────────────────
+  // ── 3. Build last year's MoM growth rates for each month transition ────
+  // For each calendar month transition (e.g. Mar→Apr), find last year's rate
+  const MOM_CAP = 2.0; // cap at ±200%
+
+  function getLastYearMoMRate(futureMonth: number, futureYear: number): { rate: number; capped: boolean; isFallback: boolean } {
+    // Look at last year: what was the MoM growth going INTO this calendar month?
+    const thisMonthKey = `${futureYear - 1}-${String(futureMonth + 1).padStart(2, "0")}`;
+    const prevMonthDate = new Date(futureYear - 1, futureMonth - 1, 1);
+    const prevMonthKey = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, "0")}`;
+
+    const thisRev = monthlyRevenue.get(thisMonthKey);
+    const prevRev = monthlyRevenue.get(prevMonthKey);
+
+    if (thisRev != null && prevRev != null && prevRev > 0) {
+      const raw = (thisRev - prevRev) / prevRev;
+      const capped = Math.max(-MOM_CAP, Math.min(MOM_CAP, raw));
+      return { rate: capped, capped: Math.abs(raw) > MOM_CAP, isFallback: false };
+    }
+    // Fallback: no data → assume flat (0% growth)
+    return { rate: 0, capped: false, isFallback: true };
+  }
+
+  // ── 4. Compound forward from last completed month ──────────────────────
+  // Last completed month = month before current
+  const lastCompletedDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const lastCompletedKey = `${lastCompletedDate.getFullYear()}-${String(lastCompletedDate.getMonth() + 1).padStart(2, "0")}`;
+  const startingRevenue = monthlyRevenue.get(lastCompletedKey) ?? avgMonthlyRevenue;
+  const startingMonth = fmtMonthLabel(lastCompletedKey);
+
   const monthlyForecasts: MonthlyForecast[] = [];
-  for (let i = 1; i <= 12; i++) {
+  let prevRevenue = startingRevenue;
+
+  for (let i = 0; i < 12; i++) {
     const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
     const mm = String(futureDate.getMonth() + 1).padStart(2, "0");
     const yyyy = futureDate.getFullYear();
     const monthKey = `${yyyy}-${mm}`;
     const monthLabel = `${MONTH_LABELS[futureDate.getMonth()]} '${String(yyyy).slice(2)}`;
 
-    const lastYearKey = `${yyyy - 1}-${mm}`;
-    const lastYearRev = monthlyRevenue.get(lastYearKey);
-    const hasLastYear = lastYearRev !== undefined && lastYearRev > 0;
-
-    const baseRevenue = hasLastYear ? lastYearRev! : avgMonthlyRevenue;
-    const forecast = baseRevenue * (1 + yoyGrowthRate);
+    const { rate, capped, isFallback } = getLastYearMoMRate(futureDate.getMonth(), yyyy);
+    const forecast = prevRevenue * (1 + rate);
 
     monthlyForecasts.push({
       month: monthKey,
       monthLabel,
       forecast: Math.round(forecast * 100) / 100,
-      lastYearRevenue: hasLastYear ? Math.round(lastYearRev! * 100) / 100 : null,
+      prevMonthRevenue: Math.round(prevRevenue * 100) / 100,
+      momRate: Math.round(rate * 1000) / 1000,
+      momRateCapped: capped,
       fromPipeline: 0, // filled below
-      isFallback: !hasLastYear,
+      isFallback,
     });
+
+    prevRevenue = forecast;
   }
 
   // ── 5. Pipeline analysis: age-based conversion + per-month overlay ─────
@@ -859,9 +850,8 @@ export async function getPipelinePrediction(
     totalPredictedRevenue: Math.round(totalPredictedRevenue * 100) / 100,
     avgMonthlyRevenue: Math.round(avgMonthlyRevenue * 100) / 100,
     avgCycleTimeDays,
-    yoyGrowthRate: Math.round(yoyGrowthRate * 1000) / 1000,
-    yoyGrowthBasis,
-    growthBasisMonths,
+    startingMonth,
+    startingRevenue: Math.round(startingRevenue * 100) / 100,
     monthlyForecasts,
     annualForecast: Math.round(annualForecast * 100) / 100,
     buckets: buckets.filter((b) => b.drafts > 0),

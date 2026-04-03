@@ -73,7 +73,9 @@ interface MonthlyForecast {
   month: string;
   monthLabel: string;
   forecast: number;
-  lastYearRevenue: number | null;
+  prevMonthRevenue: number;
+  momRate: number;
+  momRateCapped: boolean;
   fromPipeline: number;
   isFallback: boolean;
 }
@@ -85,22 +87,13 @@ interface SeasonalMonth {
   momGrowth: number | null;
 }
 
-interface GrowthBasisMonth {
-  month: string;
-  monthLabel: string;
-  revenue: number;
-  priorYearMonth: string;
-  priorYearRevenue: number;
-}
-
 interface PipelinePrediction {
   totalPipelineValue: number;
   totalPredictedRevenue: number;
   avgMonthlyRevenue: number;
   avgCycleTimeDays: number;
-  yoyGrowthRate: number;
-  yoyGrowthBasis: string;
-  growthBasisMonths: GrowthBasisMonth[];
+  startingMonth: string;
+  startingRevenue: number;
   monthlyForecasts: MonthlyForecast[];
   annualForecast: number;
   buckets: AgeBucket[];
@@ -651,10 +644,10 @@ export default function PipelineDashboard() {
               <div className="space-y-4">
                 <p className="text-xs text-sand-400 uppercase tracking-wider">
                   Revenue Forecast
-                  <InfoTip text={`Based on total order revenue (quotes + direct). Growth rate: ${pred.yoyGrowthBasis}. Each future month = last year's same month × (1 + ${Math.round(pred.yoyGrowthRate * 100)}% YoY growth). Falls back to ${fmt(pred.avgMonthlyRevenue)}/mo average when no prior year data. Pipeline shows weighted value from invoiced quotes.`} />
+                  <InfoTip text={`Compounds forward from ${pred.startingMonth} (${fmt(pred.startingRevenue)}) using last year's month-over-month growth rates. Each month = previous month × (1 + last year's MoM%). MoM rates capped at ±200%. Falls back to 0% growth when no prior year data.`} />
                 </p>
 
-                {/* Annual summary + growth rate */}
+                {/* Summary cards */}
                 <div className="grid grid-cols-3 gap-4">
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
                     <p className="text-[10px] text-blue-400 uppercase tracking-wider">12-Month Forecast</p>
@@ -662,11 +655,9 @@ export default function PipelineDashboard() {
                     <p className="text-xs text-blue-500 mt-0.5">Next 12 months projected</p>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-[10px] text-blue-400 uppercase tracking-wider">YoY Growth</p>
-                    <p className={`text-2xl font-bold mt-1 ${pred.yoyGrowthRate >= 0 ? "text-emerald-700" : "text-red-700"}`}>
-                      {pred.yoyGrowthRate >= 0 ? "+" : ""}{Math.round(pred.yoyGrowthRate * 100)}%
-                    </p>
-                    <p className="text-xs text-blue-500 mt-0.5">{pred.yoyGrowthBasis}</p>
+                    <p className="text-[10px] text-blue-400 uppercase tracking-wider">Starting From</p>
+                    <p className="text-2xl font-bold text-blue-900 mt-1">{fmt(pred.startingRevenue)}</p>
+                    <p className="text-xs text-blue-500 mt-0.5">{pred.startingMonth} actual revenue</p>
                   </div>
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
                     <p className="text-[10px] text-blue-400 uppercase tracking-wider">Pipeline Value</p>
@@ -687,97 +678,73 @@ export default function PipelineDashboard() {
                 </button>
 
                 {/* Calculation details */}
-                {showCalc && pred.growthBasisMonths && (
+                {showCalc && (
                   <div className="bg-white border border-blue-200 rounded-xl p-5 space-y-4 text-sm">
                     <p className="text-xs text-blue-400 uppercase tracking-wider font-medium">How this forecast is calculated</p>
 
-                    {/* Step 1: YoY growth */}
+                    {/* Method explanation */}
                     <div className="space-y-2">
-                      <p className="text-blue-800 font-medium">Step 1: Calculate YoY growth rate</p>
-                      <p className="text-blue-600 text-xs">Compare last 3 completed months vs the same 3 months last year (total order revenue):</p>
+                      <p className="text-blue-800 font-medium">Method: Seasonal MoM Compounding</p>
+                      <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 space-y-1">
+                        <p>1. Start from last completed month: <span className="font-bold">{pred.startingMonth} = {fmt(pred.startingRevenue)}</span></p>
+                        <p>2. For each future month, apply last year&apos;s MoM growth rate for that same month transition</p>
+                        <p>3. MoM rates are capped at &plusmn;200% to prevent extreme outliers from skewing the forecast</p>
+                        <p>4. If no prior year data exists for a transition, 0% growth is assumed</p>
+                      </div>
+                    </div>
+
+                    {/* Per-month breakdown */}
+                    <div className="space-y-2">
+                      <p className="text-blue-800 font-medium">Month-by-month calculation</p>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-blue-100">
                               <th className="pb-1 text-left text-blue-400 font-medium">Month</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">This Year</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Last Year</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-blue-50">
-                            {pred.growthBasisMonths.map((m) => (
-                              <tr key={m.month}>
-                                <td className="py-1 text-blue-700">{m.monthLabel}</td>
-                                <td className="py-1 text-right text-blue-800 font-medium">{fmt(m.revenue)}</td>
-                                <td className="py-1 text-right text-slate-500">{fmt(m.priorYearRevenue)}</td>
-                              </tr>
-                            ))}
-                            <tr className="border-t border-blue-200">
-                              <td className="py-1.5 text-blue-800 font-bold">Total</td>
-                              <td className="py-1.5 text-right text-blue-800 font-bold">
-                                {fmt(pred.growthBasisMonths.reduce((s, m) => s + m.revenue, 0))}
-                              </td>
-                              <td className="py-1.5 text-right text-slate-600 font-medium">
-                                {fmt(pred.growthBasisMonths.reduce((s, m) => s + m.priorYearRevenue, 0))}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <p className="text-xs text-blue-600">
-                        Growth = ({fmt(pred.growthBasisMonths.reduce((s, m) => s + m.revenue, 0))} &minus; {fmt(pred.growthBasisMonths.reduce((s, m) => s + m.priorYearRevenue, 0))}) &divide; {fmt(pred.growthBasisMonths.reduce((s, m) => s + m.priorYearRevenue, 0))} = <span className={`font-bold ${pred.yoyGrowthRate >= 0 ? "text-emerald-600" : "text-red-600"}`}>{pred.yoyGrowthRate >= 0 ? "+" : ""}{Math.round(pred.yoyGrowthRate * 100)}%</span>
-                      </p>
-                    </div>
-
-                    {/* Step 2: Monthly formula */}
-                    <div className="space-y-2">
-                      <p className="text-blue-800 font-medium">Step 2: Project each future month</p>
-                      <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 font-mono">
-                        Forecast = Last year same month &times; (1 + {Math.round(pred.yoyGrowthRate * 100)}%)
-                      </div>
-                      <p className="text-blue-600 text-xs">
-                        If no prior year data exists for a month, falls back to average monthly revenue ({fmt(pred.avgMonthlyRevenue)}) &times; (1 + {Math.round(pred.yoyGrowthRate * 100)}%).
-                      </p>
-                    </div>
-
-                    {/* Step 3: Per-month breakdown */}
-                    <div className="space-y-2">
-                      <p className="text-blue-800 font-medium">Step 3: Month-by-month calculation</p>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-blue-100">
-                              <th className="pb-1 text-left text-blue-400 font-medium">Month</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Last Year</th>
+                              <th className="pb-1 text-right text-blue-400 font-medium">Prev Month</th>
                               <th className="pb-1 text-center text-blue-400 font-medium">&times;</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Multiplier</th>
+                              <th className="pb-1 text-right text-blue-400 font-medium">MoM Rate</th>
                               <th className="pb-1 text-center text-blue-400 font-medium">=</th>
                               <th className="pb-1 text-right text-blue-400 font-medium">Forecast</th>
+                              <th className="pb-1 text-right text-blue-400 font-medium">Pipeline</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-blue-50">
                             {pred.monthlyForecasts.map((f) => (
                               <tr key={f.month}>
-                                <td className="py-1 text-blue-700">{f.monthLabel}{f.isFallback ? " *" : ""}</td>
-                                <td className="py-1 text-right text-slate-500">
-                                  {f.isFallback ? <span className="italic">{fmt(pred.avgMonthlyRevenue)} avg</span> : f.lastYearRevenue != null ? fmt(f.lastYearRevenue) : "—"}
+                                <td className="py-1 text-blue-700">
+                                  {f.monthLabel}
+                                  {f.isFallback && <span className="ml-1 text-[10px] text-amber-500" title="No prior year data — 0% growth assumed">*</span>}
+                                  {f.momRateCapped && <span className="ml-1 text-[10px] text-red-400" title="MoM rate was capped at ±200%">!</span>}
                                 </td>
+                                <td className="py-1 text-right text-slate-500">{fmt(f.prevMonthRevenue)}</td>
                                 <td className="py-1 text-center text-blue-300">&times;</td>
-                                <td className="py-1 text-right text-blue-600">{(1 + pred.yoyGrowthRate).toFixed(3)}</td>
+                                <td className={`py-1 text-right font-medium ${f.momRate >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                                  {f.momRate >= 0 ? "+" : ""}{Math.round(f.momRate * 100)}%
+                                </td>
                                 <td className="py-1 text-center text-blue-300">=</td>
                                 <td className="py-1 text-right text-blue-800 font-medium">{fmt(f.forecast)}</td>
+                                <td className="py-1 text-right text-violet-600">{f.fromPipeline > 0 ? fmt(f.fromPipeline) : "—"}</td>
                               </tr>
                             ))}
                             <tr className="border-t-2 border-blue-200">
                               <td colSpan={5} className="py-1.5 text-blue-800 font-bold">12-Month Total</td>
                               <td className="py-1.5 text-right text-blue-900 font-bold">{fmt(pred.annualForecast)}</td>
+                              <td className="py-1.5 text-right text-violet-700 font-medium">
+                                {fmt(pred.monthlyForecasts.reduce((s, f) => s + f.fromPipeline, 0))}
+                              </td>
                             </tr>
                           </tbody>
                         </table>
                       </div>
-                      {pred.monthlyForecasts.some((f) => f.isFallback) && (
-                        <p className="text-[10px] text-blue-400">* No prior year data — using {fmt(pred.avgMonthlyRevenue)}/mo average as base.</p>
-                      )}
+                      <div className="flex gap-4 text-[10px] text-blue-400">
+                        {pred.monthlyForecasts.some((f) => f.isFallback) && (
+                          <span>* No prior year data — 0% growth assumed</span>
+                        )}
+                        {pred.monthlyForecasts.some((f) => f.momRateCapped) && (
+                          <span className="text-red-400">! MoM rate was capped at &plusmn;200%</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -804,56 +771,16 @@ export default function PipelineDashboard() {
                             const n = String(name);
                             if (n === "forecast") return [fmtFull(v), "Forecast"];
                             if (n === "fromPipeline") return [fmtFull(v), "From Pipeline"];
-                            if (n === "lastYearRevenue") return [v ? fmtFull(v) : "No data", "Last Year"];
                             return [v, n];
                           }}
                         />
                         <Bar dataKey="forecast" fill="#2563eb" radius={[4, 4, 0, 0]} name="forecast" />
                         <Bar dataKey="fromPipeline" fill="#7c3aed" radius={[4, 4, 0, 0]} name="fromPipeline" />
-                        <Line type="monotone" dataKey="lastYearRevenue" stroke="#94a3b8" strokeWidth={2} strokeDasharray="5 5" dot={{ r: 3, fill: "#94a3b8" }} connectNulls name="lastYearRevenue" />
                       </ComposedChart>
                     </ResponsiveContainer>
                     <div className="flex justify-center gap-5 text-xs text-blue-500">
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Forecast</span>
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-violet-600" /> From Pipeline</span>
-                      <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 border-t-2 border-dashed border-slate-400" /> Last Year</span>
-                    </div>
-
-                    {/* Monthly breakdown table */}
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-blue-200">
-                            <th className="pb-1.5 text-left font-medium text-blue-400 uppercase tracking-wider">Month</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Last Year</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Forecast</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Pipeline</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-blue-100">
-                          {pred.monthlyForecasts.map((f) => (
-                            <tr key={f.month}>
-                              <td className="py-1.5 text-blue-700 font-medium">
-                                {f.monthLabel}
-                                {f.isFallback && <span className="ml-1 text-[10px] text-blue-400" title="No prior year data — using average">*</span>}
-                              </td>
-                              <td className="py-1.5 text-slate-500 text-right">{f.lastYearRevenue != null ? fmt(f.lastYearRevenue) : "—"}</td>
-                              <td className="py-1.5 text-blue-800 text-right font-medium">{fmt(f.forecast)}</td>
-                              <td className="py-1.5 text-violet-600 text-right">{f.fromPipeline > 0 ? fmt(f.fromPipeline) : "—"}</td>
-                            </tr>
-                          ))}
-                          <tr className="border-t-2 border-blue-300">
-                            <td className="py-2 text-blue-800 font-bold">Total</td>
-                            <td className="py-2 text-slate-600 text-right font-medium">
-                              {fmt(pred.monthlyForecasts.reduce((s, f) => s + (f.lastYearRevenue ?? 0), 0))}
-                            </td>
-                            <td className="py-2 text-blue-900 text-right font-bold">{fmt(pred.annualForecast)}</td>
-                            <td className="py-2 text-violet-700 text-right font-medium">
-                              {fmt(pred.monthlyForecasts.reduce((s, f) => s + f.fromPipeline, 0))}
-                            </td>
-                          </tr>
-                        </tbody>
-                      </table>
                     </div>
                   </div>
                 )}
