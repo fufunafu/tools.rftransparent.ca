@@ -4,6 +4,8 @@
  * Reuses the same OAuth app as the Grasshopper OTP fetcher.
  */
 
+import { OAuthTokenSchema } from "@/lib/schemas";
+
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -49,7 +51,8 @@ async function getAccessToken(refreshToken: string): Promise<string> {
     throw new Error(`Gmail token refresh failed: ${res.status} ${body}`);
   }
 
-  const data = await res.json();
+  const raw = await res.json();
+  const data = OAuthTokenSchema.parse(raw);
   tokenCache.set(refreshToken, {
     accessToken: data.access_token,
     expiresAt: Date.now() + (data.expires_in ?? 3600) * 1000,

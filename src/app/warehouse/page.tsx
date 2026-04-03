@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { EmployeeTab } from "@/components/admin/KPIDashboard";
+import WarehouseDashboard from "@/components/warehouse/WarehouseDashboard";
 
 export const metadata: Metadata = {
   title: "Warehouse | RF Tools",
@@ -14,7 +14,7 @@ export default async function WarehousePage() {
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
-      <EmployeeTab department="warehouse" />
+      <WarehouseDashboard />
     </div>
   );
 }

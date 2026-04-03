@@ -1,4 +1,5 @@
 import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { OrdersResponseSchema, DraftOrdersResponseSchema } from "@/lib/schemas";
 
 // --------------- Types ---------------
 
@@ -116,12 +117,25 @@ function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
 
 const MAX_PAGES = 80; // 80 pages × 250 per page = 20,000 records max per store
 
+/** Tracks partial failures so the API can surface warnings to the UI. */
+export interface FetchWarning {
+  storeId: string;
+  type: "orders" | "drafts";
+  message: string;
+}
+
+interface FetchResult<T> {
+  data: T[];
+  warnings: FetchWarning[];
+}
+
 async function fetchAllOrders(
   storeIds: string[],
   fromDate: string
-): Promise<OrderNode[]> {
+): Promise<FetchResult<OrderNode>> {
   const stores = getStores();
   const allOrders: OrderNode[] = [];
+  const warnings: FetchWarning[] = [];
 
   for (const store of stores) {
     if (!storeIds.includes(store.id)) continue;
@@ -130,30 +144,37 @@ async function fetchAllOrders(
       let hasNext = true;
       let pages = 0;
       while (hasNext && pages < MAX_PAGES) {
-        const data = await shopifyGraphQL<OrdersResponse>(
+        const raw = await shopifyGraphQL(
           store.id,
           makeOrdersQuery(fromDate, cursor)
         );
+        const data = OrdersResponseSchema.parse(raw);
         const edges = data.orders.edges;
-        allOrders.push(...edges.map((e) => e.node));
+        allOrders.push(...edges.map((e) => e.node as unknown as OrderNode));
         hasNext = data.orders.pageInfo.hasNextPage;
         cursor = edges[edges.length - 1]?.cursor;
         pages++;
       }
+      if (pages >= MAX_PAGES) {
+        warnings.push({ storeId: store.id, type: "orders", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
+      }
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error(`[kpi-sales] Order fetch failed for ${store.id}:`, err);
+      warnings.push({ storeId: store.id, type: "orders", message: `Failed to fetch orders: ${msg}` });
     }
   }
 
-  return allOrders;
+  return { data: allOrders, warnings };
 }
 
 async function fetchAllDraftOrders(
   storeIds: string[],
   fromDate: string
-): Promise<DraftOrderNode[]> {
+): Promise<FetchResult<DraftOrderNode>> {
   const stores = getStores();
   const allDrafts: DraftOrderNode[] = [];
+  const warnings: FetchWarning[] = [];
 
   for (const store of stores) {
     if (!storeIds.includes(store.id)) continue;
@@ -162,23 +183,28 @@ async function fetchAllDraftOrders(
       let hasNext = true;
       let pages = 0;
       while (hasNext && pages < MAX_PAGES) {
-        const data = await shopifyGraphQL<DraftOrdersResponse>(
+        const raw = await shopifyGraphQL(
           store.id,
           makeDraftOrdersQuery(fromDate, cursor)
         );
+        const data = DraftOrdersResponseSchema.parse(raw);
         const edges = data.draftOrders.edges;
-        allDrafts.push(...edges.map((e) => e.node));
+        allDrafts.push(...edges.map((e) => e.node as unknown as DraftOrderNode));
         hasNext = data.draftOrders.pageInfo.hasNextPage;
         cursor = edges[edges.length - 1]?.cursor;
         pages++;
       }
+      if (pages >= MAX_PAGES) {
+        warnings.push({ storeId: store.id, type: "drafts", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
+      }
     } catch (err) {
-      console.error(`[kpi-sales] Draft fetch FAILED for ${store.id}:`, err instanceof Error ? err.message : err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error(`[kpi-sales] Draft fetch FAILED for ${store.id}:`, msg);
+      warnings.push({ storeId: store.id, type: "drafts", message: `Failed to fetch drafts: ${msg}` });
     }
   }
 
-  console.log(`[kpi-sales] fetchAllDraftOrders: ${allDrafts.length} drafts from ${storeIds.length} stores (requested: ${storeIds.join(", ")})`);
-  return allDrafts;
+  return { data: allDrafts, warnings };
 }
 
 // --------------- Metrics Calculation ---------------
@@ -196,7 +222,7 @@ export async function getEmployeeSalesMetrics(
   const lowerTags = employeeTags.map((t) => t.toLowerCase()).filter(Boolean);
   if (lowerTags.length === 0) return { revenue: 0, orders: 0, aov: 0 };
 
-  const allOrders = await fetchAllOrders(storeIds, toDateStr(startDate));
+  const { data: allOrders } = await fetchAllOrders(storeIds, toDateStr(startDate));
 
   let revenue = 0;
   let orderCount = 0;
@@ -242,7 +268,7 @@ export async function getEmployeeDraftMetrics(
       drafts: [],
     };
 
-  const allDrafts = await fetchAllDraftOrders(storeIds, toDateStr(startDate));
+  const { data: allDrafts } = await fetchAllDraftOrders(storeIds, toDateStr(startDate));
 
   const matchedDrafts: DraftOrderSummary[] = [];
   let completedCount = 0;
@@ -309,7 +335,7 @@ export async function getMonthlyConversionHistory(
   const lowerTags = employeeTags.map((t) => t.toLowerCase()).filter(Boolean);
   if (lowerTags.length === 0) return [];
 
-  const allDrafts = await fetchAllDraftOrders(storeIds, toDateStr(startDate));
+  const { data: allDrafts } = await fetchAllDraftOrders(storeIds, toDateStr(startDate));
 
   // Group by month
   const monthMap = new Map<string, { total: number; completed: number }>();
@@ -408,8 +434,8 @@ export async function getFullPipelineData(
   fromDate: Date,
   toDate: Date,
   knownRepTags: string[],
-): Promise<{ metrics: PipelineMetrics; leaderboard: RepPipelineEntry[] }> {
-  const allDrafts = await fetchAllDraftOrders(storeIds, toDateStr(fromDate));
+): Promise<{ metrics: PipelineMetrics; leaderboard: RepPipelineEntry[]; warnings: FetchWarning[] }> {
+  const { data: allDrafts, warnings } = await fetchAllDraftOrders(storeIds, toDateStr(fromDate));
 
   // Filter by upper date bound
   const drafts = allDrafts.filter((d) => new Date(d.createdAt) < toDate);
@@ -560,7 +586,7 @@ export async function getFullPipelineData(
     }))
     .sort((a, b) => b.wonRevenue - a.wonRevenue);
 
-  return { metrics, leaderboard };
+  return { metrics, leaderboard, warnings };
 }
 
 // --------------- Age-Based Pipeline Prediction ---------------
@@ -575,11 +601,13 @@ export interface AgeBucket {
   predictedValue: number;
 }
 
-export interface RevenueForecast {
-  label: string;
-  days: number;
-  totalForecast: number;
-  fromPipeline: number;
+export interface MonthlyForecast {
+  month: string;        // "2026-05"
+  monthLabel: string;   // "May '26"
+  forecast: number;     // projected total revenue
+  lastYearRevenue: number | null; // same month last year (null if no data)
+  fromPipeline: number; // revenue already quoted/invoiced for this month
+  isFallback: boolean;  // true if no prior year data, used avg instead
 }
 
 export interface SeasonalMonth {
@@ -589,14 +617,26 @@ export interface SeasonalMonth {
   momGrowth: number | null; // month-over-month % change, null for first month
 }
 
+export interface GrowthBasisMonth {
+  month: string;       // "2026-01"
+  monthLabel: string;  // "Jan '26"
+  revenue: number;
+  priorYearMonth: string;
+  priorYearRevenue: number;
+}
+
 export interface PipelinePrediction {
   totalPipelineValue: number;
   totalPredictedRevenue: number;
   avgMonthlyRevenue: number;
   avgCycleTimeDays: number;
-  forecasts: RevenueForecast[];
+  yoyGrowthRate: number;          // e.g. 0.286 for +28.6%
+  yoyGrowthBasis: string;         // e.g. "Jan–Mar '26 vs Jan–Mar '25"
+  growthBasisMonths: GrowthBasisMonth[]; // the 3 months used to compute YoY
+  monthlyForecasts: MonthlyForecast[]; // next 12 months
+  annualForecast: number;          // sum of monthly forecasts
   buckets: AgeBucket[];
-  seasonalPattern: SeasonalMonth[]; // last ~18 months of MoM changes
+  seasonalPattern: SeasonalMonth[]; // last ~24 months of MoM changes
 }
 
 const PREDICTION_BUCKETS = [
@@ -611,108 +651,169 @@ const PREDICTION_BUCKETS = [
 ];
 
 /**
- * Age-based pipeline prediction that stays constant regardless of date range.
- *
- * Uses a survival analysis approach:
- * 1. Build a "resolved cohort" from drafts old enough to have converted or died (≥180d)
- * 2. Compute a cycle-time CDF from completed drafts in the cohort
- * 3. For each current INVOICE_SENT draft at age N:
- *    P(converts) = (completed after day N) / (still pending at day N)
- * 4. predicted value = draft amount × P(converts)
+ * Revenue forecast using:
+ * 1. Total order revenue (not just drafts) for historical baseline
+ * 2. YoY growth rate from last 3 completed months vs same period last year
+ * 3. Month-by-month projection: last year same month × (1 + YoY growth)
+ * 4. Pipeline overlay: invoiced drafts weighted by conversion probability
  */
 export async function getPipelinePrediction(
   storeIds: string[],
 ): Promise<PipelinePrediction> {
-  // Fetch 2 years of history for reliable rates
+  const now = new Date();
   const historyStart = new Date();
   historyStart.setFullYear(historyStart.getFullYear() - 2);
-  const allDrafts = await fetchAllDraftOrders(storeIds, toDateStr(historyStart));
+  const dateStr = toDateStr(historyStart);
 
-  const now = new Date();
+  // Fetch orders + drafts in parallel for full historical picture
+  const [ordersResult, draftsResult] = await Promise.all([
+    fetchAllOrders(storeIds, dateStr),
+    fetchAllDraftOrders(storeIds, dateStr),
+  ]);
+  const allOrders = ordersResult.data;
+  const allDrafts = draftsResult.data;
 
-  // Current pipeline: all INVOICE_SENT drafts (not date-filtered)
+  // ── 1. Build monthly TOTAL revenue from real orders ─────────────────────
+  const monthlyRevenue = new Map<string, number>();
+  for (const order of allOrders) {
+    if (order.cancelledAt) continue;
+    const month = order.createdAt.slice(0, 7);
+    monthlyRevenue.set(month, (monthlyRevenue.get(month) ?? 0) + calcOrderNetRevenue(order));
+  }
+
+  const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+
+  // ── 2. YoY growth from last 3 completed months ─────────────────────────
+  // Find last completed month (the month before current)
+  const lastCompletedDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const recentKeys: string[] = [];
+  const priorYearKeys: string[] = [];
+  for (let i = 0; i < 3; i++) {
+    const d = new Date(lastCompletedDate.getFullYear(), lastCompletedDate.getMonth() - i, 1);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    recentKeys.push(key);
+    const py = new Date(d.getFullYear() - 1, d.getMonth(), 1);
+    priorYearKeys.push(`${py.getFullYear()}-${String(py.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  const recentTotal = recentKeys.reduce((s, k) => s + (monthlyRevenue.get(k) ?? 0), 0);
+  const priorTotal = priorYearKeys.reduce((s, k) => s + (monthlyRevenue.get(k) ?? 0), 0);
+  const yoyGrowthRate = priorTotal > 0 ? (recentTotal - priorTotal) / priorTotal : 0;
+
+  // Human-readable basis label
+  const basisStart = recentKeys[recentKeys.length - 1]; // earliest
+  const basisEnd = recentKeys[0]; // latest
+  const fmtBasis = (k: string) => {
+    const [y, m] = k.split("-");
+    return `${MONTH_LABELS[parseInt(m, 10) - 1]} '${y.slice(2)}`;
+  };
+  const yoyGrowthBasis = `${fmtBasis(basisStart)}–${fmtBasis(basisEnd)} vs prior year`;
+
+  // Build detailed basis for calculation display
+  const growthBasisMonths: GrowthBasisMonth[] = recentKeys.map((key, i) => ({
+    month: key,
+    monthLabel: fmtBasis(key),
+    revenue: Math.round((monthlyRevenue.get(key) ?? 0) * 100) / 100,
+    priorYearMonth: priorYearKeys[i],
+    priorYearRevenue: Math.round((monthlyRevenue.get(priorYearKeys[i]) ?? 0) * 100) / 100,
+  })).reverse(); // chronological order
+
+  // ── 3. Seasonal pattern from historical data ────────────────────────────
+  const sortedMonths = [...monthlyRevenue.entries()]
+    .filter(([m]) => m < currentMonth)
+    .sort(([a], [b]) => a.localeCompare(b));
+
+  const seasonalPattern: SeasonalMonth[] = [];
+  for (let i = 0; i < sortedMonths.length; i++) {
+    const [monthKey, revenue] = sortedMonths[i];
+    const [y, m] = monthKey.split("-");
+    const label = `${MONTH_LABELS[parseInt(m, 10) - 1]} '${y.slice(2)}`;
+    let momGrowth: number | null = null;
+    if (i > 0) {
+      const prevRev = sortedMonths[i - 1][1];
+      if (prevRev > 0) momGrowth = Math.round(((revenue - prevRev) / prevRev) * 1000) / 10;
+    }
+    seasonalPattern.push({ month: monthKey, monthLabel: label, revenue: Math.round(revenue * 100) / 100, momGrowth });
+  }
+
+  // Average monthly revenue from last 6 completed months (fallback)
+  const last6 = sortedMonths.slice(-6);
+  const avgMonthlyRevenue = last6.length > 0
+    ? last6.reduce((s, [, r]) => s + r, 0) / last6.length
+    : 0;
+
+  // ── 4. Month-by-month forecast for next 12 months ──────────────────────
+  const monthlyForecasts: MonthlyForecast[] = [];
+  for (let i = 1; i <= 12; i++) {
+    const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    const mm = String(futureDate.getMonth() + 1).padStart(2, "0");
+    const yyyy = futureDate.getFullYear();
+    const monthKey = `${yyyy}-${mm}`;
+    const monthLabel = `${MONTH_LABELS[futureDate.getMonth()]} '${String(yyyy).slice(2)}`;
+
+    const lastYearKey = `${yyyy - 1}-${mm}`;
+    const lastYearRev = monthlyRevenue.get(lastYearKey);
+    const hasLastYear = lastYearRev !== undefined && lastYearRev > 0;
+
+    const baseRevenue = hasLastYear ? lastYearRev! : avgMonthlyRevenue;
+    const forecast = baseRevenue * (1 + yoyGrowthRate);
+
+    monthlyForecasts.push({
+      month: monthKey,
+      monthLabel,
+      forecast: Math.round(forecast * 100) / 100,
+      lastYearRevenue: hasLastYear ? Math.round(lastYearRev! * 100) / 100 : null,
+      fromPipeline: 0, // filled below
+      isFallback: !hasLastYear,
+    });
+  }
+
+  // ── 5. Pipeline analysis: age-based conversion + per-month overlay ─────
   const pipeline = allDrafts.filter((d) => d.status === "INVOICE_SENT");
 
-  // Resolved cohort: drafts created ≥ 180 days ago (had time to convert or die)
+  // Resolved cohort for survival analysis
   const MATURITY_DAYS = 180;
-  const maturityCutoff = new Date(now.getTime() - MATURITY_DAYS * 24 * 60 * 60 * 1000);
+  const maturityCutoff = new Date(now.getTime() - MATURITY_DAYS * 86_400_000);
   const resolvedCohort = allDrafts.filter((d) => new Date(d.createdAt) < maturityCutoff);
   const completedInCohort = resolvedCohort.filter((d) => d.status === "COMPLETED");
 
-  // Build cycle-time array from completed drafts
   const cycleTimes: number[] = [];
   for (const draft of completedInCohort) {
-    if (draft.order?.createdAt) {
-      const days = Math.max(
-        0,
-        (new Date(draft.order.createdAt).getTime() - new Date(draft.createdAt).getTime()) /
-          (1000 * 60 * 60 * 24),
-      );
-      cycleTimes.push(days);
-    } else {
-      cycleTimes.push(0); // completed but no timestamp → assume instant
-    }
+    const days = draft.order?.createdAt
+      ? Math.max(0, (new Date(draft.order.createdAt).getTime() - new Date(draft.createdAt).getTime()) / 86_400_000)
+      : 0;
+    cycleTimes.push(days);
   }
   const sortedCycles = cycleTimes.sort((a, b) => a - b);
-
   const cohortTotal = resolvedCohort.length;
   const cohortCompleted = completedInCohort.length;
 
-  // P(converts | still pending at age N)
   function conversionProbAtAge(age: number): number {
     if (cohortTotal === 0) return 0;
-    // Count completed drafts with cycle_time ≤ age (already converted by this age)
     let completedByAge = 0;
-    for (const c of sortedCycles) {
-      if (c <= age) completedByAge++;
-      else break; // sorted, so we can stop early
-    }
+    for (const c of sortedCycles) { if (c <= age) completedByAge++; else break; }
     const pendingAtAge = cohortTotal - completedByAge;
     if (pendingAtAge === 0) return 0;
-    const completedAfterAge = cohortCompleted - completedByAge;
-    return completedAfterAge / pendingAtAge;
+    return (cohortCompleted - completedByAge) / pendingAtAge;
   }
 
-  // P(closes within W more days | still pending at age N)
-  // = (completed between day N and day N+W) / (still pending at day N)
-  function conversionProbByDeadline(age: number, withinDays: number): number {
-    if (cohortTotal === 0) return 0;
-    let completedByAge = 0;
-    let completedByDeadline = 0;
-    const deadline = age + withinDays;
-    for (const c of sortedCycles) {
-      if (c <= age) completedByAge++;
-      if (c <= deadline) completedByDeadline++;
-      if (c > deadline) break;
-    }
-    const pendingAtAge = cohortTotal - completedByAge;
-    if (pendingAtAge === 0) return 0;
-    const closesInWindow = completedByDeadline - completedByAge;
-    return closesInWindow / pendingAtAge;
-  }
+  // Estimate which month each pipeline draft is likely to close in
+  // Use average cycle time for remaining days estimate
+  const filteredCycles = cycleTimes.filter((d) => d >= 0.1 && d <= MAX_CYCLE_DAYS);
+  const avgCycleTimeDays = filteredCycles.length > 0
+    ? Math.round((filteredCycles.reduce((a, b) => a + b, 0) / filteredCycles.length) * 10) / 10
+    : 30; // default 30 days if no data
 
-  // Time horizons to compute
-  const HORIZONS = [
-    { label: "This month", days: 30 },
-    { label: "3 months", days: 90 },
-    { label: "1 year", days: 365 },
-  ];
-
-  // Score each pipeline draft by its age
   const buckets: AgeBucket[] = PREDICTION_BUCKETS.map((b) => ({
-    ...b,
-    drafts: 0,
-    value: 0,
-    conversionRate: 0,
-    predictedValue: 0,
+    ...b, drafts: 0, value: 0, conversionRate: 0, predictedValue: 0,
   }));
 
   let totalPipelineValue = 0;
   let totalPredictedRevenue = 0;
-  const horizonTotals = HORIZONS.map(() => 0);
 
   for (const draft of pipeline) {
-    const age = (now.getTime() - new Date(draft.createdAt).getTime()) / (1000 * 60 * 60 * 24);
+    const age = (now.getTime() - new Date(draft.createdAt).getTime()) / 86_400_000;
     const amount = calcNetRevenue(draft);
     const prob = conversionProbAtAge(age);
     const predicted = amount * prob;
@@ -720,9 +821,15 @@ export async function getPipelinePrediction(
     totalPipelineValue += amount;
     totalPredictedRevenue += predicted;
 
-    // Accumulate per-horizon predictions
-    for (let i = 0; i < HORIZONS.length; i++) {
-      horizonTotals[i] += amount * conversionProbByDeadline(age, HORIZONS[i].days);
+    // Estimate close month: draft age + remaining expected days
+    const remainingDays = Math.max(0, avgCycleTimeDays - age);
+    const expectedCloseDate = new Date(now.getTime() + remainingDays * 86_400_000);
+    const closeMonth = `${expectedCloseDate.getFullYear()}-${String(expectedCloseDate.getMonth() + 1).padStart(2, "0")}`;
+
+    // Add weighted pipeline value to the matching forecast month
+    const forecastMonth = monthlyForecasts.find((f) => f.month === closeMonth);
+    if (forecastMonth) {
+      forecastMonth.fromPipeline += predicted;
     }
 
     const bucket = buckets.find((b) => age >= b.minAge && age <= b.maxAge);
@@ -733,109 +840,30 @@ export async function getPipelinePrediction(
     }
   }
 
-  // Effective conversion rate per bucket = predictedValue / value
+  // Round pipeline values
+  for (const f of monthlyForecasts) {
+    f.fromPipeline = Math.round(f.fromPipeline * 100) / 100;
+  }
+
+  // Effective conversion rate per bucket
   for (const bucket of buckets) {
-    bucket.conversionRate =
-      bucket.value > 0 ? Math.round((bucket.predictedValue / bucket.value) * 1000) / 10 : 0;
+    bucket.conversionRate = bucket.value > 0 ? Math.round((bucket.predictedValue / bucket.value) * 1000) / 10 : 0;
     bucket.value = Math.round(bucket.value * 100) / 100;
     bucket.predictedValue = Math.round(bucket.predictedValue * 100) / 100;
   }
 
-  // Avg cycle time (excluding outliers, for display)
-  const filteredCycles = cycleTimes.filter((d) => d >= 0.1 && d <= MAX_CYCLE_DAYS);
-  const avgCycleTimeDays =
-    filteredCycles.length > 0
-      ? Math.round((filteredCycles.reduce((a, b) => a + b, 0) / filteredCycles.length) * 10) / 10
-      : 0;
-
-  // ── Historical monthly revenue with MoM seasonal pattern ────────────────
-  const monthlyRevenue = new Map<string, number>();
-  for (const draft of allDrafts) {
-    if (draft.status !== "COMPLETED") continue;
-    const dateStr = draft.order?.createdAt ?? draft.createdAt;
-    const month = dateStr.slice(0, 7);
-    monthlyRevenue.set(month, (monthlyRevenue.get(month) ?? 0) + calcNetRevenue(draft));
-  }
-
-  const currentMonth = now.toISOString().slice(0, 7);
-  const MONTH_LABELS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-  // Build sorted monthly data for the last ~24 months
-  const sortedMonths = [...monthlyRevenue.entries()]
-    .filter(([m]) => m < currentMonth)
-    .sort(([a], [b]) => a.localeCompare(b));
-
-  // Build seasonal pattern: monthly revenue with MoM growth
-  const seasonalPattern: SeasonalMonth[] = [];
-  for (let i = 0; i < sortedMonths.length; i++) {
-    const [monthKey, revenue] = sortedMonths[i];
-    const [y, m] = monthKey.split("-");
-    const label = `${MONTH_LABELS[parseInt(m, 10) - 1]} '${y.slice(2)}`;
-
-    let momGrowth: number | null = null;
-    if (i > 0) {
-      const prevRev = sortedMonths[i - 1][1];
-      if (prevRev > 0) {
-        momGrowth = Math.round(((revenue - prevRev) / prevRev) * 1000) / 10;
-      }
-    }
-
-    seasonalPattern.push({
-      month: monthKey,
-      monthLabel: label,
-      revenue: Math.round(revenue * 100) / 100,
-      momGrowth,
-    });
-  }
-
-  // Last 6 complete months average (fallback)
-  const recentMonths = sortedMonths.slice(-6);
-  const avgMonthlyRevenue =
-    recentMonths.length > 0
-      ? recentMonths.reduce((sum, [, rev]) => sum + rev, 0) / recentMonths.length
-      : 0;
-
-  // Seasonal forecast: use last year's same-month revenue as baseline.
-  // No compounding — each month is independently estimated from last year's actual value.
-  // Falls back to recent average for months without prior year data.
-  function seasonalForecastForMonths(count: number): number {
-    let total = 0;
-
-    for (let i = 0; i < count; i++) {
-      const futureDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
-      const mm = String(futureDate.getMonth() + 1).padStart(2, "0");
-      const lastYearKey = `${futureDate.getFullYear() - 1}-${mm}`;
-      const lastYearRev = monthlyRevenue.get(lastYearKey);
-
-      if (lastYearRev !== undefined && lastYearRev > 0) {
-        total += lastYearRev;
-      } else {
-        total += avgMonthlyRevenue; // fallback
-      }
-    }
-
-    return total;
-  }
-
-  // Build forecasts: seasonal projection + pipeline visibility
-  const forecasts: RevenueForecast[] = HORIZONS.map((h, i) => {
-    const months = Math.round(h.days / 30);
-    const totalForecast = seasonalForecastForMonths(months);
-    const fromPipeline = horizonTotals[i];
-    return {
-      label: h.label,
-      days: h.days,
-      totalForecast: Math.round(Math.max(totalForecast, fromPipeline) * 100) / 100,
-      fromPipeline: Math.round(fromPipeline * 100) / 100,
-    };
-  });
+  const annualForecast = monthlyForecasts.reduce((s, f) => s + f.forecast, 0);
 
   return {
     totalPipelineValue: Math.round(totalPipelineValue * 100) / 100,
     totalPredictedRevenue: Math.round(totalPredictedRevenue * 100) / 100,
     avgMonthlyRevenue: Math.round(avgMonthlyRevenue * 100) / 100,
     avgCycleTimeDays,
-    forecasts,
+    yoyGrowthRate: Math.round(yoyGrowthRate * 1000) / 1000,
+    yoyGrowthBasis,
+    growthBasisMonths,
+    monthlyForecasts,
+    annualForecast: Math.round(annualForecast * 100) / 100,
     buckets: buckets.filter((b) => b.drafts > 0),
     seasonalPattern,
   };
@@ -885,10 +913,12 @@ export async function getOrderChannelMetrics(
   const knownRepSet = new Set(knownRepTags.map((t) => t.toLowerCase()));
 
   // Fetch all orders and all draft orders in parallel
-  const [allOrders, allDrafts] = await Promise.all([
+  const [ordersResult, draftsResult] = await Promise.all([
     fetchAllOrders(storeIds, dateStr),
     fetchAllDraftOrders(storeIds, dateStr),
   ]);
+  const allOrders = ordersResult.data;
+  const allDrafts = draftsResult.data;
 
   // Build set of order GIDs that originated from a draft order
   const draftOrderIds = new Set<string>();

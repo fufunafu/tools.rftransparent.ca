@@ -1,4 +1,5 @@
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { OAuthTokenSchema } from "@/lib/schemas";
 
 export interface ShopifyStoreConfig {
   id: string;
@@ -58,7 +59,8 @@ async function getToken(config: ShopifyStoreConfig): Promise<string> {
     throw new Error(`Shopify auth failed for ${config.label}: ${res.status} ${text}`);
   }
 
-  const data = await res.json();
+  const raw = await res.json();
+  const data = OAuthTokenSchema.parse(raw);
   tokenCache.set(config.id, {
     token: data.access_token,
     expiresAt: Date.now() + 23 * 60 * 60 * 1000,

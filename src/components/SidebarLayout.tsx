@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useSidebarResize } from "@/hooks/useSidebarResize";
 
 type Status = "done" | "wip" | "todo";
 
@@ -54,6 +54,10 @@ const NAV_ITEMS: NavItem[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" />
       </svg>
     ),
+    children: [
+      { href: "/warehouse", label: "Dashboard", status: "done" as Status },
+      { href: "/warehouse/report", label: "Daily Report", status: "done" as Status },
+    ],
   },
   {
     href: "/customer-service",
@@ -123,45 +127,7 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-  const [width, setWidth] = useState(240);
-  const isResizing = useRef(false);
-  const sidebarRef = useRef<HTMLDivElement>(null);
-
-  const MIN_WIDTH = 180;
-  const MAX_WIDTH = 400;
-  const COLLAPSED_WIDTH = 64;
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    isResizing.current = true;
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-  }, []);
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing.current) return;
-      const newWidth = e.clientX;
-      if (newWidth < COLLAPSED_WIDTH + 20) {
-        setCollapsed(true);
-      } else {
-        setCollapsed(false);
-        setWidth(Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, newWidth)));
-      }
-    };
-    const handleMouseUp = () => {
-      isResizing.current = false;
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, []);
+  const { collapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
 
   // No sidebar on the login page
   if (pathname === "/login") {
@@ -173,7 +139,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       {/* Sidebar */}
       <aside
         ref={sidebarRef}
-        style={{ width: collapsed ? COLLAPSED_WIDTH : width }}
+        style={{ width }}
         className="shrink-0 bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200 relative"
       >
         {/* Logo + collapse toggle */}
@@ -183,7 +149,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           </div>
           {!collapsed && <span className="text-sm font-semibold text-slate-900 flex-1">RF Transparent</span>}
           <button
-            onClick={() => setCollapsed(!collapsed)}
+            onClick={toggleCollapsed}
             className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >

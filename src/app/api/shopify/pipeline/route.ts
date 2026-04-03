@@ -5,6 +5,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics } from "@/lib/kpi-sales";
 
 const VALID_DAYS = [30, 90, 180, 365, 730];
+const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
 export async function GET(req: NextRequest) {
   if (!(await isAuthenticated()))
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
   const customTo = req.nextUrl.searchParams.get("to");
   const daysParam = parseInt(req.nextUrl.searchParams.get("days") ?? "90", 10);
   const days = VALID_DAYS.includes(daysParam) ? daysParam : 90;
+  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "true";
 
   let fromDate: Date;
   let toDate: Date;
@@ -35,7 +37,30 @@ export async function GET(req: NextRequest) {
   if (storeIds.length === 0)
     return NextResponse.json({ error: "No stores configured" }, { status: 503 });
 
+  // Cache key based on store filter + date range
+  const cacheKey = `pipeline:${storeIds.sort().join(",")}:${days}:${customFrom ?? ""}:${customTo ?? ""}`;
+
   try {
+    // Check cache first (unless force refresh)
+    if (!forceRefresh) {
+      const { data: cached } = await getSupabase()
+        .from("pipeline_cache")
+        .select("result, computed_at")
+        .eq("cache_key", cacheKey)
+        .single();
+
+      if (cached) {
+        const age = Date.now() - new Date(cached.computed_at).getTime();
+        if (age < CACHE_TTL_MS) {
+          return NextResponse.json({
+            ...cached.result,
+            cachedAt: cached.computed_at,
+            stores: allStores.map((s) => ({ id: s.id, label: s.label })),
+          });
+        }
+      }
+    }
+
     // Fetch employee tags first (fast Supabase query)
     const empResult = await getSupabase()
       .from("employees")
@@ -59,7 +84,7 @@ export async function GET(req: NextRequest) {
     }
 
     // Metrics + prediction + channel split in parallel
-    const [{ metrics, leaderboard }, prediction, channelMetrics] = await Promise.all([
+    const [{ metrics, leaderboard, warnings }, prediction, channelMetrics] = await Promise.all([
       getFullPipelineData(storeIds, fromDate, toDate, knownRepTags),
       getPipelinePrediction(storeIds),
       getOrderChannelMetrics(storeIds, fromDate, toDate, knownRepTags),
@@ -80,17 +105,33 @@ export async function GET(req: NextRequest) {
       })),
     };
 
-    return NextResponse.json({
+    const now = new Date().toISOString();
+    const result = {
       metrics,
       prediction,
       channelMetrics: enrichedChannelMetrics,
       leaderboard: enrichedLeaderboard,
-      stores: allStores.map((s) => ({ id: s.id, label: s.label })),
       period: {
         from: fromDate.toISOString().split("T")[0],
         to: toDate.toISOString().split("T")[0],
         days,
       },
+      warnings: warnings.length > 0 ? warnings : undefined,
+    };
+
+    // Write to cache (upsert)
+    await getSupabase()
+      .from("pipeline_cache")
+      .upsert({
+        cache_key: cacheKey,
+        result,
+        computed_at: now,
+      });
+
+    return NextResponse.json({
+      ...result,
+      cachedAt: now,
+      stores: allStores.map((s) => ({ id: s.id, label: s.label })),
     });
   } catch (err) {
     console.error("[Pipeline API]", err);

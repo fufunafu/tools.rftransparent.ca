@@ -1,4 +1,5 @@
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { OAuthTokenSchema } from "@/lib/schemas";
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const ADS_API_URL = "https://googleads.googleapis.com/v20";
@@ -26,10 +27,11 @@ async function getAccessToken(): Promise<string> {
     throw new Error(`Google OAuth token refresh failed: ${res.status} ${text}`);
   }
 
-  const data = await res.json();
+  const raw = await res.json();
+  const data = OAuthTokenSchema.parse(raw);
   accessTokenCache = {
     token: data.access_token,
-    expiresAt: Date.now() + (data.expires_in - 60) * 1000,
+    expiresAt: Date.now() + ((data.expires_in ?? 3600) - 60) * 1000,
   };
   return data.access_token;
 }
@@ -81,6 +83,45 @@ interface RawMetrics {
   impressions?: string;
   conversions?: number;
   conversionsValue?: number;
+}
+
+interface MetricsAccumulator {
+  costMicros: number;
+  clicks: number;
+  impressions: number;
+  conversions: number;
+  value: number;
+}
+
+function emptyAccumulator(): MetricsAccumulator {
+  return { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
+}
+
+/**
+ * Generic aggregation: group rows by a key, accumulate metrics, then map to output.
+ * Eliminates the repeated Map-iterate-accumulate pattern across all breakdown functions.
+ */
+function aggregateByKey<TRow, TOut>(
+  rows: unknown[],
+  extractKey: (row: TRow) => string | null,
+  extractMetrics: (row: TRow) => RawMetrics,
+  mapEntry: (key: string, agg: MetricsAccumulator) => TOut,
+): TOut[] {
+  const byKey = new Map<string, MetricsAccumulator>();
+  for (const row of rows) {
+    const r = row as TRow;
+    const key = extractKey(r);
+    if (key === null) continue;
+    const m = parseMetrics(extractMetrics(r));
+    const existing = byKey.get(key) ?? emptyAccumulator();
+    existing.costMicros += m.costMicros;
+    existing.clicks += m.clicks;
+    existing.impressions += m.impressions;
+    existing.conversions += m.conversions;
+    existing.value += m.value;
+    byKey.set(key, existing);
+  }
+  return Array.from(byKey.entries()).map(([key, agg]) => mapEntry(key, agg));
 }
 
 function parseMetrics(m: RawMetrics) {
@@ -208,24 +249,12 @@ export async function getCampaignBreakdown(startDate: string, endDate: string, m
       AND campaign.status != 'REMOVED'
   `);
 
-  const byCampaign = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { campaign: { name: string }; metrics: RawMetrics };
-    const name = r.campaign.name;
-    if (!matchesMarket(name, market)) continue;
-    const m = parseMetrics(r.metrics);
-    const existing = byCampaign.get(name) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byCampaign.set(name, existing);
-  }
-
-  return Array.from(byCampaign.entries())
-    .map(([campaign, agg]) => ({ campaign, ...buildAdMetrics(agg) }))
-    .sort((a, b) => b.ad_spend - a.ad_spend);
+  return aggregateByKey<{ campaign: { name: string }; metrics: RawMetrics }, CampaignMetrics>(
+    rows,
+    (r) => matchesMarket(r.campaign.name, market) ? r.campaign.name : null,
+    (r) => r.metrics,
+    (campaign, agg) => ({ campaign, ...buildAdMetrics(agg) }),
+  ).sort((a, b) => b.ad_spend - a.ad_spend);
 }
 
 // --- Device Breakdown ---
@@ -242,31 +271,17 @@ export async function getDeviceBreakdown(startDate: string, endDate: string): Pr
       AND campaign.status != 'REMOVED'
   `);
 
-  const byDevice = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { segments: { device: string }; metrics: RawMetrics };
-    const device = r.segments.device;
-    const m = parseMetrics(r.metrics);
-    const existing = byDevice.get(device) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byDevice.set(device, existing);
-  }
-
   const deviceLabels: Record<string, string> = {
-    MOBILE: "Mobile",
-    DESKTOP: "Desktop",
-    TABLET: "Tablet",
-    CONNECTED_TV: "Connected TV",
-    OTHER: "Other",
+    MOBILE: "Mobile", DESKTOP: "Desktop", TABLET: "Tablet",
+    CONNECTED_TV: "Connected TV", OTHER: "Other",
   };
 
-  return Array.from(byDevice.entries())
-    .map(([device, agg]) => ({ device: deviceLabels[device] ?? device, ...buildAdMetrics(agg) }))
-    .sort((a, b) => b.ad_spend - a.ad_spend);
+  return aggregateByKey<{ segments: { device: string }; metrics: RawMetrics }, DeviceMetrics>(
+    rows,
+    (r) => r.segments.device,
+    (r) => r.metrics,
+    (device, agg) => ({ device: deviceLabels[device] ?? device, ...buildAdMetrics(agg) }),
+  ).sort((a, b) => b.ad_spend - a.ad_spend);
 }
 
 // --- Geographic Performance ---
@@ -302,27 +317,16 @@ export async function getGeoPerformance(startDate: string, endDate: string): Pro
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
   `);
 
-  const byGeo = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { geographicView: { countryCriterionId: string }; metrics: RawMetrics };
-    const id = r.geographicView.countryCriterionId;
-    const m = parseMetrics(r.metrics);
-    const existing = byGeo.get(id) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byGeo.set(id, existing);
-  }
-
-  return Array.from(byGeo.entries())
-    .map(([criterionId, agg]) => ({
+  return aggregateByKey<{ geographicView: { countryCriterionId: string }; metrics: RawMetrics }, GeoMetrics>(
+    rows,
+    (r) => r.geographicView.countryCriterionId,
+    (r) => r.metrics,
+    (criterionId, agg) => ({
       criterionId,
       country: COUNTRY_NAMES[criterionId] ?? `Region ${criterionId}`,
       ...buildAdMetrics(agg),
-    }))
-    .sort((a, b) => b.ad_spend - a.ad_spend);
+    }),
+  ).sort((a, b) => b.ad_spend - a.ad_spend);
 }
 
 // --- Search Terms ---
@@ -339,24 +343,12 @@ export async function getSearchTerms(startDate: string, endDate: string): Promis
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
   `);
 
-  const byTerm = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { searchTermView: { searchTerm: string }; metrics: RawMetrics };
-    const term = r.searchTermView.searchTerm;
-    const m = parseMetrics(r.metrics);
-    const existing = byTerm.get(term) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byTerm.set(term, existing);
-  }
-
-  return Array.from(byTerm.entries())
-    .map(([term, agg]) => ({ term, ...buildAdMetrics(agg) }))
-    .sort((a, b) => b.clicks - a.clicks)
-    .slice(0, 100);
+  return aggregateByKey<{ searchTermView: { searchTerm: string }; metrics: RawMetrics }, SearchTermMetrics>(
+    rows,
+    (r) => r.searchTermView.searchTerm,
+    (r) => r.metrics,
+    (term, agg) => ({ term, ...buildAdMetrics(agg) }),
+  ).sort((a, b) => b.clicks - a.clicks).slice(0, 100);
 }
 
 // --- Region (State/Province) Performance ---
@@ -401,37 +393,28 @@ export async function getRegionPerformance(
   `);
 
   // Aggregate by region
-  const byRegion = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { segments: { geoTargetRegion: string }; metrics: RawMetrics };
-    const regionRef = String(r.segments.geoTargetRegion ?? "").replace("geoTargetConstants/", "");
-    if (!regionRef) continue;
-    const m = parseMetrics(r.metrics);
-    const existing = byRegion.get(regionRef) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byRegion.set(regionRef, existing);
-  }
+  type RegionRow = { segments: { geoTargetRegion: string }; metrics: RawMetrics };
+  const aggregated = aggregateByKey<RegionRow, { criterionId: string; agg: MetricsAccumulator }>(
+    rows,
+    (r) => {
+      const ref = String(r.segments.geoTargetRegion ?? "").replace("geoTargetConstants/", "");
+      return ref || null;
+    },
+    (r) => r.metrics,
+    (key, agg) => ({ criterionId: key, agg }),
+  );
 
-  if (byRegion.size === 0) return { regions: [] };
+  if (aggregated.length === 0) return { regions: [] };
 
   // Resolve names — use hardcoded map first, API for unknowns
-  const regionIds = Array.from(byRegion.keys());
-  const unknownIds = regionIds.filter((id) => !GEO_NAMES[id]);
+  const unknownIds = aggregated.filter((r) => !GEO_NAMES[r.criterionId]).map((r) => r.criterionId);
   const apiGeoInfo = unknownIds.length > 0 ? await resolveGeoInfo(unknownIds) : {};
 
-  const regions: RegionMetrics[] = [];
-  for (const [regionId, agg] of byRegion.entries()) {
-    const name = GEO_NAMES[regionId] ?? apiGeoInfo[regionId]?.name ?? `Region ${regionId}`;
-    regions.push({
-      criterionId: regionId,
-      region: name,
-      ...buildAdMetrics(agg),
-    });
-  }
+  const regions: RegionMetrics[] = aggregated.map(({ criterionId, agg }) => ({
+    criterionId,
+    region: GEO_NAMES[criterionId] ?? apiGeoInfo[criterionId]?.name ?? `Region ${criterionId}`,
+    ...buildAdMetrics(agg),
+  }));
 
   return { regions: regions.sort((a, b) => b.ad_spend - a.ad_spend) };
 }
@@ -497,31 +480,27 @@ export async function getCityPerformance(
   `);
 
   // Aggregate by city
-  const byCity = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { segments: { geoTargetCity: string }; metrics: RawMetrics };
-    const cityRef = String(r.segments.geoTargetCity ?? "").replace("geoTargetConstants/", "");
-    if (!cityRef) continue;
-    const m = parseMetrics(r.metrics);
-    const existing = byCity.get(cityRef) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byCity.set(cityRef, existing);
-  }
+  type CityRow = { segments: { geoTargetCity: string }; metrics: RawMetrics };
+  const aggregated = aggregateByKey<CityRow, { criterionId: string; agg: MetricsAccumulator }>(
+    rows,
+    (r) => {
+      const ref = String(r.segments.geoTargetCity ?? "").replace("geoTargetConstants/", "");
+      return ref || null;
+    },
+    (r) => r.metrics,
+    (key, agg) => ({ criterionId: key, agg }),
+  );
 
   // Sort by spend, take top 50, resolve names
-  const sorted = Array.from(byCity.entries())
-    .sort(([, a], [, b]) => b.costMicros - a.costMicros)
+  const sorted = aggregated
+    .sort((a, b) => b.agg.costMicros - a.agg.costMicros)
     .slice(0, 50);
 
-  const geoInfo = await resolveGeoInfo(sorted.map(([id]) => id));
+  const geoInfo = await resolveGeoInfo(sorted.map((s) => s.criterionId));
 
   return sorted
     .slice(0, 30)
-    .map(([criterionId, agg]) => ({
+    .map(({ criterionId, agg }) => ({
       criterionId,
       city: geoInfo[criterionId]?.name ?? `City ${criterionId}`,
       ...buildAdMetrics(agg),
@@ -552,29 +531,15 @@ export async function getAgePerformance(startDate: string, endDate: string): Pro
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
   `);
 
-  const byAge = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { adGroupCriterion: { ageRange: { type: string } }; metrics: RawMetrics };
-    const age = r.adGroupCriterion.ageRange.type;
-    const m = parseMetrics(r.metrics);
-    const existing = byAge.get(age) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byAge.set(age, existing);
-  }
-
-  return Array.from(byAge.entries())
-    .map(([type, agg]) => ({
-      ageRange: AGE_LABELS[type] ?? type,
-      ...buildAdMetrics(agg),
-    }))
-    .sort((a, b) => {
-      const order = Object.values(AGE_LABELS);
-      return order.indexOf(a.ageRange) - order.indexOf(b.ageRange);
-    });
+  return aggregateByKey<{ adGroupCriterion: { ageRange: { type: string } }; metrics: RawMetrics }, AgeMetrics>(
+    rows,
+    (r) => r.adGroupCriterion.ageRange.type,
+    (r) => r.metrics,
+    (type, agg) => ({ ageRange: AGE_LABELS[type] ?? type, ...buildAdMetrics(agg) }),
+  ).sort((a, b) => {
+    const order = Object.values(AGE_LABELS);
+    return order.indexOf(a.ageRange) - order.indexOf(b.ageRange);
+  });
 }
 
 // --- Gender Demographics ---
@@ -597,26 +562,12 @@ export async function getGenderPerformance(startDate: string, endDate: string): 
     WHERE segments.date BETWEEN '${startDate}' AND '${endDate}'
   `);
 
-  const byGender = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { adGroupCriterion: { gender: { type: string } }; metrics: RawMetrics };
-    const gender = r.adGroupCriterion.gender.type;
-    const m = parseMetrics(r.metrics);
-    const existing = byGender.get(gender) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byGender.set(gender, existing);
-  }
-
-  return Array.from(byGender.entries())
-    .map(([type, agg]) => ({
-      gender: GENDER_LABELS[type] ?? type,
-      ...buildAdMetrics(agg),
-    }))
-    .sort((a, b) => b.ad_spend - a.ad_spend);
+  return aggregateByKey<{ adGroupCriterion: { gender: { type: string } }; metrics: RawMetrics }, GenderMetrics>(
+    rows,
+    (r) => r.adGroupCriterion.gender.type,
+    (r) => r.metrics,
+    (type, agg) => ({ gender: GENDER_LABELS[type] ?? type, ...buildAdMetrics(agg) }),
+  ).sort((a, b) => b.ad_spend - a.ad_spend);
 }
 
 // --- Language Performance ---
@@ -633,20 +584,6 @@ export async function getLanguagePerformance(startDate: string, endDate: string)
     WHERE campaign_criterion.type = 'LANGUAGE'
       AND segments.date BETWEEN '${startDate}' AND '${endDate}'
   `);
-
-  const byLang = new Map<string, { costMicros: number; clicks: number; impressions: number; conversions: number; value: number }>();
-  for (const row of rows) {
-    const r = row as { campaignCriterion: { language: { languageConstant: string } }; metrics: RawMetrics };
-    const langConstant = r.campaignCriterion.language.languageConstant ?? "unknown";
-    const m = parseMetrics(r.metrics);
-    const existing = byLang.get(langConstant) ?? { costMicros: 0, clicks: 0, impressions: 0, conversions: 0, value: 0 };
-    existing.costMicros += m.costMicros;
-    existing.clicks += m.clicks;
-    existing.impressions += m.impressions;
-    existing.conversions += m.conversions;
-    existing.value += m.value;
-    byLang.set(langConstant, existing);
-  }
 
   const LANG_NAMES: Record<string, string> = {
     "languageConstants/1000": "English",
@@ -666,12 +603,15 @@ export async function getLanguagePerformance(startDate: string, endDate: string)
     "languageConstants/1042": "Turkish",
   };
 
-  return Array.from(byLang.entries())
-    .map(([langConstant, agg]) => ({
+  return aggregateByKey<{ campaignCriterion: { language: { languageConstant: string } }; metrics: RawMetrics }, LanguageMetrics>(
+    rows,
+    (r) => r.campaignCriterion.language.languageConstant ?? "unknown",
+    (r) => r.metrics,
+    (langConstant, agg) => ({
       language: LANG_NAMES[langConstant] ?? langConstant.replace("languageConstants/", "Lang "),
       ...buildAdMetrics(agg),
-    }))
-    .sort((a, b) => b.ad_spend - a.ad_spend);
+    }),
+  ).sort((a, b) => b.ad_spend - a.ad_spend);
 }
 
 export function isGoogleAdsConfigured(): boolean {

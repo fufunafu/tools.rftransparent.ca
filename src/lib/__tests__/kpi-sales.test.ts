@@ -94,43 +94,11 @@ describe("getEmployeeSalesMetrics", () => {
   });
 
   it("filters orders by employee tag and date range", async () => {
-    mockShopifyGraphQL.mockResolvedValueOnce({
-      orders: {
-        edges: [
-          {
-            node: {
-              createdAt: "2026-01-15T00:00:00Z",
-              tags: ["john"],
-              subtotalPriceSet: { shopMoney: { amount: "100.00" } },
-              shippingCostMeta: null,
-              exportTariffMeta: null,
-            },
-            cursor: "c1",
-          },
-          {
-            node: {
-              createdAt: "2026-01-20T00:00:00Z",
-              tags: ["jane"],
-              subtotalPriceSet: { shopMoney: { amount: "200.00" } },
-              shippingCostMeta: null,
-              exportTariffMeta: null,
-            },
-            cursor: "c2",
-          },
-          {
-            node: {
-              createdAt: "2025-12-01T00:00:00Z", // outside range
-              tags: ["john"],
-              subtotalPriceSet: { shopMoney: { amount: "300.00" } },
-              shippingCostMeta: null,
-              exportTariffMeta: null,
-            },
-            cursor: "c3",
-          },
-        ],
-        pageInfo: { hasNextPage: false },
-      },
-    });
+    mockOrderResponse([
+      makeOrder({ createdAt: "2026-01-15T00:00:00Z", tags: ["john"], amount: "100.00" }),
+      makeOrder({ createdAt: "2026-01-20T00:00:00Z", tags: ["jane"], amount: "200.00" }),
+      makeOrder({ createdAt: "2025-12-01T00:00:00Z", tags: ["john"], amount: "300.00" }), // outside range
+    ]);
 
     const result = await getEmployeeSalesMetrics(
       ["john"],
@@ -145,23 +113,9 @@ describe("getEmployeeSalesMetrics", () => {
   });
 
   it("performs case-insensitive tag matching", async () => {
-    mockShopifyGraphQL.mockResolvedValueOnce({
-      orders: {
-        edges: [
-          {
-            node: {
-              createdAt: "2026-01-15T00:00:00Z",
-              tags: ["JOHN"],
-              subtotalPriceSet: { shopMoney: { amount: "150.00" } },
-              shippingCostMeta: null,
-              exportTariffMeta: null,
-            },
-            cursor: "c1",
-          },
-        ],
-        pageInfo: { hasNextPage: false },
-      },
-    });
+    mockOrderResponse([
+      makeOrder({ createdAt: "2026-01-15T00:00:00Z", tags: ["JOHN"], amount: "150.00" }),
+    ]);
 
     const result = await getEmployeeSalesMetrics(
       ["john"],
@@ -385,6 +339,8 @@ describe("getPipelinePrediction", () => {
   }
 
   it("scores recent invoiced drafts higher than old ones", async () => {
+    // Mock orders fetch (empty — forecast uses total orders for historical baseline)
+    mockOrderResponse([]);
     // Resolved cohort: old completed draft (200 days ago, cycle 5 days)
     // Plus an old unconverted draft (200 days ago, still INVOICE_SENT)
     // → 50% of old drafts converted, and they did so quickly (5 days)
@@ -434,6 +390,7 @@ describe("getPipelinePrediction", () => {
   });
 
   it("returns zero prediction when no historical completions", async () => {
+    mockOrderResponse([]);
     mockDraftResponse([
       makeDraft({
         createdAt: daysAgo(10),
@@ -451,6 +408,7 @@ describe("getPipelinePrediction", () => {
   });
 
   it("ignores OPEN drafts in pipeline (only INVOICE_SENT)", async () => {
+    mockOrderResponse([]);
     mockDraftResponse([
       makeDraft({
         createdAt: daysAgo(5),
@@ -467,6 +425,7 @@ describe("getPipelinePrediction", () => {
   });
 
   it("provides age buckets with conversion rates", async () => {
+    mockOrderResponse([]);
     // 2 old completed drafts (cycle 3 days each) + 1 old unconverted
     // → historical rate ~66% for young drafts
     mockDraftResponse([

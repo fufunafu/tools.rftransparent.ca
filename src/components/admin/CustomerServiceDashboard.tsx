@@ -905,6 +905,18 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
             </div>
           </div>}
 
+          {/* Last sync timestamps (always visible) */}
+          {mounted && (data?.lastSync?.cik || data?.lastSync?.grasshopper) && (
+            <div className="flex gap-3">
+              {data?.lastSync?.cik && (
+                <p className="text-[10px] text-sand-400" title={data.lastSync.cik}>CIK: {formatSyncTime(data.lastSync.cik)}</p>
+              )}
+              {data?.lastSync?.grasshopper && (
+                <p className="text-[10px] text-emerald-400" title={data.lastSync.grasshopper}>GH: {formatSyncTime(data.lastSync.grasshopper)}</p>
+              )}
+            </div>
+          )}
+
           {/* Mode toggle */}
           <button
             onClick={() => handleModeChange(mode === "staff" ? "admin" : "staff")}

@@ -10,6 +10,10 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import MetricCards from "@/components/admin/email/MetricCards";
+import type { MetricCard } from "@/components/admin/email/MetricCards";
+import ThreadTable from "@/components/admin/email/ThreadTable";
+import type { UnansweredThread, ThreadCounts } from "@/components/admin/email/ThreadTable";
 
 // --- Types ---
 
@@ -22,6 +26,9 @@ interface EmailMetrics {
   unanswered_rate: number;
   response_rate: number;
   avg_response_time: number | null;
+  noise_threads: number;
+  dismissed_threads: number;
+  total_threads_raw: number;
 }
 
 interface SummaryResponse {
@@ -30,15 +37,6 @@ interface SummaryResponse {
   change: Record<string, number | null>;
   lastSync: { status: string; finishedAt: string | null; messagesSynced: number; errorMessage: string | null } | null;
   stores: { id: string; label: string }[];
-}
-
-interface UnansweredThread {
-  thread_id: string;
-  subject: string;
-  from_email: string;
-  received_at: string;
-  message_count: number;
-  snippet: string;
 }
 
 interface HistoryPoint {
@@ -66,15 +64,6 @@ function formatDateTime(iso: string) {
     ", " + d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  return `${Math.floor(hrs / 24)}d ago`;
-}
-
 function formatResponseTime(mins: number | null): string {
   if (mins == null) return "—";
   if (mins < 60) return `${mins} min`;
@@ -87,13 +76,6 @@ function formatShortDate(label: unknown) {
   if (typeof label !== "string") return "";
   const d = new Date(label + "T12:00:00");
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function ChangeBadge({ value, invert }: { value: number | null | undefined; invert?: boolean }) {
-  if (value == null) return null;
-  const positive = invert ? value < 0 : value > 0;
-  const color = value === 0 ? "text-sand-400" : positive ? "text-green-600" : "text-red-500";
-  return <span className={`text-xs font-medium ${color}`}>{value > 0 ? "+" : ""}{value}%</span>;
 }
 
 // --- Stores ---
@@ -120,10 +102,13 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
 
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [threads, setThreads] = useState<UnansweredThread[]>([]);
+  const [threadCounts, setThreadCounts] = useState<ThreadCounts>({ actionable: 0, noise: 0, dismissed: 0, total: 0 });
+  const [threadFilter, setThreadFilter] = useState<"actionable" | "noise" | "dismissed">("actionable");
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
+  const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -143,7 +128,7 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
     try {
       const [summaryRes, threadsRes, historyRes] = await Promise.all([
         fetch(`/api/customer-service/emails?store=${store}&from=${from}&to=${to}`),
-        fetch(`/api/customer-service/emails?view=threads&store=${store}&from=${from}&to=${to}`),
+        fetch(`/api/customer-service/emails?view=threads&filter=${threadFilter}&store=${store}&from=${from}&to=${to}`),
         fetch(`/api/customer-service/emails?view=history&store=${store}&from=${from}&to=${to}`),
       ]);
 
@@ -156,24 +141,26 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
       setData(summary);
       setStores(summary.stores ?? []);
       setThreads(threadsData.threads ?? []);
+      setThreadCounts(threadsData.counts ?? { actionable: 0, noise: 0, dismissed: 0, total: 0 });
       setHistory(historyData.history ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
       setLoading(false);
     }
-  }, [store, from, to]);
+  }, [store, from, to, threadFilter]);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const handleSync = async () => {
+  const handleSync = async (backfill = false) => {
     setSyncing(true);
     setSyncStatus("");
     try {
-      const res = await fetch(`/api/customer-service/emails?store=${store}`, { method: "POST" });
+      const url = `/api/customer-service/emails?store=${store}${backfill ? "&backfill=true" : ""}`;
+      const res = await fetch(url, { method: "POST" });
       const json = await res.json();
       if (json.status === "success") {
-        setSyncStatus(`Synced ${json.messages_synced} messages`);
+        setSyncStatus(`Synced ${json.messages_synced} messages${backfill ? " (90-day backfill)" : ""}`);
         loadData();
       } else {
         setSyncStatus(`Error: ${json.error}`);
@@ -182,6 +169,44 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
       setSyncStatus("Failed to reach sync endpoint");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const inboxEmail = stores.find((s) => s.id === store)
+    ? (() => {
+        const map: Record<string, string> = { rf_transparent: "info@glass-railing.com", glass_railing_store: "info@glassrailingstore.com", bc_transparent: "anne@cloture-verre.com" };
+        return map[store] ?? "";
+      })()
+    : "";
+
+  const handleDismiss = async (threadId: string) => {
+    setDismissingIds((prev) => new Set(prev).add(threadId));
+    try {
+      await fetch(`/api/customer-service/emails`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, inbox: inboxEmail, action: "dismiss" }),
+      });
+      // Remove from local list immediately
+      setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+      setThreadCounts((prev) => ({ ...prev, actionable: prev.actionable - 1, dismissed: prev.dismissed + 1 }));
+    } finally {
+      setDismissingIds((prev) => { const s = new Set(prev); s.delete(threadId); return s; });
+    }
+  };
+
+  const handleUndismiss = async (threadId: string) => {
+    setDismissingIds((prev) => new Set(prev).add(threadId));
+    try {
+      await fetch(`/api/customer-service/emails`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, inbox: inboxEmail, action: "undismiss" }),
+      });
+      setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+      setThreadCounts((prev) => ({ ...prev, dismissed: prev.dismissed - 1, actionable: prev.actionable + 1 }));
+    } finally {
+      setDismissingIds((prev) => { const s = new Set(prev); s.delete(threadId); return s; });
     }
   };
 
@@ -194,11 +219,11 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
   const respTimeOnTrack = avgRespTime <= RESPONSE_TIME_TARGET;
   const allOnTrack = unansweredOnTrack && respTimeOnTrack;
 
-  const staffCards = [
+  const staffCards: MetricCard[] = [
     { label: "Inbound", value: metrics?.total_inbound ?? 0, prev: data?.previous?.total_inbound ?? 0, change: change?.total_inbound, format: (n: number) => String(n) },
     { label: "Outbound", value: metrics?.total_outbound ?? 0, prev: data?.previous?.total_outbound ?? 0, change: change?.total_outbound, format: (n: number) => String(n) },
-    { label: "Unanswered", value: unansweredRate, prev: data?.previous?.unanswered_rate ?? 0, change: change?.unanswered_rate, format: (n: number) => `${n}%`, target: UNANSWERED_TARGET, invert: true, subtitle: `${metrics?.unanswered_threads ?? 0} unanswered out of ${metrics?.inbound_threads ?? 0} threads`, tooltip: "Threads with no staff reply ÷ total inbound threads × 100." },
-    { label: "Avg Response", value: avgRespTime, prev: data?.previous?.avg_response_time ?? 0, change: change?.avg_response_time, format: formatResponseTime, target: RESPONSE_TIME_TARGET, invert: true, subtitle: "Target: respond within 4 hours", tooltip: "Average time from customer email to first staff reply in the thread." },
+    { label: "Unanswered", value: unansweredRate, prev: data?.previous?.unanswered_rate ?? 0, change: change?.unanswered_rate, format: (n: number) => `${n}%`, target: UNANSWERED_TARGET, invert: true, subtitle: `${metrics?.unanswered_threads ?? 0} unanswered out of ${metrics?.inbound_threads ?? 0} threads` },
+    { label: "Avg Response", value: avgRespTime, prev: data?.previous?.avg_response_time ?? 0, change: change?.avg_response_time, format: formatResponseTime, target: RESPONSE_TIME_TARGET, invert: true, subtitle: "Target: respond within 4 hours" },
   ];
 
   return (
@@ -231,16 +256,24 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
           </div>
 
           {mounted && mode === "admin" && (
-            <div className="text-center">
+            <div className="flex items-center gap-2">
               <button
-                onClick={handleSync}
+                onClick={() => handleSync(false)}
                 disabled={syncing}
                 className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
               >
                 {syncing ? "Syncing..." : "Sync Emails"}
               </button>
+              <button
+                onClick={() => handleSync(true)}
+                disabled={syncing}
+                className="px-3 py-1.5 text-xs font-medium text-sand-600 border border-sand-200 rounded-lg hover:bg-sand-50 disabled:opacity-50 transition-colors"
+                title="Pull 90 days of email history from Gmail"
+              >
+                Backfill 90d
+              </button>
               {data?.lastSync?.finishedAt && (
-                <p className="text-[10px] text-sand-400 mt-0.5">Last: {formatDateTime(data.lastSync.finishedAt)}</p>
+                <span className="text-[10px] text-sand-400">Last: {formatDateTime(data.lastSync.finishedAt)}</span>
               )}
             </div>
           )}
@@ -306,81 +339,18 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
           )}
 
           {/* Metric cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {staffCards.map((c) => {
-              const hasTarget = c.target != null;
-              const target = c.target ?? 0;
-              let progress = 0;
-              let onTrack = true;
-              if (hasTarget) {
-                progress = target > 0 ? Math.min(c.value / target, 1) : 0;
-                onTrack = c.value <= target;
-              }
-              return (
-                <div key={c.label} className="bg-white rounded-xl border border-sand-200/60 p-4">
-                  <div className="flex items-center justify-between mb-1">
-                    <p className="text-[11px] text-sand-400 uppercase tracking-wider">{c.label}</p>
-                    {hasTarget && (
-                      <span className={`text-[10px] font-medium ${onTrack ? "text-emerald-500" : "text-amber-500"}`}>
-                        {onTrack ? "✓" : "!"} &le;{c.label === "Avg Response" ? "4h" : `${target}%`}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xl font-semibold text-sand-900">{c.format(c.value)}</p>
-                  {c.subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{c.subtitle}</p>}
-                  {hasTarget && (
-                    <div className="mt-2 h-1.5 bg-sand-100 rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all ${onTrack ? "bg-emerald-400" : "bg-amber-400"}`}
-                        style={{ width: `${Math.max(progress * 100, 4)}%` }}
-                      />
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2 mt-1.5">
-                    <span className="text-xs text-sand-400">prev: {c.format(c.prev)}</span>
-                    <ChangeBadge value={c.change ?? null} invert={c.invert} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          <MetricCards cards={staffCards} />
 
           {/* Unanswered threads */}
-          <div>
-            <h2 className="text-sm font-semibold text-sand-700 mb-2">Unanswered — Action Needed</h2>
-            {threads.length === 0 ? (
-              <div className="bg-white rounded-xl border border-sand-200/60 p-8 text-center">
-                <p className="text-sand-500 text-sm">All emails have been answered.</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-sand-100 text-left">
-                        <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">From</th>
-                        <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Subject</th>
-                        <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
-                        <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Waiting</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {threads.map((t) => (
-                        <tr key={t.thread_id} className="border-b border-sand-50 hover:bg-sand-50/50">
-                          <td className="px-4 py-2.5 text-sand-700 font-medium">{t.from_email}</td>
-                          <td className="px-4 py-2.5 text-sand-600 max-w-xs truncate" title={t.subject}>{t.subject}</td>
-                          <td className="px-4 py-2.5 text-sand-500">{formatDateTime(t.received_at)}</td>
-                          <td className="px-4 py-2.5">
-                            <span className="text-xs text-amber-600 font-medium">{timeAgo(t.received_at)}</span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
+          <ThreadTable
+            threads={threads}
+            threadCounts={threadCounts}
+            threadFilter={threadFilter}
+            onFilterChange={setThreadFilter}
+            onDismiss={handleDismiss}
+            onUndismiss={handleUndismiss}
+            dismissingIds={dismissingIds}
+          />
 
           {/* Volume chart (admin mode) */}
           {mounted && mode === "admin" && history.length > 1 && (

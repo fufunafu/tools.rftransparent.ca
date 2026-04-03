@@ -27,16 +27,110 @@ interface EmailRecord {
   snippet: string;
 }
 
-function computeMetrics(records: EmailRecord[]) {
+// --- Noise sender detection ---
+// Prefix patterns: if the local part (before @) starts with any of these, it's noise
+const NOISE_PREFIXES = [
+  "noreply", "no-reply", "no_reply", "no.reply",
+  "donotreply", "do-not-reply", "do_not_reply",
+  "nepasrepondre", "ne-pas-repondre", "sansreponse", "sans-reponse",
+  "mailer-daemon", "postmaster",
+];
+
+// Domain patterns: if the sender domain matches (exact or subdomain), it's noise
+const NOISE_DOMAINS = [
+  // Security / alarm systems
+  "alarm.com",
+  // Telecom notifications
+  "external.telus.com", "connect.telus.com", "business.telus.com",
+  // Social media
+  "facebookmail.com",
+  "em.linkedin.com", "linkedin.com",
+  "marketing.pinterest.com", "info.pinterest.com", "discover.pinterest.com", "explore.pinterest.com",
+  "service.tiktok.com",
+  // Job boards
+  "jobalert.indeed.com", "indeedemail.com",
+  // Marketplaces
+  "member.alibaba.com", "service.alibaba.com", "buynotice.alibaba.com",
+  "g.shopifyemail.com",
+  // Travel / marketing
+  "eg.expedia.com", "eg.vrbo.com",
+  "mail.aircanada.com",
+  "newsletter.croisieres.fr", "newsletter.croisierenet.com",
+  // Payment notifications
+  "payments.interac.ca",
+  "news.paypal.com",
+  // Google automated
+  "googlemail.com",
+  // SaaS notifications
+  "shop.app",
+  "mail.notion.so",
+  "m.grasshopper.com",
+  // Marketing platforms
+  "hs-send.com",
+  "ccsend.com",
+  "cyberimpact.com",
+  "marketplaceevents.messages5.com",
+  "kajabimail.net",
+  // Tools / newsletters
+  "mail.reportpundit.com",
+  "edit.houzz.com",
+  "email.clover.com", "mail.clover.com",
+  "email.heygen.com",
+  "newsletter.artlist.io",
+  "marketing.descript.com",
+  "cmail.bark.com",
+  "account.onstar.ca",
+  "mail.aircanada.com",
+];
+
+// Prefix patterns in the domain part that indicate noise (e.g. ads-noreply@google.com)
+const NOISE_DOMAIN_PREFIXES = ["noreply@", "no-reply@", "ads-noreply@", "workspace-noreply@", "notifications-noreply@", "messages-noreply@", "googledev-noreply@", "iebilling-no_reply@"];
+
+/**
+ * Returns true if the sender email is automated/marketing noise that doesn't need a response.
+ */
+function isNoiseSender(email: string): boolean {
+  const lower = email.toLowerCase().trim();
+  const atIdx = lower.indexOf("@");
+  if (atIdx < 0) return false;
+
+  const local = lower.slice(0, atIdx);
+  const domain = lower.slice(atIdx + 1);
+
+  // Check local part prefix patterns
+  for (const prefix of NOISE_PREFIXES) {
+    if (local === prefix || local.startsWith(prefix + "+") || local.startsWith(prefix + ".")) return true;
+    // Also catch exact prefix match (noreply@...)
+    if (local === prefix) return true;
+  }
+
+  // Check for -noreply or _noreply suffix in local part (e.g. ads-noreply, iebilling-no_reply)
+  if (/-noreply$/i.test(local) || /_noreply$/i.test(local) || /-no[_-]reply$/i.test(local)) return true;
+
+  // Check the full email against domain prefix patterns
+  for (const dp of NOISE_DOMAIN_PREFIXES) {
+    if (lower.includes(dp)) return true;
+  }
+
+  // Check domain patterns (exact match or subdomain)
+  for (const nd of NOISE_DOMAINS) {
+    if (domain === nd || domain.endsWith("." + nd)) return true;
+  }
+
+  return false;
+}
+
+function computeMetrics(records: EmailRecord[], dismissedThreadIds?: Set<string>) {
   const inbound = records.filter((r) => r.direction === "inbound");
   const outbound = records.filter((r) => r.direction === "outbound");
 
   // Group by thread to determine answered/unanswered
-  const threadMap = new Map<string, { firstInbound: string | null; firstOutbound: string | null }>();
+  const threadMap = new Map<string, { firstInbound: string | null; firstOutbound: string | null; firstInboundFrom: string }>();
   for (const r of records) {
-    const thread = threadMap.get(r.thread_id) ?? { firstInbound: null, firstOutbound: null };
+    const thread = threadMap.get(r.thread_id) ?? { firstInbound: null, firstOutbound: null, firstInboundFrom: "" };
     if (r.direction === "inbound" && (!thread.firstInbound || r.received_at < thread.firstInbound)) {
       thread.firstInbound = r.received_at;
+      thread.firstInboundFrom = r.from_email;
     }
     if (r.direction === "outbound" && (!thread.firstOutbound || r.received_at < thread.firstOutbound)) {
       thread.firstOutbound = r.received_at;
@@ -46,10 +140,20 @@ function computeMetrics(records: EmailRecord[]) {
 
   // Threads that have at least one inbound message
   const inboundThreads = [...threadMap.entries()].filter(([, t]) => t.firstInbound);
-  const answeredThreads = inboundThreads.filter(([, t]) => t.firstOutbound && t.firstOutbound > t.firstInbound!);
-  const unansweredThreads = inboundThreads.filter(([, t]) => !t.firstOutbound || t.firstOutbound <= t.firstInbound!);
 
-  // Response times (in minutes)
+  // Actionable threads: exclude noise senders and dismissed threads
+  const actionableThreads = inboundThreads.filter(([id, t]) => {
+    if (isNoiseSender(t.firstInboundFrom)) return false;
+    if (dismissedThreadIds?.has(id)) return false;
+    return true;
+  });
+  const noiseThreadCount = inboundThreads.filter(([, t]) => isNoiseSender(t.firstInboundFrom)).length;
+  const dismissedThreadCount = inboundThreads.filter(([id, t]) => !isNoiseSender(t.firstInboundFrom) && dismissedThreadIds?.has(id)).length;
+
+  const answeredThreads = actionableThreads.filter(([, t]) => t.firstOutbound && t.firstOutbound > t.firstInbound!);
+  const unansweredThreads = actionableThreads.filter(([, t]) => !t.firstOutbound || t.firstOutbound <= t.firstInbound!);
+
+  // Response times (in minutes) — only from actionable answered threads
   const responseTimes: number[] = [];
   for (const [, t] of answeredThreads) {
     if (t.firstInbound && t.firstOutbound) {
@@ -62,23 +166,26 @@ function computeMetrics(records: EmailRecord[]) {
     ? Math.round(responseTimes.reduce((s, v) => s + v, 0) / responseTimes.length)
     : null;
 
-  const unansweredRate = inboundThreads.length > 0
-    ? Math.round((unansweredThreads.length / inboundThreads.length) * 1000) / 10
+  const unansweredRate = actionableThreads.length > 0
+    ? Math.round((unansweredThreads.length / actionableThreads.length) * 1000) / 10
     : 0;
 
-  const responseRate = inboundThreads.length > 0
-    ? Math.round((answeredThreads.length / inboundThreads.length) * 1000) / 10
+  const responseRate = actionableThreads.length > 0
+    ? Math.round((answeredThreads.length / actionableThreads.length) * 1000) / 10
     : 0;
 
   return {
     total_inbound: inbound.length,
     total_outbound: outbound.length,
-    inbound_threads: inboundThreads.length,
+    inbound_threads: actionableThreads.length,
     answered_threads: answeredThreads.length,
     unanswered_threads: unansweredThreads.length,
     unanswered_rate: unansweredRate,
     response_rate: responseRate,
     avg_response_time: avgResponseTime,
+    noise_threads: noiseThreadCount,
+    dismissed_threads: dismissedThreadCount,
+    total_threads_raw: inboundThreads.length,
   };
 }
 
@@ -109,6 +216,14 @@ async function fetchRecords(from: string, to: string, storeId: string): Promise<
 }
 
 const STORES = INBOXES.map((i) => ({ id: i.storeId, label: i.label }));
+
+async function fetchDismissedThreadIds(inbox: string): Promise<Set<string>> {
+  const { data } = await getSupabase()
+    .from("email_dismissed_threads")
+    .select("thread_id")
+    .eq("inbox", inbox);
+  return new Set((data ?? []).map((r: { thread_id: string }) => r.thread_id));
+}
 
 export async function GET(req: NextRequest) {
   if (!(await isAuthenticated()))
@@ -150,9 +265,13 @@ export async function GET(req: NextRequest) {
     errorMessage: lastRunRow[0].error_message,
   } : null;
 
+  const inboxEmail = INBOXES.find((i) => i.storeId === storeId)?.email ?? "";
+  const dismissedIds = await fetchDismissedThreadIds(inboxEmail);
+
   try {
     // --- Unanswered threads view ---
     if (view === "threads") {
+      const filter = req.nextUrl.searchParams.get("filter"); // "actionable" (default) | "noise" | "dismissed" | "all"
       const records = await fetchRecords(from, to, storeId);
 
       // Group by thread
@@ -163,7 +282,7 @@ export async function GET(req: NextRequest) {
         threadMap.set(r.thread_id, arr);
       }
 
-      const unanswered: { thread_id: string; subject: string; from_email: string; received_at: string; message_count: number; snippet: string }[] = [];
+      const unanswered: { thread_id: string; subject: string; from_email: string; received_at: string; message_count: number; snippet: string; is_noise: boolean; is_dismissed: boolean }[] = [];
 
       for (const [threadId, msgs] of threadMap) {
         const inbound = msgs.filter((m) => m.direction === "inbound").sort((a, b) => a.received_at.localeCompare(b.received_at));
@@ -174,6 +293,9 @@ export async function GET(req: NextRequest) {
         const hasReply = outbound.some((o) => o.received_at > firstIn.received_at);
 
         if (!hasReply) {
+          const noise = isNoiseSender(firstIn.from_email);
+          const dismissed = dismissedIds.has(threadId);
+
           unanswered.push({
             thread_id: threadId,
             subject: firstIn.subject,
@@ -181,13 +303,35 @@ export async function GET(req: NextRequest) {
             received_at: firstIn.received_at,
             message_count: msgs.length,
             snippet: firstIn.snippet,
+            is_noise: noise,
+            is_dismissed: dismissed,
           });
         }
       }
 
       unanswered.sort((a, b) => b.received_at.localeCompare(a.received_at));
 
-      return NextResponse.json({ threads: unanswered, total: unanswered.length, lastSync });
+      // Apply filter
+      let filtered = unanswered;
+      if (filter === "noise") {
+        filtered = unanswered.filter((t) => t.is_noise);
+      } else if (filter === "dismissed") {
+        filtered = unanswered.filter((t) => t.is_dismissed && !t.is_noise);
+      } else if (filter === "all") {
+        // no filtering
+      } else {
+        // "actionable" (default): exclude noise and dismissed
+        filtered = unanswered.filter((t) => !t.is_noise && !t.is_dismissed);
+      }
+
+      const counts = {
+        actionable: unanswered.filter((t) => !t.is_noise && !t.is_dismissed).length,
+        noise: unanswered.filter((t) => t.is_noise).length,
+        dismissed: unanswered.filter((t) => t.is_dismissed && !t.is_noise).length,
+        total: unanswered.length,
+      };
+
+      return NextResponse.json({ threads: filtered, counts, lastSync });
     }
 
     // --- History view ---
@@ -223,8 +367,8 @@ export async function GET(req: NextRequest) {
       fetchRecords(prevFromStr, prevToStr, storeId),
     ]);
 
-    const current = computeMetrics(currentRecords);
-    const previous = computeMetrics(previousRecords);
+    const current = computeMetrics(currentRecords, dismissedIds);
+    const previous = computeMetrics(previousRecords, dismissedIds);
 
     return NextResponse.json({
       current,
@@ -275,12 +419,14 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // Fetch last 7 days of emails
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const afterEpoch = Math.floor(sevenDaysAgo.getTime() / 1000);
+    // Fetch emails — default 14 days, backfill=true pulls 90 days
+    const backfill = req.nextUrl.searchParams.get("backfill") === "true";
+    const daysBack = backfill ? 90 : 14;
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - daysBack);
+    const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
 
-    const messages = await listMessages(inbox, `after:${afterEpoch}`, 500);
+    const messages = await listMessages(inbox, `after:${afterEpoch}`, backfill ? 2000 : 500);
 
     const records: EmailRecord[] = messages.map((msg) => ({
       message_id: msg.id,
@@ -328,4 +474,32 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ status: "error", error: errMsg }, { status: 500 });
   }
+}
+
+// PATCH: dismiss or undismiss a thread
+export async function PATCH(req: NextRequest) {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const body = await req.json();
+  const { thread_id, inbox, action } = body as { thread_id: string; inbox: string; action: "dismiss" | "undismiss" };
+
+  if (!thread_id || !inbox) {
+    return NextResponse.json({ error: "thread_id and inbox required" }, { status: 400 });
+  }
+
+  const supabase = getSupabase();
+
+  if (action === "undismiss") {
+    await supabase.from("email_dismissed_threads").delete().eq("thread_id", thread_id).eq("inbox", inbox);
+    return NextResponse.json({ status: "undismissed", thread_id });
+  }
+
+  // Default: dismiss
+  const { error } = await supabase
+    .from("email_dismissed_threads")
+    .upsert({ thread_id, inbox, dismissed_at: new Date().toISOString() }, { onConflict: "thread_id,inbox" });
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ status: "dismissed", thread_id });
 }

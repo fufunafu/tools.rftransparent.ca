@@ -31,9 +31,9 @@ export async function GET(req: NextRequest) {
     });
 
     try {
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const afterEpoch = Math.floor(sevenDaysAgo.getTime() / 1000);
+      const sinceDate = new Date();
+      sinceDate.setDate(sinceDate.getDate() - 14);
+      const afterEpoch = Math.floor(sinceDate.getTime() / 1000);
 
       const messages = await listMessages(inbox, `after:${afterEpoch}`, 500);
 
