@@ -15,8 +15,12 @@ function pctChange(cur: number, prev: number): number | null {
 
 function sanitizePhone(raw: string | null): string | null {
   if (!raw) return null;
-  const digits = raw.replace(/\D/g, "");
+  let digits = raw.replace(/\D/g, "");
   if (digits.length < 3 || digits.length > 15) return null;
+  // Normalize North American numbers: strip leading country code 1
+  if (digits.length === 11 && digits.startsWith("1")) {
+    digits = digits.slice(1);
+  }
   return digits;
 }
 
@@ -43,11 +47,13 @@ function computeMetrics(records: CallRecord[]) {
 
   // Missed = inbound + no endpoint + no subsequent resolution
   // Resolution = outbound call TO that number OR another inbound call FROM that number that was answered
+  // Normalize phone numbers for matching (GH/CIK may store different formats)
   const outboundByNumber = new Map<string, string[]>();
   for (const r of outbound) {
-    const times = outboundByNumber.get(r.to_number) ?? [];
+    const key = sanitizePhone(r.to_number) ?? r.to_number;
+    const times = outboundByNumber.get(key) ?? [];
     times.push(r.call_start);
-    outboundByNumber.set(r.to_number, times);
+    outboundByNumber.set(key, times);
   }
 
   // Also track answered inbound calls per number (caller called back and got through)
@@ -55,9 +61,10 @@ function computeMetrics(records: CallRecord[]) {
   const answeredInboundByNumber = new Map<string, string[]>();
   for (const r of inbound) {
     if (r.endpoint && !r.endpoint.toLowerCase().includes("vm")) {
-      const times = answeredInboundByNumber.get(r.from_number) ?? [];
+      const key = sanitizePhone(r.from_number) ?? r.from_number;
+      const times = answeredInboundByNumber.get(key) ?? [];
       times.push(r.call_start);
-      answeredInboundByNumber.set(r.from_number, times);
+      answeredInboundByNumber.set(key, times);
     }
   }
 
@@ -71,11 +78,12 @@ function computeMetrics(records: CallRecord[]) {
   const missedCalls: CallRecord[] = [];
 
   for (const call of unansweredCalls) {
+    const callNumber = sanitizePhone(call.from_number) ?? call.from_number;
     // Check outbound callbacks
-    const outboundCbs = outboundByNumber.get(call.from_number);
+    const outboundCbs = outboundByNumber.get(callNumber);
     const outboundAfter = outboundCbs?.filter((t) => t > call.call_start).sort() ?? [];
     // Check if caller called back and was answered
-    const answeredCbs = answeredInboundByNumber.get(call.from_number);
+    const answeredCbs = answeredInboundByNumber.get(callNumber);
     const answeredAfter = answeredCbs?.filter((t) => t > call.call_start).sort() ?? [];
 
     // Check if resolved by either outbound callback or answered inbound
@@ -102,10 +110,16 @@ function computeMetrics(records: CallRecord[]) {
     ? Math.round((recoveredCount / unansweredCalls.length) * 1000) / 10
     : 0;
 
-  // Miss rate: all unanswered inbound calls / all inbound
+  // Miss rate: unanswered / inbound — excluding weekends (Sat=6, Sun=0)
+  const isWeekday = (r: CallRecord) => {
+    const day = new Date(r.call_start).getDay();
+    return day !== 0 && day !== 6;
+  };
+  const weekdayInbound = inbound.filter(isWeekday);
+  const weekdayUnanswered = unansweredCalls.filter(isWeekday);
   const missRate =
-    inbound.length > 0
-      ? Math.round((unansweredCalls.length / inbound.length) * 1000) / 10
+    weekdayInbound.length > 0
+      ? Math.round((weekdayUnanswered.length / weekdayInbound.length) * 1000) / 10
       : 0;
 
   // Avg handle time — inbound (answered, not VM, duration > 0)
@@ -166,12 +180,14 @@ const STORES = [
  */
 function deduplicateRecords<T extends { from_number: string; call_start: string; direction: string; source: string }>(records: T[]): T[] {
   // Build a set of GH inbound call signatures for fast lookup
+  // Use sanitized phone numbers for matching (GH and CIK may store different formats)
   const ghCalls = records.filter((r) => r.source === "grasshopper" && r.direction === "inbound");
   const ghSignatures = new Map<string, number[]>();
   for (const r of ghCalls) {
-    const times = ghSignatures.get(r.from_number) ?? [];
+    const normalized = sanitizePhone(r.from_number) ?? r.from_number;
+    const times = ghSignatures.get(normalized) ?? [];
     times.push(new Date(r.call_start).getTime());
-    ghSignatures.set(r.from_number, times);
+    ghSignatures.set(normalized, times);
   }
 
   if (ghSignatures.size === 0) return records; // No GH calls, nothing to dedup
@@ -183,7 +199,8 @@ function deduplicateRecords<T extends { from_number: string; call_start: string;
     if (r.direction !== "inbound") return true;
 
     // Check if this CIK inbound call matches a GH call (same number, within 120s)
-    const ghTimes = ghSignatures.get(r.from_number);
+    const normalized = sanitizePhone(r.from_number) ?? r.from_number;
+    const ghTimes = ghSignatures.get(normalized);
     if (!ghTimes) return true; // No GH call from this number
 
     const cikTime = new Date(r.call_start).getTime();

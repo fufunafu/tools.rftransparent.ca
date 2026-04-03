@@ -96,6 +96,7 @@ interface PipelinePrediction {
   startingRevenue: number;
   monthlyForecasts: MonthlyForecast[];
   annualForecast: number;
+  fallbackMomRates: Record<number, number>;
   buckets: AgeBucket[];
   seasonalPattern: SeasonalMonth[];
 }
@@ -261,6 +262,92 @@ const METRIC_TOOLTIPS: Record<string, string> = {
   "Pipeline Value": "Total dollar value of invoiced draft orders that haven't been completed yet. Only includes drafts where an invoice has been sent to the customer.",
   "Avg Sale": "Average revenue per completed draft order. Calculated as: total completed revenue \u00f7 number of completed drafts.",
 };
+
+// ─── Fallback Rates Editor ──────────────────────────────────────────────────
+
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const TRANSITION_LABELS = [
+  "Dec→Jan", "Jan→Feb", "Feb→Mar", "Mar→Apr", "Apr→May", "May→Jun",
+  "Jun→Jul", "Jul→Aug", "Aug→Sep", "Sep→Oct", "Oct→Nov", "Nov→Dec",
+];
+
+function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>; onSaved: () => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Record<number, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  const startEdit = () => {
+    const d: Record<number, string> = {};
+    for (let i = 0; i < 12; i++) {
+      d[i] = String(Math.round((rates[i] ?? 0) * 100));
+    }
+    setDraft(d);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    const ratesObj: Record<string, number> = {};
+    for (let i = 0; i < 12; i++) {
+      ratesObj[i] = (parseFloat(draft[i]) || 0) / 100;
+    }
+    try {
+      const res = await fetch("/api/settings/forecast-rates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rates: ratesObj }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setEditing(false);
+      onSaved();
+    } catch {
+      alert("Failed to save rates");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2 border-t border-blue-100 pt-4">
+      <div className="flex items-center justify-between">
+        <p className="text-blue-800 font-medium">Seasonal fallback rates</p>
+        {!editing ? (
+          <button onClick={startEdit} className="text-xs text-blue-500 hover:text-blue-700 underline">Edit</button>
+        ) : (
+          <div className="flex gap-2">
+            <button onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
+            <button onClick={handleSave} disabled={saving} className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded-md disabled:opacity-50">
+              {saving ? "Saving..." : "Save & Recalculate"}
+            </button>
+          </div>
+        )}
+      </div>
+      <p className="text-xs text-blue-500">Used when Shopify data is missing for a month transition (pre-July 2025).</p>
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
+        {Array.from({ length: 12 }, (_, i) => (
+          <div key={i} className="flex items-center justify-between gap-2">
+            <span className="text-blue-600 whitespace-nowrap">{TRANSITION_LABELS[i]}</span>
+            {editing ? (
+              <div className="flex items-center gap-0.5">
+                <input
+                  type="number"
+                  value={draft[i] ?? "0"}
+                  onChange={(e) => setDraft((d) => ({ ...d, [i]: e.target.value }))}
+                  className="w-14 px-1.5 py-0.5 text-right text-xs border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
+                />
+                <span className="text-blue-400">%</span>
+              </div>
+            ) : (
+              <span className={`font-medium ${(rates[i] ?? 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                {(rates[i] ?? 0) >= 0 ? "+" : ""}{Math.round((rates[i] ?? 0) * 100)}%
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
@@ -746,6 +833,12 @@ export default function PipelineDashboard() {
                         )}
                       </div>
                     </div>
+
+                    {/* Editable fallback rates */}
+                    <FallbackRatesEditor
+                      rates={pred.fallbackMomRates}
+                      onSaved={handleRecalculate}
+                    />
                   </div>
                 )}
 

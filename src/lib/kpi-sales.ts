@@ -1,5 +1,6 @@
 import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
 import { OrdersResponseSchema, DraftOrdersResponseSchema } from "@/lib/schemas";
+import { getSupabase } from "@/lib/supabase";
 
 // --------------- Types ---------------
 
@@ -628,6 +629,7 @@ export interface PipelinePrediction {
   startingRevenue: number;     // actual revenue of last completed month
   monthlyForecasts: MonthlyForecast[]; // next 12 months
   annualForecast: number;       // sum of monthly forecasts
+  fallbackMomRates: Record<number, number>; // editable seasonal fallback rates
   buckets: AgeBucket[];
   seasonalPattern: SeasonalMonth[]; // last ~24 months of MoM changes
 }
@@ -708,6 +710,26 @@ export async function getPipelinePrediction(
   // For each calendar month transition (e.g. Mar→Apr), find last year's rate
   const MOM_CAP = 2.0; // cap at ±200%
 
+  // Load editable fallback MoM rates from Supabase (for pre-Shopify months)
+  const HARDCODED_FALLBACK: Record<number, number> = {
+    0: -0.55, 1: 0.50, 2: 1.00, 3: 2.00, 4: 1.20, 5: 0.07,
+    6: -0.15, 7: -0.06, 8: -0.25, 9: -0.03, 10: -0.08, 11: -0.45,
+  };
+  let SEASONAL_FALLBACK_MOM: Record<number, number> = HARDCODED_FALLBACK;
+  try {
+    const { data: rates } = await getSupabase()
+      .from("forecast_mom_rates")
+      .select("month_index, mom_rate");
+    if (rates && rates.length > 0) {
+      SEASONAL_FALLBACK_MOM = {};
+      for (const r of rates) {
+        SEASONAL_FALLBACK_MOM[r.month_index] = Number(r.mom_rate);
+      }
+    }
+  } catch {
+    // Supabase table may not exist yet — use hardcoded defaults
+  }
+
   function getLastYearMoMRate(futureMonth: number, futureYear: number): { rate: number; capped: boolean; isFallback: boolean } {
     // Look at last year: what was the MoM growth going INTO this calendar month?
     const thisMonthKey = `${futureYear - 1}-${String(futureMonth + 1).padStart(2, "0")}`;
@@ -722,7 +744,14 @@ export async function getPipelinePrediction(
       const capped = Math.max(-MOM_CAP, Math.min(MOM_CAP, raw));
       return { rate: capped, capped: Math.abs(raw) > MOM_CAP, isFallback: false };
     }
-    // Fallback: no data → assume flat (0% growth)
+    // Use seasonal fallback only for pre-Shopify months (before July 2025).
+    // After that, Shopify data is authoritative — missing = genuinely no revenue.
+    const PRE_SHOPIFY_CUTOFF = "2025-07";
+    if (thisMonthKey < PRE_SHOPIFY_CUTOFF || prevMonthKey < PRE_SHOPIFY_CUTOFF) {
+      const fallbackRate = SEASONAL_FALLBACK_MOM[futureMonth] ?? 0;
+      const cappedFallback = Math.max(-MOM_CAP, Math.min(MOM_CAP, fallbackRate));
+      return { rate: cappedFallback, capped: false, isFallback: true };
+    }
     return { rate: 0, capped: false, isFallback: true };
   }
 
@@ -854,6 +883,7 @@ export async function getPipelinePrediction(
     startingRevenue: Math.round(startingRevenue * 100) / 100,
     monthlyForecasts,
     annualForecast: Math.round(annualForecast * 100) / 100,
+    fallbackMomRates: SEASONAL_FALLBACK_MOM,
     buckets: buckets.filter((b) => b.drafts > 0),
     seasonalPattern,
   };
