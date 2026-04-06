@@ -216,18 +216,19 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     }
   }
 
-  // 4. Detect completions — fetch COMPLETED drafts from last 90 days
-  const completedFrom = new Date();
-  completedFrom.setDate(completedFrom.getDate() - 90);
+  // 4. Detect completions — fetch COMPLETED drafts (same 180-day window)
   const completedDrafts = await fetchDraftsForSync(
     storeId,
-    completedFrom.toISOString().split("T")[0],
+    fromDateStr,
     "status:completed",
   );
 
   for (const draft of completedDrafts) {
     const existing = existingByDraftId.get(draft.id);
+    const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
+
     if (existing && existing.lead_status !== "won" && existing.lead_status !== "lost") {
+      // Existing lead that converted — mark as won
       await supabase
         .from("followup_leads")
         .update({
@@ -247,6 +248,26 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       });
 
       result.auto_won++;
+    } else if (!existing) {
+      // Completed draft never tracked — insert as already-won lead
+      const { error } = await supabase.from("followup_leads").insert({
+        store_id: storeId,
+        shopify_draft_id: draft.id,
+        draft_name: draft.name,
+        customer_name: draft.customer?.displayName || null,
+        customer_email: draft.customer?.email || null,
+        customer_phone: draft.customer?.phone || null,
+        quote_amount: amount,
+        shopify_created_at: draft.createdAt,
+        shopify_status: "COMPLETED",
+        lead_status: "won",
+        next_followup_at: null,
+        followup_count: 0,
+        closed_at: draft.order?.createdAt || now,
+        first_synced_at: now,
+        last_synced_at: now,
+      });
+      if (!error) result.auto_won++;
     }
   }
 
