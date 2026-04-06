@@ -40,6 +40,7 @@ export interface FollowUpLead {
   customer_email: string | null;
   customer_phone: string | null;
   quote_amount: number;
+  shopify_created_at: string | null;
   shopify_status: string;
   lead_status: LeadStatus;
   next_followup_at: string | null;
@@ -186,6 +187,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         customer_email: draft.customer?.email || null,
         customer_phone: draft.customer?.phone || null,
         quote_amount: amount,
+        shopify_created_at: draft.createdAt,
         shopify_status: draft.status,
         lead_status: "new",
         next_followup_at: threeDaysOut,
@@ -204,6 +206,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           customer_email: draft.customer?.email || null,
           customer_phone: draft.customer?.phone || null,
           quote_amount: amount,
+          shopify_created_at: draft.createdAt,
           shopify_status: draft.status,
           last_synced_at: now,
           updated_at: now,

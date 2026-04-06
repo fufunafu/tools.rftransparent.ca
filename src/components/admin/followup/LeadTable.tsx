@@ -103,7 +103,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                 <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Status</th>
                 <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Due</th>
                 <th className="text-center px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Attempts</th>
-                <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Created</th>
+                <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quoted</th>
                 <th className="px-4 py-3"></th>
               </tr>
             </thead>
@@ -150,7 +150,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                         <span className="ml-1 text-[10px] text-red-500">!</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sand-500">{formatDate(lead.created_at)}</td>
+                    <td className="px-4 py-3 text-sand-500">{formatDate(lead.shopify_created_at || lead.created_at)}</td>
                     <td className="px-4 py-3">
                       {!lead.closed_at && (
                         <button
