@@ -205,9 +205,10 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
   const [syncStatus, setSyncStatus] = useState("");
   const [error, setError] = useState("");
 
-  // Modal / detail state
+  // Modal / detail / help state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
   const [detailLead, setDetailLead] = useState<FollowUpLead | null>(null);
+  const [showHelp, setShowHelp] = useState(false);
 
   useEffect(() => {
     const saved = localStorage.getItem("cs_followup_store");
@@ -318,9 +319,56 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     <>
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-sand-900">Follow-up CRM</h1>
+        <div className="relative">
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-sand-900">Follow-up CRM</h1>
+            <button
+              onClick={() => setShowHelp(!showHelp)}
+              className="w-5 h-5 rounded-full bg-sand-200 text-sand-500 hover:bg-blue-100 hover:text-blue-600 text-xs font-bold flex items-center justify-center transition-colors"
+              title="How does this work?"
+            >
+              ?
+            </button>
+          </div>
           <p className="text-sm text-sand-500 mt-1">Track quotes and schedule follow-up calls to improve conversion</p>
+
+          {/* Help popover */}
+          {showHelp && (
+            <div className="absolute top-full left-0 mt-2 w-[420px] bg-white rounded-xl border border-sand-200 shadow-lg p-5 z-30 text-sm text-sand-700 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-semibold text-sand-900">How it works</h3>
+                <button onClick={() => setShowHelp(false)} className="text-sand-400 hover:text-sand-600">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              <ol className="list-decimal list-inside space-y-2">
+                <li><strong>Sync</strong> &mdash; Click &ldquo;Sync from Shopify&rdquo; to pull in all open quotes (draft orders).</li>
+                <li><strong>First follow-up</strong> &mdash; New quotes are automatically scheduled for a follow-up call in 3 days.</li>
+                <li><strong>Call &amp; categorize</strong> &mdash; After calling the customer, click &ldquo;Log Follow-up&rdquo; and pick a category. The next follow-up is scheduled automatically.</li>
+                <li><strong>Repeat</strong> &mdash; Keep following up until the lead converts or is closed.</li>
+              </ol>
+
+              <div>
+                <p className="font-medium text-sand-900 mb-1">Categories &amp; timing:</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                  <span>Hot Lead</span><span className="text-sand-500">next day</span>
+                  <span>No Answer</span><span className="text-sand-500">2 days</span>
+                  <span>Price Shopping</span><span className="text-sand-500">4 days</span>
+                  <span>Considering</span><span className="text-sand-500">7 days</span>
+                  <span>Future Project</span><span className="text-sand-500">custom date</span>
+                </div>
+              </div>
+
+              <div className="text-xs text-sand-500 border-t border-sand-100 pt-2 space-y-1">
+                <p>After <strong>5 attempts</strong> without conversion, the system suggests closing the lead.</p>
+                <p>When a quote is marked as <strong>Lost</strong>, you must select a reason (for trending).</p>
+                <p>Quotes that convert in Shopify are automatically marked as <strong>Won</strong>.</p>
+              </div>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3">
           {stores.length > 1 && (
