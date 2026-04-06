@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import SummaryCards from "@/components/admin/followup/SummaryCards";
 import LeadTable from "@/components/admin/followup/LeadTable";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
-import { FOLLOWUP_CATEGORIES, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
+import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -190,6 +190,124 @@ function LeadDetailPanel({
   );
 }
 
+// ─── Timing Editor ───────────────────────────────────────────────────────────
+
+const EDITABLE_CATEGORIES = ["new", "hot_lead", "considering", "price_shopping", "no_answer"] as const;
+
+function TimingEditor({ store }: { store: string }) {
+  const [open, setOpen] = useState(false);
+  const [config, setConfig] = useState<Record<string, number | null>>({});
+  const [draft, setDraft] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch(`/api/customer-service/follow-up?view=config&store=${store}`)
+      .then((r) => r.json())
+      .then((d) => { setConfig(d.config ?? {}); setLoaded(true); });
+  }, [open, store]);
+
+  const startEdit = () => {
+    const d: Record<string, string> = {};
+    for (const cat of EDITABLE_CATEGORIES) {
+      d[cat] = String(config[cat] ?? DEFAULT_FOLLOWUP_DAYS[cat] ?? "");
+    }
+    setDraft(d);
+    setEditing(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const configObj: Record<string, number | null> = {};
+      for (const cat of EDITABLE_CATEGORIES) {
+        const val = parseInt(draft[cat]);
+        configObj[cat] = isNaN(val) ? null : val;
+      }
+      const res = await fetch("/api/customer-service/follow-up", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ store_id: store, config: configObj }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setConfig(configObj);
+      setEditing(false);
+    } catch {
+      alert("Failed to save timing config");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-sand-50/50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4 text-sand-400">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+          </svg>
+          <span className="text-sm font-medium text-sand-700">Follow-up Timing Settings</span>
+        </div>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 text-sand-400 transition-transform ${open ? "rotate-180" : ""}`}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="px-5 pb-5 border-t border-sand-200/60 pt-4">
+          {!loaded ? (
+            <p className="text-sm text-sand-400">Loading...</p>
+          ) : (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs text-sand-500">Days until next follow-up for each category. &ldquo;Future Project&rdquo; always uses a custom date.</p>
+                {!editing ? (
+                  <button onClick={startEdit} className="text-xs text-blue-600 hover:text-blue-800 font-medium">Edit</button>
+                ) : (
+                  <div className="flex gap-2">
+                    <button onClick={() => setEditing(false)} className="text-xs text-sand-400 hover:text-sand-600">Cancel</button>
+                    <button onClick={handleSave} disabled={saving} className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded-md disabled:opacity-50">
+                      {saving ? "Saving..." : "Save"}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                {EDITABLE_CATEGORIES.map((cat) => {
+                  const label = FOLLOWUP_CATEGORIES[cat]?.label ?? cat;
+                  const currentDays = config[cat] ?? DEFAULT_FOLLOWUP_DAYS[cat];
+                  return (
+                    <div key={cat} className="text-center">
+                      <p className="text-xs text-sand-500 mb-1">{label}</p>
+                      {editing ? (
+                        <input
+                          type="number"
+                          min="1"
+                          value={draft[cat] ?? ""}
+                          onChange={(e) => setDraft((d) => ({ ...d, [cat]: e.target.value }))}
+                          className="w-16 mx-auto px-2 py-1 text-center text-sm border border-sand-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        />
+                      ) : (
+                        <p className="text-lg font-semibold text-sand-900">{currentDays ?? "—"}<span className="text-xs font-normal text-sand-400 ml-0.5">d</span></p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
 export default function FollowUpDashboard({ defaultStore }: { defaultStore?: string }) {
@@ -205,10 +323,11 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
   const [syncStatus, setSyncStatus] = useState("");
   const [error, setError] = useState("");
 
-  // Modal / detail / help state
+  // Modal / detail / help / config state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
   const [detailLead, setDetailLead] = useState<FollowUpLead | null>(null);
   const [showHelp, setShowHelp] = useState(false);
+  const [storeDays, setStoreDays] = useState<Record<string, number | null>>({});
 
   useEffect(() => {
     const saved = localStorage.getItem("cs_followup_store");
@@ -220,19 +339,22 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     setLoading(true);
     setError("");
     try {
-      const [summaryRes, leadsRes] = await Promise.all([
+      const [summaryRes, leadsRes, configRes] = await Promise.all([
         fetch(`/api/customer-service/follow-up?view=summary&store=${store}`),
         fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=${filter}`),
+        fetch(`/api/customer-service/follow-up?view=config&store=${store}`),
       ]);
 
       if (!summaryRes.ok) throw new Error("Failed to load follow-up data");
 
       const summaryData = await summaryRes.json();
       const leadsData = await leadsRes.json();
+      const configData = await configRes.json();
 
       setSummary(summaryData);
       setStores(summaryData.stores ?? []);
       setLeads(leadsData.leads ?? []);
+      setStoreDays(configData.config ?? {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -512,6 +634,9 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
               </div>
             </div>
           )}
+
+          {/* Follow-up timing editor */}
+          <TimingEditor store={store} />
         </>
       ) : null}
 
@@ -519,6 +644,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
       {modalLead && (
         <FollowUpModal
           lead={modalLead}
+          storeDays={storeDays}
           onClose={() => setModalLead(null)}
           onSubmit={handleLogFollowUp}
         />

@@ -5,6 +5,8 @@ import { getStores } from "@/lib/shopify";
 import {
   syncDraftOrdersForStore,
   computeNextFollowup,
+  getFollowupDaysForStore,
+  DEFAULT_FOLLOWUP_DAYS,
   FOLLOWUP_CATEGORIES,
   MAX_ATTEMPTS,
   type LeadStatus,
@@ -49,6 +51,12 @@ export async function GET(req: NextRequest) {
   try {
     if (view === "stores") {
       return NextResponse.json({ stores: STORES });
+    }
+
+    // ── Config (follow-up days per category) ──
+    if (view === "config") {
+      const storeDays = await getFollowupDaysForStore(storeId);
+      return NextResponse.json({ config: storeDays, defaults: DEFAULT_FOLLOWUP_DAYS });
     }
 
     // ── Summary ──
@@ -242,8 +250,9 @@ export async function POST(req: NextRequest) {
       });
       if (logError) throw new Error(logError.message);
 
-      // Update lead
-      const nextFollowup = computeNextFollowup(outcome, custom_date);
+      // Update lead — use store-specific follow-up days
+      const storeDays = await getFollowupDaysForStore(storeId);
+      const nextFollowup = computeNextFollowup(outcome, storeDays, custom_date);
       const updateData: Record<string, unknown> = {
         lead_status: outcome,
         next_followup_at: nextFollowup,
@@ -338,6 +347,42 @@ export async function PATCH(req: NextRequest) {
     console.error("[Follow-up API PATCH]", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Update failed" },
+      { status: 500 },
+    );
+  }
+}
+
+// ─── PUT (save config) ──────────────────────────────────────────────────────
+
+export async function PUT(req: NextRequest) {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  try {
+    const body = await req.json();
+    const { store_id, config } = body as { store_id: string; config: Record<string, number | null> };
+
+    if (!store_id || !config) {
+      return NextResponse.json({ error: "store_id and config required" }, { status: 400 });
+    }
+
+    const supabase = getSupabase();
+    const rows = Object.entries(config).map(([category, followup_days]) => ({
+      store_id,
+      category,
+      followup_days,
+    }));
+
+    const { error } = await supabase
+      .from("followup_config")
+      .upsert(rows, { onConflict: "store_id,category" });
+
+    if (error) throw new Error(error.message);
+    return NextResponse.json({ status: "success" });
+  } catch (err) {
+    console.error("[Follow-up API PUT]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Config save failed" },
       { status: 500 },
     );
   }

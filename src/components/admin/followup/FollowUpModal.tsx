@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   FOLLOWUP_CATEGORIES,
+  DEFAULT_FOLLOWUP_DAYS,
   LOSS_REASONS,
   MAX_ATTEMPTS,
   type LeadStatus,
@@ -21,6 +22,7 @@ const OUTCOME_OPTIONS: { value: LeadStatus; label: string; color: string }[] = [
 
 interface Props {
   lead: FollowUpLead;
+  storeDays?: Record<string, number | null>;
   onClose: () => void;
   onSubmit: (data: {
     lead_id: string;
@@ -31,19 +33,20 @@ interface Props {
   }) => Promise<void>;
 }
 
-function getPreviewDate(outcome: LeadStatus, customDate: string): string {
+function getPreviewDate(outcome: LeadStatus, customDate: string, storeDays?: Record<string, number | null>): string {
   const cat = FOLLOWUP_CATEGORIES[outcome];
   if (cat.terminal) return "Lead will be closed";
   if (outcome === "future_project") {
     if (!customDate) return "Select a date";
     return `Next follow-up: ${new Date(customDate + "T12:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`;
   }
-  if (cat.followupDays === null) return "";
-  const d = new Date(Date.now() + cat.followupDays * 24 * 60 * 60 * 1000);
-  return `Next follow-up: ${d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} (${cat.followupDays} day${cat.followupDays > 1 ? "s" : ""})`;
+  const days = storeDays?.[outcome] ?? DEFAULT_FOLLOWUP_DAYS[outcome] ?? cat.followupDays;
+  if (days === null) return "";
+  const d = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+  return `Next follow-up: ${d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} (${days} day${days > 1 ? "s" : ""})`;
 }
 
-export default function FollowUpModal({ lead, onClose, onSubmit }: Props) {
+export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Props) {
   const [outcome, setOutcome] = useState<LeadStatus | "">("");
   const [notes, setNotes] = useState("");
   const [closeReason, setCloseReason] = useState("");
@@ -208,7 +211,7 @@ export default function FollowUpModal({ lead, onClose, onSubmit }: Props) {
           {outcome && (
             <div className="bg-sand-50 rounded-lg px-4 py-3">
               <p className="text-sm text-sand-600">
-                {getPreviewDate(outcome as LeadStatus, customDate)}
+                {getPreviewDate(outcome as LeadStatus, customDate, storeDays)}
               </p>
             </div>
           )}

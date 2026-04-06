@@ -3,7 +3,25 @@ import { getSupabase } from "@/lib/supabase";
 
 // ─── Category Configuration ─────────────────────────────────────────────────
 
-export const FOLLOWUP_CATEGORIES = {
+export const DEFAULT_FOLLOWUP_DAYS: Record<string, number | null> = {
+  new: 3,
+  hot_lead: 1,
+  considering: 7,
+  price_shopping: 4,
+  future_project: null,
+  no_answer: 2,
+  lost: null,
+  duplicate: null,
+  won: null,
+};
+
+export const FOLLOWUP_CATEGORIES: Record<string, {
+  label: string;
+  followupDays: number | null;
+  color: string;
+  terminal: boolean;
+  requiresNotes: boolean;
+}> = {
   new:            { label: "New Lead",       followupDays: 3,    color: "blue",   terminal: false, requiresNotes: false },
   hot_lead:       { label: "Hot Lead",       followupDays: 1,    color: "red",    terminal: false, requiresNotes: false },
   considering:    { label: "Considering",    followupDays: 7,    color: "amber",  terminal: false, requiresNotes: true  },
@@ -13,9 +31,25 @@ export const FOLLOWUP_CATEGORIES = {
   lost:           { label: "Lost",           followupDays: null, color: "slate",  terminal: true,  requiresNotes: true  },
   duplicate:      { label: "Duplicate",      followupDays: null, color: "slate",  terminal: true,  requiresNotes: false },
   won:            { label: "Won",            followupDays: null, color: "green",  terminal: true,  requiresNotes: false },
-} as const;
+};
 
 export type LeadStatus = keyof typeof FOLLOWUP_CATEGORIES;
+
+/** Load per-store follow-up day overrides from DB, merged with defaults. */
+export async function getFollowupDaysForStore(storeId: string): Promise<Record<string, number | null>> {
+  const merged = { ...DEFAULT_FOLLOWUP_DAYS };
+  const { data } = await getSupabase()
+    .from("followup_config")
+    .select("category, followup_days")
+    .eq("store_id", storeId);
+
+  for (const row of data ?? []) {
+    if (row.category in merged) {
+      merged[row.category] = row.followup_days;
+    }
+  }
+  return merged;
+}
 
 export const LOSS_REASONS = [
   "Went with competitor",
@@ -146,6 +180,10 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   const supabase = getSupabase();
   const result: SyncResult = { new_leads: 0, updated_leads: 0, auto_won: 0, stale_detected: 0 };
 
+  // Load store-specific follow-up day config
+  const storeDays = await getFollowupDaysForStore(storeId);
+  const newLeadDays = storeDays["new"] ?? DEFAULT_FOLLOWUP_DAYS["new"] ?? 3;
+
   // All-time sync — Shopify paginates up to 20,000 records which is plenty
   const fromDateStr = "2020-01-01";
 
@@ -169,7 +207,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
   // 3. Upsert — separate new inserts from updates
   const now = new Date().toISOString();
-  const threeDaysOut = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
+  const firstFollowup = new Date(Date.now() + newLeadDays * 24 * 60 * 60 * 1000).toISOString();
 
   for (const draft of shopifyDrafts) {
     const existing = existingByDraftId.get(draft.id);
@@ -188,7 +226,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         shopify_created_at: draft.createdAt,
         shopify_status: draft.status,
         lead_status: "new",
-        next_followup_at: threeDaysOut,
+        next_followup_at: firstFollowup,
         followup_count: 0,
         first_synced_at: now,
         last_synced_at: now,
@@ -291,10 +329,15 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-export function computeNextFollowup(status: LeadStatus, customDate?: string): string | null {
+export function computeNextFollowup(
+  status: LeadStatus,
+  storeDays: Record<string, number | null>,
+  customDate?: string,
+): string | null {
   const cat = FOLLOWUP_CATEGORIES[status];
   if (cat.terminal) return null;
   if (status === "future_project" && customDate) return new Date(customDate).toISOString();
-  if (cat.followupDays === null) return null;
-  return new Date(Date.now() + cat.followupDays * 24 * 60 * 60 * 1000).toISOString();
+  const days = storeDays[status] ?? cat.followupDays;
+  if (days === null) return null;
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
 }
