@@ -396,6 +396,20 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
         </div>
       </div>
 
+      {/* Sync progress */}
+      {syncing && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
+          <svg className="w-4 h-4 text-blue-500 animate-spin" viewBox="0 0 24 24" fill="none">
+            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+            <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
+          </svg>
+          <div>
+            <p className="text-sm font-medium text-blue-700">Pulling draft orders from Shopify...</p>
+            <p className="text-xs text-blue-600">This can take 30-60 seconds. Syncing quotes from the last 6 months.</p>
+          </div>
+        </div>
+      )}
+
       {/* Sync status */}
       {syncStatus && (
         <div className={`text-sm px-4 py-2 rounded-lg ${
