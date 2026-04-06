@@ -710,7 +710,8 @@ export async function getPipelinePrediction(
   // For each calendar month transition (e.g. Mar→Apr), find last year's rate
   const MOM_CAP = 2.0; // cap at ±200%
 
-  // Load editable fallback MoM rates from Supabase (for pre-Shopify months)
+  // Load editable fallback MoM rates from Supabase, per store.
+  // When forecasting multiple stores, merge all matching store rates (last write wins per month).
   const HARDCODED_FALLBACK: Record<number, number> = {
     0: -0.55, 1: 0.50, 2: 1.00, 3: 2.00, 4: 1.20, 5: 0.07,
     6: -0.15, 7: -0.06, 8: -0.25, 9: -0.03, 10: -0.08, 11: -0.45,
@@ -719,7 +720,8 @@ export async function getPipelinePrediction(
   try {
     const { data: rates } = await getSupabase()
       .from("forecast_mom_rates")
-      .select("month_index, mom_rate");
+      .select("store_id, month_index, mom_rate")
+      .in("store_id", storeIds);
     if (rates && rates.length > 0) {
       SEASONAL_FALLBACK_MOM = {};
       for (const r of rates) {

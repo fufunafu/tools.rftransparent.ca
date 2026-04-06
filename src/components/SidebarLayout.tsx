@@ -71,6 +71,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: "/customer-service/phones", label: "Phones", status: "done" as Status },
       { href: "/customer-service/emails", label: "Emails", status: "wip" as Status },
+      { href: "/customer-service/follow-up", label: "Follow-up", status: "wip" as Status },
     ],
   },
   {

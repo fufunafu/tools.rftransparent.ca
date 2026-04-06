@@ -271,7 +271,7 @@ const TRANSITION_LABELS = [
   "Jun→Jul", "Jul→Aug", "Aug→Sep", "Sep→Oct", "Oct→Nov", "Nov→Dec",
 ];
 
-function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>; onSaved: () => void }) {
+function FallbackRatesEditor({ rates, storeId, onSaved }: { rates: Record<number, number>; storeId: string; onSaved: () => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
@@ -295,7 +295,7 @@ function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>
       const res = await fetch("/api/settings/forecast-rates", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rates: ratesObj }),
+        body: JSON.stringify({ rates: ratesObj, storeId }),
       });
       if (!res.ok) throw new Error("Failed to save");
       setEditing(false);
@@ -312,7 +312,7 @@ function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>
       <div className="flex items-center justify-between">
         <p className="text-blue-800 font-medium">Seasonal fallback rates</p>
         {!editing ? (
-          <button onClick={startEdit} className="text-xs text-blue-500 hover:text-blue-700 underline">Edit</button>
+          storeId !== "all" && <button onClick={startEdit} className="text-xs text-blue-500 hover:text-blue-700 underline">Edit</button>
         ) : (
           <div className="flex gap-2">
             <button onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
@@ -322,7 +322,7 @@ function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>
           </div>
         )}
       </div>
-      <p className="text-xs text-blue-500">Used when Shopify data is missing for a month transition (pre-July 2025).</p>
+      <p className="text-xs text-blue-500">Used when Shopify data is missing for a month transition (pre-July 2025). Rates are per-store{storeId !== "all" ? ` (editing: ${storeId})` : " — select a single store to edit"}.</p>
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
         {Array.from({ length: 12 }, (_, i) => (
           <div key={i} className="flex items-center justify-between gap-2">
@@ -351,9 +351,26 @@ function FallbackRatesEditor({ rates, onSaved }: { rates: Record<number, number>
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-// Session-level cache: survives tab navigation, clears on refresh
+// Session-level cache: survives tab navigation, clears on reload
 const pipelineCache = new Map<string, { data: PipelineData; ts: number }>();
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Persistent cache: survives page reloads — only updated on explicit Recalculate
+const LS_PREFIX = "pipeline_cache_v1:";
+function lsSave(key: string, data: PipelineData): void {
+  try {
+    localStorage.setItem(LS_PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
+  } catch {
+    // Ignore quota errors — in-memory cache still works
+  }
+}
+function lsLoad(key: string): { data: PipelineData; ts: number } | null {
+  try {
+    const raw = localStorage.getItem(LS_PREFIX + key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
 
 export default function PipelineDashboard() {
   const [days, setDays] = useState(90);
@@ -366,7 +383,6 @@ export default function PipelineDashboard() {
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().split("T")[0]);
   const [data, setData] = useState<PipelineData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState("");
   const [sortBy, setSortBy] = useState<SortKey>("wonRevenue");
@@ -386,24 +402,30 @@ export default function PipelineDashboard() {
     }
     const cacheKey = params.toString();
 
-    // Check cache — show stale data immediately, refresh in background
+    // 1. In-memory cache hit — show immediately, no fetch
     const cached = pipelineCache.get(cacheKey);
     if (cached) {
       setData(cached.data);
       setLoading(false);
-      if (Date.now() - cached.ts < CACHE_TTL_MS) return; // still fresh
-      setRefreshing(true); // stale — refresh in background
-    } else {
-      setLoading(true);
-      setLoadStep("Connecting to Shopify...");
+      return;
     }
 
+    // 2. localStorage hit — show immediately, populate in-memory cache, no fetch
+    const persisted = lsLoad(cacheKey);
+    if (persisted) {
+      pipelineCache.set(cacheKey, persisted);
+      setData(persisted.data);
+      setLoading(false);
+      return;
+    }
+
+    // 3. True cache miss — fetch from API
+    setLoading(true);
+    setLoadStep("Connecting to Shopify...");
     setError("");
 
     // Simulate progress steps for slow loads
-    const stepTimer = !cached
-      ? setTimeout(() => { if (!cancelled) setLoadStep("Fetching draft orders & computing predictions..."); }, 3000)
-      : undefined;
+    const stepTimer = setTimeout(() => { if (!cancelled) setLoadStep("Fetching draft orders & computing predictions..."); }, 3000);
 
     fetch(`/api/shopify/pipeline?${params}`)
       .then((r) => r.json())
@@ -412,6 +434,7 @@ export default function PipelineDashboard() {
         if (json.error) throw new Error(json.error);
         setData(json);
         pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
+        lsSave(cacheKey, json);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message ?? "Failed to load pipeline data");
@@ -419,7 +442,6 @@ export default function PipelineDashboard() {
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
-          setRefreshing(false);
           setLoadStep("");
         }
       });
@@ -430,15 +452,20 @@ export default function PipelineDashboard() {
   const handleRecalculate = async () => {
     setRecalculating(true);
     try {
-      const params = new URLSearchParams({ store, refresh: "true" });
-      if (useCustom) { params.set("from", customFrom); params.set("to", customTo); }
-      else params.set("days", String(days));
+      const cacheParams = new URLSearchParams({ store });
+      if (useCustom) { cacheParams.set("from", customFrom); cacheParams.set("to", customTo); }
+      else cacheParams.set("days", String(days));
+      const cacheKey = cacheParams.toString();
 
-      const res = await fetch(`/api/shopify/pipeline?${params}`);
+      const fetchParams = new URLSearchParams(cacheParams);
+      fetchParams.set("refresh", "true");
+
+      const res = await fetch(`/api/shopify/pipeline?${fetchParams}`);
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       setData(json);
-      pipelineCache.set(params.toString(), { data: json, ts: Date.now() });
+      pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
+      lsSave(cacheKey, json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Recalculation failed");
     } finally {
@@ -487,7 +514,6 @@ export default function PipelineDashboard() {
             <div className="flex items-center gap-2 mt-0.5">
               <p className="text-xs text-sand-400">
                 Draft orders (quotes) to completed sales
-                {refreshing && <span className="ml-2 text-blue-400 animate-pulse">Refreshing...</span>}
               </p>
               {data?.cachedAt && (
                 <span className="text-[10px] text-sand-300">
@@ -837,6 +863,7 @@ export default function PipelineDashboard() {
                     {/* Editable fallback rates */}
                     <FallbackRatesEditor
                       rates={pred.fallbackMomRates}
+                      storeId={store}
                       onSaved={handleRecalculate}
                     />
                   </div>

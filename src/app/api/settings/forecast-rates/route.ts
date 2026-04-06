@@ -7,12 +7,15 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { rates } = body as { rates: Record<string, number> };
+  const { rates, storeId } = body as { rates: Record<string, number>; storeId: string };
 
   if (!rates || typeof rates !== "object")
     return NextResponse.json({ error: "rates object is required" }, { status: 400 });
+  if (!storeId)
+    return NextResponse.json({ error: "storeId is required" }, { status: 400 });
 
   const rows = Object.entries(rates).map(([idx, rate]) => ({
+    store_id: storeId,
     month_index: parseInt(idx, 10),
     mom_rate: rate,
     updated_at: new Date().toISOString(),
