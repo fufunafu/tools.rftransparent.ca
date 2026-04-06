@@ -405,7 +405,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
           </svg>
           <div>
             <p className="text-sm font-medium text-blue-700">Pulling draft orders from Shopify...</p>
-            <p className="text-xs text-blue-600">This can take 30-60 seconds. Syncing quotes from the last 6 months.</p>
+            <p className="text-xs text-blue-600">This can take 30-60 seconds. Syncing all quotes from Shopify.</p>
           </div>
         </div>
       )}

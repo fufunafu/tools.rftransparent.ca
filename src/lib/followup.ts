@@ -146,10 +146,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   const supabase = getSupabase();
   const result: SyncResult = { new_leads: 0, updated_leads: 0, auto_won: 0, stale_detected: 0 };
 
-  // 180-day lookback for open/invoice_sent drafts
-  const fromDate = new Date();
-  fromDate.setDate(fromDate.getDate() - 180);
-  const fromDateStr = fromDate.toISOString().split("T")[0];
+  // All-time sync — Shopify paginates up to 20,000 records which is plenty
+  const fromDateStr = "2020-01-01";
 
   // 1. Fetch OPEN and INVOICE_SENT drafts from Shopify
   const [openDrafts, invoiceDrafts] = await Promise.all([
