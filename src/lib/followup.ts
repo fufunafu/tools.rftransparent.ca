@@ -212,9 +212,33 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   for (const draft of shopifyDrafts) {
     const existing = existingByDraftId.get(draft.id);
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
+    const hasOrder = draft.order !== null; // draft converted to a real order
 
     if (!existing) {
-      // New lead
+      if (hasOrder) {
+        // Draft already converted — insert as won
+        const { error } = await supabase.from("followup_leads").insert({
+          store_id: storeId,
+          shopify_draft_id: draft.id,
+          draft_name: draft.name,
+          customer_name: draft.customer?.displayName || null,
+          customer_email: draft.customer?.email || null,
+          customer_phone: draft.customer?.phone || null,
+          quote_amount: amount,
+          shopify_created_at: draft.createdAt,
+          shopify_status: draft.status,
+          lead_status: "won",
+          next_followup_at: null,
+          followup_count: 0,
+          closed_at: draft.order!.createdAt,
+          first_synced_at: now,
+          last_synced_at: now,
+        });
+        if (!error) result.auto_won++;
+        continue;
+      }
+
+      // New active lead
       const { error } = await supabase.from("followup_leads").insert({
         store_id: storeId,
         shopify_draft_id: draft.id,
@@ -233,6 +257,31 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       });
       if (!error) result.new_leads++;
     } else {
+      // Existing lead — check if it converted since last sync
+      if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
+        await supabase
+          .from("followup_leads")
+          .update({
+            lead_status: "won",
+            shopify_status: draft.status,
+            closed_at: draft.order!.createdAt,
+            next_followup_at: null,
+            updated_at: now,
+            last_synced_at: now,
+          })
+          .eq("id", existing.id);
+
+        await supabase.from("followup_logs").insert({
+          lead_id: existing.id,
+          outcome: "won",
+          notes: "Auto-detected: draft order has a linked order",
+          logged_by: "system",
+        });
+
+        result.auto_won++;
+        continue;
+      }
+
       // Update sync fields only — preserve lead_status, next_followup_at, notes
       await supabase
         .from("followup_leads")
