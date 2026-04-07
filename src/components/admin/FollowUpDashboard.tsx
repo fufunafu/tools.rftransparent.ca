@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import SummaryCards from "@/components/admin/followup/SummaryCards";
 import LeadTable from "@/components/admin/followup/LeadTable";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
+import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
+import CalendarView from "@/components/admin/followup/CalendarView";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -17,7 +19,20 @@ interface SummaryMetrics {
   lost_count: number;
   conversion_rate: number;
   avg_attempts: number;
+  avg_cycle_won: number | null;
+  avg_cycle_lost: number | null;
   pipeline_value: number;
+  won_value: number;
+}
+
+interface MonthData {
+  month: string;
+  label: string;
+  total: number;
+  won: number;
+  lost: number;
+  conversion_rate: number;
+  quoted_value: number;
   won_value: number;
 }
 
@@ -323,11 +338,14 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
   const [syncStatus, setSyncStatus] = useState("");
   const [error, setError] = useState("");
 
-  // Modal / detail / help / config state
+  // Modal / detail / help / config / analytics state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
   const [detailLead, setDetailLead] = useState<FollowUpLead | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [storeDays, setStoreDays] = useState<Record<string, number | null>>({});
+  const [analytics, setAnalytics] = useState<MonthData[]>([]);
+  const [viewMode, setViewMode] = useState<"table" | "calendar">("table");
+  const [calendarLeads, setCalendarLeads] = useState<FollowUpLead[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem("cs_followup_store");
@@ -339,10 +357,12 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     setLoading(true);
     setError("");
     try {
-      const [summaryRes, leadsRes, configRes] = await Promise.all([
+      const [summaryRes, leadsRes, configRes, analyticsRes, calendarRes] = await Promise.all([
         fetch(`/api/customer-service/follow-up?view=summary&store=${store}`),
         fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=${filter}`),
         fetch(`/api/customer-service/follow-up?view=config&store=${store}`),
+        fetch(`/api/customer-service/follow-up?view=analytics&store=${store}`),
+        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=all`),
       ]);
 
       if (!summaryRes.ok) throw new Error("Failed to load follow-up data");
@@ -350,11 +370,15 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
       const summaryData = await summaryRes.json();
       const leadsData = await leadsRes.json();
       const configData = await configRes.json();
+      const analyticsData = await analyticsRes.json();
+      const calendarData = await calendarRes.json();
 
       setSummary(summaryData);
       setStores(summaryData.stores ?? []);
       setLeads(leadsData.leads ?? []);
       setStoreDays(configData.config ?? {});
+      setAnalytics(analyticsData.months ?? []);
+      setCalendarLeads(calendarData.leads ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
     } finally {
@@ -403,6 +427,17 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
     setModalLead(null);
+    loadData();
+  };
+
+  const handleBulkClose = async (leadIds: string[], reason: string) => {
+    const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=bulk_close`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lead_ids: leadIds, status: "lost", close_reason: reason }),
+    });
+    const json = await res.json();
+    if (json.status !== "success") throw new Error(json.error);
     loadData();
   };
 
@@ -592,6 +627,41 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             ]}
           />
 
+          {/* Cycle time cards */}
+          {(metrics.avg_cycle_won !== null || metrics.avg_cycle_lost !== null) && (
+            <SummaryCards
+              cards={[
+                {
+                  label: "Avg Cycle (Won)",
+                  value: metrics.avg_cycle_won !== null ? `${metrics.avg_cycle_won}d` : "—",
+                  color: "bg-green-400",
+                  subtitle: "Quote to conversion",
+                },
+                {
+                  label: "Avg Cycle (Lost)",
+                  value: metrics.avg_cycle_lost !== null ? `${metrics.avg_cycle_lost}d` : "—",
+                  color: "bg-slate-400",
+                  subtitle: "Quote to close",
+                },
+                {
+                  label: "Avg Attempts",
+                  value: metrics.avg_attempts,
+                  color: "bg-indigo-400",
+                  subtitle: "Follow-ups per lead",
+                },
+                {
+                  label: "Won Value",
+                  value: formatCurrency(metrics.won_value),
+                  color: "bg-emerald-500",
+                  subtitle: `${metrics.won_count} deals closed`,
+                },
+              ]}
+            />
+          )}
+
+          {/* Analytics Chart */}
+          <AnalyticsChart data={analytics} />
+
           {/* Status breakdown pills */}
           {statusPills.length > 0 && (
             <div className="flex flex-wrap gap-2">
@@ -608,15 +678,43 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             </div>
           )}
 
-          {/* Lead Table */}
+          {/* View toggle */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setViewMode("table")}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                viewMode === "table" ? "bg-blue-600 text-white" : "bg-sand-100 text-sand-600 hover:bg-sand-200"
+              }`}
+            >
+              Table
+            </button>
+            <button
+              onClick={() => setViewMode("calendar")}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                viewMode === "calendar" ? "bg-blue-600 text-white" : "bg-sand-100 text-sand-600 hover:bg-sand-200"
+              }`}
+            >
+              Calendar
+            </button>
+          </div>
+
+          {/* Lead Table or Calendar */}
+          {viewMode === "calendar" ? (
+            <CalendarView
+              leads={calendarLeads}
+              onViewDetail={(lead) => setDetailLead(lead)}
+            />
+          ) : (
           <LeadTable
             leads={leads}
             filter={filter}
             onFilterChange={(f) => setFilter(f)}
             onLogFollowUp={(lead) => setModalLead(lead)}
             onViewDetail={(lead) => setDetailLead(lead)}
+            onBulkClose={handleBulkClose}
             filterCounts={filterCounts}
           />
+          )}
 
           {/* Loss reasons summary */}
           {summary?.loss_reasons && Object.keys(summary.loss_reasons).length > 0 && (

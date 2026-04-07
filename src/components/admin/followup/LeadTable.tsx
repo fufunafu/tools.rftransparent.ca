@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { FOLLOWUP_CATEGORIES, MAX_ATTEMPTS, type LeadStatus } from "@/lib/followup";
+import { FOLLOWUP_CATEGORIES, MAX_ATTEMPTS, LOSS_REASONS, type LeadStatus } from "@/lib/followup";
 import type { FollowUpLead } from "@/lib/followup";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -46,6 +46,7 @@ interface Props {
   onFilterChange: (f: string) => void;
   onLogFollowUp: (lead: FollowUpLead) => void;
   onViewDetail: (lead: FollowUpLead) => void;
+  onBulkClose: (leadIds: string[], reason: string) => Promise<void>;
   filterCounts: Record<string, number>;
 }
 
@@ -81,10 +82,39 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   );
 }
 
-export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp, onViewDetail, filterCounts }: Props) {
+function exportCSV(leads: FollowUpLead[]) {
+  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Amount", "Status", "Due Date", "Attempts", "Quoted Date", "Notes"];
+  const rows = leads.map((l) => [
+    l.draft_name,
+    l.customer_name || "",
+    l.customer_email || "",
+    l.customer_phone || "",
+    Number(l.quote_amount).toFixed(2),
+    FOLLOWUP_CATEGORIES[l.lead_status as LeadStatus]?.label ?? l.lead_status,
+    l.next_followup_at ? l.next_followup_at.split("T")[0] : "",
+    String(l.followup_count),
+    (l.shopify_created_at || l.created_at).split("T")[0],
+    (l.notes || "").replace(/"/g, '""'),
+  ]);
+
+  const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `followup-leads-${new Date().toISOString().split("T")[0]}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp, onViewDetail, onBulkClose, filterCounts }: Props) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkReason, setBulkReason] = useState("");
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkClosing, setBulkClosing] = useState(false);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -156,7 +186,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
             );
           })}
         </div>
-        <div className="pb-2 sm:pb-0">
+        <div className="flex items-center gap-2 pb-2 sm:pb-0">
           <input
             type="text"
             value={search}
@@ -164,8 +194,76 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
             placeholder="Search by name, email, phone, draft #..."
             className="w-full sm:w-64 px-3 py-1.5 text-sm border border-sand-200 rounded-lg bg-sand-50 text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white"
           />
+          {sorted.length > 0 && (
+            <button
+              onClick={() => exportCSV(sorted)}
+              className="shrink-0 px-3 py-1.5 text-xs font-medium text-sand-600 border border-sand-200 rounded-lg hover:bg-sand-50 transition-colors"
+              title="Export visible leads as CSV"
+            >
+              Export CSV
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Bulk action toolbar */}
+      {selected.size > 0 && (
+        <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 border-b border-blue-200">
+          <span className="text-sm font-medium text-blue-700">{selected.size} selected</span>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBulkModal(true)}
+              className="px-3 py-1.5 text-xs font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Mark as Lost
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="px-3 py-1.5 text-xs text-sand-500 hover:text-sand-700 transition-colors"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk close modal */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={() => setShowBulkModal(false)}>
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-sand-900">Close {selected.size} leads as Lost</h3>
+            <div>
+              <label className="block text-sm font-medium text-sand-700 mb-2">Reason <span className="text-red-500">*</span></label>
+              <div className="space-y-1.5">
+                {LOSS_REASONS.map((reason) => (
+                  <label key={reason} className="flex items-center gap-3 cursor-pointer">
+                    <input type="radio" name="bulkReason" value={reason} checked={bulkReason === reason} onChange={() => setBulkReason(reason)} className="text-blue-600" />
+                    <span className="text-sm text-sand-700">{reason}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => { setShowBulkModal(false); setBulkReason(""); }} className="px-4 py-2 text-sm text-sand-600">Cancel</button>
+              <button
+                onClick={async () => {
+                  if (!bulkReason) return;
+                  setBulkClosing(true);
+                  await onBulkClose(Array.from(selected), bulkReason);
+                  setSelected(new Set());
+                  setShowBulkModal(false);
+                  setBulkReason("");
+                  setBulkClosing(false);
+                }}
+                disabled={!bulkReason || bulkClosing}
+                className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {bulkClosing ? "Closing..." : "Confirm"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       {sorted.length === 0 ? (
@@ -177,6 +275,20 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-sand-200/60">
+                <th className="px-3 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={selected.size > 0 && selected.size === sorted.filter((l) => !l.closed_at).length}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelected(new Set(sorted.filter((l) => !l.closed_at).map((l) => l.id)));
+                      } else {
+                        setSelected(new Set());
+                      }
+                    }}
+                    className="text-blue-600"
+                  />
+                </th>
                 {columns.map((col) => (
                   <th
                     key={col.key}
@@ -197,13 +309,28 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                 const statusColor = STATUS_COLORS[lead.lead_status] ?? "bg-sand-100 text-sand-600";
                 const isStale = lead.shopify_status === "DELETED";
                 const nearMax = lead.followup_count >= MAX_ATTEMPTS && !lead.closed_at;
+                const isSelected = selected.has(lead.id);
 
                 return (
                   <tr
                     key={lead.id}
-                    className="border-b border-sand-100 hover:bg-sand-50/50 cursor-pointer transition-colors"
+                    className={`border-b border-sand-100 hover:bg-sand-50/50 cursor-pointer transition-colors ${isSelected ? "bg-blue-50/50" : ""}`}
                     onClick={() => onViewDetail(lead)}
                   >
+                    <td className="px-3 py-3" onClick={(e) => e.stopPropagation()}>
+                      {!lead.closed_at && (
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            const next = new Set(selected);
+                            if (isSelected) next.delete(lead.id); else next.add(lead.id);
+                            setSelected(next);
+                          }}
+                          className="text-blue-600"
+                        />
+                      )}
+                    </td>
                     <td className="px-4 py-3 font-medium text-sand-900">
                       {lead.draft_name}
                       {isStale && (

@@ -59,6 +59,39 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ config: storeDays, defaults: DEFAULT_FOLLOWUP_DAYS });
     }
 
+    // ── Analytics (monthly trends) ──
+    if (view === "analytics") {
+      const { data: allLeads } = await supabase
+        .from("followup_leads")
+        .select("shopify_created_at, lead_status, quote_amount, closed_at")
+        .eq("store_id", storeId);
+
+      const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
+
+      for (const lead of (allLeads ?? []) as { shopify_created_at: string | null; lead_status: string; quote_amount: number; closed_at: string | null }[]) {
+        const dateStr = lead.shopify_created_at || lead.closed_at;
+        if (!dateStr) continue;
+        const month = dateStr.slice(0, 7); // "YYYY-MM"
+        const entry = monthMap.get(month) ?? { total: 0, won: 0, lost: 0, quoted_value: 0, won_value: 0 };
+        entry.total++;
+        entry.quoted_value += Number(lead.quote_amount);
+        if (lead.lead_status === "won") { entry.won++; entry.won_value += Number(lead.quote_amount); }
+        if (lead.lead_status === "lost") entry.lost++;
+        monthMap.set(month, entry);
+      }
+
+      const months = Array.from(monthMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, d]) => ({
+          month,
+          label: new Date(month + "-15").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+          ...d,
+          conversion_rate: (d.won + d.lost) > 0 ? Math.round((d.won / (d.won + d.lost)) * 1000) / 10 : 0,
+        }));
+
+      return NextResponse.json({ months });
+    }
+
     // ── Summary ──
     if (view === "summary") {
       // Active leads (not closed)
@@ -109,6 +142,18 @@ export async function GET(req: NextRequest) {
         lossReasons[reason] = (lossReasons[reason] || 0) + 1;
       }
 
+      // Avg cycle time (days from quote to close)
+      function avgCycleDays(leads: FollowUpLead[]): number | null {
+        const withDates = leads.filter((l) => l.shopify_created_at && l.closed_at);
+        if (withDates.length === 0) return null;
+        const totalDays = withDates.reduce((s, l) => {
+          const from = new Date(l.shopify_created_at!).getTime();
+          const to = new Date(l.closed_at!).getTime();
+          return s + (to - from) / (1000 * 60 * 60 * 24);
+        }, 0);
+        return Math.round((totalDays / withDates.length) * 10) / 10;
+      }
+
       // Avg follow-up attempts for closed leads
       const closedWithAttempts = closed.filter((l) => l.followup_count > 0);
       const avgAttempts = closedWithAttempts.length > 0
@@ -125,6 +170,8 @@ export async function GET(req: NextRequest) {
           lost_count: lostLeads.length,
           conversion_rate: conversionRate,
           avg_attempts: avgAttempts,
+          avg_cycle_won: avgCycleDays(wonLeads),
+          avg_cycle_lost: avgCycleDays(lostLeads),
           pipeline_value: Math.round(pipelineValue),
           won_value: Math.round(wonValue),
         },
@@ -285,6 +332,48 @@ export async function POST(req: NextRequest) {
       if (updateError) throw new Error(updateError.message);
 
       return NextResponse.json({ status: "success", lead: updatedLead });
+    }
+
+    // ── Bulk close leads ──
+    if (action === "bulk_close") {
+      const body = await req.json();
+      const { lead_ids, status, close_reason } = body as {
+        lead_ids: string[];
+        status: "lost" | "duplicate";
+        close_reason?: string;
+      };
+
+      if (!lead_ids?.length || !status) {
+        return NextResponse.json({ error: "lead_ids and status required" }, { status: 400 });
+      }
+
+      const supabase = getSupabase();
+      const now = new Date().toISOString();
+
+      const { error: updateError } = await supabase
+        .from("followup_leads")
+        .update({
+          lead_status: status,
+          closed_at: now,
+          next_followup_at: null,
+          close_reason: close_reason || null,
+          updated_at: now,
+        })
+        .in("id", lead_ids);
+
+      if (updateError) throw new Error(updateError.message);
+
+      // Insert log entries
+      const logs = lead_ids.map((id) => ({
+        lead_id: id,
+        outcome: status,
+        notes: close_reason ? `Bulk closed: ${close_reason}` : "Bulk closed",
+        logged_by: "admin",
+      }));
+
+      await supabase.from("followup_logs").insert(logs);
+
+      return NextResponse.json({ status: "success", closed: lead_ids.length });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
