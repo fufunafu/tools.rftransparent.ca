@@ -72,19 +72,22 @@ function computeMetrics(records: CallRecord[]) {
   const isVm = (r: CallRecord) => r.endpoint?.toLowerCase().includes("vm");
   const unansweredCalls = inbound.filter((r) => !r.endpoint || isVm(r));
 
-  // For each unanswered call, check if there was a resolution
+  // For each unanswered call, check if there was a resolution within 48 hours
+  const CALLBACK_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours
   const responseTimes: number[] = [];
   let recoveredCount = 0;
   const missedCalls: CallRecord[] = [];
 
   for (const call of unansweredCalls) {
     const callNumber = sanitizePhone(call.from_number) ?? call.from_number;
-    // Check outbound callbacks
+    const callTime = new Date(call.call_start).getTime();
+    const cutoff = new Date(callTime + CALLBACK_WINDOW_MS).toISOString();
+    // Check outbound callbacks (within 48h)
     const outboundCbs = outboundByNumber.get(callNumber);
-    const outboundAfter = outboundCbs?.filter((t) => t > call.call_start).sort() ?? [];
-    // Check if caller called back and was answered
+    const outboundAfter = outboundCbs?.filter((t) => t > call.call_start && t < cutoff).sort() ?? [];
+    // Check if caller called back and was answered (within 48h)
     const answeredCbs = answeredInboundByNumber.get(callNumber);
-    const answeredAfter = answeredCbs?.filter((t) => t > call.call_start).sort() ?? [];
+    const answeredAfter = answeredCbs?.filter((t) => t > call.call_start && t < cutoff).sort() ?? [];
 
     // Check if resolved by either outbound callback or answered inbound
     const hasOutbound = outboundAfter.length > 0;
@@ -463,40 +466,51 @@ export async function GET(req: NextRequest) {
       const inbound = records.filter((r) => r.direction === "inbound");
       const outbound = records.filter((r) => r.direction === "outbound");
 
+      const isVmCall = (r: CallRecord) => r.endpoint?.toLowerCase().includes("vm");
+
       const outboundByNumber = new Map<string, string[]>();
       for (const r of outbound) {
-        const times = outboundByNumber.get(r.to_number) ?? [];
+        const key = sanitizePhone(r.to_number) ?? r.to_number;
+        const times = outboundByNumber.get(key) ?? [];
         times.push(r.call_start);
-        outboundByNumber.set(r.to_number, times);
+        outboundByNumber.set(key, times);
       }
 
       // Also track answered inbound calls (caller called back and got through)
+      // Exclude voicemail — leaving a VM is not a real resolution
       const answeredInboundByNumber = new Map<string, string[]>();
       for (const r of inbound) {
-        if (r.endpoint) {
-          const times = answeredInboundByNumber.get(r.from_number) ?? [];
+        if (r.endpoint && !isVmCall(r)) {
+          const key = sanitizePhone(r.from_number) ?? r.from_number;
+          const times = answeredInboundByNumber.get(key) ?? [];
           times.push(r.call_start);
-          answeredInboundByNumber.set(r.from_number, times);
+          answeredInboundByNumber.set(key, times);
         }
       }
 
+      // Missed = inbound with no endpoint OR voicemail (consistent with computeMetrics)
+      const CALLBACK_WINDOW_MS = 48 * 60 * 60 * 1000; // 48 hours
       const missedCalls = inbound.filter((r) => {
-        if (r.endpoint) return false;
-        // Check outbound callback
-        const outCbs = outboundByNumber.get(r.from_number);
-        const hasOutbound = outCbs?.some((t) => t > r.call_start) ?? false;
-        // Check if caller called back and was answered
-        const inCbs = answeredInboundByNumber.get(r.from_number);
-        const hasAnsweredInbound = inCbs?.some((t) => t > r.call_start) ?? false;
+        if (r.endpoint && !isVmCall(r)) return false;
+        const callNumber = sanitizePhone(r.from_number) ?? r.from_number;
+        const callTime = new Date(r.call_start).getTime();
+        const cutoff = new Date(callTime + CALLBACK_WINDOW_MS).toISOString();
+        // Check outbound callback (within 48h)
+        const outCbs = outboundByNumber.get(callNumber);
+        const hasOutbound = outCbs?.some((t) => t > r.call_start && t < cutoff) ?? false;
+        // Check if caller called back and was answered (within 48h)
+        const inCbs = answeredInboundByNumber.get(callNumber);
+        const hasAnsweredInbound = inCbs?.some((t) => t > r.call_start && t < cutoff) ?? false;
         return !hasOutbound && !hasAnsweredInbound;
       });
 
-      // Group by phone number
+      // Group by sanitized phone number
       const grouped = new Map<string, typeof missedCalls>();
       for (const r of missedCalls) {
-        const arr = grouped.get(r.from_number) ?? [];
+        const key = sanitizePhone(r.from_number) ?? r.from_number;
+        const arr = grouped.get(key) ?? [];
         arr.push(r);
-        grouped.set(r.from_number, arr);
+        grouped.set(key, arr);
       }
 
       const callbacks = Array.from(grouped.entries()).map(([number, calls]) => {
@@ -632,7 +646,7 @@ export async function GET(req: NextRequest) {
       // Daily (day-of-week) aggregation
       const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
       const daily = Array.from({ length: 7 }, (_, d) => ({
-        day: d, label: dayLabels[d], total_calls: 0, missed: 0, miss_rate: 0, dayCount: 0,
+        day: d, label: dayLabels[d], total_calls: 0, inbound: 0, missed: 0, miss_rate: 0, dayCount: 0,
       }));
 
       // Count how many of each weekday exist in the range
@@ -653,10 +667,11 @@ export async function GET(req: NextRequest) {
           dow = new Date(y, m - 1, d).getDay();
         }
         daily[dow].total_calls++;
+        if (r.direction === "inbound") daily[dow].inbound++;
         if (isMissed(r)) daily[dow].missed++;
       }
       for (const d of daily) {
-        d.miss_rate = d.total_calls > 0 ? Math.round((d.missed / d.total_calls) * 1000) / 10 : 0;
+        d.miss_rate = d.inbound > 0 ? Math.round((d.missed / d.inbound) * 1000) / 10 : 0;
       }
 
       // Reorder to start from Monday
