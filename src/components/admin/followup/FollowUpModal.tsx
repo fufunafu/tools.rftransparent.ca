@@ -64,6 +64,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
     outcome !== "" &&
     (!requiresNotes || notes.trim()) &&
     (!isLost || closeReason) &&
+    (!isLost || notes.trim().length >= 50) &&
     (!isFutureProject || customDate) &&
     !submitting;
 
@@ -199,12 +200,17 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
               onChange={(e) => setNotes(e.target.value)}
               placeholder={
                 outcome === "considering" ? "e.g., Needs to discuss with spouse, comparing materials..."
-                : outcome === "lost" && closeReason === "Other" ? "Explain why the lead was lost..."
+                : outcome === "lost" ? "Explain why the lead was lost..."
                 : "Optional notes about this follow-up..."
               }
               rows={3}
               className="w-full px-3 py-2 border border-sand-200 rounded-lg text-sm text-sand-900 resize-none focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+            {isLost && (
+              <p className={`text-xs mt-1 ${notes.trim().length >= 50 ? "text-sand-400" : "text-red-500"}`}>
+                {notes.trim().length}/50 minimum characters
+              </p>
+            )}
           </div>
 
           {/* Preview */}
