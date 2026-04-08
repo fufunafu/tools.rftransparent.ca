@@ -102,14 +102,20 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
 
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [threads, setThreads] = useState<UnansweredThread[]>([]);
-  const [threadCounts, setThreadCounts] = useState<ThreadCounts>({ actionable: 0, noise: 0, dismissed: 0, total: 0 });
-  const [threadFilter, setThreadFilter] = useState<"actionable" | "noise" | "dismissed">("actionable");
+  const [threadCounts, setThreadCounts] = useState<ThreadCounts>({ actionable: 0, noise: 0, dismissed: 0, resolved: 0, total: 0 });
+  const [threadFilter, setThreadFilter] = useState<"actionable" | "noise" | "dismissed" | "resolved">("actionable");
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
+  const [resolvingIds, setResolvingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
+  const [showNoiseSettings, setShowNoiseSettings] = useState(false);
+  const [noiseRules, setNoiseRules] = useState<{ id: string; rule_type: string; value: string }[]>([]);
+  const [noiseRuleType, setNoiseRuleType] = useState<"domain" | "prefix">("domain");
+  const [noiseRuleValue, setNoiseRuleValue] = useState("");
+  const [addingNoise, setAddingNoise] = useState(false);
 
   useEffect(() => {
     const savedStore = localStorage.getItem("cs_email_store");
@@ -141,7 +147,7 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
       setData(summary);
       setStores(summary.stores ?? []);
       setThreads(threadsData.threads ?? []);
-      setThreadCounts(threadsData.counts ?? { actionable: 0, noise: 0, dismissed: 0, total: 0 });
+      setThreadCounts(threadsData.counts ?? { actionable: 0, noise: 0, dismissed: 0, resolved: 0, total: 0 });
       setHistory(historyData.history ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load");
@@ -198,17 +204,90 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
   const handleUndismiss = async (threadId: string) => {
     setDismissingIds((prev) => new Set(prev).add(threadId));
     try {
+      const thread = threads.find((t) => t.thread_id === threadId);
       await fetch(`/api/customer-service/emails`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ thread_id: threadId, inbox: inboxEmail, action: "undismiss" }),
       });
       setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
-      setThreadCounts((prev) => ({ ...prev, dismissed: prev.dismissed - 1, actionable: prev.actionable + 1 }));
+      setThreadCounts((prev) => ({
+        ...prev,
+        actionable: prev.actionable + 1,
+        dismissed: thread?.resolution_type !== "resolved" ? prev.dismissed - 1 : prev.dismissed,
+        resolved: thread?.resolution_type === "resolved" ? prev.resolved - 1 : prev.resolved,
+      }));
     } finally {
       setDismissingIds((prev) => { const s = new Set(prev); s.delete(threadId); return s; });
     }
   };
+
+  const handleResolve = async (threadId: string) => {
+    setResolvingIds((prev) => new Set(prev).add(threadId));
+    try {
+      await fetch(`/api/customer-service/emails`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ thread_id: threadId, inbox: inboxEmail, action: "resolve" }),
+      });
+      setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+      setThreadCounts((prev) => ({ ...prev, actionable: prev.actionable - 1, resolved: prev.resolved + 1 }));
+    } finally {
+      setResolvingIds((prev) => { const s = new Set(prev); s.delete(threadId); return s; });
+    }
+  };
+
+  const loadNoiseRules = useCallback(async () => {
+    try {
+      const res = await fetch("/api/customer-service/email-noise-rules");
+      const json = await res.json();
+      setNoiseRules(json.rules ?? []);
+    } catch {}
+  }, []);
+
+  const handleAddNoise = async (domain: string, threadId: string) => {
+    try {
+      const res = await fetch("/api/customer-service/email-noise-rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_type: "domain", value: domain }),
+      });
+      if (res.ok || res.status === 409) {
+        // Remove thread from view immediately
+        setThreads((prev) => prev.filter((t) => t.thread_id !== threadId));
+        setThreadCounts((prev) => ({ ...prev, actionable: prev.actionable - 1, noise: prev.noise + 1 }));
+        if (res.ok) setNoiseRules((prev) => [...prev, { id: Date.now().toString(), rule_type: "domain", value: domain }]);
+      }
+    } catch {}
+  };
+
+  const handleAddNoiseRule = async () => {
+    if (!noiseRuleValue.trim()) return;
+    setAddingNoise(true);
+    try {
+      const res = await fetch("/api/customer-service/email-noise-rules", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rule_type: noiseRuleType, value: noiseRuleValue.trim() }),
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setNoiseRules((prev) => [json.rule, ...prev]);
+        setNoiseRuleValue("");
+      }
+    } finally {
+      setAddingNoise(false);
+    }
+  };
+
+  const handleDeleteNoiseRule = async (id: string) => {
+    try {
+      await fetch(`/api/customer-service/email-noise-rules?id=${id}`, { method: "DELETE" });
+      setNoiseRules((prev) => prev.filter((r) => r.id !== id));
+    } catch {}
+  };
+
+  useEffect(() => { if (showNoiseSettings) loadNoiseRules(); }, [showNoiseSettings, loadNoiseRules]);
 
   const metrics = data?.current;
   const change = data?.change;
@@ -349,8 +428,89 @@ export default function EmailDashboard({ defaultStore }: { defaultStore?: string
             onFilterChange={setThreadFilter}
             onDismiss={handleDismiss}
             onUndismiss={handleUndismiss}
+            onResolve={handleResolve}
+            onAddNoise={handleAddNoise}
             dismissingIds={dismissingIds}
+            resolvingIds={resolvingIds}
           />
+
+          {/* Noise filter settings (admin mode) */}
+          {mounted && mode === "admin" && (
+            <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
+              <button
+                onClick={() => setShowNoiseSettings((v) => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 text-xs text-sand-500 hover:bg-sand-50/50 transition-colors"
+              >
+                <span className="font-medium text-sand-700">Noise Filter Rules</span>
+                <span>{showNoiseSettings ? "▲" : "▼"}</span>
+              </button>
+
+              {showNoiseSettings && (
+                <div className="px-4 pb-4 space-y-3 border-t border-sand-100">
+                  <p className="text-[11px] text-sand-400 pt-3">
+                    Emails from these domains or subject prefixes are auto-classified as noise and hidden from the Needs Reply tab.
+                  </p>
+
+                  {/* Add rule form */}
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
+                      {(["domain", "prefix"] as const).map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setNoiseRuleType(t)}
+                          className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors capitalize ${
+                            noiseRuleType === t ? "bg-white text-sand-900 shadow-sm" : "text-sand-500 hover:text-sand-700"
+                          }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={noiseRuleValue}
+                      onChange={(e) => setNoiseRuleValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleAddNoiseRule(); }}
+                      placeholder={noiseRuleType === "domain" ? "example.com" : "noreply"}
+                      className="flex-1 min-w-[160px] max-w-xs px-3 py-1 text-xs border border-sand-200 rounded-lg bg-white text-sand-700 placeholder:text-sand-400 focus:outline-none focus:ring-1 focus:ring-sand-400"
+                    />
+                    <button
+                      onClick={handleAddNoiseRule}
+                      disabled={addingNoise || !noiseRuleValue.trim()}
+                      className="px-3 py-1 text-xs font-medium bg-sand-900 text-white rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+                    >
+                      {addingNoise ? "Adding..." : "Add"}
+                    </button>
+                  </div>
+
+                  {/* Rules list */}
+                  {noiseRules.length === 0 ? (
+                    <p className="text-xs text-sand-400">No custom rules yet.</p>
+                  ) : (
+                    <div className="space-y-1">
+                      {noiseRules.map((rule) => (
+                        <div key={rule.id} className="flex items-center gap-2 py-1">
+                          <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                            rule.rule_type === "domain" ? "bg-blue-50 text-blue-600" : "bg-purple-50 text-purple-600"
+                          }`}>
+                            {rule.rule_type}
+                          </span>
+                          <span className="text-xs text-sand-700 flex-1 font-mono">{rule.value}</span>
+                          <button
+                            onClick={() => handleDeleteNoiseRule(rule.id)}
+                            className="text-[11px] text-sand-300 hover:text-red-500 transition-colors"
+                            title="Remove rule"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Volume chart (admin mode) */}
           {mounted && mode === "admin" && history.length > 1 && (

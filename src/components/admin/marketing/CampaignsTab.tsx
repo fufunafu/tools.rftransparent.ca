@@ -35,16 +35,26 @@ function formatNumber(n: number) {
 
 type SortKey = "campaign" | "ad_spend" | "revenue" | "roas" | "clicks" | "impressions" | "conversions";
 
+const MKT_LS_PREFIX = "marketing_cache_v1:";
+function lsSave(key: string, data: unknown): void {
+  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
+}
+function lsLoad<T>(key: string): T | null {
+  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
 export default function CampaignsTab({
   from,
   to,
   demo,
   market = "all",
+  refreshKey = 0,
 }: {
   from: string;
   to: string;
   demo: boolean;
   market?: string;
+  refreshKey?: number;
 }) {
   const [data, setData] = useState<CampaignData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -54,6 +64,15 @@ export default function CampaignsTab({
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `campaigns:${from}:${to}:${market}:${demo}`;
+
+    const cached = lsLoad<CampaignData[]>(cacheKey);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     const params = new URLSearchParams({ view: "campaigns", from, to });
@@ -64,7 +83,9 @@ export default function CampaignsTab({
       .then((json) => {
         if (cancelled) return;
         if (json.error) throw new Error(json.error);
-        setData(json.campaigns ?? []);
+        const campaigns = json.campaigns ?? [];
+        setData(campaigns);
+        lsSave(cacheKey, campaigns);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -73,7 +94,7 @@ export default function CampaignsTab({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [from, to, demo, market]);
+  }, [from, to, demo, market, refreshKey]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {

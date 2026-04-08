@@ -23,7 +23,7 @@ export async function PUT(req: NextRequest) {
 
   const { error } = await getSupabase()
     .from("forecast_mom_rates")
-    .upsert(rows);
+    .upsert(rows, { onConflict: "store_id,month_index" });
 
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 });

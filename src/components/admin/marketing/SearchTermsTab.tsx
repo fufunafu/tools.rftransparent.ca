@@ -57,14 +57,24 @@ const COLUMN_TOOLTIPS: Partial<Record<SortKey, string>> = {
   roas: "Return on Ad Spend = Revenue / Spend. A ROAS of 3x means $3 earned for every $1 spent.",
 };
 
+const MKT_LS_PREFIX = "marketing_cache_v1:";
+function lsSave(key: string, data: unknown): void {
+  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
+}
+function lsLoad<T>(key: string): T | null {
+  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
 export default function SearchTermsTab({
   from,
   to,
   demo,
+  refreshKey = 0,
 }: {
   from: string;
   to: string;
   demo: boolean;
+  refreshKey?: number;
 }) {
   const [data, setData] = useState<SearchTermData[]>([]);
   const [loading, setLoading] = useState(false);
@@ -75,6 +85,15 @@ export default function SearchTermsTab({
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `search:${from}:${to}:${demo}`;
+
+    const cached = lsLoad<SearchTermData[]>(cacheKey);
+    if (cached) {
+      setData(cached);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     const params = new URLSearchParams({ view: "search-terms", from, to });
@@ -84,7 +103,9 @@ export default function SearchTermsTab({
       .then((json) => {
         if (cancelled) return;
         if (json.error) throw new Error(json.error);
-        setData(json.searchTerms ?? []);
+        const terms = json.searchTerms ?? [];
+        setData(terms);
+        lsSave(cacheKey, terms);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -93,7 +114,7 @@ export default function SearchTermsTab({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [from, to, demo]);
+  }, [from, to, demo, refreshKey]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(!sortAsc);

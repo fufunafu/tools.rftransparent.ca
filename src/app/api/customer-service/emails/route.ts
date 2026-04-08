@@ -86,6 +86,24 @@ const NOISE_DOMAINS = [
 // Prefix patterns in the domain part that indicate noise (e.g. ads-noreply@google.com)
 const NOISE_DOMAIN_PREFIXES = ["noreply@", "no-reply@", "ads-noreply@", "workspace-noreply@", "notifications-noreply@", "messages-noreply@", "googledev-noreply@", "iebilling-no_reply@"];
 
+// Custom noise rules loaded from DB (merged with hardcoded lists above)
+let _extraPrefixes: string[] = [];
+let _extraDomains: string[] = [];
+let _noiseCacheAt = 0;
+const NOISE_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function refreshNoiseRules(): Promise<void> {
+  if (Date.now() - _noiseCacheAt < NOISE_CACHE_TTL_MS) return;
+  try {
+    const { data } = await getSupabase().from("email_noise_rules").select("rule_type, value");
+    _extraPrefixes = data?.filter((r) => r.rule_type === "prefix").map((r) => r.value as string) ?? [];
+    _extraDomains = data?.filter((r) => r.rule_type === "domain").map((r) => r.value as string) ?? [];
+    _noiseCacheAt = Date.now();
+  } catch {
+    // Keep stale cache on error
+  }
+}
+
 /**
  * Returns true if the sender email is automated/marketing noise that doesn't need a response.
  */
@@ -97,14 +115,12 @@ function isNoiseSender(email: string): boolean {
   const local = lower.slice(0, atIdx);
   const domain = lower.slice(atIdx + 1);
 
-  // Check local part prefix patterns
-  for (const prefix of NOISE_PREFIXES) {
+  // Check hardcoded + custom prefix patterns
+  for (const prefix of [...NOISE_PREFIXES, ..._extraPrefixes]) {
     if (local === prefix || local.startsWith(prefix + "+") || local.startsWith(prefix + ".")) return true;
-    // Also catch exact prefix match (noreply@...)
-    if (local === prefix) return true;
   }
 
-  // Check for -noreply or _noreply suffix in local part (e.g. ads-noreply, iebilling-no_reply)
+  // Check for -noreply or _noreply suffix in local part
   if (/-noreply$/i.test(local) || /_noreply$/i.test(local) || /-no[_-]reply$/i.test(local)) return true;
 
   // Check the full email against domain prefix patterns
@@ -112,8 +128,8 @@ function isNoiseSender(email: string): boolean {
     if (lower.includes(dp)) return true;
   }
 
-  // Check domain patterns (exact match or subdomain)
-  for (const nd of NOISE_DOMAINS) {
+  // Check hardcoded + custom domain patterns (exact match or subdomain)
+  for (const nd of [...NOISE_DOMAINS, ..._extraDomains]) {
     if (domain === nd || domain.endsWith("." + nd)) return true;
   }
 
@@ -217,12 +233,16 @@ async function fetchRecords(from: string, to: string, storeId: string): Promise<
 
 const STORES = INBOXES.map((i) => ({ id: i.storeId, label: i.label }));
 
-async function fetchDismissedThreadIds(inbox: string): Promise<Set<string>> {
+async function fetchDismissedThreads(inbox: string): Promise<Map<string, "dismissed" | "resolved">> {
   const { data } = await getSupabase()
     .from("email_dismissed_threads")
-    .select("thread_id")
+    .select("thread_id, resolution_type")
     .eq("inbox", inbox);
-  return new Set((data ?? []).map((r: { thread_id: string }) => r.thread_id));
+  const map = new Map<string, "dismissed" | "resolved">();
+  for (const r of (data ?? [])) {
+    map.set(r.thread_id, (r.resolution_type ?? "dismissed") as "dismissed" | "resolved");
+  }
+  return map;
 }
 
 export async function GET(req: NextRequest) {
@@ -265,8 +285,9 @@ export async function GET(req: NextRequest) {
     errorMessage: lastRunRow[0].error_message,
   } : null;
 
+  await refreshNoiseRules();
   const inboxEmail = INBOXES.find((i) => i.storeId === storeId)?.email ?? "";
-  const dismissedIds = await fetchDismissedThreadIds(inboxEmail);
+  const dismissedMap = await fetchDismissedThreads(inboxEmail);
 
   try {
     // --- Unanswered threads view ---
@@ -282,7 +303,7 @@ export async function GET(req: NextRequest) {
         threadMap.set(r.thread_id, arr);
       }
 
-      const unanswered: { thread_id: string; subject: string; from_email: string; received_at: string; message_count: number; snippet: string; is_noise: boolean; is_dismissed: boolean }[] = [];
+      const unanswered: { thread_id: string; subject: string; from_email: string; received_at: string; message_count: number; snippet: string; is_noise: boolean; is_dismissed: boolean; resolution_type?: "dismissed" | "resolved" }[] = [];
 
       for (const [threadId, msgs] of threadMap) {
         const inbound = msgs.filter((m) => m.direction === "inbound").sort((a, b) => a.received_at.localeCompare(b.received_at));
@@ -294,7 +315,8 @@ export async function GET(req: NextRequest) {
 
         if (!hasReply) {
           const noise = isNoiseSender(firstIn.from_email);
-          const dismissed = dismissedIds.has(threadId);
+          const dismissed = dismissedMap.has(threadId);
+          const resolution_type = dismissed ? dismissedMap.get(threadId) : undefined;
 
           unanswered.push({
             thread_id: threadId,
@@ -305,6 +327,7 @@ export async function GET(req: NextRequest) {
             snippet: firstIn.snippet,
             is_noise: noise,
             is_dismissed: dismissed,
+            resolution_type,
           });
         }
       }
@@ -315,8 +338,10 @@ export async function GET(req: NextRequest) {
       let filtered = unanswered;
       if (filter === "noise") {
         filtered = unanswered.filter((t) => t.is_noise);
+      } else if (filter === "resolved") {
+        filtered = unanswered.filter((t) => t.is_dismissed && !t.is_noise && t.resolution_type === "resolved");
       } else if (filter === "dismissed") {
-        filtered = unanswered.filter((t) => t.is_dismissed && !t.is_noise);
+        filtered = unanswered.filter((t) => t.is_dismissed && !t.is_noise && t.resolution_type !== "resolved");
       } else if (filter === "all") {
         // no filtering
       } else {
@@ -327,7 +352,8 @@ export async function GET(req: NextRequest) {
       const counts = {
         actionable: unanswered.filter((t) => !t.is_noise && !t.is_dismissed).length,
         noise: unanswered.filter((t) => t.is_noise).length,
-        dismissed: unanswered.filter((t) => t.is_dismissed && !t.is_noise).length,
+        dismissed: unanswered.filter((t) => t.is_dismissed && !t.is_noise && t.resolution_type !== "resolved").length,
+        resolved: unanswered.filter((t) => t.is_dismissed && !t.is_noise && t.resolution_type === "resolved").length,
         total: unanswered.length,
       };
 
@@ -367,8 +393,8 @@ export async function GET(req: NextRequest) {
       fetchRecords(prevFromStr, prevToStr, storeId),
     ]);
 
-    const current = computeMetrics(currentRecords, dismissedIds);
-    const previous = computeMetrics(previousRecords, dismissedIds);
+    const current = computeMetrics(currentRecords, dismissedMap);
+    const previous = computeMetrics(previousRecords, dismissedMap);
 
     return NextResponse.json({
       current,
@@ -482,7 +508,7 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { thread_id, inbox, action } = body as { thread_id: string; inbox: string; action: "dismiss" | "undismiss" };
+  const { thread_id, inbox, action } = body as { thread_id: string; inbox: string; action: "dismiss" | "undismiss" | "resolve" };
 
   if (!thread_id || !inbox) {
     return NextResponse.json({ error: "thread_id and inbox required" }, { status: 400 });
@@ -495,10 +521,18 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ status: "undismissed", thread_id });
   }
 
+  if (action === "resolve") {
+    const { error } = await supabase
+      .from("email_dismissed_threads")
+      .upsert({ thread_id, inbox, dismissed_at: new Date().toISOString(), resolution_type: "resolved" }, { onConflict: "thread_id,inbox" });
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ status: "resolved", thread_id });
+  }
+
   // Default: dismiss
   const { error } = await supabase
     .from("email_dismissed_threads")
-    .upsert({ thread_id, inbox, dismissed_at: new Date().toISOString() }, { onConflict: "thread_id,inbox" });
+    .upsert({ thread_id, inbox, dismissed_at: new Date().toISOString(), resolution_type: "dismissed" }, { onConflict: "thread_id,inbox" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ status: "dismissed", thread_id });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -476,6 +476,15 @@ function InsightsPanel({
   );
 }
 
+// Persistent cache: survives page reloads — only updated on explicit Refresh
+const MKT_LS_PREFIX = "marketing_cache_v1:";
+function mktLsSave(key: string, data: unknown): void {
+  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
+}
+function mktLsLoad<T>(key: string): T | null {
+  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
 export default function MarketingDashboard() {
   const [range, setRange] = useState<Range>("7d");
   const [customFrom, setCustomFrom] = useState(() => daysAgoStr(30));
@@ -488,6 +497,8 @@ export default function MarketingDashboard() {
   const [tab, setTab] = useState<Tab>("overview");
   const [hasGA4, setHasGA4] = useState(false);
   const [market, setMarket] = useState<"all" | "us" | "ca">("all");
+  const [refreshKey, setRefreshKey] = useState(0);
+  const forceNextRef = useRef(false);
 
   const getDateRange = useCallback(() => {
     const rangeDays: Record<string, number> = {
@@ -498,9 +509,24 @@ export default function MarketingDashboard() {
   }, [range, customFrom, customTo]);
 
   const loadData = useCallback(async () => {
+    const { from, to } = getDateRange();
+    const force = forceNextRef.current;
+    forceNextRef.current = false;
+
+    // Check localStorage unless forcing a refresh
+    if (!force) {
+      const cacheKey = `overview:${from}:${to}:${market}:${demo}`;
+      const cached = mktLsLoad<{ data: MarketingResponse; history: DailyPoint[]; hasGA4: boolean }>(cacheKey);
+      if (cached) {
+        setData(cached.data);
+        setHistory(cached.history ?? []);
+        setHasGA4(cached.hasGA4 ?? false);
+        return;
+      }
+    }
+
     setLoading(true);
     setError("");
-    const { from, to } = getDateRange();
 
     try {
       const params = new URLSearchParams({ from, to });
@@ -521,19 +547,38 @@ export default function MarketingDashboard() {
         throw new Error(json.error || "Failed to load");
       }
 
-      setData(await summaryRes.json());
+      const summaryData: MarketingResponse = await summaryRes.json();
+      setData(summaryData);
 
+      let histData: DailyPoint[] = [];
+      let hasGA4Val = false;
       if (historyRes.ok) {
         const histJson = await historyRes.json();
-        setHistory(histJson.history ?? []);
-        setHasGA4(!!histJson.hasGA4);
+        histData = histJson.history ?? [];
+        hasGA4Val = !!histJson.hasGA4;
+        setHistory(histData);
+        setHasGA4(hasGA4Val);
       }
+
+      mktLsSave(`overview:${from}:${to}:${market}:${demo}`, { data: summaryData, history: histData, hasGA4: hasGA4Val });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   }, [getDateRange, demo, market]);
+
+  const handleRefresh = useCallback(() => {
+    // Clear all marketing cache entries so sub-tabs also fetch fresh
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith(MKT_LS_PREFIX))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch {}
+    forceNextRef.current = true;
+    setRefreshKey((k) => k + 1);
+    loadData();
+  }, [loadData]);
 
   useEffect(() => {
     loadData();
@@ -676,7 +721,7 @@ export default function MarketingDashboard() {
         </button>
 
         <button
-          onClick={loadData}
+          onClick={handleRefresh}
           disabled={loading}
           className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
         >
@@ -1022,9 +1067,9 @@ export default function MarketingDashboard() {
         </>
       )}
 
-      {tab === "campaigns" && <CampaignsTab from={from} to={to} demo={demo} market={market} />}
-      {tab === "audience" && <AudienceTab from={from} to={to} demo={demo} market={market} />}
-      {tab === "search" && <SearchTermsTab from={from} to={to} demo={demo} />}
+      {tab === "campaigns" && <CampaignsTab from={from} to={to} demo={demo} market={market} refreshKey={refreshKey} />}
+      {tab === "audience" && <AudienceTab from={from} to={to} demo={demo} market={market} refreshKey={refreshKey} />}
+      {tab === "search" && <SearchTermsTab from={from} to={to} demo={demo} refreshKey={refreshKey} />}
     </div>
   );
 }

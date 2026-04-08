@@ -109,16 +109,34 @@ const GENDER_COLORS = ["#2563eb", "#ec4899", "#94a3b8"];
 
 type GeoSortKey = "region" | "ad_spend" | "revenue" | "roas" | "clicks" | "conversions";
 
+const MKT_LS_PREFIX = "marketing_cache_v1:";
+function lsSave(key: string, data: unknown): void {
+  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
+}
+function lsLoad<T>(key: string): T | null {
+  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
+}
+
+interface AudienceCacheEntry {
+  devices: DeviceData[];
+  geo: GeoData[];
+  age: AgeData[];
+  gender: GenderData[];
+  languages: LanguageData[];
+}
+
 export default function AudienceTab({
   from,
   to,
   demo,
   market = "all",
+  refreshKey = 0,
 }: {
   from: string;
   to: string;
   demo: boolean;
   market?: string;
+  refreshKey?: number;
 }) {
   const [devices, setDevices] = useState<DeviceData[]>([]);
   const [geo, setGeo] = useState<GeoData[]>([]);
@@ -150,6 +168,21 @@ export default function AudienceTab({
 
   useEffect(() => {
     let cancelled = false;
+    const cacheKey = `audience:${from}:${to}:${market}:${demo}`;
+
+    const cached = lsLoad<AudienceCacheEntry>(cacheKey);
+    if (cached) {
+      setDevices(cached.devices ?? []);
+      setGeo(cached.geo ?? []);
+      setAgeData(cached.age ?? []);
+      setGenderData(cached.gender ?? []);
+      setLanguages(cached.languages ?? []);
+      setSelectedCountry(null);
+      setSelectedRegion(null);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError("");
     setSelectedCountry(null);
@@ -165,11 +198,19 @@ export default function AudienceTab({
         if (cancelled) return;
         if (devJson.error) throw new Error(devJson.error);
         if (geoJson.error) throw new Error(geoJson.error);
-        setDevices(devJson.devices ?? []);
-        setGeo(geoJson.geo ?? []);
-        setAgeData(demoJson.age ?? []);
-        setGenderData(demoJson.gender ?? []);
-        setLanguages(langJson.languages ?? []);
+        const entry: AudienceCacheEntry = {
+          devices: devJson.devices ?? [],
+          geo: geoJson.geo ?? [],
+          age: demoJson.age ?? [],
+          gender: demoJson.gender ?? [],
+          languages: langJson.languages ?? [],
+        };
+        setDevices(entry.devices);
+        setGeo(entry.geo);
+        setAgeData(entry.age);
+        setGenderData(entry.gender);
+        setLanguages(entry.languages);
+        lsSave(cacheKey, entry);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -182,7 +223,7 @@ export default function AudienceTab({
         }
       });
     return () => { cancelled = true; };
-  }, [from, to, demo, market, demoParam, marketParam]);
+  }, [from, to, demo, market, demoParam, marketParam, refreshKey]);
 
   const loadRegions = useCallback((country: GeoData) => {
     setSelectedCountry(country);
