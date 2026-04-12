@@ -7,7 +7,7 @@ const MarketingDashboard = lazy(() => import("./MarketingDashboard"));
 const AccountingDashboard = lazy(() => import("./AccountingDashboard"));
 const CustomerServiceDashboard = lazy(() => import("./CustomerServiceDashboard"));
 
-type Period = "daily" | "weekly" | "monthly";
+type Period = "daily" | "weekly" | "monthly" | "yearly";
 type Tab = "sales" | "marketing" | "warehouse" | "customer_service" | "accounting";
 
 interface Location {
@@ -50,6 +50,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   daily: "Daily",
   weekly: "Weekly",
   monthly: "Monthly",
+  yearly: "Yearly",
 };
 
 function formatCurrency(n: number) {
@@ -194,7 +195,7 @@ export function EmployeeTab({ department }: { department: string }) {
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["daily", "weekly", "monthly"] as Period[]).map((p) => (
+          {(["daily", "weekly", "monthly", "yearly"] as Period[]).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}

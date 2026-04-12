@@ -108,7 +108,7 @@ function makeUnfulfilledOrdersQuery(cursor?: string) {
   `;
 }
 
-type Period = "daily" | "weekly" | "monthly";
+type Period = "daily" | "weekly" | "monthly" | "yearly";
 
 function getPeriodRange(
   period: Period,
@@ -133,11 +133,16 @@ function getPeriodRange(
     prevStart = new Date(start);
     prevStart.setDate(prevStart.getDate() - 7);
     prevEnd = new Date(start);
-  } else {
-    // monthly
+  } else if (period === "monthly") {
     start = new Date(date.getFullYear(), date.getMonth(), 1);
     end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
     prevStart = new Date(date.getFullYear(), date.getMonth() - 1, 1);
+    prevEnd = new Date(start);
+  } else {
+    // yearly
+    start = new Date(date.getFullYear(), 0, 1);
+    end = new Date(date.getFullYear() + 1, 0, 1);
+    prevStart = new Date(date.getFullYear() - 1, 0, 1);
     prevEnd = new Date(start);
   }
 
@@ -171,7 +176,7 @@ export async function GET(req: NextRequest) {
   const locationId = req.nextUrl.searchParams.get("locationId");
   const employeeId = req.nextUrl.searchParams.get("employeeId");
 
-  if (!["daily", "weekly", "monthly"].includes(period))
+  if (!["daily", "weekly", "monthly", "yearly"].includes(period))
     return NextResponse.json({ error: "Invalid period" }, { status: 400 });
 
   const { start, end, prevStart, prevEnd } = getPeriodRange(period, dateStr);
