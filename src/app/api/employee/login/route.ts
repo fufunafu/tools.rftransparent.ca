@@ -1,13 +1,8 @@
-import { NextRequest, NextResponse } from "next/server";
-import { validatePassword, setSessionCookie } from "@/lib/employee-auth";
+import { NextResponse } from "next/server";
 
-export async function POST(req: NextRequest) {
-  const { password } = await req.json();
-
-  if (!validatePassword(password)) {
-    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
-  }
-
-  await setSessionCookie();
-  return NextResponse.json({ ok: true });
+export async function POST() {
+  return NextResponse.json(
+    { error: "Password login is no longer supported. Please sign in with Google." },
+    { status: 410 }
+  );
 }

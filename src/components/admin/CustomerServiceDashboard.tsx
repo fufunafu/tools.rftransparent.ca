@@ -279,11 +279,11 @@ const METRIC_CARDS: {
   { key: "total_calls", label: "Total Calls", format: formatNumber, tooltip: "Total number of inbound + outbound calls in the selected period." },
   { key: "inbound_calls", label: "Inbound", format: formatNumber, tooltip: "Calls received from customers." },
   { key: "outbound_calls", label: "Outbound", format: formatNumber, tooltip: "Calls made by your team to customers." },
-  { key: "missed_calls", label: "Missed Calls", format: formatNumber, invert: true, tooltip: "Inbound calls that went unanswered (no pickup, no voicemail)." },
-  { key: "miss_rate", label: "Miss Rate", format: (v) => `${v}%`, invert: true, tooltip: "Percentage of inbound calls that were missed. Calculated as: missed calls \u00f7 inbound calls \u00d7 100. Industry average is 10\u201320%." },
+  { key: "missed_calls", label: "Unanswered", format: formatNumber, invert: true, tooltip: "Inbound calls where nobody picked up \u2014 includes calls that rang out and voicemails." },
+  { key: "miss_rate", label: "Miss Rate", format: (v) => `${v}%`, invert: true, tooltip: "Percentage of inbound calls that went unanswered. Calculated as: unanswered calls \u00f7 inbound calls \u00d7 100. Industry average is 10\u201320%." },
   { key: "vm_calls", label: "Voicemails", format: formatNumber, tooltip: "Calls that went to voicemail." },
-  { key: "avg_response_time", label: "Avg Response", format: formatResponseTime, tooltip: "Average time (in minutes) between a missed call and the first outbound callback to that number." },
-  { key: "avg_duration_inbound", label: "Avg Inbound", format: (v) => `${v} min`, tooltip: "Average duration of answered inbound calls (excludes missed and voicemail)." },
+  { key: "avg_response_time", label: "Avg Response", format: formatResponseTime, tooltip: "Average time (in minutes) between an unanswered call and the first outbound callback to that number." },
+  { key: "avg_duration_inbound", label: "Avg Inbound", format: (v) => `${v} min`, tooltip: "Average duration of answered inbound calls (excludes unanswered and voicemail)." },
   { key: "avg_duration_outbound", label: "Avg Outbound", format: (v) => `${v} min`, tooltip: "Average duration of outbound calls." },
   { key: "first_time_callers", label: "New Callers", format: formatNumber, tooltip: "Unique phone numbers calling for the first time in this period." },
   { key: "returning_callers", label: "Returning", format: formatNumber, tooltip: "Phone numbers that have called more than once in this period." },
@@ -321,7 +321,7 @@ const BENCHMARKS = [
     high: 80,
     unit: "%",
     industry: "60-80%",
-    tooltip: "Percentage of missed callers who were called back. Calculated as: callers who received a callback \u00f7 total unanswered calls \u00d7 100. Higher is better \u2014 above 80% is excellent.",
+    tooltip: "Percentage of unanswered callers who were called back. Calculated as: callers who received a callback \u00f7 total unanswered calls \u00d7 100. Higher is better \u2014 above 80% is excellent.",
     invert: true,
     getValue: (m: Metrics) => m.recovery_rate,
   },
@@ -332,7 +332,7 @@ const BENCHMARKS = [
     high: 60,
     unit: " min",
     industry: "15-60 min",
-    tooltip: "Average time in minutes between a missed call and the callback to that caller. Only includes calls that were actually called back. Under 15 min is excellent, over 60 min needs improvement.",
+    tooltip: "Average time in minutes between an unanswered call and the callback to that caller. Only includes calls that were actually called back. Under 15 min is excellent, over 60 min needs improvement.",
     invert: false,
     getValue: (m: Metrics) => m.avg_response_time ?? 0,
   },
@@ -354,7 +354,7 @@ const BENCHMARKS = [
     high: 15,
     unit: "%",
     industry: "5-15%",
-    tooltip: "Percentage of inbound callers who needed a callback because their call was missed. Calculated as: unanswered calls \u00f7 total inbound calls \u00d7 100. Lower is better \u2014 means more calls are answered on the first try.",
+    tooltip: "Percentage of inbound callers who went unanswered. Calculated as: unanswered calls \u00f7 total inbound calls \u00d7 100. Lower is better \u2014 means more calls are answered on the first try.",
     invert: false,
     getValue: (m: Metrics) =>
       m.inbound_calls > 0
@@ -1239,9 +1239,9 @@ function InsightsPanel({ metrics, daily }: { metrics: Metrics; daily?: DailyPoin
   }
 
   if (metrics.recovery_rate >= 80) {
-    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is excellent — you're calling back most missed callers.`, type: "positive" });
+    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is excellent — you're calling back most unanswered callers.`, type: "positive" });
   } else if (metrics.recovery_rate >= 60) {
-    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is solid — most missed callers are getting a callback.`, type: "positive" });
+    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is solid — most unanswered callers are getting a callback.`, type: "positive" });
   }
 
   if (metrics.avg_response_time != null && metrics.avg_response_time > 0 && metrics.avg_response_time <= 15) {
@@ -1268,11 +1268,11 @@ function InsightsPanel({ metrics, daily }: { metrics: Metrics; daily?: DailyPoin
   }
 
   if (metrics.recovery_rate < 60) {
-    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is below average. Aim to call back every missed caller within the same business day.`, type: "improvement" });
+    insights.push({ text: `Recovery rate of ${metrics.recovery_rate}% is below average. Aim to call back every unanswered caller within the same business day.`, type: "improvement" });
   }
 
   if (metrics.avg_response_time != null && metrics.avg_response_time > 60) {
-    insights.push({ text: `Average callback time of ${metrics.avg_response_time} min is over an hour. Try to return missed calls within 30 minutes during business hours.`, type: "improvement" });
+    insights.push({ text: `Average callback time of ${metrics.avg_response_time} min is over an hour. Try to return unanswered calls within 30 minutes during business hours.`, type: "improvement" });
   }
 
   if (metrics.avg_duration > 6) {
@@ -1282,7 +1282,7 @@ function InsightsPanel({ metrics, daily }: { metrics: Metrics; daily?: DailyPoin
   if (callbackRate > 15) {
     insights.push({ text: `Callback rate of ${callbackRate}% is high. Prioritize answering inbound calls over other tasks to reduce the need for callbacks.`, type: "improvement" });
   } else if (callbackRate > 5) {
-    insights.push({ text: `Callback rate of ${callbackRate}% could be improved. Try to return missed calls within 30 minutes during business hours.`, type: "improvement" });
+    insights.push({ text: `Callback rate of ${callbackRate}% could be improved. Try to return unanswered calls within 30 minutes during business hours.`, type: "improvement" });
   }
 
   // Weekend coverage alerts
@@ -1493,8 +1493,8 @@ function StaffView({
   const staffCards: { label: string; value: number; prev: number; change: number | null | undefined; format: (n: number) => string; target?: number; invert?: boolean; higherIsBetter?: boolean; tooltip?: string; subtitle?: string }[] = [
     { label: "Inbound", value: inboundCount, prev: data?.previous?.inbound_calls ?? 0, change: change?.inbound_calls, format: formatNumber },
     { label: "Outbound", value: metrics?.outbound_calls ?? 0, prev: data?.previous?.outbound_calls ?? 0, change: change?.outbound_calls, format: formatNumber },
-    { label: "Miss Rate", value: missRate, prev: data?.previous?.miss_rate ?? 0, change: change?.miss_rate, format: (n: number) => `${n}%`, target: MISS_RATE_TARGET, invert: true, tooltip: "Missed calls (unanswered + voicemail) ÷ total inbound × 100.", subtitle: `${missedCount} missed out of ${inboundCount} inbound` },
-    { label: "Called Back", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Missed calls your team called back ÷ total missed × 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} missed` },
+    { label: "Miss Rate", value: missRate, prev: data?.previous?.miss_rate ?? 0, change: change?.miss_rate, format: (n: number) => `${n}%`, target: MISS_RATE_TARGET, invert: true, tooltip: "Unanswered calls (no pickup + voicemail) \u00f7 total inbound \u00d7 100.", subtitle: `${missedCount} unanswered out of ${inboundCount} inbound` },
+    { label: "Called Back", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Unanswered calls your team called back \u00f7 total unanswered \u00d7 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} unanswered` },
   ];
 
   return (
@@ -1516,7 +1516,7 @@ function StaffView({
               {!missOnTrack && (
                 <p className="text-sm text-amber-800">
                   <span className="font-medium">Miss rate is {missRate}%</span>
-                  <span className="text-amber-600"> — target is &le;{MISS_RATE_TARGET}%. {missedCount} missed call{missedCount !== 1 ? "s" : ""} this period.</span>
+                  <span className="text-amber-600"> — target is &le;{MISS_RATE_TARGET}%. {missedCount} unanswered call{missedCount !== 1 ? "s" : ""} this period.</span>
                 </p>
               )}
               {!callbackOnTrack && (
@@ -1580,7 +1580,7 @@ function StaffView({
 
       {/* Callbacks */}
       <div>
-        <h2 className="text-sm font-semibold text-sand-700 mb-2">Missed — Action Needed</h2>
+        <h2 className="text-sm font-semibold text-sand-700 mb-2">Needs Callback</h2>
         <CallbacksTab
           data={callbackData}
           store={store}
@@ -1899,7 +1899,7 @@ function CallbacksTab({
         )}
         <div className="flex items-center gap-2">
           <span className="text-xs text-sand-400">
-            {data?.totalMissed ?? 0} total missed calls
+            {data?.totalMissed ?? 0} unresolved calls
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">

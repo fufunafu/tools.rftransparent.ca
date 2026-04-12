@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAuthenticated, getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getStores } from "@/lib/shopify";
 import {
@@ -243,9 +243,11 @@ export async function GET(req: NextRequest) {
 // ─── POST ────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated()))
+  const user = await getAuthenticatedUser();
+  if (!user)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
+  const loggedBy = user.email ?? "unknown";
   const action = req.nextUrl.searchParams.get("action");
   const storeId = req.nextUrl.searchParams.get("store") || STORES[0]?.id;
 
@@ -293,7 +295,7 @@ export async function POST(req: NextRequest) {
         lead_id,
         outcome,
         notes: notes || null,
-        logged_by: "admin",
+        logged_by: loggedBy,
       });
       if (logError) throw new Error(logError.message);
 
@@ -368,7 +370,7 @@ export async function POST(req: NextRequest) {
         lead_id: id,
         outcome: status,
         notes: close_reason ? `Bulk closed: ${close_reason}` : "Bulk closed",
-        logged_by: "admin",
+        logged_by: loggedBy,
       }));
 
       await supabase.from("followup_logs").insert(logs);
