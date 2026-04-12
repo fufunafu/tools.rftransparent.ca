@@ -83,7 +83,7 @@ function ChangeBadge({ value }: { value: number | null }) {
   );
 }
 
-const CURRENCY_METRICS = new Set(["revenue", "aov", "ad_spend"]);
+const CURRENCY_METRICS = new Set(["revenue", "sold", "quoted", "aov", "ad_spend"]);
 const HOURS_METRICS = new Set(["avg_fulfillment_hours", "oldest_unfulfilled_hours"]);
 
 function formatMetricValue(metric: string, value: number) {
@@ -94,6 +94,9 @@ function formatMetricValue(metric: string, value: number) {
 
 function metricLabel(key: string) {
   const labels: Record<string, string> = {
+    quoted: "Quoted",
+    quote_count: "Quotes",
+    sold: "Sold",
     revenue: "Revenue",
     orders: "Orders",
     aov: "AOV",
@@ -212,7 +215,7 @@ export function EmployeeTab({ department }: { department: string }) {
           className="rounded-lg border border-sand-200 px-3 py-2 text-sm text-sand-700 bg-white"
         />
 
-        {(department === "sales" || department === "warehouse") && (
+        {department === "warehouse" && (
           <select
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
@@ -302,9 +305,11 @@ export function EmployeeTab({ department }: { department: string }) {
                   <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
                     Employee
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                    Location
-                  </th>
+                  {department !== "sales" && (
+                    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+                      Location
+                    </th>
+                  )}
                   {allMetricKeys.map((key) => (
                     <th
                       key={key}
@@ -325,7 +330,7 @@ export function EmployeeTab({ department }: { department: string }) {
                 {sortedEmployees.length === 0 && (
                   <tr>
                     <td
-                      colSpan={2 + allMetricKeys.length}
+                      colSpan={(department !== "sales" ? 2 : 1) + allMetricKeys.length}
                       className="px-4 py-8 text-center text-sand-400"
                     >
                       No employees found for this department.{" "}
@@ -351,9 +356,11 @@ export function EmployeeTab({ department }: { department: string }) {
                     <td className="px-4 py-3 font-medium text-sand-900">
                       {emp.employeeName}
                     </td>
-                    <td className="px-4 py-3 text-sand-500">
-                      {emp.locationName}
-                    </td>
+                    {department !== "sales" && (
+                      <td className="px-4 py-3 text-sand-500">
+                        {emp.locationName}
+                      </td>
+                    )}
                     {allMetricKeys.map((key) => (
                       <td key={key} className="px-4 py-3 text-right">
                         <span className="text-sand-900">

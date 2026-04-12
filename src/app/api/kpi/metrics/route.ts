@@ -29,6 +29,20 @@ interface FulfillmentOrdersResponse {
   };
 }
 
+interface DraftOrderNode {
+  createdAt: string;
+  status: string;
+  tags: string[];
+  subtotalPriceSet: { shopMoney: { amount: string } };
+}
+
+interface DraftOrdersResponse {
+  draftOrders: {
+    edges: { node: DraftOrderNode; cursor: string }[];
+    pageInfo: { hasNextPage: boolean };
+  };
+}
+
 function makeOrdersQuery(dateFilter: string, cursor?: string) {
   const after = cursor ? `, after: "${cursor}"` : "";
   return `
@@ -51,6 +65,26 @@ function makeFulfilledOrdersQuery(dateFilter: string, cursor?: string) {
       orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "fulfillment_status:shipped created_at:>='${dateFilter}'"${after}) {
         edges {
           node { createdAt displayFulfillmentStatus fulfillments { createdAt } }
+          cursor
+        }
+        pageInfo { hasNextPage }
+      }
+    }
+  `;
+}
+
+function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
+  const after = cursor ? `, after: "${cursor}"` : "";
+  return `
+    query {
+      draftOrders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
+        edges {
+          node {
+            createdAt
+            status
+            tags
+            subtotalPriceSet { shopMoney { amount } }
+          }
           cursor
         }
         pageInfo { hasNextPage }
@@ -168,35 +202,19 @@ export async function GET(req: NextRequest) {
     (e) => e.department !== "sales" && e.department !== "warehouse"
   );
 
-  // --- SALES: auto-calculate from Shopify ---
+  // --- SALES: auto-calculate from Shopify (RF Transparent store only) ---
   if (salesEmployees.length > 0) {
-    // Build a map from lowercase tag → employee for fast lookup
-    const tagToEmployee = new Map<
-      string,
-      (typeof salesEmployees)[0]
-    >();
-    for (const emp of salesEmployees) {
-      const tags: string[] = emp.shopify_tags ?? [];
-      for (const t of tags) {
-        if (t) tagToEmployee.set(t.toLowerCase(), emp);
-      }
-    }
-
-    // Fetch orders from all stores for the full range (prev + current)
-    const allOrders: OrderNode[] = [];
     const stores = getStores();
-
-    // Determine which stores are relevant based on location filter
-    const relevantStoreIds = locationId
-      ? employees
-          .flatMap((e) => e.locations?.shopify_store_ids ?? [])
-          .filter((v, i, a) => a.indexOf(v) === i)
-      : stores.map((s) => s.id);
+    // Sales always uses RF Transparent store only
+    const rfStore = stores.find((s) => s.label === "RF Transparent");
+    const salesStoreIds = rfStore ? [rfStore.id] : stores.map((s) => s.id);
 
     const fetchDate = toDateStr(prevStart);
 
+    // Fetch completed orders (sold)
+    const allOrders: OrderNode[] = [];
     for (const store of stores) {
-      if (!relevantStoreIds.includes(store.id)) continue;
+      if (!salesStoreIds.includes(store.id)) continue;
       try {
         let cursor: string | undefined;
         let hasNext = true;
@@ -213,36 +231,69 @@ export async function GET(req: NextRequest) {
           pages++;
         }
       } catch (err) {
-        console.error(
-          `[KPI Metrics] Shopify fetch failed for ${store.id}:`,
-          err
-        );
+        console.error(`[KPI Metrics] Orders fetch failed for ${store.id}:`, err);
       }
     }
 
-    // Attribute orders to employees via tags (match any alias)
+    // Fetch draft orders (quoted)
+    const allDrafts: DraftOrderNode[] = [];
+    for (const store of stores) {
+      if (!salesStoreIds.includes(store.id)) continue;
+      try {
+        let cursor: string | undefined;
+        let hasNext = true;
+        let pages = 0;
+        while (hasNext && pages < 20) {
+          const data = await shopifyGraphQL<DraftOrdersResponse>(
+            store.id,
+            makeDraftOrdersQuery(fetchDate, cursor)
+          );
+          const edges = data.draftOrders.edges;
+          allDrafts.push(...edges.map((e) => e.node));
+          hasNext = data.draftOrders.pageInfo.hasNextPage;
+          cursor = edges[edges.length - 1]?.cursor;
+          pages++;
+        }
+      } catch (err) {
+        console.error(`[KPI Metrics] Drafts fetch failed for ${store.id}:`, err);
+      }
+    }
+
+    // Attribute to employees via tags
     for (const emp of salesEmployees) {
-      const empTags: string[] = (emp.shopify_tags ?? []).map((t: string) => t.toLowerCase()).filter(Boolean);
+      const empTags: string[] = (emp.shopify_tags ?? [])
+        .map((t: string) => t.toLowerCase())
+        .filter(Boolean);
       if (empTags.length === 0) continue;
 
-      let curRevenue = 0,
-        curOrders = 0,
-        prevRevenue = 0,
-        prevOrders = 0;
+      let curRevenue = 0, curOrders = 0, prevRevenue = 0, prevOrders = 0;
+      let curQuoted = 0, curQuotes = 0, prevQuoted = 0, prevQuotes = 0;
 
       for (const order of allOrders) {
         const orderDate = new Date(order.createdAt);
         const orderTags = order.tags.map((t) => t.toLowerCase());
         if (!empTags.some((et) => orderTags.includes(et))) continue;
-
         const amount = calcNetRevenue(order);
-
         if (orderDate >= start && orderDate < end) {
           curRevenue += amount;
           curOrders++;
         } else if (orderDate >= prevStart && orderDate < prevEnd) {
           prevRevenue += amount;
           prevOrders++;
+        }
+      }
+
+      for (const draft of allDrafts) {
+        const draftDate = new Date(draft.createdAt);
+        const draftTags = draft.tags.map((t) => t.toLowerCase());
+        if (!empTags.some((et) => draftTags.includes(et))) continue;
+        const amount = parseFloat(draft.subtotalPriceSet?.shopMoney?.amount ?? "0");
+        if (draftDate >= start && draftDate < end) {
+          curQuoted += amount;
+          curQuotes++;
+        } else if (draftDate >= prevStart && draftDate < prevEnd) {
+          prevQuoted += amount;
+          prevQuotes++;
         }
       }
 
@@ -259,17 +310,23 @@ export async function GET(req: NextRequest) {
         locationName: emp.locations?.name ?? "—",
         metrics: {
           current: {
-            revenue: Math.round(curRevenue * 100) / 100,
+            quoted: Math.round(curQuoted * 100) / 100,
+            quote_count: curQuotes,
+            sold: Math.round(curRevenue * 100) / 100,
             orders: curOrders,
             aov: Math.round(curAOV * 100) / 100,
           },
           previous: {
-            revenue: Math.round(prevRevenue * 100) / 100,
+            quoted: Math.round(prevQuoted * 100) / 100,
+            quote_count: prevQuotes,
+            sold: Math.round(prevRevenue * 100) / 100,
             orders: prevOrders,
             aov: Math.round(prevAOV * 100) / 100,
           },
           change: {
-            revenue: pctChange(curRevenue, prevRevenue),
+            quoted: pctChange(curQuoted, prevQuoted),
+            quote_count: pctChange(curQuotes, prevQuotes),
+            sold: pctChange(curRevenue, prevRevenue),
             orders: pctChange(curOrders, prevOrders),
             aov: pctChange(curAOV, prevAOV),
           },
