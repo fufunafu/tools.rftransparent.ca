@@ -393,8 +393,9 @@ export async function GET(req: NextRequest) {
       fetchRecords(prevFromStr, prevToStr, storeId),
     ]);
 
-    const current = computeMetrics(currentRecords, dismissedMap);
-    const previous = computeMetrics(previousRecords, dismissedMap);
+    const dismissedSet = new Set(dismissedMap.keys());
+    const current = computeMetrics(currentRecords, dismissedSet);
+    const previous = computeMetrics(previousRecords, dismissedSet);
 
     return NextResponse.json({
       current,

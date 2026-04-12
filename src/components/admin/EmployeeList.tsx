@@ -12,6 +12,7 @@ interface Location {
 interface Employee {
   id: string;
   name: string;
+  email: string | null;
   department: string;
   location_id: string | null;
   shopify_tags: string[];
