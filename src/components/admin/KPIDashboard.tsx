@@ -35,6 +35,7 @@ interface MetricsResponse {
     current: { from: string; to: string };
     previous: { from: string; to: string };
   };
+  discoveredTags?: { orders: string[]; drafts: string[] };
 }
 
 const TABS: { value: Tab; label: string }[] = [
@@ -261,6 +262,23 @@ export function EmployeeTab({ department }: { department: string }) {
           {" · "}
           Compared to: {data.dateRange.previous.from} &rarr; {data.dateRange.previous.to}
         </p>
+      )}
+
+      {/* Tags hint — shown when the period has orders but employees lack shopify_tags */}
+      {department === "sales" && data?.discoveredTags && (
+        <details className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          <summary className="cursor-pointer font-medium">
+            Tags found on orders this period — use these to configure Shopify Tags per employee
+          </summary>
+          <div className="mt-2 space-y-1">
+            {data.discoveredTags.orders.length > 0 && (
+              <p><span className="font-medium">Orders:</span> {data.discoveredTags.orders.join(", ")}</p>
+            )}
+            {data.discoveredTags.drafts.length > 0 && (
+              <p><span className="font-medium">Quotes:</span> {data.discoveredTags.drafts.join(", ")}</p>
+            )}
+          </div>
+        </details>
       )}
 
       {/* Summary cards */}

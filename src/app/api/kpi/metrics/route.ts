@@ -194,6 +194,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ employees: [], summary: {} });
 
   const results: EmployeeMetrics[] = [];
+  // Tags seen on actual orders/drafts in the current period (sales only).
+  // Returned to the UI so users know what to put in Shopify Tags per employee.
+  let discoveredOrderTags: string[] = [];
+  let discoveredDraftTags: string[] = [];
 
   // Split employees by department type
   const salesEmployees = employees.filter((e) => e.department === "sales");
@@ -201,6 +205,22 @@ export async function GET(req: NextRequest) {
   const otherEmployees = employees.filter(
     (e) => e.department !== "sales" && e.department !== "warehouse"
   );
+
+  /**
+   * Returns the tags to use for matching orders to an employee.
+   * Uses configured shopify_tags if set; otherwise falls back to
+   * name-derived tags (first name, last name, full name).
+   */
+  function getMatchTags(emp: { name: string; shopify_tags?: string[] | null }): string[] {
+    const configured = (emp.shopify_tags ?? [])
+      .map((t: string) => t.toLowerCase())
+      .filter(Boolean);
+    if (configured.length > 0) return configured;
+    // Name-based fallback: "Robert Glas" → ["robert glas", "robert", "glas"]
+    const name = emp.name.trim().toLowerCase();
+    const parts = name.split(/\s+/);
+    return [...new Set([name, ...parts])];
+  }
 
   // --- SALES: auto-calculate from Shopify (RF Transparent store only) ---
   if (salesEmployees.length > 0) {
@@ -259,12 +279,26 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // Attribute to employees via tags
+    // Collect all tags from current-period orders/drafts so the UI can
+    // surface them as a configuration hint.
+    const orderTagSet = new Set<string>();
+    const draftTagSet = new Set<string>();
+    for (const order of allOrders) {
+      if (new Date(order.createdAt) >= start && new Date(order.createdAt) < end) {
+        order.tags.forEach((t) => orderTagSet.add(t));
+      }
+    }
+    for (const draft of allDrafts) {
+      if (new Date(draft.createdAt) >= start && new Date(draft.createdAt) < end) {
+        draft.tags.forEach((t) => draftTagSet.add(t));
+      }
+    }
+    discoveredOrderTags = [...orderTagSet].sort();
+    discoveredDraftTags = [...draftTagSet].sort();
+
+    // Attribute to employees via tags (configured shopify_tags or name fallback)
     for (const emp of salesEmployees) {
-      const empTags: string[] = (emp.shopify_tags ?? [])
-        .map((t: string) => t.toLowerCase())
-        .filter(Boolean);
-      if (empTags.length === 0) continue;
+      const empTags = getMatchTags(emp);
 
       let curRevenue = 0, curOrders = 0, prevRevenue = 0, prevOrders = 0;
       let curQuoted = 0, curQuotes = 0, prevQuoted = 0, prevQuotes = 0;
@@ -572,5 +606,8 @@ export async function GET(req: NextRequest) {
       current: { from: toDateStr(start), to: toDateStr(end) },
       previous: { from: toDateStr(prevStart), to: toDateStr(prevEnd) },
     },
+    ...(discoveredOrderTags.length > 0 || discoveredDraftTags.length > 0
+      ? { discoveredTags: { orders: discoveredOrderTags, drafts: discoveredDraftTags } }
+      : {}),
   });
 }
