@@ -301,6 +301,12 @@ export async function GET(req: NextRequest) {
     discoveredOrderTags = [...orderTagSet].sort();
     discoveredDraftTags = [...draftTagSet].sort();
 
+    // All tags that belong to known employees (for unassigned detection)
+    const allKnownTags = new Set<string>();
+    for (const emp of salesEmployees) {
+      for (const t of getMatchTags(emp)) allKnownTags.add(t);
+    }
+
     // Attribute to employees via tags (configured shopify_tags or name fallback)
     for (const emp of salesEmployees) {
       const empTags = getMatchTags(emp);
@@ -371,6 +377,77 @@ export async function GET(req: NextRequest) {
           },
         },
       });
+    }
+
+    // --- Unassigned: orders/drafts not matched to any known employee ---
+    {
+      let curRevenue = 0, curOrders = 0, prevRevenue = 0, prevOrders = 0;
+      let curQuoted = 0, curQuotes = 0, prevQuoted = 0, prevQuotes = 0;
+
+      const pctChange = (cur: number, prev: number) =>
+        prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
+
+      for (const order of allOrders) {
+        const orderDate = new Date(order.createdAt);
+        const orderTags = order.tags.map((t) => t.toLowerCase());
+        if (orderTags.some((t) => allKnownTags.has(t))) continue; // attributed
+        const amount = calcNetRevenue(order);
+        if (orderDate >= start && orderDate < end) {
+          curRevenue += amount;
+          curOrders++;
+        } else if (orderDate >= prevStart && orderDate < prevEnd) {
+          prevRevenue += amount;
+          prevOrders++;
+        }
+      }
+
+      for (const draft of allDrafts) {
+        const draftDate = new Date(draft.createdAt);
+        const draftTags = draft.tags.map((t) => t.toLowerCase());
+        if (draftTags.some((t) => allKnownTags.has(t))) continue; // attributed
+        const amount = parseFloat(draft.subtotalPriceSet?.shopMoney?.amount ?? "0");
+        if (draftDate >= start && draftDate < end) {
+          curQuoted += amount;
+          curQuotes++;
+        } else if (draftDate >= prevStart && draftDate < prevEnd) {
+          prevQuoted += amount;
+          prevQuotes++;
+        }
+      }
+
+      if (curOrders + prevOrders + curQuotes + prevQuotes > 0) {
+        const curAOV = curOrders > 0 ? curRevenue / curOrders : 0;
+        const prevAOV = prevOrders > 0 ? prevRevenue / prevOrders : 0;
+        results.push({
+          employeeId: "__unassigned__",
+          employeeName: "Unassigned",
+          department: "sales",
+          locationName: "—",
+          metrics: {
+            current: {
+              quoted: Math.round(curQuoted * 100) / 100,
+              quote_count: curQuotes,
+              sold: Math.round(curRevenue * 100) / 100,
+              orders: curOrders,
+              aov: Math.round(curAOV * 100) / 100,
+            },
+            previous: {
+              quoted: Math.round(prevQuoted * 100) / 100,
+              quote_count: prevQuotes,
+              sold: Math.round(prevRevenue * 100) / 100,
+              orders: prevOrders,
+              aov: Math.round(prevAOV * 100) / 100,
+            },
+            change: {
+              quoted: pctChange(curQuoted, prevQuoted),
+              quote_count: pctChange(curQuotes, prevQuotes),
+              sold: pctChange(curRevenue, prevRevenue),
+              orders: pctChange(curOrders, prevOrders),
+              aov: pctChange(curAOV, prevAOV),
+            },
+          },
+        });
+      }
     }
   }
 
