@@ -10,6 +10,7 @@ interface Location {
 interface Employee {
   id: string;
   name: string;
+  email: string | null;
   department: string;
   location_id: string | null;
   shopify_tags: string[];
@@ -32,6 +33,7 @@ const DEPARTMENTS = [
 
 export default function EmployeeForm({ employee, onSave, onCancel }: Props) {
   const [name, setName] = useState(employee?.name ?? "");
+  const [email, setEmail] = useState(employee?.email ?? "");
   const [department, setDepartment] = useState(employee?.department ?? "sales");
   const [locationId, setLocationId] = useState(employee?.location_id ?? "");
   const [shopifyTags, setShopifyTags] = useState(
@@ -59,6 +61,7 @@ export default function EmployeeForm({ employee, onSave, onCancel }: Props) {
     try {
       const body = {
         name: name.trim(),
+        email: email.trim().toLowerCase() || null,
         department,
         location_id: locationId || null,
         shopify_tags: shopifyTags
@@ -113,6 +116,20 @@ export default function EmployeeForm({ employee, onSave, onCancel }: Props) {
             className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
             placeholder="Employee name"
             autoFocus
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-sand-700 mb-1">
+            Google Email
+            <span className="text-sand-400 font-normal ml-1">(grants admin access)</span>
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
+            placeholder="employee@example.com"
           />
         </div>
 

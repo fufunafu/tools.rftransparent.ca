@@ -11,12 +11,13 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { name, department, location_id, shopify_tags, active } = body;
+  const { name, email, department, location_id, shopify_tags, active } = body;
 
   const { data, error } = await getSupabase()
     .from("employees")
     .update({
       name,
+      email: email || null,
       department,
       location_id: location_id || null,
       shopify_tags: Array.isArray(shopify_tags) ? shopify_tags.filter(Boolean) : [],
