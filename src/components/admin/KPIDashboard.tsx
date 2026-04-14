@@ -115,7 +115,7 @@ function metricLabel(key: string) {
 
 // --- Employee table tab (Sales, Warehouse, Customer Service) ---
 export function EmployeeTab({ department }: { department: string }) {
-  const [period, setPeriod] = useState<Period>("daily");
+  const [period, setPeriod] = useState<Period>(department === "sales" ? "yearly" : "daily");
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [locationId, setLocationId] = useState("");
   const [locations, setLocations] = useState<Location[]>([]);
