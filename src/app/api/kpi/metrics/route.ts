@@ -139,11 +139,14 @@ function getPeriodRange(
     prevStart = new Date(date.getFullYear(), date.getMonth() - 1, 1);
     prevEnd = new Date(start);
   } else {
-    // yearly
-    start = new Date(date.getFullYear(), 0, 1);
-    end = new Date(date.getFullYear() + 1, 0, 1);
-    prevStart = new Date(date.getFullYear() - 1, 0, 1);
+    // yearly — rolling 12-month window ending on (and including) the selected date
+    end = new Date(date);
+    end.setDate(end.getDate() + 1); // exclusive end: day after selected date
+    start = new Date(date);
+    start.setFullYear(start.getFullYear() - 1);
     prevEnd = new Date(start);
+    prevStart = new Date(start);
+    prevStart.setFullYear(prevStart.getFullYear() - 1);
   }
 
   return { start, end, prevStart, prevEnd };
