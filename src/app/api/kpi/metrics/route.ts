@@ -365,6 +365,8 @@ export async function GET(req: NextRequest) {
 
       const curAOV = curOrders > 0 ? curRevenue / curOrders : 0;
       const prevAOV = prevOrders > 0 ? prevRevenue / prevOrders : 0;
+      const curConv = curQuoted > 0 ? (curRevenue / curQuoted) * 100 : 0;
+      const prevConv = prevQuoted > 0 ? (prevRevenue / prevQuoted) * 100 : 0;
 
       const pctChange = (cur: number, prev: number) =>
         prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
@@ -381,6 +383,7 @@ export async function GET(req: NextRequest) {
             sold: Math.round(curRevenue * 100) / 100,
             orders: curOrders,
             aov: Math.round(curAOV * 100) / 100,
+            conversion_rate: Math.round(curConv * 10) / 10,
           },
           previous: {
             quoted: Math.round(prevQuoted * 100) / 100,
@@ -388,6 +391,7 @@ export async function GET(req: NextRequest) {
             sold: Math.round(prevRevenue * 100) / 100,
             orders: prevOrders,
             aov: Math.round(prevAOV * 100) / 100,
+            conversion_rate: Math.round(prevConv * 10) / 10,
           },
           change: {
             quoted: pctChange(curQuoted, prevQuoted),
@@ -395,6 +399,7 @@ export async function GET(req: NextRequest) {
             sold: pctChange(curRevenue, prevRevenue),
             orders: pctChange(curOrders, prevOrders),
             aov: pctChange(curAOV, prevAOV),
+            conversion_rate: pctChange(curConv, prevConv),
           },
         },
       });
@@ -439,6 +444,8 @@ export async function GET(req: NextRequest) {
       if (curOrders + prevOrders + curQuotes + prevQuotes > 0) {
         const curAOV = curOrders > 0 ? curRevenue / curOrders : 0;
         const prevAOV = prevOrders > 0 ? prevRevenue / prevOrders : 0;
+        const curConv = curQuoted > 0 ? (curRevenue / curQuoted) * 100 : 0;
+        const prevConv = prevQuoted > 0 ? (prevRevenue / prevQuoted) * 100 : 0;
         results.push({
           employeeId: "__unassigned__",
           employeeName: "Unassigned",
@@ -451,6 +458,7 @@ export async function GET(req: NextRequest) {
               sold: Math.round(curRevenue * 100) / 100,
               orders: curOrders,
               aov: Math.round(curAOV * 100) / 100,
+              conversion_rate: Math.round(curConv * 10) / 10,
             },
             previous: {
               quoted: Math.round(prevQuoted * 100) / 100,
@@ -458,6 +466,7 @@ export async function GET(req: NextRequest) {
               sold: Math.round(prevRevenue * 100) / 100,
               orders: prevOrders,
               aov: Math.round(prevAOV * 100) / 100,
+              conversion_rate: Math.round(prevConv * 10) / 10,
             },
             change: {
               quoted: pctChange(curQuoted, prevQuoted),
@@ -465,6 +474,7 @@ export async function GET(req: NextRequest) {
               sold: pctChange(curRevenue, prevRevenue),
               orders: pctChange(curOrders, prevOrders),
               aov: pctChange(curAOV, prevAOV),
+              conversion_rate: pctChange(curConv, prevConv),
             },
           },
         });

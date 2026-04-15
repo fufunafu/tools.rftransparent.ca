@@ -66,32 +66,15 @@ function formatNumber(n: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(n * 100) / 100);
 }
 
-function ChangeBadge({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-sand-300">&mdash;</span>;
-  const isPositive = value > 0;
-  const isNegative = value < 0;
-  return (
-    <span
-      className={`inline-flex items-center text-xs font-medium ${
-        isPositive
-          ? "text-green-700"
-          : isNegative
-            ? "text-red-600"
-            : "text-sand-400"
-      }`}
-    >
-      {isPositive ? "+" : ""}
-      {value}%
-    </span>
-  );
-}
 
 const CURRENCY_METRICS = new Set(["revenue", "sold", "quoted", "aov", "ad_spend"]);
 const HOURS_METRICS = new Set(["avg_fulfillment_hours", "oldest_unfulfilled_hours"]);
+const PERCENT_METRICS = new Set(["conversion_rate"]);
 
 function formatMetricValue(metric: string, value: number) {
   if (CURRENCY_METRICS.has(metric)) return formatCurrency(value);
   if (HOURS_METRICS.has(metric)) return `${value}h`;
+  if (PERCENT_METRICS.has(metric)) return `${value}%`;
   return formatNumber(value);
 }
 
@@ -103,6 +86,7 @@ function metricLabel(key: string) {
     revenue: "Revenue",
     orders: "Orders",
     aov: "AOV",
+    conversion_rate: "Conv. Rate",
     open_orders: "Open Orders",
     fulfilled_orders: "Fulfilled",
     avg_fulfillment_hours: "Avg Fulfillment",
@@ -122,6 +106,7 @@ function metricTooltip(key: string): string {
     revenue:                 "Same as Sold — net revenue from completed orders attributed to this employee.",
     orders:                  "Number of completed orders attributed to this employee via their Shopify tag.",
     aov:                     "Average Order Value — Sold ÷ Orders. Shows the typical size of each transaction.",
+    conversion_rate:         "Conversion Rate — Sold ÷ Quoted, as a percentage. What share of quoted dollars closed as actual sales in the period.",
     open_orders:             "Orders that have been placed but not yet fulfilled.",
     fulfilled_orders:        "Orders that have been fully fulfilled in the period.",
     avg_fulfillment_hours:   "Average number of hours between an order being placed and it being fulfilled.",
@@ -140,9 +125,9 @@ function MetricTooltip({ text }: { text: string }) {
       <span className="w-3.5 h-3.5 rounded-full bg-sand-200 text-sand-500 text-[9px] font-bold flex items-center justify-center cursor-default leading-none">
         ?
       </span>
-      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-sand-900 text-sand-50 text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-50 normal-case font-normal tracking-normal text-left shadow-lg">
+      <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 rounded-lg bg-sand-900 text-sand-50 text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-50 normal-case font-normal tracking-normal text-left shadow-lg">
+        <span className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-sand-900" />
         {text}
-        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-sand-900" />
       </span>
     </span>
   );
@@ -217,6 +202,7 @@ export function EmployeeTab({ department }: { department: string }) {
 
   const summaryCards = data
     ? allMetricKeys.slice(0, 4).map((key) => ({
+        key,
         label: metricLabel(key),
         value: formatMetricValue(key, data.summary[key] ?? 0),
       }))
@@ -342,8 +328,9 @@ export function EmployeeTab({ department }: { department: string }) {
               key={card.label}
               className="bg-white rounded-xl border border-sand-200/60 p-4"
             >
-              <p className="text-xs text-sand-400 uppercase tracking-wider">
+              <p className="text-xs text-sand-400 uppercase tracking-wider flex items-center">
                 {card.label}
+                <MetricTooltip text={metricTooltip(card.key)} />
               </p>
               <p className="text-xl font-semibold text-sand-900 mt-1">
                 {card.value}
@@ -387,7 +374,10 @@ export function EmployeeTab({ department }: { department: string }) {
                       onClick={() => handleSort(key)}
                       className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400 cursor-pointer hover:text-sand-700 select-none"
                     >
-                      {metricLabel(key)}
+                      <span className="inline-flex items-center">
+                        {metricLabel(key)}
+                        <MetricTooltip text={metricTooltip(key)} />
+                      </span>
                       {activeSortBy === key && (
                         <span className="ml-1">
                           {sortDir === "desc" ? "\u2193" : "\u2191"}
@@ -433,13 +423,8 @@ export function EmployeeTab({ department }: { department: string }) {
                       </td>
                     )}
                     {allMetricKeys.map((key) => (
-                      <td key={key} className="px-4 py-3 text-right">
-                        <span className="text-sand-900">
-                          {formatMetricValue(key, emp.metrics.current[key] ?? 0)}
-                        </span>
-                        <span className="ml-2">
-                          <ChangeBadge value={emp.metrics.change[key] ?? null} />
-                        </span>
+                      <td key={key} className="px-4 py-3 text-right tabular-nums text-sand-900">
+                        {formatMetricValue(key, emp.metrics.current[key] ?? 0)}
                       </td>
                     ))}
                   </tr>
