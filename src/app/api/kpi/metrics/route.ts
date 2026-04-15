@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
-import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { shopifyGraphQL, getStores } from "@/lib/shopify";
 
 
-interface OrderNode extends RevenueFields {
+interface OrderNode {
   createdAt: string;
   tags: string[];
+  subtotalPriceSet: { shopMoney: { amount: string } };
 }
 
 interface FulfillmentOrderNode {
@@ -49,7 +50,11 @@ function makeOrdersQuery(dateFilter: string, cursor?: string) {
     query {
       orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
         edges {
-          node { createdAt tags ${REVENUE_FIELDS} }
+          node {
+            createdAt
+            tags
+            subtotalPriceSet { shopMoney { amount } }
+          }
           cursor
         }
         pageInfo { hasNextPage }
@@ -321,7 +326,7 @@ export async function GET(req: NextRequest) {
         const orderDate = new Date(order.createdAt);
         const orderTags = order.tags.map((t) => t.toLowerCase());
         if (!empTags.some((et) => orderTags.includes(et))) continue;
-        const amount = calcNetRevenue(order);
+        const amount = parseFloat(order.subtotalPriceSet.shopMoney.amount);
         if (orderDate >= start && orderDate < end) {
           curRevenue += amount;
           curOrders++;
@@ -394,7 +399,7 @@ export async function GET(req: NextRequest) {
         const orderDate = new Date(order.createdAt);
         const orderTags = order.tags.map((t) => t.toLowerCase());
         if (orderTags.some((t) => allKnownTags.has(t))) continue; // attributed
-        const amount = calcNetRevenue(order);
+        const amount = parseFloat(order.subtotalPriceSet.shopMoney.amount);
         if (orderDate >= start && orderDate < end) {
           curRevenue += amount;
           curOrders++;
