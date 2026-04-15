@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import KPIEntryForm from "./KPIEntryForm";
 
 const MarketingDashboard = lazy(() => import("./MarketingDashboard"));
@@ -20,11 +21,21 @@ interface EmployeeMetrics {
   employeeName: string;
   department: string;
   locationName: string;
+  shopifyTags?: string[];
   metrics: {
     current: Record<string, number>;
     previous: Record<string, number>;
     change: Record<string, number | null>;
   };
+}
+
+interface UnassignedItem {
+  id: string;
+  name: string;
+  createdAt: string;
+  amount: number;
+  tags: string[];
+  type: "order" | "draft";
 }
 
 interface MetricsResponse {
@@ -35,6 +46,7 @@ interface MetricsResponse {
     current: { from: string; to: string };
     previous: { from: string; to: string };
   };
+  unassignedOrders?: UnassignedItem[];
   discoveredTags?: { orders: string[]; drafts: string[] };
   draftsDiagnostic?: Record<string, { fetched: number; error?: string }>;
 }
@@ -100,8 +112,8 @@ function metricLabel(key: string) {
 
 function metricTooltip(key: string): string {
   const tips: Record<string, string> = {
-    quoted:                  "Total dollar value of draft orders (quotes) created by this employee in the period, matched by their Shopify tag.",
-    quote_count:             "Number of draft orders (quotes) created by this employee in the period.",
+    quoted:                  "Total dollar value of draft orders sent or closed in the period, attributed by Shopify tag. OPEN (unsent) drafts are excluded — only invoices sent to the customer and completed (converted) quotes are counted.",
+    quote_count:             "Number of draft orders sent or closed in the period (excludes OPEN / unsent drafts).",
     sold:                    "Total revenue from completed orders attributed to this employee via their Shopify tag. Calculated as order subtotal minus any shipping cost and export tariff metafields.",
     revenue:                 "Same as Sold — net revenue from completed orders attributed to this employee.",
     orders:                  "Number of completed orders attributed to this employee via their Shopify tag.",
@@ -119,17 +131,42 @@ function metricTooltip(key: string): string {
 }
 
 function MetricTooltip({ text }: { text: string }) {
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const ref = useRef<HTMLSpanElement>(null);
+
   if (!text) return null;
+
+  const show = () => {
+    if (!ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    setCoords({ top: r.bottom + 8, left: r.left + r.width / 2 });
+  };
+  const hide = () => setCoords(null);
+
   return (
-    <span className="relative group inline-flex items-center ml-1">
-      <span className="w-3.5 h-3.5 rounded-full bg-sand-200 text-sand-500 text-[9px] font-bold flex items-center justify-center cursor-default leading-none">
+    <>
+      <span
+        ref={ref}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        className="w-3.5 h-3.5 rounded-full bg-sand-200 text-sand-500 text-[9px] font-bold inline-flex items-center justify-center cursor-default leading-none ml-1 shrink-0"
+      >
         ?
       </span>
-      <span className="pointer-events-none absolute top-full left-1/2 -translate-x-1/2 mt-2 w-56 rounded-lg bg-sand-900 text-sand-50 text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-50 normal-case font-normal tracking-normal text-left shadow-lg">
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 border-4 border-transparent border-b-sand-900" />
-        {text}
-      </span>
-    </span>
+      {coords && createPortal(
+        <div
+          style={{ position: "fixed", top: coords.top, left: coords.left, transform: "translateX(-50%)", zIndex: 9999 }}
+          className="w-56 rounded-lg bg-sand-900 text-sand-50 text-xs px-3 py-2 shadow-lg pointer-events-none normal-case font-normal tracking-normal text-left"
+        >
+          <span
+            style={{ position: "absolute", bottom: "100%", left: "50%", transform: "translateX(-50%)" }}
+            className="border-4 border-transparent border-b-sand-900"
+          />
+          {text}
+        </div>,
+        document.body
+      )}
+    </>
   );
 }
 
@@ -405,29 +442,93 @@ export function EmployeeTab({ department }: { department: string }) {
                   </tr>
                 )}
                 {sortedEmployees.map((emp) => (
-                  <tr
-                    key={emp.employeeId}
-                    onClick={() =>
-                      setExpandedRow(
-                        expandedRow === emp.employeeId ? null : emp.employeeId
-                      )
-                    }
-                    className="border-b border-sand-50 hover:bg-sand-50/50 cursor-pointer transition-colors"
-                  >
-                    <td className="px-4 py-3 font-medium text-sand-900">
-                      {emp.employeeName}
-                    </td>
-                    {department !== "sales" && (
-                      <td className="px-4 py-3 text-sand-500">
-                        {emp.locationName}
+                  <React.Fragment key={emp.employeeId}>
+                    <tr
+                      onClick={() =>
+                        setExpandedRow(
+                          expandedRow === emp.employeeId ? null : emp.employeeId
+                        )
+                      }
+                      className="border-b border-sand-50 hover:bg-sand-50/50 cursor-pointer transition-colors"
+                    >
+                      <td className="px-4 py-3 font-medium text-sand-900">
+                        <span className="inline-flex items-center gap-1">
+                          {emp.employeeId === "__unassigned__" ? (
+                            <span className="inline-flex items-center gap-1">
+                              {emp.employeeName}
+                              <span className="text-sand-400 text-xs">{expandedRow === emp.employeeId ? "▲" : "▼"}</span>
+                            </span>
+                          ) : emp.employeeName}
+                          {emp.shopifyTags && emp.shopifyTags.length > 0 && (
+                            <MetricTooltip
+                              text={`Shopify tag filter: ${emp.shopifyTags.join(", ")}`}
+                            />
+                          )}
+                        </span>
                       </td>
+                      {department !== "sales" && (
+                        <td className="px-4 py-3 text-sand-500">
+                          {emp.locationName}
+                        </td>
+                      )}
+                      {allMetricKeys.map((key) => (
+                        <td key={key} className="px-4 py-3 text-right tabular-nums text-sand-900">
+                          {formatMetricValue(key, emp.metrics.current[key] ?? 0)}
+                        </td>
+                      ))}
+                    </tr>
+                    {emp.employeeId === "__unassigned__" && expandedRow === emp.employeeId && data?.unassignedOrders && (
+                      <tr key="__unassigned_detail__">
+                        <td colSpan={1 + allMetricKeys.length} className="bg-sand-50 px-4 py-4">
+                          <p className="text-xs font-semibold text-sand-500 uppercase tracking-wider mb-3">
+                            Unassigned orders &amp; quotes this period — sorted by amount
+                          </p>
+                          {data.unassignedOrders.length === 0 ? (
+                            <p className="text-sm text-sand-400">None</p>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-sand-400 border-b border-sand-200">
+                                    <th className="text-left pb-2 pr-4 font-medium">Name</th>
+                                    <th className="text-left pb-2 pr-4 font-medium">Type</th>
+                                    <th className="text-left pb-2 pr-4 font-medium">Date</th>
+                                    <th className="text-right pb-2 pr-4 font-medium">Amount</th>
+                                    <th className="text-left pb-2 font-medium">Tags</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {data.unassignedOrders.map((item) => (
+                                    <tr key={item.id} className="border-b border-sand-100 last:border-0">
+                                      <td className="py-2 pr-4 font-mono text-sand-700">{item.name}</td>
+                                      <td className="py-2 pr-4">
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${item.type === "order" ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"}`}>
+                                          {item.type === "order" ? "Order" : "Quote"}
+                                        </span>
+                                      </td>
+                                      <td className="py-2 pr-4 text-sand-500">{new Date(item.createdAt).toLocaleDateString()}</td>
+                                      <td className="py-2 pr-4 text-right tabular-nums text-sand-900">{formatMetricValue("sold", item.amount)}</td>
+                                      <td className="py-2">
+                                        {item.tags.length === 0 ? (
+                                          <span className="text-sand-300 italic">no tags</span>
+                                        ) : (
+                                          <span className="flex flex-wrap gap-1">
+                                            {item.tags.map((tag) => (
+                                              <span key={tag} className="px-1.5 py-0.5 rounded bg-sand-200 text-sand-600 text-[10px]">{tag}</span>
+                                            ))}
+                                          </span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
                     )}
-                    {allMetricKeys.map((key) => (
-                      <td key={key} className="px-4 py-3 text-right tabular-nums text-sand-900">
-                        {formatMetricValue(key, emp.metrics.current[key] ?? 0)}
-                      </td>
-                    ))}
-                  </tr>
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>

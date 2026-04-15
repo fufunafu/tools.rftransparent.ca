@@ -5,6 +5,8 @@ import { shopifyGraphQL, getStores } from "@/lib/shopify";
 
 
 interface OrderNode {
+  id: string;
+  name: string;
   createdAt: string;
   tags: string[];
   subtotalPriceSet: { shopMoney: { amount: string } };
@@ -31,6 +33,8 @@ interface FulfillmentOrdersResponse {
 }
 
 interface DraftOrderNode {
+  id: string;
+  name: string;
   createdAt: string;
   status: string;
   tags: string[];
@@ -51,6 +55,8 @@ function makeOrdersQuery(dateFilter: string, cursor?: string) {
       orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
         edges {
           node {
+            id
+            name
             createdAt
             tags
             subtotalPriceSet { shopMoney { amount } }
@@ -87,6 +93,8 @@ function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
       draftOrders(first: 250, sortKey: UPDATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
         edges {
           node {
+            id
+            name
             createdAt
             status
             tags
@@ -168,6 +176,7 @@ interface EmployeeMetrics {
   employeeName: string;
   department: string;
   locationName: string;
+  shopifyTags?: string[];
   metrics: {
     current: Record<string, number>;
     previous: Record<string, number>;
@@ -237,6 +246,8 @@ export async function GET(req: NextRequest) {
     const parts = name.split(/\s+/);
     return [...new Set([name, ...parts])];
   }
+
+  const unassignedOrderDetails: { id: string; name: string; createdAt: string; amount: number; tags: string[]; type: "order" | "draft" }[] = [];
 
   // --- SALES: auto-calculate from Shopify (RF Transparent store only) ---
   if (salesEmployees.length > 0) {
@@ -315,6 +326,7 @@ export async function GET(req: NextRequest) {
       }
     }
     for (const draft of allDrafts) {
+      if (draft.status === "OPEN") continue; // exclude unsent drafts
       if (new Date(draft.createdAt) >= start && new Date(draft.createdAt) < end) {
         draft.tags.forEach((t) => draftTagSet.add(t));
       }
@@ -350,6 +362,9 @@ export async function GET(req: NextRequest) {
       }
 
       for (const draft of allDrafts) {
+        // Exclude OPEN drafts — those are works-in-progress not yet sent to the
+        // customer. Count only INVOICE_SENT (true quotes) and COMPLETED (closed).
+        if (draft.status === "OPEN") continue;
         const draftDate = new Date(draft.createdAt);
         const draftTags = draft.tags.map((t) => t.toLowerCase());
         if (!empTags.some((et) => draftTags.includes(et))) continue;
@@ -376,6 +391,7 @@ export async function GET(req: NextRequest) {
         employeeName: emp.name,
         department: emp.department,
         locationName: emp.locations?.name ?? "—",
+        shopifyTags: empTags,
         metrics: {
           current: {
             quoted: Math.round(curQuoted * 100) / 100,
@@ -421,6 +437,7 @@ export async function GET(req: NextRequest) {
         if (orderDate >= start && orderDate < end) {
           curRevenue += amount;
           curOrders++;
+          unassignedOrderDetails.push({ id: order.id, name: order.name, createdAt: order.createdAt, amount, tags: order.tags, type: "order" });
         } else if (orderDate >= prevStart && orderDate < prevEnd) {
           prevRevenue += amount;
           prevOrders++;
@@ -428,6 +445,8 @@ export async function GET(req: NextRequest) {
       }
 
       for (const draft of allDrafts) {
+        // Same OPEN-exclusion as attributed quotes above
+        if (draft.status === "OPEN") continue;
         const draftDate = new Date(draft.createdAt);
         const draftTags = draft.tags.map((t) => t.toLowerCase());
         if (draftTags.some((t) => allKnownTags.has(t))) continue; // attributed
@@ -435,6 +454,7 @@ export async function GET(req: NextRequest) {
         if (draftDate >= start && draftDate < end) {
           curQuoted += amount;
           curQuotes++;
+          unassignedOrderDetails.push({ id: draft.id, name: draft.name, createdAt: draft.createdAt, amount, tags: draft.tags, type: "draft" });
         } else if (draftDate >= prevStart && draftDate < prevEnd) {
           prevQuoted += amount;
           prevQuotes++;
@@ -451,6 +471,7 @@ export async function GET(req: NextRequest) {
           employeeName: "Unassigned",
           department: "sales",
           locationName: "—",
+          shopifyTags: [],
           metrics: {
             current: {
               quoted: Math.round(curQuoted * 100) / 100,
@@ -610,6 +631,7 @@ export async function GET(req: NextRequest) {
           employeeName: emp.name,
           department: emp.department,
           locationName: emp.locations?.name ?? "—",
+          shopifyTags: [],
           metrics: {
             current: {
               open_orders: openOrders,
@@ -694,6 +716,7 @@ export async function GET(req: NextRequest) {
         employeeName: emp.name,
         department: emp.department,
         locationName: emp.locations?.name ?? "—",
+        shopifyTags: [],
         metrics: {
           current: curMetrics,
           previous: prevMetrics,
@@ -719,6 +742,7 @@ export async function GET(req: NextRequest) {
       current: { from: toDateStr(start), to: toDateStr(end) },
       previous: { from: toDateStr(prevStart), to: toDateStr(prevEnd) },
     },
+    unassignedOrders: unassignedOrderDetails.sort((a, b) => b.amount - a.amount),
     ...(discoveredOrderTags.length > 0 || discoveredDraftTags.length > 0
       ? { discoveredTags: { orders: discoveredOrderTags, drafts: discoveredDraftTags } }
       : {}),
