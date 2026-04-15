@@ -211,6 +211,7 @@ export async function GET(req: NextRequest) {
   // Returned to the UI so users know what to put in Shopify Tags per employee.
   let discoveredOrderTags: string[] = [];
   let discoveredDraftTags: string[] = [];
+  let draftsDiagnostic: Record<string, { fetched: number; error?: string }> = {};
 
   // Split employees by department type
   const salesEmployees = employees.filter((e) => e.department === "sales");
@@ -270,8 +271,10 @@ export async function GET(req: NextRequest) {
 
     // Fetch draft orders (quoted)
     const allDrafts: DraftOrderNode[] = [];
+    const draftDebug: Record<string, { fetched: number; error?: string }> = {};
     for (const store of stores) {
       if (!salesStoreIds.includes(store.id)) continue;
+      draftDebug[store.label] = { fetched: 0 };
       try {
         let cursor: string | undefined;
         let hasNext = true;
@@ -281,16 +284,24 @@ export async function GET(req: NextRequest) {
             store.id,
             makeDraftOrdersQuery(fetchDate, cursor)
           );
+          if (!data?.draftOrders) {
+            draftDebug[store.label].error = "draftOrders field missing (scope?)";
+            break;
+          }
           const edges = data.draftOrders.edges;
           allDrafts.push(...edges.map((e) => e.node));
+          draftDebug[store.label].fetched += edges.length;
           hasNext = data.draftOrders.pageInfo.hasNextPage;
           cursor = edges[edges.length - 1]?.cursor;
           pages++;
         }
       } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         console.error(`[KPI Metrics] Drafts fetch failed for ${store.id}:`, err);
+        draftDebug[store.label].error = msg;
       }
     }
+    draftsDiagnostic = draftDebug;
 
     // Collect all tags from current-period orders/drafts so the UI can
     // surface them as a configuration hint.
@@ -698,6 +709,9 @@ export async function GET(req: NextRequest) {
     },
     ...(discoveredOrderTags.length > 0 || discoveredDraftTags.length > 0
       ? { discoveredTags: { orders: discoveredOrderTags, drafts: discoveredDraftTags } }
+      : {}),
+    ...(Object.keys(draftsDiagnostic).length > 0
+      ? { draftsDiagnostic }
       : {}),
   });
 }

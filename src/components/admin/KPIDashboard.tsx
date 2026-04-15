@@ -36,6 +36,7 @@ interface MetricsResponse {
     previous: { from: string; to: string };
   };
   discoveredTags?: { orders: string[]; drafts: string[] };
+  draftsDiagnostic?: Record<string, { fetched: number; error?: string }>;
 }
 
 const TABS: { value: Tab; label: string }[] = [
@@ -111,6 +112,40 @@ function metricLabel(key: string) {
     satisfaction: "Satisfaction",
   };
   return labels[key] || key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function metricTooltip(key: string): string {
+  const tips: Record<string, string> = {
+    quoted:                  "Total dollar value of draft orders (quotes) created by this employee in the period, matched by their Shopify tag.",
+    quote_count:             "Number of draft orders (quotes) created by this employee in the period.",
+    sold:                    "Total revenue from completed orders attributed to this employee via their Shopify tag. Calculated as order subtotal minus any shipping cost and export tariff metafields.",
+    revenue:                 "Same as Sold — net revenue from completed orders attributed to this employee.",
+    orders:                  "Number of completed orders attributed to this employee via their Shopify tag.",
+    aov:                     "Average Order Value — Sold ÷ Orders. Shows the typical size of each transaction.",
+    open_orders:             "Orders that have been placed but not yet fulfilled.",
+    fulfilled_orders:        "Orders that have been fully fulfilled in the period.",
+    avg_fulfillment_hours:   "Average number of hours between an order being placed and it being fulfilled.",
+    oldest_unfulfilled_hours:"How many hours old the oldest still-unfulfilled order is right now.",
+    tickets_resolved:        "Number of customer service tickets closed in the period.",
+    response_time:           "Average time (in hours) to send a first reply to a new customer ticket.",
+    satisfaction:            "Average customer satisfaction score from post-ticket surveys.",
+  };
+  return tips[key] || "";
+}
+
+function MetricTooltip({ text }: { text: string }) {
+  if (!text) return null;
+  return (
+    <span className="relative group inline-flex items-center ml-1">
+      <span className="w-3.5 h-3.5 rounded-full bg-sand-200 text-sand-500 text-[9px] font-bold flex items-center justify-center cursor-default leading-none">
+        ?
+      </span>
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 rounded-lg bg-sand-900 text-sand-50 text-xs px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity z-50 normal-case font-normal tracking-normal text-left shadow-lg">
+        {text}
+        <span className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-sand-900" />
+      </span>
+    </span>
+  );
 }
 
 // --- Employee table tab (Sales, Warehouse, Customer Service) ---
@@ -263,6 +298,23 @@ export function EmployeeTab({ department }: { department: string }) {
           {" · "}
           Compared to: {data.dateRange.previous.from} &rarr; {data.dateRange.previous.to}
         </p>
+      )}
+
+      {/* Drafts diagnostic — shows per-store draft order fetch results */}
+      {department === "sales" && data?.draftsDiagnostic && (
+        <details className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-xs text-blue-800" open>
+          <summary className="cursor-pointer font-medium">
+            Draft orders fetched (quoted metric diagnostic)
+          </summary>
+          <div className="mt-2 space-y-1 font-mono">
+            {Object.entries(data.draftsDiagnostic).map(([store, info]) => (
+              <p key={store}>
+                <span className="font-semibold">{store}:</span> {info.fetched} drafts fetched
+                {info.error && <span className="text-red-700"> · error: {info.error}</span>}
+              </p>
+            ))}
+          </div>
+        </details>
       )}
 
       {/* Tags hint — shown when the period has orders but employees lack shopify_tags */}
