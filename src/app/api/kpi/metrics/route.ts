@@ -80,9 +80,11 @@ function makeFulfilledOrdersQuery(dateFilter: string, cursor?: string) {
 
 function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
   const after = cursor ? `, after: "${cursor}"` : "";
+  // Note: DraftOrderSortKeys has no CREATED_AT — use UPDATED_AT for newest-first
+  // pagination. We still filter by createdAt client-side for period attribution.
   return `
     query {
-      draftOrders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
+      draftOrders(first: 250, sortKey: UPDATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
         edges {
           node {
             createdAt
