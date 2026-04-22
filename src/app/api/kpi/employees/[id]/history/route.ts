@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getStores } from "@/lib/shopify";
-import { getMonthlyHistory } from "@/lib/kpi-sales";
+import { getMonthlyConversionHistory } from "@/lib/kpi-sales";
 
 function getMatchTags(emp: { name: string; shopify_tags?: string[] | null }): string[] {
   const configured = (emp.shopify_tags ?? [])
@@ -42,7 +42,7 @@ export async function GET(
   const salesStoreIds = rfStore ? [rfStore.id] : stores.map((s) => s.id);
 
   const matchTags = getMatchTags(emp);
-  const history = await getMonthlyHistory(matchTags, salesStoreIds, months);
+  const history = await getMonthlyConversionHistory(matchTags, salesStoreIds, months);
 
   return NextResponse.json({ employee: emp, history });
 }
