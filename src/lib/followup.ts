@@ -266,7 +266,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
   const newActiveLeads: Record<string, unknown>[] = [];
   const newWonLeads: Record<string, unknown>[] = [];
-  const updatePromises: Promise<unknown>[] = [];
+  const updatePromises: PromiseLike<unknown>[] = [];
 
   for (const draft of shopifyDrafts) {
     const existing = existingByDraftId.get(draft.id);
@@ -369,7 +369,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   const completedDrafts = await fetchDraftsForSync(storeId, fromDateStr, "status:completed");
 
   const newCompletedLeads: Record<string, unknown>[] = [];
-  const completedUpdatePromises: Promise<unknown>[] = [];
+  const completedUpdatePromises: PromiseLike<unknown>[] = [];
 
   for (const draft of completedDrafts) {
     const existing = existingByDraftId.get(draft.id);
@@ -432,7 +432,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   await Promise.all(completedUpdatePromises);
 
   // 5. Detect stale — leads in DB but missing from Shopify
-  const stalePromises: Promise<unknown>[] = [];
+  const stalePromises: PromiseLike<unknown>[] = [];
   for (const [draftId, existing] of existingByDraftId) {
     if (
       !shopifyDraftIds.has(draftId) &&
