@@ -6,6 +6,7 @@ import LeadTable from "@/components/admin/followup/LeadTable";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
 import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
 import CalendarView from "@/components/admin/followup/CalendarView";
+import StaffBreakdown from "@/components/admin/followup/StaffBreakdown";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -40,7 +41,8 @@ interface SummaryResponse {
   metrics: SummaryMetrics;
   by_status: Record<string, number>;
   loss_reasons: Record<string, number>;
-  stores: { id: string; label: string }[];
+  last_synced_at: string | null;
+  stores: { id: string; label: string; shop_domain: string }[];
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -55,12 +57,19 @@ function formatDate(iso: string): string {
 
 // ─── Lead Detail Panel ───────────────────────────────────────────────────────
 
+function shopifyAdminUrl(shopDomain: string, gid: string): string {
+  const numericId = gid.split("/").pop() ?? gid;
+  return `https://${shopDomain}/admin/draft_orders/${numericId}`;
+}
+
 function LeadDetailPanel({
   lead,
+  shopDomain,
   onClose,
   onLogFollowUp,
 }: {
   lead: FollowUpLead;
+  shopDomain: string;
   onClose: () => void;
   onLogFollowUp: () => void;
 }) {
@@ -114,7 +123,22 @@ function LeadDetailPanel({
 
           {/* Draft Details */}
           <div>
-            <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-2">Quote Details</h4>
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote Details</h4>
+              {shopDomain && lead.shopify_draft_id && (
+                <a
+                  href={shopifyAdminUrl(shopDomain, lead.shopify_draft_id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                >
+                  View in Shopify
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                </a>
+              )}
+            </div>
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-sand-400">Amount</p>
@@ -327,15 +351,22 @@ function TimingEditor({ store }: { store: string }) {
 
 export default function FollowUpDashboard({ defaultStore }: { defaultStore?: string }) {
   const [store, setStore] = useState(defaultStore || "store1");
-  const [stores, setStores] = useState<{ id: string; label: string }[]>([]);
+  const [stores, setStores] = useState<{ id: string; label: string; shop_domain: string }[]>([]);
   const [mounted, setMounted] = useState(false);
 
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [leads, setLeads] = useState<FollowUpLead[]>([]);
   const [filter, setFilter] = useState("due_today");
+  // When set, the leads list is additionally filtered by this staff name.
+  // Special value "__unknown__" means leads with created_by_staff = null.
+  const [staffFilter, setStaffFilter] = useState<string | null>(null);
+  // "1y" = last 12 months (default — hides legacy Unknowns where Shopify has aged out
+  // the creation event). "all" = every lead ever.
+  const [timeRange, setTimeRange] = useState<"1y" | "all">("1y");
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   // Modal / detail / help / config / analytics state
@@ -350,6 +381,8 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
   useEffect(() => {
     const saved = localStorage.getItem("cs_followup_store");
     if (saved) setStore(saved);
+    const savedRange = localStorage.getItem("cs_followup_range");
+    if (savedRange === "all" || savedRange === "1y") setTimeRange(savedRange);
     setMounted(true);
   }, []);
 
@@ -357,12 +390,17 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     setLoading(true);
     setError("");
     try {
+      // When filtering by staff, broaden the base filter to "all" so we see everything
+      // attributed to them regardless of due date.
+      const leadsFilter = staffFilter ? "all" : filter;
+      const creatorParam = staffFilter ? `&creator=${encodeURIComponent(staffFilter)}` : "";
+      const rangeParam = `&range=${timeRange}`;
       const [summaryRes, leadsRes, configRes, analyticsRes, calendarRes] = await Promise.all([
-        fetch(`/api/customer-service/follow-up?view=summary&store=${store}`),
-        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=${filter}`),
+        fetch(`/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`),
+        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${rangeParam}`),
         fetch(`/api/customer-service/follow-up?view=config&store=${store}`),
         fetch(`/api/customer-service/follow-up?view=analytics&store=${store}`),
-        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=all`),
+        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=all${rangeParam}`),
       ]);
 
       if (!summaryRes.ok) throw new Error("Failed to load follow-up data");
@@ -375,6 +413,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
 
       setSummary(summaryData);
       setStores(summaryData.stores ?? []);
+      setLastSyncedAt(summaryData.last_synced_at ?? null);
       setLeads(leadsData.leads ?? []);
       setStoreDays(configData.config ?? {});
       setAnalytics(analyticsData.months ?? []);
@@ -384,7 +423,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     } finally {
       setLoading(false);
     }
-  }, [store, filter]);
+  }, [store, filter, staffFilter, timeRange]);
 
   useEffect(() => { if (mounted) loadData(); }, [loadData, mounted]);
 
@@ -401,12 +440,13 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
         if (json.auto_won > 0) parts.push(`${json.auto_won} auto-won`);
         if (json.stale_detected > 0) parts.push(`${json.stale_detected} stale`);
         setSyncStatus(parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date");
+        if (json.synced_at) setLastSyncedAt(json.synced_at);
         loadData();
       } else {
         setSyncStatus(`Error: ${json.error}`);
       }
-    } catch {
-      setSyncStatus("Failed to sync");
+    } catch (e) {
+      setSyncStatus(`Failed to sync: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setSyncing(false);
     }
@@ -443,6 +483,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
 
   const handleStoreChange = (newStore: string) => {
     setStore(newStore);
+    setLastSyncedAt(null);
     localStorage.setItem("cs_followup_store", newStore);
   };
 
@@ -528,6 +569,34 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
           )}
         </div>
         <div className="flex items-center gap-3">
+          <div className="inline-flex rounded-lg border border-sand-200 bg-white p-0.5 text-xs font-medium">
+            <button
+              onClick={() => {
+                setTimeRange("1y");
+                localStorage.setItem("cs_followup_range", "1y");
+              }}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                timeRange === "1y"
+                  ? "bg-blue-600 text-white"
+                  : "text-sand-600 hover:text-sand-900"
+              }`}
+            >
+              Last 12 months
+            </button>
+            <button
+              onClick={() => {
+                setTimeRange("all");
+                localStorage.setItem("cs_followup_range", "all");
+              }}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                timeRange === "all"
+                  ? "bg-blue-600 text-white"
+                  : "text-sand-600 hover:text-sand-900"
+              }`}
+            >
+              All time
+            </button>
+          </div>
           {stores.length > 1 && (
             <select
               value={store}
@@ -538,6 +607,11 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
                 <option key={s.id} value={s.id}>{s.label}</option>
               ))}
             </select>
+          )}
+          {lastSyncedAt && (
+            <p className="text-[11px] text-sand-400" title={new Date(lastSyncedAt).toLocaleString()}>
+              Last synced {formatDate(lastSyncedAt)}
+            </p>
           )}
           <button
             onClick={handleSync}
@@ -678,6 +752,35 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             </div>
           )}
 
+          {/* Per-staff breakdown */}
+          <StaffBreakdown
+            store={store}
+            range={timeRange}
+            onStaffClick={(s) => {
+              // Clicking "Unknown" maps to leads with no creator attribution.
+              setStaffFilter(s === "Unknown" ? "__unknown__" : s);
+              // Scroll to the lead table so the user sees the filtered results.
+              requestAnimationFrame(() => {
+                document.getElementById("followup-lead-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
+          />
+
+          {/* Active staff filter chip */}
+          {staffFilter && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
+              <span className="text-sm text-blue-700">
+                Showing leads by <strong>{staffFilter === "__unknown__" ? "Unknown" : staffFilter}</strong>
+              </span>
+              <button
+                onClick={() => setStaffFilter(null)}
+                className="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
+
           {/* View toggle */}
           <div className="flex items-center gap-2">
             <button
@@ -699,6 +802,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
           </div>
 
           {/* Lead Table or Calendar */}
+          <div id="followup-lead-list">
           {viewMode === "calendar" ? (
             <CalendarView
               leads={calendarLeads}
@@ -715,6 +819,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             filterCounts={filterCounts}
           />
           )}
+          </div>
 
           {/* Loss reasons summary */}
           {summary?.loss_reasons && Object.keys(summary.loss_reasons).length > 0 && (
@@ -752,6 +857,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
       {detailLead && (
         <LeadDetailPanel
           lead={detailLead}
+          shopDomain={stores.find((s) => s.id === store)?.shop_domain ?? ""}
           onClose={() => setDetailLead(null)}
           onLogFollowUp={() => {
             setModalLead(detailLead);

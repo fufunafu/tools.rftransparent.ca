@@ -86,6 +86,7 @@ export interface FollowUpLead {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  created_by_staff: string | null;
 }
 
 export interface FollowUpLog {
@@ -106,12 +107,19 @@ interface ShopifyDraftNode {
   status: string;
   subtotalPriceSet: { shopMoney: { amount: string } };
   tags: string[];
-  order: { id: string; createdAt: string } | null;
+  order: {
+    id: string;
+    createdAt: string;
+    staffMember?: { firstName: string | null; lastName: string | null } | null;
+  } | null;
   customer: {
     displayName: string;
     email: string | null;
     phone: string | null;
   } | null;
+  events: {
+    edges: { node: { message: string; createdAt: string } }[];
+  };
 }
 
 interface DraftEdge {
@@ -129,8 +137,9 @@ function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor
             id name createdAt status
             subtotalPriceSet { shopMoney { amount } }
             tags
-            order { id createdAt }
+            order { id createdAt staffMember { firstName lastName } }
             customer { displayName email phone }
+            events(first: 20, sortKey: CREATED_AT) { edges { node { message createdAt } } }
           }
           cursor
         }
@@ -138,6 +147,32 @@ function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor
       }
     }
   `;
+}
+
+/**
+ * Resolve the staff member responsible for this draft order, in priority order:
+ *   1. The linked Order's staffMember (converted drafts — most authoritative).
+ *   2. The first "X sent an invoice to …" event. Apps like Quotation often create
+ *      drafts programmatically, but a real staff member sends the invoice — that's
+ *      the meaningful attribution for the follow-up queue.
+ *   3. The creation event ("X created this draft order.") — falls back to the app
+ *      name if no human ever sent an invoice.
+ */
+function extractCreator(draft: ShopifyDraftNode): string | null {
+  const staff = draft.order?.staffMember;
+  if (staff?.firstName || staff?.lastName) {
+    return [staff.firstName, staff.lastName].filter(Boolean).join(" ").trim() || null;
+  }
+  const events = draft.events?.edges ?? [];
+  for (const { node } of events) {
+    const match = node.message.match(/^(.+?) sent an invoice to /);
+    if (match) return match[1].trim();
+  }
+  for (const { node } of events) {
+    const match = node.message.match(/^(.+?) created this draft order\.?$/);
+    if (match) return match[1].trim();
+  }
+  return null;
 }
 
 const MAX_PAGES = 80;
@@ -155,7 +190,12 @@ async function fetchDraftsForSync(
   while (hasNext && pages < MAX_PAGES) {
     const raw = await shopifyGraphQL<{
       draftOrders: { edges: DraftEdge[]; pageInfo: { hasNextPage: boolean } };
-    }>(storeId, makeFollowUpDraftQuery(fromDate, statusFilter, cursor));
+    }>(
+      storeId,
+      makeFollowUpDraftQuery(fromDate, statusFilter, cursor),
+      undefined,
+      { app: "quotation" }, // Quotation app has read_users, required for events + staffMember
+    );
 
     const edges = raw.draftOrders.edges;
     allDrafts.push(...edges.map((e) => e.node));
@@ -187,37 +227,57 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   // All-time sync — Shopify paginates up to 20,000 records which is plenty
   const fromDateStr = "2020-01-01";
 
-  // 1. Fetch OPEN and INVOICE_SENT drafts from Shopify
-  const [openDrafts, invoiceDrafts] = await Promise.all([
-    fetchDraftsForSync(storeId, fromDateStr, "status:open"),
-    fetchDraftsForSync(storeId, fromDateStr, "status:invoice_sent"),
-  ]);
-  const shopifyDrafts = [...openDrafts, ...invoiceDrafts];
+  // System/placeholder emails that should never appear as leads
+  const SKIP_EMAILS = new Set(["application@gmail.com"]);
+
+  // 1. Fetch only INVOICE_SENT drafts — open drafts are unsent works-in-progress.
+  //    Filter out system emails before building the ID set so stale detection
+  //    will later mark any existing DB records with those emails as DELETED.
+  const shopifyDrafts = (await fetchDraftsForSync(storeId, fromDateStr, "status:invoice_sent"))
+    .filter((d) => !SKIP_EMAILS.has((d.customer?.email ?? "").toLowerCase()));
   const shopifyDraftIds = new Set(shopifyDrafts.map((d) => d.id));
 
-  // 2. Get existing leads for this store
-  const { data: existingLeads } = await supabase
-    .from("followup_leads")
-    .select("id, shopify_draft_id, lead_status, shopify_status")
-    .eq("store_id", storeId);
+  // 2. Get existing leads for this store — paginate in 1000-row pages to
+  //    bypass PostgREST's server-side db-max-rows cap (client .limit() can't exceed it)
+  const existingLeads: { id: string; shopify_draft_id: string; lead_status: string; shopify_status: string }[] = [];
+  {
+    const PAGE = 1000;
+    let from = 0;
+    while (true) {
+      const { data } = await supabase
+        .from("followup_leads")
+        .select("id, shopify_draft_id, lead_status, shopify_status")
+        .eq("store_id", storeId)
+        .range(from, from + PAGE - 1);
+      if (!data || data.length === 0) break;
+      existingLeads.push(...data);
+      if (data.length < PAGE) break;
+      from += PAGE;
+    }
+  }
 
   const existingByDraftId = new Map(
     (existingLeads ?? []).map((l: { shopify_draft_id: string; id: string; lead_status: string; shopify_status: string }) => [l.shopify_draft_id, l])
   );
 
-  // 3. Upsert — separate new inserts from updates
+  // 3. Separate new leads from updates, then batch/parallelize
   const now = new Date().toISOString();
   const firstFollowup = new Date(Date.now() + newLeadDays * 24 * 60 * 60 * 1000).toISOString();
+
+  const newActiveLeads: Record<string, unknown>[] = [];
+  const newWonLeads: Record<string, unknown>[] = [];
+  const updatePromises: Promise<unknown>[] = [];
 
   for (const draft of shopifyDrafts) {
     const existing = existingByDraftId.get(draft.id);
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
-    const hasOrder = draft.order !== null; // draft converted to a real order
+    const hasOrder = draft.order !== null;
+
+    const createdBy = extractCreator(draft);
 
     if (!existing) {
       if (hasOrder) {
-        // Draft already converted — insert as won
-        const { error } = await supabase.from("followup_leads").insert({
+        newWonLeads.push({
           store_id: storeId,
           shopify_draft_id: draft.id,
           draft_name: draft.name,
@@ -233,59 +293,50 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           closed_at: draft.order!.createdAt,
           first_synced_at: now,
           last_synced_at: now,
+          created_by_staff: createdBy,
         });
-        if (!error) result.auto_won++;
-        continue;
-      }
-
-      // New active lead
-      const { error } = await supabase.from("followup_leads").insert({
-        store_id: storeId,
-        shopify_draft_id: draft.id,
-        draft_name: draft.name,
-        customer_name: draft.customer?.displayName || null,
-        customer_email: draft.customer?.email || null,
-        customer_phone: draft.customer?.phone || null,
-        quote_amount: amount,
-        shopify_created_at: draft.createdAt,
-        shopify_status: draft.status,
-        lead_status: "new",
-        next_followup_at: firstFollowup,
-        followup_count: 0,
-        first_synced_at: now,
-        last_synced_at: now,
-      });
-      if (!error) result.new_leads++;
-    } else {
-      // Existing lead — check if it converted since last sync
-      if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
-        await supabase
-          .from("followup_leads")
-          .update({
-            lead_status: "won",
-            shopify_status: draft.status,
-            closed_at: draft.order!.createdAt,
-            next_followup_at: null,
-            updated_at: now,
-            last_synced_at: now,
-          })
-          .eq("id", existing.id);
-
-        await supabase.from("followup_logs").insert({
-          lead_id: existing.id,
-          outcome: "won",
-          notes: "Auto-detected: draft order has a linked order",
-          logged_by: "system",
+      } else {
+        newActiveLeads.push({
+          store_id: storeId,
+          shopify_draft_id: draft.id,
+          draft_name: draft.name,
+          customer_name: draft.customer?.displayName || null,
+          customer_email: draft.customer?.email || null,
+          customer_phone: draft.customer?.phone || null,
+          quote_amount: amount,
+          shopify_created_at: draft.createdAt,
+          shopify_status: draft.status,
+          lead_status: "new",
+          next_followup_at: firstFollowup,
+          followup_count: 0,
+          first_synced_at: now,
+          last_synced_at: now,
+          created_by_staff: createdBy,
         });
-
-        result.auto_won++;
-        continue;
       }
-
-      // Update sync fields only — preserve lead_status, next_followup_at, notes
-      await supabase
-        .from("followup_leads")
-        .update({
+    } else if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
+      updatePromises.push(
+        supabase.from("followup_leads").update({
+          lead_status: "won",
+          shopify_status: draft.status,
+          closed_at: draft.order!.createdAt,
+          next_followup_at: null,
+          updated_at: now,
+          last_synced_at: now,
+          created_by_staff: createdBy,
+        }).eq("id", existing.id).then(async () => {
+          await supabase.from("followup_logs").insert({
+            lead_id: existing.id,
+            outcome: "won",
+            notes: "Auto-detected: draft order has a linked order",
+            logged_by: "system",
+          });
+          result.auto_won++;
+        })
+      );
+    } else if (existing) {
+      updatePromises.push(
+        supabase.from("followup_leads").update({
           draft_name: draft.name,
           customer_name: draft.customer?.displayName || null,
           customer_email: draft.customer?.email || null,
@@ -295,47 +346,57 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           shopify_status: draft.status,
           last_synced_at: now,
           updated_at: now,
-        })
-        .eq("id", existing.id);
-      result.updated_leads++;
+          created_by_staff: createdBy,
+        }).eq("id", existing.id).then(() => { result.updated_leads++; })
+      );
     }
   }
 
-  // 4. Detect completions — fetch COMPLETED drafts (same 180-day window)
-  const completedDrafts = await fetchDraftsForSync(
-    storeId,
-    fromDateStr,
-    "status:completed",
-  );
+  // Batch-insert new leads (100 at a time)
+  const BATCH = 100;
+  for (let i = 0; i < newActiveLeads.length; i += BATCH) {
+    const { error } = await supabase.from("followup_leads").insert(newActiveLeads.slice(i, i + BATCH));
+    if (!error) result.new_leads += newActiveLeads.slice(i, i + BATCH).length;
+  }
+  for (let i = 0; i < newWonLeads.length; i += BATCH) {
+    const { error } = await supabase.from("followup_leads").insert(newWonLeads.slice(i, i + BATCH));
+    if (!error) result.auto_won += newWonLeads.slice(i, i + BATCH).length;
+  }
+  // Run all updates in parallel
+  await Promise.all(updatePromises);
+
+  // 4. Detect completions — fetch COMPLETED drafts
+  const completedDrafts = await fetchDraftsForSync(storeId, fromDateStr, "status:completed");
+
+  const newCompletedLeads: Record<string, unknown>[] = [];
+  const completedUpdatePromises: Promise<unknown>[] = [];
 
   for (const draft of completedDrafts) {
     const existing = existingByDraftId.get(draft.id);
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
+    const createdBy = extractCreator(draft);
 
     if (existing && existing.lead_status !== "won" && existing.lead_status !== "lost") {
-      // Existing lead that converted — mark as won
-      await supabase
-        .from("followup_leads")
-        .update({
+      completedUpdatePromises.push(
+        supabase.from("followup_leads").update({
           lead_status: "won",
           shopify_status: "COMPLETED",
           closed_at: now,
           next_followup_at: null,
           updated_at: now,
+          created_by_staff: createdBy,
+        }).eq("id", existing.id).then(async () => {
+          await supabase.from("followup_logs").insert({
+            lead_id: existing.id,
+            outcome: "won",
+            notes: "Auto-detected from Shopify COMPLETED status",
+            logged_by: "system",
+          });
+          result.auto_won++;
         })
-        .eq("id", existing.id);
-
-      await supabase.from("followup_logs").insert({
-        lead_id: existing.id,
-        outcome: "won",
-        notes: "Auto-detected from Shopify COMPLETED status",
-        logged_by: "system",
-      });
-
-      result.auto_won++;
+      );
     } else if (!existing) {
-      // Completed draft never tracked — insert as already-won lead
-      const { error } = await supabase.from("followup_leads").insert({
+      newCompletedLeads.push({
         store_id: storeId,
         shopify_draft_id: draft.id,
         draft_name: draft.name,
@@ -351,12 +412,27 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         closed_at: draft.order?.createdAt || now,
         first_synced_at: now,
         last_synced_at: now,
+        created_by_staff: createdBy,
       });
-      if (!error) result.auto_won++;
+    } else {
+      // Already won/lost — backfill creator + last_synced_at without touching status.
+      completedUpdatePromises.push(
+        supabase.from("followup_leads").update({
+          created_by_staff: createdBy,
+          last_synced_at: now,
+        }).eq("id", existing.id).then(() => { result.updated_leads++; })
+      );
     }
   }
 
+  for (let i = 0; i < newCompletedLeads.length; i += BATCH) {
+    const { error } = await supabase.from("followup_leads").insert(newCompletedLeads.slice(i, i + BATCH));
+    if (!error) result.auto_won += newCompletedLeads.slice(i, i + BATCH).length;
+  }
+  await Promise.all(completedUpdatePromises);
+
   // 5. Detect stale — leads in DB but missing from Shopify
+  const stalePromises: Promise<unknown>[] = [];
   for (const [draftId, existing] of existingByDraftId) {
     if (
       !shopifyDraftIds.has(draftId) &&
@@ -365,13 +441,15 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       existing.lead_status !== "lost" &&
       existing.lead_status !== "duplicate"
     ) {
-      await supabase
-        .from("followup_leads")
-        .update({ shopify_status: "DELETED", updated_at: now })
-        .eq("id", existing.id);
-      result.stale_detected++;
+      stalePromises.push(
+        supabase.from("followup_leads")
+          .update({ shopify_status: "DELETED", updated_at: now })
+          .eq("id", existing.id)
+          .then(() => { result.stale_detected++; })
+      );
     }
   }
+  await Promise.all(stalePromises);
 
   return result;
 }

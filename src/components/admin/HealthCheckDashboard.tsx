@@ -18,10 +18,18 @@ interface FreshnessRow {
   stale: boolean;
 }
 
+interface EmailFreshnessRow {
+  inbox: string;
+  label: string;
+  last_sync: string | null;
+  stale: boolean;
+}
+
 interface InitialData {
   service_checks: string[];
   env_vars: CheckResult[];
   data_freshness: FreshnessRow[];
+  email_freshness: EmailFreshnessRow[];
   checked_at: string;
 }
 
@@ -282,6 +290,54 @@ export default function HealthCheckDashboard() {
               </table>
             </div>
           </div>
+
+          {/* Email Sync Freshness */}
+          {initData.email_freshness?.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-sand-400 mb-3">
+                Email Sync Freshness
+              </p>
+              <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-sand-100 text-left">
+                      <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Inbox</th>
+                      <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Last Sync</th>
+                      <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {initData.email_freshness.map((row) => (
+                      <tr key={row.inbox} className="border-b border-sand-50 last:border-0">
+                        <td className="px-4 py-2.5">
+                          <span className="font-medium text-sand-700">{row.label}</span>
+                          <span className="ml-2 text-[11px] text-sand-400">{row.inbox}</span>
+                        </td>
+                        <td className="px-4 py-2.5 text-sand-600">
+                          {row.last_sync ? (
+                            <span title={formatDate(row.last_sync)}>{timeAgo(row.last_sync)}</span>
+                          ) : (
+                            <span className="text-sand-300">Never</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {row.stale ? (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-600">
+                              Stale
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-600">
+                              Fresh
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Environment Variables */}
           <div>

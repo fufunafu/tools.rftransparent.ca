@@ -16,7 +16,7 @@ import {
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const STORES = getStores().map((s) => ({ id: s.id, label: s.label }));
+const STORES = getStores().map((s) => ({ id: s.id, label: s.label, shop_domain: s.store }));
 
 function todayStart() {
   const d = new Date();
@@ -28,6 +28,15 @@ function tomorrowStart() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+/** Resolve a ?range=1y|all param into a cutoff ISO timestamp, or null for "all time". */
+function rangeCutoff(range: string | null): string | null {
+  if (!range || range === "all") return null;
+  // Default (including "1y"): last 365 days.
+  const d = new Date();
+  d.setFullYear(d.getFullYear() - 1);
   return d.toISOString();
 }
 
@@ -61,10 +70,22 @@ export async function GET(req: NextRequest) {
 
     // ── Analytics (monthly trends) ──
     if (view === "analytics") {
-      const { data: allLeads } = await supabase
-        .from("followup_leads")
-        .select("shopify_created_at, lead_status, quote_amount, closed_at")
-        .eq("store_id", storeId);
+      const allLeads: { shopify_created_at: string | null; lead_status: string; quote_amount: number; closed_at: string | null }[] = [];
+      {
+        const PAGE = 1000;
+        let from = 0;
+        while (true) {
+          const { data } = await supabase
+            .from("followup_leads")
+            .select("shopify_created_at, lead_status, quote_amount, closed_at")
+            .eq("store_id", storeId)
+            .range(from, from + PAGE - 1);
+          if (!data || data.length === 0) break;
+          allLeads.push(...data as typeof allLeads);
+          if (data.length < PAGE) break;
+          from += PAGE;
+        }
+      }
 
       const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
 
@@ -94,22 +115,38 @@ export async function GET(req: NextRequest) {
 
     // ── Summary ──
     if (view === "summary") {
-      // Active leads (not closed)
-      const { data: activeLeads } = await supabase
-        .from("followup_leads")
-        .select("*")
-        .eq("store_id", storeId)
-        .is("closed_at", null);
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+      // Active and closed leads — paginate past PostgREST's 1000-row server cap
+      const PAGE = 1000;
+      const activeLeads: FollowUpLead[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from("followup_leads").select("*")
+          .eq("store_id", storeId).is("closed_at", null)
+          // Exclude OPEN (unsent works-in-progress) and DELETED (draft no longer in Shopify's
+          // invoice_sent state — usually invoice recalled/voided). Neither is a real quote.
+          .not("shopify_status", "in", "(OPEN,DELETED)");
+        if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        const { data } = await q.range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        activeLeads.push(...data as FollowUpLead[]);
+        if (data.length < PAGE) break;
+      }
+      const closedLeads: FollowUpLead[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from("followup_leads").select("*")
+          .eq("store_id", storeId).not("closed_at", "is", null)
+          .not("shopify_status", "in", "(OPEN,DELETED)");
+        if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        const { data } = await q.range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        closedLeads.push(...data as FollowUpLead[]);
+        if (data.length < PAGE) break;
+      }
 
-      // Closed leads
-      const { data: closedLeads } = await supabase
-        .from("followup_leads")
-        .select("*")
-        .eq("store_id", storeId)
-        .not("closed_at", "is", null);
-
-      const active = (activeLeads ?? []) as FollowUpLead[];
-      const closed = (closedLeads ?? []) as FollowUpLead[];
+      const active = activeLeads;
+      const closed = closedLeads;
 
       const dueToday = active.filter(
         (l) => l.next_followup_at && l.next_followup_at >= today && l.next_followup_at < tomorrow
@@ -160,6 +197,14 @@ export async function GET(req: NextRequest) {
         ? Math.round((closedWithAttempts.reduce((s, l) => s + l.followup_count, 0) / closedWithAttempts.length) * 10) / 10
         : 0;
 
+      // Last sync time — max last_synced_at across all leads, no extra query needed
+      const allLeads = [...active, ...closed];
+      const lastSyncedAt = allLeads.reduce((max: string | null, l) => {
+        if (!l.last_synced_at) return max;
+        if (!max) return l.last_synced_at;
+        return l.last_synced_at > max ? l.last_synced_at : max;
+      }, null);
+
       return NextResponse.json({
         metrics: {
           due_today: dueToday,
@@ -177,6 +222,7 @@ export async function GET(req: NextRequest) {
         },
         by_status: byStatus,
         loss_reasons: lossReasons,
+        last_synced_at: lastSyncedAt,
         stores: STORES,
       });
     }
@@ -184,12 +230,31 @@ export async function GET(req: NextRequest) {
     // ── Leads list ──
     if (view === "leads") {
       const filter = req.nextUrl.searchParams.get("filter") || "due_today";
+      const creator = req.nextUrl.searchParams.get("creator"); // optional: "__unknown__" or a staff name
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+
+      const SKIP_EMAILS = ["application@gmail.com"];
+      const skipFilter = SKIP_EMAILS.map((e) => `customer_email.neq.${e}`).join(",");
 
       let query = supabase
         .from("followup_leads")
         .select("*")
         .eq("store_id", storeId)
-        .order("next_followup_at", { ascending: true, nullsFirst: false });
+        .or(`customer_email.is.null,${skipFilter}`)
+        // Exclude OPEN (unsent works-in-progress) and DELETED (invoice recalled/voided).
+        .not("shopify_status", "in", "(OPEN,DELETED)");
+
+      if (cutoff) {
+        query = query.gte("shopify_created_at", cutoff);
+      }
+
+      // When filtering by creator (from a Quotes-by-Staff click), order by
+      // newest draft first — that's the most useful view for spot-checking.
+      if (creator) {
+        query = query.order("shopify_created_at", { ascending: false, nullsFirst: false });
+      } else {
+        query = query.order("next_followup_at", { ascending: true, nullsFirst: false });
+      }
 
       if (filter === "due_today") {
         query = query.is("closed_at", null).gte("next_followup_at", today).lt("next_followup_at", tomorrow);
@@ -203,6 +268,12 @@ export async function GET(req: NextRequest) {
         query = query.not("closed_at", "is", null).order("closed_at", { ascending: false });
       }
 
+      if (creator === "__unknown__") {
+        query = query.is("created_by_staff", null);
+      } else if (creator) {
+        query = query.eq("created_by_staff", creator);
+      }
+
       const { data, error } = await query;
       if (error) throw new Error(error.message);
 
@@ -210,7 +281,64 @@ export async function GET(req: NextRequest) {
         leads: data ?? [],
         total: (data ?? []).length,
         filter,
+        creator: creator ?? null,
       });
+    }
+
+    // ── Per-staff breakdown ──
+    if (view === "by_staff") {
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+      const PAGE = 1000;
+      const rows: { created_by_staff: string | null; lead_status: string; quote_amount: number }[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from("followup_leads")
+          .select("created_by_staff, lead_status, quote_amount")
+          .eq("store_id", storeId)
+          // Exclude OPEN (unsent works-in-progress) and DELETED (invoice recalled/voided).
+          .not("shopify_status", "in", "(OPEN,DELETED)");
+        if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        const { data } = await q.range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        rows.push(...(data as typeof rows));
+        if (data.length < PAGE) break;
+      }
+
+      interface StaffAgg {
+        staff: string;
+        total: number;
+        won: number;
+        lost: number;
+        active: number;
+        quoted_value: number;
+        won_value: number;
+        conversion_rate: number;
+      }
+
+      const byStaff = new Map<string, StaffAgg>();
+      for (const r of rows) {
+        const staff = r.created_by_staff?.trim() || "Unknown";
+        const a = byStaff.get(staff) ?? {
+          staff, total: 0, won: 0, lost: 0, active: 0,
+          quoted_value: 0, won_value: 0, conversion_rate: 0,
+        };
+        a.total++;
+        a.quoted_value += Number(r.quote_amount);
+        if (r.lead_status === "won") { a.won++; a.won_value += Number(r.quote_amount); }
+        else if (r.lead_status === "lost") a.lost++;
+        else a.active++;
+        byStaff.set(staff, a);
+      }
+
+      const staffList = Array.from(byStaff.values()).map((a) => {
+        // Conversion rate = won / total (treats active quotes as not-yet-converted).
+        a.conversion_rate = a.total > 0 ? Math.round((a.won / a.total) * 1000) / 10 : 0;
+        a.quoted_value = Math.round(a.quoted_value);
+        a.won_value = Math.round(a.won_value);
+        return a;
+      }).sort((a, b) => b.total - a.total);
+
+      return NextResponse.json({ staff: staffList });
     }
 
     // ── Logs for a lead ──
@@ -264,7 +392,7 @@ export async function POST(req: NextRequest) {
       }
 
       const result = await syncDraftOrdersForStore(storeId);
-      return NextResponse.json({ status: "success", ...result });
+      return NextResponse.json({ status: "success", synced_at: new Date().toISOString(), ...result });
     }
 
     // ── Log a follow-up attempt ──

@@ -12,6 +12,8 @@ interface Employee {
   id: string;
   name: string;
   email: string | null;
+  phone: string | null;
+  birthday: string | null;
   department: string;
   location_id: string | null;
   shopify_tags: string[];
@@ -22,6 +24,8 @@ interface Employee {
 interface EditDraft {
   name: string;
   email: string;
+  phone: string;
+  birthday: string;
   department: string;
   location_id: string;
   shopify_tags: string; // comma-separated
@@ -47,13 +51,15 @@ const DEPARTMENTS = [
 const NEW_ID = "__new__";
 
 function emptyDraft(): EditDraft {
-  return { name: "", email: "", department: "sales", location_id: "", shopify_tags: "", active: true };
+  return { name: "", email: "", phone: "", birthday: "", department: "sales", location_id: "", shopify_tags: "", active: true };
 }
 
 function draftFromEmployee(emp: Employee): EditDraft {
   return {
     name: emp.name,
     email: emp.email ?? "",
+    phone: emp.phone ?? "",
+    birthday: emp.birthday ?? "",
     department: emp.department,
     location_id: emp.location_id ?? "",
     shopify_tags: (emp.shopify_tags ?? []).join(", "),
@@ -156,6 +162,23 @@ function EditRow({
           className={INPUT_CLS}
         />
       </td>
+      <td className="px-3 py-2">
+        <input
+          type="tel"
+          value={draft.phone}
+          onChange={(e) => setField("phone", e.target.value)}
+          placeholder="+1 514 555 0000"
+          className={INPUT_CLS}
+        />
+      </td>
+      <td className="px-3 py-2">
+        <input
+          type="date"
+          value={draft.birthday}
+          onChange={(e) => setField("birthday", e.target.value)}
+          className={INPUT_CLS}
+        />
+      </td>
       <td className="px-3 py-2 text-right whitespace-nowrap">
         {error && <span className="text-xs text-red-500 block mb-1">{error}</span>}
         <button
@@ -253,6 +276,8 @@ export default function EmployeeList() {
       const body = {
         name: draft.name.trim(),
         email: draft.email.trim().toLowerCase() || null,
+        phone: draft.phone.trim() || null,
+        birthday: draft.birthday || null,
         department: draft.department,
         location_id: draft.location_id || null,
         shopify_tags: draft.shopify_tags
@@ -366,6 +391,12 @@ export default function EmployeeList() {
                 <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
                   Google Email
                 </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+                  Phone (WhatsApp)
+                </th>
+                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+                  Birthday
+                </th>
                 <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
                   Actions
                 </th>
@@ -374,14 +405,14 @@ export default function EmployeeList() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sand-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-sand-400">
                     Loading...
                   </td>
                 </tr>
               )}
               {!loading && filtered.length === 0 && editingId !== NEW_ID && (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-sand-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-sand-400">
                     No employees found.
                   </td>
                 </tr>
@@ -431,6 +462,14 @@ export default function EmployeeList() {
                     </td>
                     <td className="px-4 py-3 text-sand-500 text-xs">
                       {emp.email ?? <span className="text-sand-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sand-500 text-xs">
+                      {emp.phone ?? <span className="text-sand-300">—</span>}
+                    </td>
+                    <td className="px-4 py-3 text-sand-500 text-xs">
+                      {emp.birthday
+                        ? new Date(emp.birthday + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })
+                        : <span className="text-sand-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button

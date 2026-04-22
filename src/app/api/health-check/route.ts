@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
-import { STORES as SHOPIFY_STORES } from "@/lib/shopify";
+import { STORES as SHOPIFY_STORES, shopifyGraphQL } from "@/lib/shopify";
+import { INBOXES } from "@/lib/gmail";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -18,6 +19,13 @@ interface FreshnessRow {
   latest_call: string | null;
   last_scrape: string | null;
   scrape_status: string | null;
+  stale: boolean;
+}
+
+interface EmailFreshnessRow {
+  inbox: string;
+  label: string;
+  last_sync: string | null;
   stale: boolean;
 }
 
@@ -108,6 +116,18 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
         return "Token OK";
       });
 
+    case "resend":
+      return () => timedCheck("Resend", async () => {
+        const apiKey = process.env.RESEND_API_KEY;
+        if (!apiKey) throw new Error("RESEND_API_KEY not set");
+        const res = await fetch("https://api.resend.com/domains", {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return "API OK";
+      });
+
     case "google-analytics":
       return () => timedCheck("Google Analytics", async () => {
         const propertyId = process.env.GOOGLE_GA4_PROPERTY_ID;
@@ -150,26 +170,43 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
       });
 
     default:
-      // Shopify stores
+      // Gmail inboxes — one check per inbox, indexed like shopify-N
+      if (name.startsWith("gmail-")) {
+        const idx = parseInt(name.replace("gmail-", ""), 10);
+        const inbox = INBOXES[idx];
+        if (!inbox) return null;
+        return () => timedCheck(`Gmail: ${inbox.label}`, async () => {
+          const clientId = process.env.GMAIL_CLIENT_ID;
+          const clientSecret = process.env.GMAIL_CLIENT_SECRET;
+          const refreshToken = process.env[inbox.refreshTokenEnv];
+          if (!clientId || !clientSecret || !refreshToken) throw new Error("Not configured");
+          const res = await fetch("https://oauth2.googleapis.com/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+              grant_type: "refresh_token",
+              client_id: clientId,
+              client_secret: clientSecret,
+              refresh_token: refreshToken,
+            }),
+          });
+          if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
+          return `Token OK (${inbox.email})`;
+        });
+      }
+      // Shopify stores — probe via a real API call ({ shop { name } })
+      // rather than re-running the OAuth exchange. This works for both
+      // client_credentials custom apps and shpat_ access-token custom apps.
       if (name.startsWith("shopify-")) {
         const idx = parseInt(name.replace("shopify-", ""), 10);
         const store = SHOPIFY_STORES[idx];
         if (!store) return null;
         return () => timedCheck(`Shopify: ${store.label}`, async () => {
-          const res = await fetch(
-            `https://${store.store}/admin/oauth/access_token`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: new URLSearchParams({
-                grant_type: "client_credentials",
-                client_id: store.clientId,
-                client_secret: store.clientSecret,
-              }),
-            }
+          const data = await shopifyGraphQL<{ shop: { name: string } }>(
+            store.id,
+            "{ shop { name } }"
           );
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          return "Token OK";
+          return `Connected: ${data.shop.name}`;
         });
       }
       return null;
@@ -199,6 +236,7 @@ export async function GET(req: NextRequest) {
     envCheck("OpenAI Env", ["OPENAI_API_KEY"]),
     envCheck("Resend Env", ["RESEND_API_KEY"]),
     envCheck("Scraper Env", ["SCRAPER_URL", "SCRAPER_API_KEY"]),
+    envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN_RF", "GMAIL_REFRESH_TOKEN_GRS", "GMAIL_REFRESH_TOKEN_BC"]),
   ];
 
   // Data freshness
@@ -244,6 +282,30 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Email sync freshness
+  const emailFreshness: EmailFreshnessRow[] = [];
+  for (const inbox of INBOXES) {
+    const { data: lastSync } = await getSupabase()
+      .from("email_sync_runs")
+      .select("finished_at")
+      .eq("inbox", inbox.email)
+      .eq("status", "success")
+      .order("finished_at", { ascending: false })
+      .limit(1);
+
+    const lastSyncTime = lastSync?.[0]?.finished_at ?? null;
+    const isStale = lastSyncTime
+      ? Date.now() - new Date(lastSyncTime).getTime() > staleThresholdMs
+      : true;
+
+    emailFreshness.push({
+      inbox: inbox.email,
+      label: inbox.label,
+      last_sync: lastSyncTime,
+      stale: isStale,
+    });
+  }
+
   // List of service checks the frontend should call individually
   const serviceChecks = [
     "supabase",
@@ -251,12 +313,15 @@ export async function GET(req: NextRequest) {
     ...SHOPIFY_STORES.map((_, i) => `shopify-${i}`),
     "google-ads",
     "google-analytics",
+    ...INBOXES.map((_, i) => `gmail-${i}`),
+    "resend",
   ];
 
   return NextResponse.json({
     service_checks: serviceChecks,
     env_vars: envChecks,
     data_freshness: freshness,
+    email_freshness: emailFreshness,
     checked_at: new Date().toISOString(),
   });
 }

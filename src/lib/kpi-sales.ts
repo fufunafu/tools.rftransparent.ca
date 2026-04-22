@@ -147,7 +147,9 @@ async function fetchAllOrders(
       while (hasNext && pages < MAX_PAGES) {
         const raw = await shopifyGraphQL(
           store.id,
-          makeOrdersQuery(fromDate, cursor)
+          makeOrdersQuery(fromDate, cursor),
+          undefined,
+          { app: "quotation" }, // Quotation app has read_users, needed for staffMember field
         );
         const data = OrdersResponseSchema.parse(raw);
         const edges = data.orders.edges;

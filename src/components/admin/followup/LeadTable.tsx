@@ -37,7 +37,7 @@ function formatAmount(n: number): string {
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 interface Props {
@@ -58,13 +58,14 @@ const FILTER_TABS = [
   { value: "closed", label: "Closed" },
 ];
 
-type SortKey = "draft_name" | "customer" | "amount" | "status" | "due" | "attempts" | "quoted";
+type SortKey = "draft_name" | "customer" | "created_by" | "amount" | "status" | "due" | "attempts" | "quoted";
 type SortDir = "asc" | "desc";
 
 function getSortValue(lead: FollowUpLead, key: SortKey): string | number {
   switch (key) {
     case "draft_name": return lead.draft_name.toLowerCase();
     case "customer": return (lead.customer_name || "zzz").toLowerCase();
+    case "created_by": return (lead.created_by_staff || "zzz").toLowerCase();
     case "amount": return Number(lead.quote_amount);
     case "status": return lead.lead_status;
     case "due": return lead.next_followup_at || "9999";
@@ -83,12 +84,13 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 }
 
 function exportCSV(leads: FollowUpLead[]) {
-  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Amount", "Status", "Due Date", "Attempts", "Quoted Date", "Notes"];
+  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Created By", "Amount", "Status", "Due Date", "Attempts", "Quoted Date", "Notes"];
   const rows = leads.map((l) => [
     l.draft_name,
     l.customer_name || "",
     l.customer_email || "",
     l.customer_phone || "",
+    l.created_by_staff || "",
     Number(l.quote_amount).toFixed(2),
     FOLLOWUP_CATEGORIES[l.lead_status as LeadStatus]?.label ?? l.lead_status,
     l.next_followup_at ? l.next_followup_at.split("T")[0] : "",
@@ -133,7 +135,8 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
         l.draft_name.toLowerCase().includes(q) ||
         (l.customer_name || "").toLowerCase().includes(q) ||
         (l.customer_email || "").toLowerCase().includes(q) ||
-        (l.customer_phone || "").includes(q)
+        (l.customer_phone || "").includes(q) ||
+        (l.created_by_staff || "").toLowerCase().includes(q)
     );
   }, [leads, search]);
 
@@ -149,6 +152,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
   const columns: { key: SortKey; label: string; align: string }[] = [
     { key: "draft_name", label: "Draft #", align: "text-left" },
     { key: "customer", label: "Customer", align: "text-left" },
+    { key: "created_by", label: "Created By", align: "text-left" },
     { key: "amount", label: "Amount", align: "text-right" },
     { key: "status", label: "Status", align: "text-left" },
     { key: "due", label: "Due", align: "text-left" },
@@ -342,6 +346,9 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                       {lead.customer_email && (
                         <div className="text-[11px] text-sand-400 truncate max-w-[200px]">{lead.customer_email}</div>
                       )}
+                    </td>
+                    <td className="px-4 py-3 text-sand-700 whitespace-nowrap">
+                      {lead.created_by_staff || <span className="text-sand-400">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-sand-900">
                       {formatAmount(Number(lead.quote_amount))}

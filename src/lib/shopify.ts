@@ -7,15 +7,26 @@ export interface ShopifyStoreConfig {
   store: string;
   clientId: string;
   clientSecret: string;
+  accessToken?: string;
+  // Secondary app ("Quotation") — has `read_users` / staffMembers access.
+  // Only queries that need staff identity opt into this via shopifyGraphQL's `app` option.
+  quotationAccessToken?: string;
 }
 
-// Build store list from env vars — only include stores with all 3 credentials set
+// Build store list from env vars — only include stores with all 3 credentials set.
+// SHOPIFY_ACCESS_TOKEN_N (optional): if set, used directly and the OAuth client_credentials
+// exchange is skipped. This is required for custom apps that don't have the
+// client_credentials grant enabled (most shpat_-token custom apps).
+// SHOPIFY_QUOTATION_ACCESS_TOKEN_N (optional): shpat_ token for the "Quotation" app
+// installed on the same store — used only for staff-identity queries.
 function buildStores(): ShopifyStoreConfig[] {
   const stores: ShopifyStoreConfig[] = [];
   for (let i = 1; i <= 3; i++) {
     const store = process.env[`SHOPIFY_STORE_${i}`];
     const clientId = process.env[`SHOPIFY_CLIENT_ID_${i}`];
     const clientSecret = process.env[`SHOPIFY_CLIENT_SECRET_${i}`];
+    const accessToken = process.env[`SHOPIFY_ACCESS_TOKEN_${i}`];
+    const quotationAccessToken = process.env[`SHOPIFY_QUOTATION_ACCESS_TOKEN_${i}`];
     if (store && clientId && clientSecret) {
       stores.push({
         id: `store${i}`,
@@ -23,6 +34,8 @@ function buildStores(): ShopifyStoreConfig[] {
         store,
         clientId,
         clientSecret,
+        accessToken,
+        quotationAccessToken,
       });
     }
   }
@@ -39,6 +52,10 @@ export function getStores(): ShopifyStoreConfig[] {
 const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
 async function getToken(config: ShopifyStoreConfig): Promise<string> {
+  // Prefer a directly-configured Admin API access token (shpat_...) if present —
+  // these don't expire and don't need an OAuth exchange.
+  if (config.accessToken) return config.accessToken;
+
   const cached = tokenCache.get(config.id);
   if (cached && Date.now() < cached.expiresAt) {
     return cached.token;
@@ -68,15 +85,28 @@ async function getToken(config: ShopifyStoreConfig): Promise<string> {
   return data.access_token;
 }
 
+export type ShopifyApp = "default" | "quotation";
+
 export async function shopifyGraphQL<T = unknown>(
   storeId: string,
   query: string,
-  variables?: Record<string, unknown>
+  variables?: Record<string, unknown>,
+  opts?: { app?: ShopifyApp }
 ): Promise<T> {
   const config = STORES.find((s) => s.id === storeId);
   if (!config) throw new Error(`Unknown store: ${storeId}`);
 
-  const token = await getToken(config);
+  let token: string;
+  if (opts?.app === "quotation") {
+    if (!config.quotationAccessToken) {
+      throw new Error(
+        `Quotation app not configured for ${config.label}: set SHOPIFY_QUOTATION_ACCESS_TOKEN_${config.id.replace("store", "")}`
+      );
+    }
+    token = config.quotationAccessToken;
+  } else {
+    token = await getToken(config);
+  }
 
   const res = await fetchWithRetry(
     `https://${config.store}/admin/api/2026-01/graphql.json`,

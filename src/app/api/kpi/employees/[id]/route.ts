@@ -11,7 +11,7 @@ export async function PUT(
 
   const { id } = await params;
   const body = await req.json();
-  const { name, email, department, location_id, shopify_tags, active } = body;
+  const { name, email, department, location_id, shopify_tags, active, phone, birthday } = body;
 
   const { data, error } = await getSupabase()
     .from("employees")
@@ -22,6 +22,8 @@ export async function PUT(
       location_id: location_id || null,
       shopify_tags: Array.isArray(shopify_tags) ? shopify_tags.filter(Boolean) : [],
       active,
+      phone: phone || null,
+      birthday: birthday || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", id)
