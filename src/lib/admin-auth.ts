@@ -59,6 +59,38 @@ export async function isAuthenticated(): Promise<boolean> {
   return (await getAuthenticatedUser()) !== null;
 }
 
+// Distinguishes admins (owner / allowed domain / admin_users override) from
+// users who got in solely because they're an active employee. Used to gate
+// approval-style actions where employees should only see their own data.
+export async function isAdminUser(): Promise<boolean> {
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return false;
+  const email = user.email.toLowerCase();
+
+  if (email === "fuannegao25@gmail.com") return true;
+
+  const allowedDomains = process.env.ADMIN_ALLOWED_DOMAINS
+    ?.split(",")
+    .map((d) => d.trim().toLowerCase())
+    .filter(Boolean);
+  if (allowedDomains?.length && allowedDomains.includes(email.split("@")[1])) {
+    return true;
+  }
+
+  try {
+    const { data } = await getSupabase()
+      .from("admin_users")
+      .select("email")
+      .eq("email", email)
+      .maybeSingle();
+    if (data) return true;
+  } catch {
+    // admin_users table may not exist yet
+  }
+
+  return false;
+}
+
 export async function clearSessionCookie(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();

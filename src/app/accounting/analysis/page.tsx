@@ -1,0 +1,20 @@
+import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { isAuthenticated } from "@/lib/admin-auth";
+import AccountingDashboard from "@/components/admin/AccountingDashboard";
+
+export const metadata: Metadata = {
+  title: "Analysis | Accounting | RF Tools",
+  robots: { index: false, follow: false },
+};
+
+export default async function AccountingAnalysisPage() {
+  const authenticated = await isAuthenticated();
+  if (!authenticated) redirect("/login");
+
+  return (
+    <div className="max-w-[1400px] mx-auto space-y-6">
+      <AccountingDashboard />
+    </div>
+  );
+}
