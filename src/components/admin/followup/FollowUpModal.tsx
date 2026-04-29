@@ -172,7 +172,14 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                       }}
                       className="text-blue-600"
                     />
-                    <span className="text-sm text-sand-700">{reason}</span>
+                    <span className="text-sm text-sand-700">
+                      {reason}
+                      {reason === "Other" && (
+                        <span className="text-sand-400 italic ml-1.5">
+                          — only if none of the above fit
+                        </span>
+                      )}
+                    </span>
                   </label>
                 ))}
               </div>
