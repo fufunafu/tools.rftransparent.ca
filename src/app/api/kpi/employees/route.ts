@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   const department = req.nextUrl.searchParams.get("department");
   const locationId = req.nextUrl.searchParams.get("locationId");
-  const activeOnly = req.nextUrl.searchParams.get("active") !== "false";
+  const activeOnly = req.nextUrl.searchParams.get("active") === "true";
 
   let query = getSupabase()
     .from("employees")
