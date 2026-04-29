@@ -58,7 +58,7 @@ const FILTER_TABS = [
   { value: "closed", label: "Closed" },
 ];
 
-type SortKey = "draft_name" | "customer" | "created_by" | "amount" | "status" | "due" | "attempts" | "quoted";
+type SortKey = "draft_name" | "customer" | "created_by" | "amount" | "status" | "due" | "attempts" | "quoted" | "orders";
 type SortDir = "asc" | "desc";
 
 function getSortValue(lead: FollowUpLead, key: SortKey): string | number {
@@ -71,6 +71,8 @@ function getSortValue(lead: FollowUpLead, key: SortKey): string | number {
     case "due": return lead.next_followup_at || "9999";
     case "attempts": return lead.followup_count;
     case "quoted": return lead.shopify_created_at || lead.created_at;
+    // Sort unknowns (null) last regardless of direction by parking them above any real count.
+    case "orders": return lead.customer_orders_count ?? Number.MAX_SAFE_INTEGER;
   }
 }
 
@@ -84,7 +86,7 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
 }
 
 function exportCSV(leads: FollowUpLead[]) {
-  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Created By", "Amount", "Status", "Due Date", "Attempts", "Quoted Date", "Notes"];
+  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Created By", "Amount", "Status", "Due Date", "Attempts", "Lifetime Orders", "Quoted Date", "Notes"];
   const rows = leads.map((l) => [
     l.draft_name,
     l.customer_name || "",
@@ -95,6 +97,7 @@ function exportCSV(leads: FollowUpLead[]) {
     FOLLOWUP_CATEGORIES[l.lead_status as LeadStatus]?.label ?? l.lead_status,
     l.next_followup_at ? l.next_followup_at.split("T")[0] : "",
     String(l.followup_count),
+    l.customer_orders_count != null ? String(l.customer_orders_count) : "",
     (l.shopify_created_at || l.created_at).split("T")[0],
     (l.notes || "").replace(/"/g, '""'),
   ]);
@@ -157,6 +160,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
     { key: "status", label: "Status", align: "text-left" },
     { key: "due", label: "Due", align: "text-left" },
     { key: "attempts", label: "Attempts", align: "text-center" },
+    { key: "orders", label: "Lifetime Orders", align: "text-center" },
     { key: "quoted", label: "Quoted", align: "text-left" },
   ];
 
@@ -365,6 +369,17 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                       </span>
                       {nearMax && (
                         <span className="ml-1 text-[10px] text-red-500">!</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      {lead.customer_orders_count == null ? (
+                        <span className="text-sand-300">—</span>
+                      ) : lead.customer_orders_count === 0 ? (
+                        <span className="inline-block text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">
+                          New
+                        </span>
+                      ) : (
+                        <span className="text-sand-700">{lead.customer_orders_count}</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sand-500">{formatDate(lead.shopify_created_at || lead.created_at)}</td>

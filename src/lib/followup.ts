@@ -87,6 +87,7 @@ export interface FollowUpLead {
   created_at: string;
   updated_at: string;
   created_by_staff: string | null;
+  customer_orders_count: number | null;
 }
 
 export interface FollowUpLog {
@@ -116,6 +117,7 @@ interface ShopifyDraftNode {
     displayName: string;
     email: string | null;
     phone: string | null;
+    numberOfOrders: string | null;
   } | null;
   events: {
     edges: { node: { message: string; createdAt: string } }[];
@@ -138,7 +140,7 @@ function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor
             subtotalPriceSet { shopMoney { amount } }
             tags
             order { id createdAt staffMember { firstName lastName } }
-            customer { displayName email phone }
+            customer { displayName email phone numberOfOrders }
             events(first: 20, sortKey: CREATED_AT) { edges { node { message createdAt } } }
           }
           cursor
@@ -274,6 +276,9 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     const hasOrder = draft.order !== null;
 
     const createdBy = extractCreator(draft);
+    const ordersCount = draft.customer?.numberOfOrders != null
+      ? parseInt(draft.customer.numberOfOrders, 10)
+      : null;
 
     if (!existing) {
       if (hasOrder) {
@@ -294,6 +299,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           first_synced_at: now,
           last_synced_at: now,
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
         });
       } else {
         newActiveLeads.push({
@@ -312,6 +318,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           first_synced_at: now,
           last_synced_at: now,
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
         });
       }
     } else if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
@@ -324,6 +331,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           updated_at: now,
           last_synced_at: now,
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
         }).eq("id", existing.id).then(async () => {
           await supabase.from("followup_logs").insert({
             lead_id: existing.id,
@@ -347,6 +355,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           last_synced_at: now,
           updated_at: now,
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
         }).eq("id", existing.id).then(() => { result.updated_leads++; })
       );
     }
@@ -375,6 +384,9 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     const existing = existingByDraftId.get(draft.id);
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
     const createdBy = extractCreator(draft);
+    const ordersCount = draft.customer?.numberOfOrders != null
+      ? parseInt(draft.customer.numberOfOrders, 10)
+      : null;
 
     if (existing && existing.lead_status !== "won" && existing.lead_status !== "lost") {
       completedUpdatePromises.push(
@@ -385,6 +397,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           next_followup_at: null,
           updated_at: now,
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
         }).eq("id", existing.id).then(async () => {
           await supabase.from("followup_logs").insert({
             lead_id: existing.id,
@@ -413,12 +426,14 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         first_synced_at: now,
         last_synced_at: now,
         created_by_staff: createdBy,
+        customer_orders_count: ordersCount,
       });
     } else {
       // Already won/lost — backfill creator + last_synced_at without touching status.
       completedUpdatePromises.push(
         supabase.from("followup_leads").update({
           created_by_staff: createdBy,
+          customer_orders_count: ordersCount,
           last_synced_at: now,
         }).eq("id", existing.id).then(() => { result.updated_leads++; })
       );
