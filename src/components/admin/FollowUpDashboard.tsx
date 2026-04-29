@@ -7,6 +7,8 @@ import FollowUpModal from "@/components/admin/followup/FollowUpModal";
 import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
 import CalendarView from "@/components/admin/followup/CalendarView";
 import StaffBreakdown from "@/components/admin/followup/StaffBreakdown";
+import StaffDetailPanel from "@/components/admin/followup/StaffDetailPanel";
+import LossReasonsPanel from "@/components/admin/followup/LossReasonsPanel";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -372,6 +374,9 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
   // Modal / detail / help / config / analytics state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
   const [detailLead, setDetailLead] = useState<FollowUpLead | null>(null);
+  // When set, shows a right-side drawer with per-staff stats (conversion/quoted trends).
+  // Mirrors `staffFilter` — "__unknown__" means leads with created_by_staff = null.
+  const [detailStaff, setDetailStaff] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [storeDays, setStoreDays] = useState<Record<string, number | null>>({});
   const [analytics, setAnalytics] = useState<MonthData[]>([]);
@@ -758,7 +763,9 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             range={timeRange}
             onStaffClick={(s) => {
               // Clicking "Unknown" maps to leads with no creator attribution.
-              setStaffFilter(s === "Unknown" ? "__unknown__" : s);
+              const key = s === "Unknown" ? "__unknown__" : s;
+              setStaffFilter(key);
+              setDetailStaff(key);
               // Scroll to the lead table so the user sees the filtered results.
               requestAnimationFrame(() => {
                 document.getElementById("followup-lead-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -773,7 +780,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
                 Showing leads by <strong>{staffFilter === "__unknown__" ? "Unknown" : staffFilter}</strong>
               </span>
               <button
-                onClick={() => setStaffFilter(null)}
+                onClick={() => { setStaffFilter(null); setDetailStaff(null); }}
                 className="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium"
               >
                 Clear filter
@@ -821,21 +828,9 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
           )}
           </div>
 
-          {/* Loss reasons summary */}
+          {/* Loss reasons — pie chart + click-to-drill into lost leads' notes */}
           {summary?.loss_reasons && Object.keys(summary.loss_reasons).length > 0 && (
-            <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-              <h3 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-3">Loss Reasons</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                {Object.entries(summary.loss_reasons)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([reason, count]) => (
-                    <div key={reason} className="text-center">
-                      <p className="text-lg font-semibold text-sand-900">{count}</p>
-                      <p className="text-xs text-sand-500">{reason}</p>
-                    </div>
-                  ))}
-              </div>
-            </div>
+            <LossReasonsPanel reasons={summary.loss_reasons} store={store} range={timeRange} />
           )}
 
           {/* Follow-up timing editor */}
@@ -863,6 +858,16 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
             setModalLead(detailLead);
             setDetailLead(null);
           }}
+        />
+      )}
+
+      {/* Staff Detail Panel (stats drawer) */}
+      {detailStaff && (
+        <StaffDetailPanel
+          staff={detailStaff}
+          store={store}
+          range={timeRange}
+          onClose={() => setDetailStaff(null)}
         />
       )}
     </>

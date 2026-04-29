@@ -231,6 +231,7 @@ export async function GET(req: NextRequest) {
     if (view === "leads") {
       const filter = req.nextUrl.searchParams.get("filter") || "due_today";
       const creator = req.nextUrl.searchParams.get("creator"); // optional: "__unknown__" or a staff name
+      const closeReason = req.nextUrl.searchParams.get("close_reason");
       const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
 
       const SKIP_EMAILS = ["application@gmail.com"];
@@ -272,6 +273,15 @@ export async function GET(req: NextRequest) {
         query = query.is("created_by_staff", null);
       } else if (creator) {
         query = query.eq("created_by_staff", creator);
+      }
+
+      if (closeReason) {
+        if (closeReason === "Unknown") {
+          // "Unknown" is what summary shows for null close_reason on lost leads.
+          query = query.eq("lead_status", "lost").is("close_reason", null);
+        } else {
+          query = query.eq("close_reason", closeReason);
+        }
       }
 
       const { data, error } = await query;
@@ -339,6 +349,89 @@ export async function GET(req: NextRequest) {
       }).sort((a, b) => b.total - a.total);
 
       return NextResponse.json({ staff: staffList });
+    }
+
+    // ── Per-staff monthly time-series ──
+    // Same filters as `by_staff` (OPEN/DELETED excluded, same range), but
+    // restricted to a single staff name and bucketed by month of creation.
+    // Used by the staff detail drawer in FollowUpDashboard.
+    if (view === "by_staff_monthly") {
+      const staffParam = req.nextUrl.searchParams.get("staff");
+      if (!staffParam) {
+        return NextResponse.json({ error: "staff required" }, { status: 400 });
+      }
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+
+      const PAGE = 1000;
+      const rows: {
+        shopify_created_at: string | null;
+        closed_at: string | null;
+        lead_status: string;
+        quote_amount: number;
+      }[] = [];
+
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from("followup_leads")
+          .select("shopify_created_at, closed_at, lead_status, quote_amount")
+          .eq("store_id", storeId)
+          .not("shopify_status", "in", "(OPEN,DELETED)");
+        if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        if (staffParam === "__unknown__") {
+          q = q.is("created_by_staff", null);
+        } else {
+          q = q.eq("created_by_staff", staffParam);
+        }
+        const { data } = await q.range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        rows.push(...(data as typeof rows));
+        if (data.length < PAGE) break;
+      }
+
+      // Lifetime-in-range totals (mirrors the by_staff aggregation so the cards
+      // in the drawer match the row in the Quotes-by-Staff breakdown).
+      const totals = { total: 0, won: 0, lost: 0, active: 0, quoted_value: 0, won_value: 0, conversion_rate: 0 };
+      for (const r of rows) {
+        totals.total++;
+        totals.quoted_value += Number(r.quote_amount);
+        if (r.lead_status === "won") { totals.won++; totals.won_value += Number(r.quote_amount); }
+        else if (r.lead_status === "lost") totals.lost++;
+        else totals.active++;
+      }
+      totals.conversion_rate = totals.total > 0 ? Math.round((totals.won / totals.total) * 1000) / 10 : 0;
+      totals.quoted_value = Math.round(totals.quoted_value);
+      totals.won_value = Math.round(totals.won_value);
+
+      // Monthly bucketing (same shape as the `analytics` view).
+      const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
+      for (const r of rows) {
+        const dateStr = r.shopify_created_at || r.closed_at;
+        if (!dateStr) continue;
+        const month = dateStr.slice(0, 7);
+        const entry = monthMap.get(month) ?? { total: 0, won: 0, lost: 0, quoted_value: 0, won_value: 0 };
+        entry.total++;
+        entry.quoted_value += Number(r.quote_amount);
+        if (r.lead_status === "won") { entry.won++; entry.won_value += Number(r.quote_amount); }
+        if (r.lead_status === "lost") entry.lost++;
+        monthMap.set(month, entry);
+      }
+
+      const months = Array.from(monthMap.entries())
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([month, d]) => ({
+          month,
+          label: new Date(month + "-15").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+          total: d.total,
+          won: d.won,
+          lost: d.lost,
+          quoted_value: Math.round(d.quoted_value),
+          won_value: Math.round(d.won_value),
+          // won / total across the month — matches StaffBreakdown's lifetime definition,
+          // so the line chart and the card stay internally consistent.
+          conversion_rate: d.total > 0 ? Math.round((d.won / d.total) * 1000) / 10 : 0,
+        }));
+
+      return NextResponse.json({ staff: staffParam, totals, months });
     }
 
     // ── Logs for a lead ──
