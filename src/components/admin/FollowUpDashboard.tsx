@@ -729,10 +729,10 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
                   subtitle: "Follow-ups per lead",
                 },
                 {
-                  label: "Won Value",
-                  value: formatCurrency(metrics.won_value),
+                  label: "Pipeline Value",
+                  value: formatCurrency(metrics.pipeline_value),
                   color: "bg-emerald-500",
-                  subtitle: `${metrics.won_count} deals closed`,
+                  subtitle: `${metrics.total_active} open quotes`,
                 },
               ]}
             />
