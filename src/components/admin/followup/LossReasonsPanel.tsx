@@ -17,7 +17,13 @@ const COLORS = ["#dc2626", "#f59e0b", "#8b5cf6", "#0ea5e9", "#10b981", "#ec4899"
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function formatAmount(n: number): string {
