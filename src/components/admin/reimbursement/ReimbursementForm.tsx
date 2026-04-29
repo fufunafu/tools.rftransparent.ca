@@ -2,7 +2,19 @@
 
 import { useState } from "react";
 
-const CATEGORIES = ["Travel", "Meals", "Supplies", "Tools", "Software", "Shipping", "Other"] as const;
+const CATEGORIES = [
+  "Gas",
+  "Hotel",
+  "Car Rental",
+  "Flight",
+  "Parking",
+  "Meals",
+  "Supplies",
+  "Tools",
+  "Software",
+  "Shipping",
+  "Other",
+] as const;
 
 interface Props {
   onSubmitted: (id: number) => void;
@@ -19,6 +31,7 @@ export default function ReimbursementForm({ onSubmitted }: Props) {
   const [amount, setAmount] = useState("");
   const [vendor, setVendor] = useState("");
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("Supplies");
+  const [otherCategory, setOtherCategory] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +49,14 @@ export default function ReimbursementForm({ onSubmitted }: Props) {
       setError("Vendor is required.");
       return;
     }
+    if (category === "Other" && !otherCategory.trim()) {
+      setError("Please specify the category for 'Other'.");
+      return;
+    }
+
+    // For "Other" we store what the user typed as the category, so the saved
+    // value is meaningful instead of a literal "Other".
+    const finalCategory = category === "Other" ? `Other — ${otherCategory.trim()}` : category;
 
     setSubmitting(true);
     try {
@@ -46,7 +67,7 @@ export default function ReimbursementForm({ onSubmitted }: Props) {
           expense_date: expenseDate,
           amount: amt,
           vendor: vendor.trim(),
-          category,
+          category: finalCategory,
           description: description.trim() || null,
         }),
       });
@@ -58,6 +79,7 @@ export default function ReimbursementForm({ onSubmitted }: Props) {
       setVendor("");
       setDescription("");
       setCategory("Supplies");
+      setOtherCategory("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Submission failed");
     } finally {
@@ -128,6 +150,19 @@ export default function ReimbursementForm({ onSubmitted }: Props) {
             ))}
           </select>
         </label>
+        {category === "Other" && (
+          <label className="block sm:col-span-2">
+            <span className="text-xs font-medium text-sand-600">Specify category</span>
+            <input
+              type="text"
+              required
+              value={otherCategory}
+              onChange={(e) => setOtherCategory(e.target.value)}
+              placeholder="What kind of expense is this?"
+              className="mt-1 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
+          </label>
+        )}
       </div>
 
       <label className="block">
