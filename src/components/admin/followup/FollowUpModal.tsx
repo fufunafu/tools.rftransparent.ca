@@ -52,6 +52,9 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   const [closeReason, setCloseReason] = useState("");
   const [customDate, setCustomDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // Required acknowledgement when closing as Lost / Too expensive — pushes the
+  // rep to try a discount before giving up.
+  const [discountOffered, setDiscountOffered] = useState(false);
 
   const nearMax = lead.followup_count >= MAX_ATTEMPTS - 1;
   const atMax = lead.followup_count >= MAX_ATTEMPTS;
@@ -59,12 +62,14 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   const requiresNotes = selectedCat?.requiresNotes ?? false;
   const isLost = outcome === "lost";
   const isFutureProject = outcome === "future_project";
+  const isTooExpensive = isLost && closeReason === "Too expensive";
 
   const canSubmit =
     outcome !== "" &&
     (!requiresNotes || notes.trim()) &&
     (!isLost || closeReason) &&
     (!isLost || notes.trim().length >= 50) &&
+    (!isTooExpensive || discountOffered) &&
     (!isFutureProject || customDate) &&
     !submitting;
 
@@ -161,13 +166,35 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                       name="closeReason"
                       value={reason}
                       checked={closeReason === reason}
-                      onChange={() => setCloseReason(reason)}
+                      onChange={() => {
+                        setCloseReason(reason);
+                        if (reason !== "Too expensive") setDiscountOffered(false);
+                      }}
                       className="text-blue-600"
                     />
                     <span className="text-sm text-sand-700">{reason}</span>
                   </label>
                 ))}
               </div>
+
+              {isTooExpensive && (
+                <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-2">
+                  <p className="text-sm text-amber-800">
+                    Hey — have you tried offering this customer a 5% discount before marking them lost?
+                  </p>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={discountOffered}
+                      onChange={(e) => setDiscountOffered(e.target.checked)}
+                      className="mt-0.5 text-blue-600"
+                    />
+                    <span className="text-sm text-amber-900">
+                      I offered a discount and they still declined. <span className="text-red-500">*</span>
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
           )}
 
