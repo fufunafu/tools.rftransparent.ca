@@ -434,6 +434,57 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ staff: staffParam, totals, months });
     }
 
+    // ── Lost leads + the closing note from followup_logs ──
+    // The note the user types when marking a lead Lost is stored on
+    // followup_logs (per-attempt), not on followup_leads. This view joins
+    // the most recent outcome=lost log onto each lead so the loss-reasons
+    // drill-down can show *why*.
+    if (view === "lost_details") {
+      const closeReason = req.nextUrl.searchParams.get("close_reason");
+      if (!closeReason) {
+        return NextResponse.json({ error: "close_reason required" }, { status: 400 });
+      }
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+
+      let leadsQ = supabase
+        .from("followup_leads")
+        .select("*")
+        .eq("store_id", storeId)
+        .eq("lead_status", "lost")
+        .order("closed_at", { ascending: false });
+
+      if (closeReason === "Unknown") {
+        leadsQ = leadsQ.is("close_reason", null);
+      } else {
+        leadsQ = leadsQ.eq("close_reason", closeReason);
+      }
+      if (cutoff) leadsQ = leadsQ.gte("shopify_created_at", cutoff);
+
+      const { data: leadsData, error: leadsErr } = await leadsQ;
+      if (leadsErr) throw new Error(leadsErr.message);
+      const leads = (leadsData ?? []) as FollowUpLead[];
+
+      const ids = leads.map((l) => l.id);
+      const noteByLead = new Map<string, string>();
+      if (ids.length > 0) {
+        const { data: logs } = await supabase
+          .from("followup_logs")
+          .select("lead_id, notes, created_at")
+          .in("lead_id", ids)
+          .eq("outcome", "lost")
+          .order("created_at", { ascending: false });
+        for (const row of (logs ?? []) as { lead_id: string; notes: string | null }[]) {
+          // First (most recent) lost log wins; later ones for the same lead are ignored.
+          if (row.notes && !noteByLead.has(row.lead_id)) {
+            noteByLead.set(row.lead_id, row.notes);
+          }
+        }
+      }
+
+      const enriched = leads.map((l) => ({ ...l, closing_note: noteByLead.get(l.id) ?? null }));
+      return NextResponse.json({ leads: enriched, total: enriched.length });
+    }
+
     // ── Logs for a lead ──
     if (view === "logs") {
       const leadId = req.nextUrl.searchParams.get("lead_id");

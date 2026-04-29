@@ -4,6 +4,8 @@ import { useState, useMemo } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import type { FollowUpLead } from "@/lib/followup";
 
+type LostLead = FollowUpLead & { closing_note: string | null };
+
 interface Props {
   reasons: Record<string, number>;
   store: string;
@@ -24,7 +26,7 @@ function formatAmount(n: number): string {
 
 export default function LossReasonsPanel({ reasons, store, range }: Props) {
   const [active, setActive] = useState<string | null>(null);
-  const [leads, setLeads] = useState<FollowUpLead[] | null>(null);
+  const [leads, setLeads] = useState<LostLead[] | null>(null);
   const [loading, setLoading] = useState(false);
 
   const data = useMemo(
@@ -49,17 +51,14 @@ export default function LossReasonsPanel({ reasons, store, range }: Props) {
     setLeads(null);
     try {
       const params = new URLSearchParams({
-        view: "leads",
-        filter: "closed",
+        view: "lost_details",
         store,
         range,
         close_reason: reason,
       });
       const res = await fetch(`/api/customer-service/follow-up?${params}`);
       const body = await res.json();
-      // Defensive: filter to lost only — server returns both won and lost under "closed".
-      const lostOnly = (body.leads ?? []).filter((l: FollowUpLead) => l.lead_status === "lost");
-      setLeads(lostOnly);
+      setLeads(body.leads ?? []);
     } finally {
       setLoading(false);
     }
@@ -165,7 +164,9 @@ export default function LossReasonsPanel({ reasons, store, range }: Props) {
                       <span>{formatDate(l.closed_at)}</span>
                     </div>
                   </div>
-                  {l.notes ? (
+                  {l.closing_note ? (
+                    <p className="mt-1 text-sand-600 whitespace-pre-wrap">{l.closing_note}</p>
+                  ) : l.notes ? (
                     <p className="mt-1 text-sand-600 whitespace-pre-wrap">{l.notes}</p>
                   ) : (
                     <p className="mt-1 text-sand-400 italic text-xs">No notes</p>
