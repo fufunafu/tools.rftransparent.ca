@@ -91,6 +91,30 @@ export async function isAdminUser(): Promise<boolean> {
   return false;
 }
 
+// Approve/reject gates for the reimbursement workflow. Admin status (domain
+// allowlist, admin_users override) doesn't imply authority to sign off on
+// expenses — only people in the management department do. Owner always passes.
+export async function isManagementUser(): Promise<boolean> {
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return false;
+  const email = user.email.toLowerCase();
+
+  if (email === "fuannegao25@gmail.com") return true;
+
+  try {
+    const { data } = await getSupabase()
+      .from("employees")
+      .select("id")
+      .eq("email", email)
+      .eq("active", true)
+      .eq("department", "management")
+      .maybeSingle();
+    return !!data;
+  } catch {
+    return false;
+  }
+}
+
 export async function clearSessionCookie(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     .order("submitted_at", { ascending: false });
 
   if (scope === "all") {
-    if (!(await isAdminUser())) {
+    if (!(await isManagementUser())) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   } else {

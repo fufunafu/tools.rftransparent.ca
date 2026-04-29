@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 
@@ -17,7 +17,7 @@ export async function PATCH(
 ) {
   const user = await getAuthenticatedUser();
   if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!(await isAdminUser())) {
+  if (!(await isManagementUser())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

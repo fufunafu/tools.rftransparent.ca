@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
+import { isAuthenticated, isManagementUser } from "@/lib/admin-auth";
 import ReimbursementDashboard from "@/components/admin/reimbursement/ReimbursementDashboard";
 
 export const metadata: Metadata = {
@@ -10,11 +10,12 @@ export const metadata: Metadata = {
 
 export default async function ReimbursementPage() {
   if (!(await isAuthenticated())) redirect("/login");
-  const admin = await isAdminUser();
+  // Only the management department can review (approve/reject) reimbursements.
+  const canReview = await isManagementUser();
 
   return (
     <div className="max-w-[1100px] mx-auto">
-      <ReimbursementDashboard isAdmin={admin} />
+      <ReimbursementDashboard isAdmin={canReview} />
     </div>
   );
 }
