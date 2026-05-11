@@ -485,6 +485,101 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ leads: enriched, total: enriched.length });
     }
 
+    // ── Recent follow-up activity by staff ──
+    // Aggregates followup_logs in a sliding window so we can answer
+    // "who actually worked the queue this week?" — separate from
+    // `by_staff` which counts who *created* the quotes.
+    if (view === "recent_activity") {
+      const daysRaw = parseInt(req.nextUrl.searchParams.get("days") ?? "7", 10);
+      const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, daysRaw)) : 7;
+      const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+
+      const PAGE = 1000;
+      const rows: {
+        logged_by: string;
+        outcome: string;
+        created_at: string;
+        followup_leads: { store_id: string } | null;
+      }[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data } = await supabase
+          .from("followup_logs")
+          .select("logged_by, outcome, created_at, followup_leads!inner(store_id)")
+          .eq("followup_leads.store_id", storeId)
+          .gte("created_at", cutoff)
+          .order("created_at", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        // PostgREST returns the joined row as an object when using !inner, but the
+        // generated types think it's an array — coerce defensively.
+        for (const r of data as Array<{
+          logged_by: string;
+          outcome: string;
+          created_at: string;
+          followup_leads: { store_id: string } | { store_id: string }[] | null;
+        }>) {
+          const fl = Array.isArray(r.followup_leads) ? r.followup_leads[0] ?? null : r.followup_leads;
+          rows.push({
+            logged_by: r.logged_by,
+            outcome: r.outcome,
+            created_at: r.created_at,
+            followup_leads: fl,
+          });
+        }
+        if (data.length < PAGE) break;
+      }
+
+      // Resolve display names: one query, build email → name map.
+      const nameMap = new Map<string, string>();
+      try {
+        const { data: emps } = await supabase
+          .from("employees")
+          .select("email, name")
+          .not("email", "is", null);
+        for (const e of (emps ?? []) as { email: string; name: string }[]) {
+          if (e.email) nameMap.set(e.email.toLowerCase(), e.name);
+        }
+      } catch {
+        // employees.email may not exist in all environments — fall back to email-only display.
+      }
+
+      interface StaffAgg {
+        email: string;
+        name: string;
+        total: number;
+        won: number;
+        lost: number;
+        ongoing: number;
+        last_at: string;
+      }
+
+      const byEmail = new Map<string, StaffAgg>();
+      for (const r of rows) {
+        const email = (r.logged_by || "unknown").toLowerCase();
+        const agg = byEmail.get(email) ?? {
+          email,
+          name: nameMap.get(email) ?? r.logged_by ?? "unknown",
+          total: 0,
+          won: 0,
+          lost: 0,
+          ongoing: 0,
+          last_at: r.created_at,
+        };
+        agg.total++;
+        if (r.outcome === "won") agg.won++;
+        // "duplicate" is a close, not a real loss, but it's still terminal — group with lost
+        // for the headline outcome breakdown.
+        else if (r.outcome === "lost" || r.outcome === "duplicate") agg.lost++;
+        else agg.ongoing++;
+        if (r.created_at > agg.last_at) agg.last_at = r.created_at;
+        byEmail.set(email, agg);
+      }
+
+      const staff = Array.from(byEmail.values()).sort((a, b) => b.total - a.total);
+
+      return NextResponse.json({ days, total: rows.length, staff });
+    }
+
     // ── Logs for a lead ──
     if (view === "logs") {
       const leadId = req.nextUrl.searchParams.get("lead_id");

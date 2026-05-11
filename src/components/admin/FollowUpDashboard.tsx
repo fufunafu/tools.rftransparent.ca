@@ -8,6 +8,7 @@ import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
 import CalendarView from "@/components/admin/followup/CalendarView";
 import StaffBreakdown from "@/components/admin/followup/StaffBreakdown";
 import StaffDetailPanel from "@/components/admin/followup/StaffDetailPanel";
+import RecentActivityPanel from "@/components/admin/followup/RecentActivityPanel";
 import LossReasonsPanel from "@/components/admin/followup/LossReasonsPanel";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
 
@@ -772,6 +773,9 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
               });
             }}
           />
+
+          {/* Recent follow-up activity by staff */}
+          <RecentActivityPanel store={store} />
 
           {/* Active staff filter chip */}
           {staffFilter && (
