@@ -507,6 +507,9 @@ export async function GET(req: NextRequest) {
           .select("logged_by, outcome, created_at, followup_leads!inner(store_id)")
           .eq("followup_leads.store_id", storeId)
           .gte("created_at", cutoff)
+          // "system" logs are sync-time auto-wins (Shopify reported the draft
+          // completed without a rep logging it) — not real follow-up activity.
+          .neq("logged_by", "system")
           .order("created_at", { ascending: false })
           .range(from, from + PAGE - 1);
         if (!data || data.length === 0) break;
