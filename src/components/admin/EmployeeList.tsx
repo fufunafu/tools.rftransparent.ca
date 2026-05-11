@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import EmployeeDrawer, { type EditDraft } from "@/components/admin/EmployeeDrawer";
+import EmployeeFilters, { type StatusFilter } from "@/components/admin/EmployeeFilters";
 
 interface Location {
   id: string;
@@ -21,17 +23,6 @@ interface Employee {
   locations: Location | null;
 }
 
-interface EditDraft {
-  name: string;
-  email: string;
-  phone: string;
-  birthday: string;
-  department: string;
-  location_id: string;
-  shopify_tags: string; // comma-separated
-  active: boolean;
-}
-
 const DEPT_LABELS: Record<string, string> = {
   sales: "Sales",
   marketing: "Marketing",
@@ -40,18 +31,30 @@ const DEPT_LABELS: Record<string, string> = {
   management: "Management",
 };
 
-const DEPARTMENTS = [
-  { value: "sales", label: "Sales" },
-  { value: "marketing", label: "Marketing" },
-  { value: "customer_service", label: "Customer Service" },
-  { value: "warehouse", label: "Warehouse" },
-  { value: "management", label: "Management" },
-];
+const DEPT_COLORS: Record<string, string> = {
+  sales: "bg-blue-50 text-blue-700",
+  marketing: "bg-purple-50 text-purple-700",
+  customer_service: "bg-amber-50 text-amber-700",
+  warehouse: "bg-emerald-50 text-emerald-700",
+  management: "bg-slate-100 text-slate-700",
+};
 
 const NEW_ID = "__new__";
 
+type SortKey = "name" | "department" | "birthday";
+type SortDir = "asc" | "desc";
+
 function emptyDraft(): EditDraft {
-  return { name: "", email: "", phone: "", birthday: "", department: "sales", location_id: "", shopify_tags: "", active: true };
+  return {
+    name: "",
+    email: "",
+    phone: "",
+    birthday: "",
+    department: "sales",
+    location_id: "",
+    shopify_tags: "",
+    active: true,
+  };
 }
 
 function draftFromEmployee(emp: Employee): EditDraft {
@@ -67,165 +70,52 @@ function draftFromEmployee(emp: Employee): EditDraft {
   };
 }
 
-const INPUT_CLS =
-  "w-full rounded border border-sand-200 px-2 py-1 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none bg-white";
+function birthdayKey(b: string | null): number {
+  if (!b) return 99_99;
+  const [, m, d] = b.split("-").map(Number);
+  return (m ?? 99) * 100 + (d ?? 99);
+}
 
-function EditRow({
-  draft,
-  setField,
-  locations,
-  saving,
-  error,
-  onSave,
-  onCancel,
-  nameRef,
-}: {
-  draft: EditDraft;
-  setField: <K extends keyof EditDraft>(key: K, value: EditDraft[K]) => void;
-  locations: Location[];
-  saving: boolean;
-  error: string;
-  onSave: () => void;
-  onCancel: () => void;
-  nameRef: React.RefObject<HTMLInputElement | null>;
-}) {
-  const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") onSave();
-    if (e.key === "Escape") onCancel();
-  };
-
-  return (
-    <tr className="border-b border-accent/20 bg-blue-50/60" onKeyDown={handleKey}>
-      <td className="px-3 py-2">
-        <input
-          ref={nameRef}
-          type="text"
-          value={draft.name}
-          onChange={(e) => setField("name", e.target.value)}
-          placeholder="Employee name"
-          className={INPUT_CLS}
-        />
-      </td>
-      <td className="px-3 py-2">
-        <select
-          value={draft.department}
-          onChange={(e) => setField("department", e.target.value)}
-          className={INPUT_CLS}
-        >
-          {DEPARTMENTS.map((d) => (
-            <option key={d.value} value={d.value}>
-              {d.label}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <select
-          value={draft.location_id}
-          onChange={(e) => setField("location_id", e.target.value)}
-          className={INPUT_CLS}
-        >
-          <option value="">No location</option>
-          {locations.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <input
-          type="text"
-          value={draft.shopify_tags}
-          onChange={(e) => setField("shopify_tags", e.target.value)}
-          placeholder="tag1, tag2"
-          className={INPUT_CLS}
-        />
-      </td>
-      <td className="px-3 py-2">
-        <label className="flex items-center gap-1.5 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={draft.active}
-            onChange={(e) => setField("active", e.target.checked)}
-            className="rounded border-sand-300 text-accent focus:ring-accent"
-          />
-          <span className="text-xs text-sand-600">Active</span>
-        </label>
-      </td>
-      <td className="px-3 py-2">
-        <input
-          type="email"
-          value={draft.email}
-          onChange={(e) => setField("email", e.target.value)}
-          placeholder="employee@example.com"
-          className={INPUT_CLS}
-        />
-      </td>
-      <td className="px-3 py-2">
-        <input
-          type="tel"
-          value={draft.phone}
-          onChange={(e) => setField("phone", e.target.value)}
-          placeholder="+1 514 555 0000"
-          className={INPUT_CLS}
-        />
-      </td>
-      <td className="px-3 py-2">
-        <input
-          type="date"
-          value={draft.birthday}
-          onChange={(e) => setField("birthday", e.target.value)}
-          className={INPUT_CLS}
-        />
-      </td>
-      <td className="px-3 py-2 text-right whitespace-nowrap">
-        {error && <span className="text-xs text-red-500 block mb-1">{error}</span>}
-        <button
-          onClick={onSave}
-          disabled={saving}
-          className="text-sm font-medium text-accent hover:text-accent-dark mr-3 transition-colors disabled:opacity-50"
-        >
-          {saving ? "Saving…" : "Save"}
-        </button>
-        <button
-          onClick={onCancel}
-          disabled={saving}
-          className="text-sm text-sand-400 hover:text-sand-600 transition-colors"
-        >
-          Cancel
-        </button>
-      </td>
-    </tr>
-  );
+function formatBirthday(b: string | null): string {
+  if (!b) return "—";
+  return new Date(b + "T12:00:00Z").toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 export default function EmployeeList() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
+
+  const [search, setSearch] = useState("");
+  const [departmentFilter, setDepartmentFilter] = useState("");
+  const [locationFilter, setLocationFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
+
+  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>(emptyDraft());
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const nameRef = useRef<HTMLInputElement | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (!showInactive) params.set("active", "true");
-      const res = await fetch(`/api/kpi/employees?${params}`);
-      setEmployees(await res.json());
+      // Always fetch all; we filter client-side so "All" segment works.
+      const res = await fetch(`/api/kpi/employees?active=false`);
+      const data = await res.json();
+      setEmployees(Array.isArray(data) ? data : []);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [showInactive]);
+  }, []);
 
   useEffect(() => {
     load();
@@ -234,13 +124,46 @@ export default function EmployeeList() {
   useEffect(() => {
     fetch("/api/kpi/locations")
       .then((r) => r.json())
-      .then((d) => setLocations(d))
+      .then((d) => setLocations(Array.isArray(d) ? d : []))
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (editingId) nameRef.current?.focus();
-  }, [editingId]);
+  const departmentCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const e of employees) counts[e.department] = (counts[e.department] ?? 0) + 1;
+    return counts;
+  }, [employees]);
+
+  const activeCount = useMemo(() => employees.filter((e) => e.active).length, [employees]);
+  const inactiveCount = employees.length - activeCount;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = employees.filter((e) => {
+      if (statusFilter === "active" && !e.active) return false;
+      if (statusFilter === "inactive" && e.active) return false;
+      if (departmentFilter && e.department !== departmentFilter) return false;
+      if (locationFilter && e.location_id !== locationFilter) return false;
+      if (q) {
+        const hay = `${e.name} ${e.email ?? ""}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const dir = sortDir === "asc" ? 1 : -1;
+    list.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === "name") cmp = a.name.localeCompare(b.name);
+      else if (sortKey === "department")
+        cmp = (DEPT_LABELS[a.department] ?? a.department).localeCompare(
+          DEPT_LABELS[b.department] ?? b.department,
+        );
+      else if (sortKey === "birthday") cmp = birthdayKey(a.birthday) - birthdayKey(b.birthday);
+      return cmp * dir;
+    });
+    return list;
+  }, [employees, search, departmentFilter, locationFilter, statusFilter, sortKey, sortDir]);
 
   const startEdit = (emp: Employee) => {
     if (editingId) return;
@@ -257,6 +180,7 @@ export default function EmployeeList() {
   };
 
   const cancelEdit = () => {
+    if (saving || deleting) return;
     setEditingId(null);
     setSaveError("");
   };
@@ -292,7 +216,7 @@ export default function EmployeeList() {
           method: isNew ? "POST" : "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
-        }
+        },
       );
       if (!res.ok) {
         const data = await res.json();
@@ -307,203 +231,264 @@ export default function EmployeeList() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this employee? This also removes their KPI entries."))
-      return;
-    setDeleting(id);
+  const handleDelete = async () => {
+    if (!editingId || editingId === NEW_ID) return;
+    setDeleting(true);
     try {
-      await fetch(`/api/kpi/employees/${id}`, { method: "DELETE" });
+      await fetch(`/api/kpi/employees/${editingId}`, { method: "DELETE" });
+      setEditingId(null);
       load();
     } catch {
       // ignore
     } finally {
-      setDeleting(null);
+      setDeleting(false);
     }
   };
 
-  const filtered = employees.filter(
-    (e) =>
-      !filter ||
-      e.name.toLowerCase().includes(filter.toLowerCase()) ||
-      e.department.includes(filter.toLowerCase())
-  );
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const clearFilters = () => {
+    setSearch("");
+    setDepartmentFilter("");
+    setLocationFilter("");
+    setStatusFilter("active");
+  };
+
+  const hasActiveFilters =
+    search !== "" ||
+    departmentFilter !== "" ||
+    locationFilter !== "" ||
+    statusFilter !== "active";
+
+  const drawerOpen = editingId !== null;
+  const drawerMode: "create" | "edit" = editingId === NEW_ID ? "create" : "edit";
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-baseline gap-3">
         <h2 className="text-xl font-semibold text-sand-900">Employees</h2>
-        <span className="text-sm text-sand-400">{employees.length} total</span>
-        <div className="ml-auto flex items-center gap-3">
-          <input
-            type="text"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search..."
-            className="rounded-lg border border-sand-200 px-3 py-1.5 text-sm text-sand-700 bg-white w-48"
-          />
-          <label className="flex items-center gap-1.5 text-sm text-sand-500 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
-              className="rounded border-sand-300 text-accent focus:ring-accent"
-            />
-            Show inactive
-          </label>
-          <button
-            onClick={startAdd}
-            disabled={!!editingId}
-            className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-40"
-          >
-            + Add Employee
-          </button>
+        <div className="flex items-center gap-1.5 text-xs text-sand-500">
+          <span className="px-2 py-0.5 rounded-full bg-sand-100">{employees.length} total</span>
+          <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-700">
+            {activeCount} active
+          </span>
+          {inactiveCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full bg-sand-100 text-sand-500">
+              {inactiveCount} inactive
+            </span>
+          )}
         </div>
       </div>
 
-      {editingId && (
-        <p className="text-xs text-sand-400">
-          Click <kbd className="px-1 py-0.5 rounded bg-sand-100 font-mono">Save</kbd> or press{" "}
-          <kbd className="px-1 py-0.5 rounded bg-sand-100 font-mono">Enter</kbd> to save ·{" "}
-          <kbd className="px-1 py-0.5 rounded bg-sand-100 font-mono">Esc</kbd> to cancel
-        </p>
-      )}
+      <EmployeeFilters
+        search={search}
+        onSearch={setSearch}
+        department={departmentFilter}
+        onDepartment={setDepartmentFilter}
+        locationId={locationFilter}
+        onLocation={setLocationFilter}
+        status={statusFilter}
+        onStatus={setStatusFilter}
+        locations={locations}
+        departmentCounts={departmentCounts}
+        onAdd={startAdd}
+        addDisabled={drawerOpen}
+      />
 
       <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-sand-100">
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Name
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Department
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Location
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Shopify Tags
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Status
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Google Email
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Phone (WhatsApp)
-                </th>
-                <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Birthday
-                </th>
-                <th className="text-right px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
-                  Actions
-                </th>
+                <SortHeader label="Name" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
+                <SortHeader label="Department" active={sortKey === "department"} dir={sortDir} onClick={() => toggleSort("department")} />
+                <PlainHeader label="Location" />
+                <SortHeader label="Birthday" active={sortKey === "birthday"} dir={sortDir} onClick={() => toggleSort("birthday")} />
+                <PlainHeader label="Status" />
               </tr>
             </thead>
             <tbody>
-              {loading && (
+              {loading && <SkeletonRows count={6} />}
+
+              {!loading && filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sand-400">
-                    Loading...
-                  </td>
-                </tr>
-              )}
-              {!loading && filtered.length === 0 && editingId !== NEW_ID && (
-                <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-sand-400">
-                    No employees found.
+                  <td colSpan={5} className="px-4 py-16">
+                    <EmptyState
+                      hasFilters={hasActiveFilters}
+                      onAdd={startAdd}
+                      onClearFilters={clearFilters}
+                    />
                   </td>
                 </tr>
               )}
 
-              {filtered.map((emp) =>
-                editingId === emp.id ? (
-                  <EditRow
-                    key={emp.id}
-                    draft={draft}
-                    setField={setField}
-                    locations={locations}
-                    saving={saving}
-                    error={saveError}
-                    onSave={handleSave}
-                    onCancel={cancelEdit}
-                    nameRef={nameRef}
-                  />
-                ) : (
+              {!loading &&
+                filtered.map((emp) => (
                   <tr
                     key={emp.id}
                     onClick={() => startEdit(emp)}
-                    className={`border-b border-sand-50 transition-colors ${
-                      editingId ? "cursor-default" : "hover:bg-sand-50/50 cursor-pointer"
-                    }`}
+                    className="border-b border-sand-50 last:border-0 hover:bg-sand-50/50 cursor-pointer transition-colors"
                   >
-                    <td className="px-4 py-3 font-medium text-sand-900">{emp.name}</td>
-                    <td className="px-4 py-3 text-sand-600">
-                      {DEPT_LABELS[emp.department] ?? emp.department}
-                    </td>
-                    <td className="px-4 py-3 text-sand-500">
-                      {emp.locations?.name ?? "—"}
-                    </td>
-                    <td className="px-4 py-3 text-sand-400 font-mono text-xs">
-                      {emp.shopify_tags?.length > 0 ? emp.shopify_tags.join(", ") : "—"}
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-sand-900">{emp.name}</div>
+                      {emp.email && (
+                        <div className="text-xs text-sand-400 mt-0.5">{emp.email}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          emp.active
-                            ? "bg-green-50 text-green-700"
-                            : "bg-sand-100 text-sand-400"
+                          DEPT_COLORS[emp.department] ?? "bg-sand-100 text-sand-600"
                         }`}
                       >
+                        {DEPT_LABELS[emp.department] ?? emp.department}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-sand-500">{emp.locations?.name ?? "—"}</td>
+                    <td className="px-4 py-3 text-sand-500 text-xs">
+                      {formatBirthday(emp.birthday)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex items-center gap-1.5 text-xs ${
+                          emp.active ? "text-green-700" : "text-sand-400"
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            emp.active ? "bg-green-500" : "bg-sand-300"
+                          }`}
+                        />
                         {emp.active ? "Active" : "Inactive"}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sand-500 text-xs">
-                      {emp.email ?? <span className="text-sand-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sand-500 text-xs">
-                      {emp.phone ?? <span className="text-sand-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sand-500 text-xs">
-                      {emp.birthday
-                        ? new Date(emp.birthday + "T12:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric" })
-                        : <span className="text-sand-300">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDelete(emp.id);
-                        }}
-                        disabled={deleting === emp.id || !!editingId}
-                        className="text-sm text-red-400 hover:text-red-600 transition-colors disabled:opacity-40"
-                      >
-                        {deleting === emp.id ? "…" : "Delete"}
-                      </button>
-                    </td>
                   </tr>
-                )
-              )}
-
-              {/* New row appended at the bottom */}
-              {editingId === NEW_ID && (
-                <EditRow
-                  draft={draft}
-                  setField={setField}
-                  locations={locations}
-                  saving={saving}
-                  error={saveError}
-                  onSave={handleSave}
-                  onCancel={cancelEdit}
-                  nameRef={nameRef}
-                />
-              )}
+                ))}
             </tbody>
           </table>
         </div>
       </div>
+
+      <EmployeeDrawer
+        open={drawerOpen}
+        mode={drawerMode}
+        draft={draft}
+        setField={setField}
+        locations={locations}
+        saving={saving}
+        error={saveError}
+        onSave={handleSave}
+        onCancel={cancelEdit}
+        onDelete={drawerMode === "edit" ? handleDelete : undefined}
+        deleting={deleting}
+      />
+    </div>
+  );
+}
+
+function PlainHeader({ label }: { label: string }) {
+  return (
+    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+      {label}
+    </th>
+  );
+}
+
+function SortHeader({
+  label,
+  active,
+  dir,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  dir: SortDir;
+  onClick: () => void;
+}) {
+  return (
+    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+      <button
+        type="button"
+        onClick={onClick}
+        className={`inline-flex items-center gap-1 hover:text-sand-700 transition-colors ${
+          active ? "text-sand-700" : ""
+        }`}
+      >
+        {label}
+        <span className="text-[10px]">
+          {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+function SkeletonRows({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, i) => (
+        <tr key={i} className="border-b border-sand-50 last:border-0">
+          <td className="px-4 py-3">
+            <div className="h-4 w-32 bg-sand-100 rounded animate-pulse" />
+            <div className="h-3 w-40 bg-sand-50 rounded animate-pulse mt-1.5" />
+          </td>
+          <td className="px-4 py-3">
+            <div className="h-5 w-20 bg-sand-100 rounded-full animate-pulse" />
+          </td>
+          <td className="px-4 py-3">
+            <div className="h-4 w-24 bg-sand-100 rounded animate-pulse" />
+          </td>
+          <td className="px-4 py-3">
+            <div className="h-4 w-12 bg-sand-100 rounded animate-pulse" />
+          </td>
+          <td className="px-4 py-3">
+            <div className="h-4 w-16 bg-sand-100 rounded animate-pulse" />
+          </td>
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function EmptyState({
+  hasFilters,
+  onAdd,
+  onClearFilters,
+}: {
+  hasFilters: boolean;
+  onAdd: () => void;
+  onClearFilters: () => void;
+}) {
+  if (hasFilters) {
+    return (
+      <div className="text-center space-y-3">
+        <p className="text-sand-500 text-sm">No employees match your filters.</p>
+        <button
+          type="button"
+          onClick={onClearFilters}
+          className="text-sm font-medium text-accent hover:text-accent-dark"
+        >
+          Clear filters
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="text-center space-y-3">
+      <p className="text-sand-500 text-sm">No employees yet.</p>
+      <button
+        type="button"
+        onClick={onAdd}
+        className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors"
+      >
+        + Add your first employee
+      </button>
     </div>
   );
 }
