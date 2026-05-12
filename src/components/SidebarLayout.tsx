@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
@@ -133,6 +134,18 @@ const NAV_ITEMS: NavItem[] = [
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { collapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
+  // Click-to-expand state for parent items with children. A parent is open if
+  // the user explicitly toggled it open OR the current route lives inside it.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const isSectionOpen = (item: NavItem) => {
+    if (openSections[item.href] !== undefined) return openSections[item.href];
+    return pathname === item.href || pathname.startsWith(item.href + "/");
+  };
+  const toggleSection = (href: string) =>
+    setOpenSections((prev) => {
+      const current = prev[href] ?? (pathname === href || pathname.startsWith(href + "/"));
+      return { ...prev, [href]: !current };
+    });
 
   // No sidebar on the login page
   if (pathname === "/login") {
@@ -169,40 +182,80 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           {NAV_ITEMS.map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const hasChildren = item.children && item.children.length > 0;
+            // When the sidebar is collapsed there's no room for child labels, so
+            // tapping a parent still drills straight into its first child (the
+            // old behavior). When expanded, parents become click-to-toggle.
+            const expanded = hasChildren && !collapsed && isSectionOpen(item);
+
+            const statusDot = !collapsed && (
+              <>
+                {item.status === "done" && (
+                  <span className="w-2 h-2 rounded-full bg-green-500" title="Ready" />
+                )}
+                {item.status === "wip" && (
+                  <span className="w-2 h-2 rounded-full bg-amber-400" title="In progress" />
+                )}
+                {item.status === "todo" && (
+                  <span className="w-2 h-2 rounded-full bg-slate-300" title="Not started" />
+                )}
+              </>
+            );
+
+            const rowClass = `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              active
+                ? "bg-blue-50 text-blue-600"
+                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`;
 
             return (
-              <div key={item.href} className="group">
-                <Link
-                  href={hasChildren ? item.children![0].href : item.href}
-                  className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    active
-                      ? "bg-blue-50 text-blue-600"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                  }`}
-                  title={collapsed ? item.label : undefined}
-                >
-                  <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
-                    {item.icon}
-                  </span>
-                  {!collapsed && (
-                    <>
-                      <span className="flex-1">{item.label}</span>
-                      {item.status === "done" && (
-                        <span className="w-2 h-2 rounded-full bg-green-500" title="Ready" />
-                      )}
-                      {item.status === "wip" && (
-                        <span className="w-2 h-2 rounded-full bg-amber-400" title="In progress" />
-                      )}
-                      {item.status === "todo" && (
-                        <span className="w-2 h-2 rounded-full bg-slate-300" title="Not started" />
-                      )}
-                    </>
-                  )}
-                </Link>
+              <div key={item.href}>
+                {hasChildren && !collapsed ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleSection(item.href)}
+                    aria-expanded={expanded}
+                    className={`${rowClass} w-full text-left`}
+                  >
+                    <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
+                      {item.icon}
+                    </span>
+                    <span className="flex-1">{item.label}</span>
+                    {statusDot}
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                        expanded ? "rotate-90" : ""
+                      }`}
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+                    </svg>
+                  </button>
+                ) : (
+                  <Link
+                    href={hasChildren ? item.children![0].href : item.href}
+                    className={rowClass}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
+                      {item.icon}
+                    </span>
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1">{item.label}</span>
+                        {statusDot}
+                      </>
+                    )}
+                  </Link>
+                )}
                 {hasChildren && !collapsed && (
-                  <div className={`overflow-hidden transition-all ${
-                    active ? "max-h-40" : "max-h-0 group-hover:max-h-40"
-                  }`}>
+                  <div
+                    className={`overflow-hidden transition-all duration-200 ${
+                      expanded ? "max-h-40" : "max-h-0"
+                    }`}
+                  >
                     {item.children!.map((child) => {
                       const childActive = pathname === child.href || pathname.startsWith(child.href + "/");
                       return (
