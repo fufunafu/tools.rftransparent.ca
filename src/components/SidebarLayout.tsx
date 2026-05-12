@@ -111,7 +111,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/todos",
-    label: "To-Do List",
+    label: "Tasks",
     status: "done" as Status,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">

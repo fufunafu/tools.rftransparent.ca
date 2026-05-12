@@ -96,7 +96,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">To-Do List</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Tasks</h1>
           <p className="text-sm text-slate-500 mt-1">
             {scope === "all" && "Team: "}
             {activeCount} active{completedCount > 0 && `, ${completedCount} completed`}
@@ -171,8 +171,8 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
         {filtered.length === 0 ? (
           <div className="p-8 text-center text-slate-400 text-sm">
             {filter === "all"
-              ? "No to-dos yet. Add one above!"
-              : `No ${filter} to-dos.`}
+              ? "No tasks yet. Add one above!"
+              : `No ${filter} tasks.`}
           </div>
         ) : (
           filtered.map((todo) => (

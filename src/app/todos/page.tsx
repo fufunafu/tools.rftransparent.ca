@@ -4,7 +4,7 @@ import { isAuthenticated, isManagementUser } from "@/lib/admin-auth";
 import TodoList from "@/components/admin/TodoList";
 
 export const metadata: Metadata = {
-  title: "To-Do List | RF Tools",
+  title: "Tasks | RF Tools",
   robots: { index: false, follow: false },
 };
 
