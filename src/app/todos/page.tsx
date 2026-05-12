@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAuthenticated, isManagementUser } from "@/lib/admin-auth";
 import TodoList from "@/components/admin/TodoList";
 
 export const metadata: Metadata = {
@@ -9,12 +9,13 @@ export const metadata: Metadata = {
 };
 
 export default async function TodosPage() {
-  const authenticated = await isAuthenticated();
-  if (!authenticated) redirect("/login");
+  if (!(await isAuthenticated())) redirect("/login");
+  // Only management can switch into All-tasks oversight mode.
+  const canSeeAll = await isManagementUser();
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <TodoList />
+      <TodoList canSeeAll={canSeeAll} />
     </div>
   );
 }

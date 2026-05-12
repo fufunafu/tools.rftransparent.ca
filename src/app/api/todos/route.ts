@@ -1,95 +1,163 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 
-export async function GET() {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+interface TodoRow {
+  id: string;
+  title: string;
+  completed: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
 
-  const { data, error } = await getSupabase()
+async function buildNameMap(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  try {
+    const { data } = await getSupabase()
+      .from("employees")
+      .select("email, name")
+      .not("email", "is", null);
+    for (const e of (data ?? []) as { email: string; name: string }[]) {
+      if (e.email) map.set(e.email.toLowerCase(), e.name);
+    }
+  } catch {
+    // employees table / email column may not exist — fall back to email-only display.
+  }
+  return map;
+}
+
+export async function GET(req: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const myEmail = user.email.toLowerCase();
+  const scope = req.nextUrl.searchParams.get("scope") ?? "mine";
+
+  let query = getSupabase()
     .from("todos")
     .select("*")
     .order("completed", { ascending: true })
     .order("created_at", { ascending: false })
     .limit(500);
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (scope === "all") {
+    if (!(await isManagementUser())) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    // No created_by filter — managers see everyone.
+  } else {
+    query = query.eq("created_by", myEmail);
+  }
 
-  return NextResponse.json(data);
+  const { data, error } = await query;
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const nameMap = await buildNameMap();
+  const enriched = ((data ?? []) as TodoRow[]).map((t) => ({
+    ...t,
+    created_by_name: nameMap.get(t.created_by.toLowerCase()) ?? t.created_by,
+  }));
+
+  return NextResponse.json(enriched);
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { title, created_by } = body;
+  const { title } = body as { title?: string };
 
   if (!title || typeof title !== "string" || !title.trim())
-    return NextResponse.json(
-      { error: "title is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "title is required" }, { status: 400 });
+
+  const ownerEmail = user.email.toLowerCase();
 
   const { data, error } = await getSupabase()
     .from("todos")
     .insert({
       title: title.trim(),
-      created_by: (created_by ?? "").trim() || "Anonymous",
+      created_by: ownerEmail,
     })
     .select()
     .single();
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  return NextResponse.json(data, { status: 201 });
+  const nameMap = await buildNameMap();
+  return NextResponse.json(
+    {
+      ...data,
+      created_by_name: nameMap.get(ownerEmail) ?? ownerEmail,
+    },
+    { status: 201 },
+  );
 }
 
 export async function PATCH(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { id, completed } = body;
+  const { id, completed } = body as { id?: string; completed?: boolean };
 
-  if (!id)
-    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
   if (typeof completed !== "boolean")
-    return NextResponse.json(
-      { error: "completed (boolean) is required" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "completed (boolean) is required" }, { status: 400 });
 
-  const { data, error } = await getSupabase()
+  const supabase = getSupabase();
+  const myEmail = user.email.toLowerCase();
+
+  const { data: existing, error: fetchErr } = await supabase
+    .from("todos")
+    .select("created_by")
+    .eq("id", id)
+    .single();
+  if (fetchErr || !existing) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const owner = (existing.created_by as string).toLowerCase();
+  if (owner !== myEmail && !(await isManagementUser())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { data, error } = await supabase
     .from("todos")
     .update({ completed, updated_at: new Date().toISOString() })
     .eq("id", id)
     .select()
     .single();
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
-
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json(data);
 }
 
 export async function DELETE(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const id = req.nextUrl.searchParams.get("id");
-  if (!id)
-    return NextResponse.json({ error: "id is required" }, { status: 400 });
+  if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  const { error } = await getSupabase()
+  const supabase = getSupabase();
+  const myEmail = user.email.toLowerCase();
+
+  const { data: existing, error: fetchErr } = await supabase
     .from("todos")
-    .delete()
-    .eq("id", id);
+    .select("created_by")
+    .eq("id", id)
+    .single();
+  if (fetchErr || !existing) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  const owner = (existing.created_by as string).toLowerCase();
+  if (owner !== myEmail && !(await isManagementUser())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  const { error } = await supabase.from("todos").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
   return NextResponse.json({ success: true });
 }

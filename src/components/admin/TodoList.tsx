@@ -7,27 +7,31 @@ interface Todo {
   title: string;
   completed: boolean;
   created_by: string;
+  created_by_name: string;
   created_at: string;
 }
 
 type Filter = "all" | "active" | "completed";
+type Scope = "mine" | "all";
 
-export default function TodoList() {
+export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean }) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
-  const [createdBy, setCreatedBy] = useState("");
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
+  const [scope, setScope] = useState<Scope>("mine");
 
   const fetchTodos = useCallback(async () => {
+    setLoading(true);
     try {
-      const res = await fetch("/api/todos");
+      const res = await fetch(`/api/todos${scope === "all" ? "?scope=all" : ""}`, { cache: "no-store" });
       if (res.ok) setTodos(await res.json());
+      else setTodos([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [scope]);
 
   useEffect(() => {
     fetchTodos();
@@ -41,10 +45,12 @@ export default function TodoList() {
       const res = await fetch("/api/todos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, created_by: createdBy }),
+        body: JSON.stringify({ title }),
       });
       if (res.ok) {
-        const todo = await res.json();
+        const todo: Todo = await res.json();
+        // A newly created todo is always yours — show it in "mine" mode immediately,
+        // and in "all" mode too since you can see everything.
         setTodos((prev) => [todo, ...prev]);
         setTitle("");
       }
@@ -55,9 +61,7 @@ export default function TodoList() {
 
   async function handleToggle(todo: Todo) {
     const updated = { ...todo, completed: !todo.completed };
-    setTodos((prev) =>
-      prev.map((t) => (t.id === todo.id ? updated : t))
-    );
+    setTodos((prev) => prev.map((t) => (t.id === todo.id ? updated : t)));
     await fetch("/api/todos", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -90,13 +94,31 @@ export default function TodoList() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">To-Do List</h1>
           <p className="text-sm text-slate-500 mt-1">
+            {scope === "all" && "Team: "}
             {activeCount} active{completedCount > 0 && `, ${completedCount} completed`}
           </p>
         </div>
+        {canSeeAll && (
+          <div className="flex gap-1">
+            {(["mine", "all"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => setScope(s)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
+                  scope === s
+                    ? "bg-blue-50 text-blue-600"
+                    : "text-slate-500 hover:bg-slate-50"
+                }`}
+              >
+                {s === "mine" ? "My tasks" : "All tasks"}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Add form */}
@@ -111,13 +133,6 @@ export default function TodoList() {
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-          <input
-            type="text"
-            placeholder="Your name"
-            value={createdBy}
-            onChange={(e) => setCreatedBy(e.target.value)}
-            className="w-40 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           />
           <button
             type="submit"
@@ -190,12 +205,18 @@ export default function TodoList() {
                 >
                   {todo.title}
                 </p>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {todo.created_by} &middot;{" "}
-                  {new Date(todo.created_at).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                  })}
+                <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  {scope === "all" && (
+                    <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 text-[11px] font-medium">
+                      {todo.created_by_name}
+                    </span>
+                  )}
+                  <span>
+                    {new Date(todo.created_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
                 </p>
               </div>
 
