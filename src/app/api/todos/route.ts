@@ -9,6 +9,17 @@ interface TodoRow {
   created_by: string;
   created_at: string;
   updated_at: string;
+  due_at: string | null;
+}
+
+function normalizeDueDate(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // Expect YYYY-MM-DD from the date input — accept anything Postgres can cast,
+  // but cheap-validate to keep junk out.
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return null;
+  return trimmed;
 }
 
 async function buildNameMap(): Promise<Map<string, string>> {
@@ -67,7 +78,7 @@ export async function POST(req: NextRequest) {
   if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { title } = body as { title?: string };
+  const { title, due_at } = body as { title?: string; due_at?: string };
 
   if (!title || typeof title !== "string" || !title.trim())
     return NextResponse.json({ error: "title is required" }, { status: 400 });
@@ -79,6 +90,7 @@ export async function POST(req: NextRequest) {
     .insert({
       title: title.trim(),
       created_by: ownerEmail,
+      due_at: normalizeDueDate(due_at),
     })
     .select()
     .single();
@@ -100,11 +112,19 @@ export async function PATCH(req: NextRequest) {
   if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { id, completed } = body as { id?: string; completed?: boolean };
+  const { id, completed, due_at } = body as {
+    id?: string;
+    completed?: boolean;
+    // due_at semantics: string "YYYY-MM-DD" sets it, empty string / null clears it,
+    // undefined leaves it alone (so a pure completion toggle doesn't wipe the date).
+    due_at?: string | null;
+  };
 
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
-  if (typeof completed !== "boolean")
-    return NextResponse.json({ error: "completed (boolean) is required" }, { status: 400 });
+  if (completed !== undefined && typeof completed !== "boolean")
+    return NextResponse.json({ error: "completed must be boolean" }, { status: 400 });
+  if (completed === undefined && due_at === undefined)
+    return NextResponse.json({ error: "nothing to update" }, { status: 400 });
 
   const supabase = getSupabase();
   const myEmail = user.email.toLowerCase();
@@ -122,9 +142,13 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
+  const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (completed !== undefined) updates.completed = completed;
+  if (due_at !== undefined) updates.due_at = due_at === null || due_at === "" ? null : normalizeDueDate(due_at);
+
   const { data, error } = await supabase
     .from("todos")
-    .update({ completed, updated_at: new Date().toISOString() })
+    .update(updates)
     .eq("id", id)
     .select()
     .single();
