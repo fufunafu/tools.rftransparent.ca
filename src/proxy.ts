@@ -37,7 +37,8 @@ export async function proxy(request: NextRequest) {
   const isPublic =
     pathname === "/login" ||
     pathname.startsWith("/api/auth/") ||
-    pathname.startsWith("/api/cron/");
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/api/customer-service/leads/webhook");
 
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();

@@ -58,6 +58,7 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: "/warehouse", label: "Dashboard", status: "done" as Status },
       { href: "/warehouse/report", label: "Daily Report", status: "done" as Status },
+      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip" as Status },
     ],
   },
   {
@@ -73,6 +74,7 @@ const NAV_ITEMS: NavItem[] = [
       { href: "/customer-service/phones", label: "Phones", status: "done" as Status },
       { href: "/customer-service/emails", label: "Emails", status: "done" as Status },
       { href: "/customer-service/follow-up", label: "Follow-up", status: "done" as Status },
+      { href: "/customer-service/leads", label: "Leads", status: "wip" as Status },
     ],
   },
   {
