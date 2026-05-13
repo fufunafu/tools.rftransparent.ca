@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { isAuthenticated, getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getStores } from "@/lib/shopify";
@@ -12,6 +13,11 @@ import {
   type LeadStatus,
   type FollowUpLead,
 } from "@/lib/followup";
+import {
+  getFollowupSummary,
+  getFollowupAnalytics,
+  getFollowupByStaff,
+} from "@/lib/customer-service/followup-queries";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -70,159 +76,57 @@ export async function GET(req: NextRequest) {
 
     // ── Analytics (monthly trends) ──
     if (view === "analytics") {
-      const allLeads: { shopify_created_at: string | null; lead_status: string; quote_amount: number; closed_at: string | null }[] = [];
-      {
-        const PAGE = 1000;
-        let from = 0;
-        while (true) {
-          const { data } = await supabase
-            .from("followup_leads")
-            .select("shopify_created_at, lead_status, quote_amount, closed_at")
-            .eq("store_id", storeId)
-            .range(from, from + PAGE - 1);
-          if (!data || data.length === 0) break;
-          allLeads.push(...data as typeof allLeads);
-          if (data.length < PAGE) break;
-          from += PAGE;
-        }
-      }
-
-      const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
-
-      for (const lead of (allLeads ?? []) as { shopify_created_at: string | null; lead_status: string; quote_amount: number; closed_at: string | null }[]) {
-        const dateStr = lead.shopify_created_at || lead.closed_at;
-        if (!dateStr) continue;
-        const month = dateStr.slice(0, 7); // "YYYY-MM"
-        const entry = monthMap.get(month) ?? { total: 0, won: 0, lost: 0, quoted_value: 0, won_value: 0 };
-        entry.total++;
-        entry.quoted_value += Number(lead.quote_amount);
-        if (lead.lead_status === "won") { entry.won++; entry.won_value += Number(lead.quote_amount); }
-        if (lead.lead_status === "lost") entry.lost++;
-        monthMap.set(month, entry);
-      }
-
-      const months = Array.from(monthMap.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([month, d]) => ({
-          month,
-          label: new Date(month + "-15").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
-          ...d,
-          conversion_rate: (d.won + d.lost) > 0 ? Math.round((d.won / (d.won + d.lost)) * 1000) / 10 : 0,
-        }));
-
+      const rows = await getFollowupAnalytics(storeId);
+      const months = rows.map((r) => ({
+        month: r.month_key,
+        label: new Date(r.month_key + "-15").toLocaleDateString("en-US", { month: "short", year: "2-digit" }),
+        total: r.total,
+        won: r.won,
+        lost: r.lost,
+        quoted_value: r.quoted_value,
+        won_value: r.won_value,
+        conversion_rate: r.conversion_rate,
+      }));
       return NextResponse.json({ months });
     }
 
     // ── Summary ──
     if (view === "summary") {
       const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
-      // Active and closed leads — paginate past PostgREST's 1000-row server cap
-      const PAGE = 1000;
-      const activeLeads: FollowUpLead[] = [];
-      for (let from = 0; ; from += PAGE) {
-        let q = supabase
-          .from("followup_leads").select("*")
-          .eq("store_id", storeId).is("closed_at", null)
-          // Exclude OPEN (unsent works-in-progress) and DELETED (draft no longer in Shopify's
-          // invoice_sent state — usually invoice recalled/voided). Neither is a real quote.
-          .not("shopify_status", "in", "(OPEN,DELETED)");
-        if (cutoff) q = q.gte("shopify_created_at", cutoff);
-        const { data } = await q.range(from, from + PAGE - 1);
-        if (!data || data.length === 0) break;
-        activeLeads.push(...data as FollowUpLead[]);
-        if (data.length < PAGE) break;
+      const summary = await getFollowupSummary(storeId, cutoff);
+      if (!summary) {
+        // Empty store — return zero-valued shape so the dashboard renders.
+        return NextResponse.json({
+          metrics: {
+            due_today: 0, overdue: 0, total_active: 0, total_closed: 0,
+            won_count: 0, lost_count: 0, conversion_rate: 0, avg_attempts: 0,
+            avg_cycle_won: null, avg_cycle_lost: null,
+            pipeline_value: 0, won_value: 0,
+          },
+          by_status: {},
+          loss_reasons: {},
+          last_synced_at: null,
+          stores: STORES,
+        });
       }
-      const closedLeads: FollowUpLead[] = [];
-      for (let from = 0; ; from += PAGE) {
-        let q = supabase
-          .from("followup_leads").select("*")
-          .eq("store_id", storeId).not("closed_at", "is", null)
-          .not("shopify_status", "in", "(OPEN,DELETED)");
-        if (cutoff) q = q.gte("shopify_created_at", cutoff);
-        const { data } = await q.range(from, from + PAGE - 1);
-        if (!data || data.length === 0) break;
-        closedLeads.push(...data as FollowUpLead[]);
-        if (data.length < PAGE) break;
-      }
-
-      const active = activeLeads;
-      const closed = closedLeads;
-
-      const dueToday = active.filter(
-        (l) => l.next_followup_at && l.next_followup_at >= today && l.next_followup_at < tomorrow
-      ).length;
-
-      const overdue = active.filter(
-        (l) => l.next_followup_at && l.next_followup_at < today
-      ).length;
-
-      const wonLeads = closed.filter((l) => l.lead_status === "won");
-      const lostLeads = closed.filter((l) => l.lead_status === "lost");
-      const totalClosedNonDup = wonLeads.length + lostLeads.length;
-      const conversionRate = totalClosedNonDup > 0
-        ? Math.round((wonLeads.length / totalClosedNonDup) * 1000) / 10
-        : 0;
-
-      const wonValue = wonLeads.reduce((s, l) => s + Number(l.quote_amount), 0);
-      const pipelineValue = active.reduce((s, l) => s + Number(l.quote_amount), 0);
-
-      // Status breakdown
-      const byStatus: Record<string, number> = {};
-      for (const l of active) {
-        byStatus[l.lead_status] = (byStatus[l.lead_status] || 0) + 1;
-      }
-
-      // Loss reason breakdown
-      const lossReasons: Record<string, number> = {};
-      for (const l of lostLeads) {
-        const reason = l.close_reason || "Unknown";
-        lossReasons[reason] = (lossReasons[reason] || 0) + 1;
-      }
-
-      // Avg cycle time (days from quote to close)
-      function avgCycleDays(leads: FollowUpLead[]): number | null {
-        const withDates = leads.filter((l) => l.shopify_created_at && l.closed_at);
-        if (withDates.length === 0) return null;
-        const totalDays = withDates.reduce((s, l) => {
-          const from = new Date(l.shopify_created_at!).getTime();
-          const to = new Date(l.closed_at!).getTime();
-          return s + (to - from) / (1000 * 60 * 60 * 24);
-        }, 0);
-        return Math.round((totalDays / withDates.length) * 10) / 10;
-      }
-
-      // Avg follow-up attempts for closed leads
-      const closedWithAttempts = closed.filter((l) => l.followup_count > 0);
-      const avgAttempts = closedWithAttempts.length > 0
-        ? Math.round((closedWithAttempts.reduce((s, l) => s + l.followup_count, 0) / closedWithAttempts.length) * 10) / 10
-        : 0;
-
-      // Last sync time — max last_synced_at across all leads, no extra query needed
-      const allLeads = [...active, ...closed];
-      const lastSyncedAt = allLeads.reduce((max: string | null, l) => {
-        if (!l.last_synced_at) return max;
-        if (!max) return l.last_synced_at;
-        return l.last_synced_at > max ? l.last_synced_at : max;
-      }, null);
-
       return NextResponse.json({
         metrics: {
-          due_today: dueToday,
-          overdue,
-          total_active: active.length,
-          total_closed: closed.length,
-          won_count: wonLeads.length,
-          lost_count: lostLeads.length,
-          conversion_rate: conversionRate,
-          avg_attempts: avgAttempts,
-          avg_cycle_won: avgCycleDays(wonLeads),
-          avg_cycle_lost: avgCycleDays(lostLeads),
-          pipeline_value: Math.round(pipelineValue),
-          won_value: Math.round(wonValue),
+          due_today: summary.due_today,
+          overdue: summary.overdue,
+          total_active: summary.total_active,
+          total_closed: summary.total_closed,
+          won_count: summary.won_count,
+          lost_count: summary.lost_count,
+          conversion_rate: summary.conversion_rate,
+          avg_attempts: summary.avg_attempts,
+          avg_cycle_won: summary.avg_cycle_won,
+          avg_cycle_lost: summary.avg_cycle_lost,
+          pipeline_value: summary.pipeline_value,
+          won_value: summary.won_value,
         },
-        by_status: byStatus,
-        loss_reasons: lossReasons,
-        last_synced_at: lastSyncedAt,
+        by_status: summary.by_status,
+        loss_reasons: summary.loss_reasons,
+        last_synced_at: summary.last_synced_at,
         stores: STORES,
       });
     }
@@ -232,6 +136,7 @@ export async function GET(req: NextRequest) {
       const filter = req.nextUrl.searchParams.get("filter") || "due_today";
       const creator = req.nextUrl.searchParams.get("creator"); // optional: "__unknown__" or a staff name
       const closeReason = req.nextUrl.searchParams.get("close_reason");
+      const leadStatus = req.nextUrl.searchParams.get("lead_status"); // optional: "hot_lead", "new", etc.
       const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
 
       const SKIP_EMAILS = ["application@gmail.com"];
@@ -284,6 +189,11 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      // Click-through filter from the status pills above the table.
+      if (leadStatus) {
+        query = query.eq("lead_status", leadStatus);
+      }
+
       const { data, error } = await query;
       if (error) throw new Error(error.message);
 
@@ -298,57 +208,8 @@ export async function GET(req: NextRequest) {
     // ── Per-staff breakdown ──
     if (view === "by_staff") {
       const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
-      const PAGE = 1000;
-      const rows: { created_by_staff: string | null; lead_status: string; quote_amount: number }[] = [];
-      for (let from = 0; ; from += PAGE) {
-        let q = supabase
-          .from("followup_leads")
-          .select("created_by_staff, lead_status, quote_amount")
-          .eq("store_id", storeId)
-          // Exclude OPEN (unsent works-in-progress) and DELETED (invoice recalled/voided).
-          .not("shopify_status", "in", "(OPEN,DELETED)");
-        if (cutoff) q = q.gte("shopify_created_at", cutoff);
-        const { data } = await q.range(from, from + PAGE - 1);
-        if (!data || data.length === 0) break;
-        rows.push(...(data as typeof rows));
-        if (data.length < PAGE) break;
-      }
-
-      interface StaffAgg {
-        staff: string;
-        total: number;
-        won: number;
-        lost: number;
-        active: number;
-        quoted_value: number;
-        won_value: number;
-        conversion_rate: number;
-      }
-
-      const byStaff = new Map<string, StaffAgg>();
-      for (const r of rows) {
-        const staff = r.created_by_staff?.trim() || "Unknown";
-        const a = byStaff.get(staff) ?? {
-          staff, total: 0, won: 0, lost: 0, active: 0,
-          quoted_value: 0, won_value: 0, conversion_rate: 0,
-        };
-        a.total++;
-        a.quoted_value += Number(r.quote_amount);
-        if (r.lead_status === "won") { a.won++; a.won_value += Number(r.quote_amount); }
-        else if (r.lead_status === "lost") a.lost++;
-        else a.active++;
-        byStaff.set(staff, a);
-      }
-
-      const staffList = Array.from(byStaff.values()).map((a) => {
-        // Conversion rate = won / total (treats active quotes as not-yet-converted).
-        a.conversion_rate = a.total > 0 ? Math.round((a.won / a.total) * 1000) / 10 : 0;
-        a.quoted_value = Math.round(a.quoted_value);
-        a.won_value = Math.round(a.won_value);
-        return a;
-      }).sort((a, b) => b.total - a.total);
-
-      return NextResponse.json({ staff: staffList });
+      const staff = await getFollowupByStaff(storeId, cutoff);
+      return NextResponse.json({ staff });
     }
 
     // ── Per-staff monthly time-series ──
@@ -634,6 +495,7 @@ export async function POST(req: NextRequest) {
       }
 
       const result = await syncDraftOrdersForStore(storeId);
+      revalidateTag(`cs:followup:${storeId}`, "max");
       return NextResponse.json({ status: "success", synced_at: new Date().toISOString(), ...result });
     }
 
@@ -703,6 +565,7 @@ export async function POST(req: NextRequest) {
 
       if (updateError) throw new Error(updateError.message);
 
+      revalidateTag(`cs:followup:${storeId}`, "max");
       return NextResponse.json({ status: "success", lead: updatedLead });
     }
 
@@ -745,6 +608,7 @@ export async function POST(req: NextRequest) {
 
       await supabase.from("followup_logs").insert(logs);
 
+      revalidateTag(`cs:followup:${storeId}`, "max");
       return NextResponse.json({ status: "success", closed: lead_ids.length });
     }
 
@@ -803,6 +667,9 @@ export async function PATCH(req: NextRequest) {
       .single();
 
     if (error) throw new Error(error.message);
+    // PATCH body doesn't include storeId — invalidate at the coarse tag.
+    // Manual edits are rare; broader invalidation is fine here.
+    revalidateTag("cs:followup", "max");
     return NextResponse.json({ status: "success", lead: data });
   } catch (err) {
     console.error("[Follow-up API PATCH]", err);

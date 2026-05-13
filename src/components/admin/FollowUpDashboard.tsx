@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
+import useSWR, { useSWRConfig } from "swr";
 import SummaryCards from "@/components/admin/followup/SummaryCards";
 import LeadTable from "@/components/admin/followup/LeadTable";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
@@ -76,16 +77,11 @@ function LeadDetailPanel({
   onClose: () => void;
   onLogFollowUp: () => void;
 }) {
-  const [logs, setLogs] = useState<FollowUpLog[]>([]);
-  const [loadingLogs, setLoadingLogs] = useState(true);
-
-  useEffect(() => {
-    setLoadingLogs(true);
-    fetch(`/api/customer-service/follow-up?view=logs&lead_id=${lead.id}`)
-      .then((r) => r.json())
-      .then((d) => setLogs(d.logs ?? []))
-      .finally(() => setLoadingLogs(false));
-  }, [lead.id]);
+  const { data: logsData } = useSWR<{ logs: FollowUpLog[] }>(
+    `/api/customer-service/follow-up?view=logs&lead_id=${lead.id}`
+  );
+  const logs = logsData?.logs ?? [];
+  const loadingLogs = !logsData;
 
   const statusLabel = FOLLOWUP_CATEGORIES[lead.lead_status as LeadStatus]?.label ?? lead.lead_status;
 
@@ -238,18 +234,16 @@ const EDITABLE_CATEGORIES = ["new", "hot_lead", "considering", "price_shopping",
 
 function TimingEditor({ store }: { store: string }) {
   const [open, setOpen] = useState(false);
-  const [config, setConfig] = useState<Record<string, number | null>>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => {
-    if (!open) return;
-    fetch(`/api/customer-service/follow-up?view=config&store=${store}`)
-      .then((r) => r.json())
-      .then((d) => { setConfig(d.config ?? {}); setLoaded(true); });
-  }, [open, store]);
+  const configUrl = `/api/customer-service/follow-up?view=config&store=${store}`;
+  const { data: configData, mutate: mutateConfig } = useSWR<{ config: Record<string, number | null> }>(
+    open ? configUrl : null
+  );
+  const config = configData?.config ?? {};
+  const loaded = !!configData;
 
   const startEdit = () => {
     const d: Record<string, string> = {};
@@ -274,7 +268,7 @@ function TimingEditor({ store }: { store: string }) {
         body: JSON.stringify({ store_id: store, config: configObj }),
       });
       if (!res.ok) throw new Error("Failed to save");
-      setConfig(configObj);
+      await mutateConfig({ config: configObj }, { revalidate: false });
       setEditing(false);
     } catch {
       alert("Failed to save timing config");
@@ -352,37 +346,37 @@ function TimingEditor({ store }: { store: string }) {
 
 // ─── Main Dashboard ──────────────────────────────────────────────────────────
 
-export default function FollowUpDashboard({ defaultStore }: { defaultStore?: string }) {
+export default function FollowUpDashboard({
+  defaultStore,
+  initialSummary,
+}: {
+  defaultStore?: string;
+  initialSummary?: SummaryResponse | null;
+}) {
   const [store, setStore] = useState(defaultStore || "store1");
-  const [stores, setStores] = useState<{ id: string; label: string; shop_domain: string }[]>([]);
   const [mounted, setMounted] = useState(false);
 
-  const [summary, setSummary] = useState<SummaryResponse | null>(null);
-  const [leads, setLeads] = useState<FollowUpLead[]>([]);
   const [filter, setFilter] = useState("due_today");
   // When set, the leads list is additionally filtered by this staff name.
   // Special value "__unknown__" means leads with created_by_staff = null.
   const [staffFilter, setStaffFilter] = useState<string | null>(null);
+  // Click-through from the status pills (Hot Lead / New Lead / etc.). Independent
+  // of staffFilter — both can be active at once.
+  const [leadStatusFilter, setLeadStatusFilter] = useState<LeadStatus | null>(null);
   // "1y" = last 12 months (default — hides legacy Unknowns where Shopify has aged out
   // the creation event). "all" = every lead ever.
   const [timeRange, setTimeRange] = useState<"1y" | "all">("1y");
-  const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
-  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
-  const [error, setError] = useState("");
 
-  // Modal / detail / help / config / analytics state
+  // Modal / detail / help / analytics state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
   const [detailLead, setDetailLead] = useState<FollowUpLead | null>(null);
   // When set, shows a right-side drawer with per-staff stats (conversion/quoted trends).
   // Mirrors `staffFilter` — "__unknown__" means leads with created_by_staff = null.
   const [detailStaff, setDetailStaff] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
-  const [storeDays, setStoreDays] = useState<Record<string, number | null>>({});
-  const [analytics, setAnalytics] = useState<MonthData[]>([]);
   const [viewMode, setViewMode] = useState<"table" | "calendar">("table");
-  const [calendarLeads, setCalendarLeads] = useState<FollowUpLead[]>([]);
 
   useEffect(() => {
     const saved = localStorage.getItem("cs_followup_store");
@@ -392,46 +386,84 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     setMounted(true);
   }, []);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      // When filtering by staff, broaden the base filter to "all" so we see everything
-      // attributed to them regardless of due date.
-      const leadsFilter = staffFilter ? "all" : filter;
-      const creatorParam = staffFilter ? `&creator=${encodeURIComponent(staffFilter)}` : "";
-      const rangeParam = `&range=${timeRange}`;
-      const [summaryRes, leadsRes, configRes, analyticsRes, calendarRes] = await Promise.all([
-        fetch(`/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`),
-        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${rangeParam}`),
-        fetch(`/api/customer-service/follow-up?view=config&store=${store}`),
-        fetch(`/api/customer-service/follow-up?view=analytics&store=${store}`),
-        fetch(`/api/customer-service/follow-up?view=leads&store=${store}&filter=all${rangeParam}`),
-      ]);
+  // ── Data fetching (SWR) ─────────────────────────────────────────────────────
+  // Each query owns its own cache key so tab/filter changes only re-fetch what
+  // actually depends on the changed input. After mutations, mutate() invalidates
+  // only the affected keys (see handleLogFollowUp / handleSync / handleBulkClose).
 
-      if (!summaryRes.ok) throw new Error("Failed to load follow-up data");
+  // When filtering by staff or by lead status, broaden the base filter to "all" so we see
+  // every matching lead regardless of due date — otherwise the date filter would hide
+  // leads the user explicitly clicked through to.
+  const leadsFilter = (staffFilter || leadStatusFilter) ? "all" : filter;
+  const creatorParam = staffFilter ? `&creator=${encodeURIComponent(staffFilter)}` : "";
+  const leadStatusParam = leadStatusFilter ? `&lead_status=${leadStatusFilter}` : "";
+  const rangeParam = `&range=${timeRange}`;
 
-      const summaryData = await summaryRes.json();
-      const leadsData = await leadsRes.json();
-      const configData = await configRes.json();
-      const analyticsData = await analyticsRes.json();
-      const calendarData = await calendarRes.json();
+  // summaryUrl is computed unconditionally (no `mounted` gate) so the server-rendered
+  // HTML can use `initialSummary` as fallback data. Other URLs stay gated on mounted —
+  // they don't have fallbacks and avoiding an extra fetch on hydration is cheap.
+  const summaryUrl = `/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`;
+  const leadsUrl = mounted
+    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${rangeParam}`
+    : null;
+  const configUrl = mounted
+    ? `/api/customer-service/follow-up?view=config&store=${store}`
+    : null;
+  const analyticsUrl = mounted
+    ? `/api/customer-service/follow-up?view=analytics&store=${store}`
+    : null;
+  const calendarUrl = mounted
+    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=all${rangeParam}`
+    : null;
 
-      setSummary(summaryData);
-      setStores(summaryData.stores ?? []);
-      setLastSyncedAt(summaryData.last_synced_at ?? null);
-      setLeads(leadsData.leads ?? []);
-      setStoreDays(configData.config ?? {});
-      setAnalytics(analyticsData.months ?? []);
-      setCalendarLeads(calendarData.leads ?? []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-  }, [store, filter, staffFilter, timeRange]);
+  // Fallback only applies when SWR's current key matches the (defaultStore, '1y')
+  // combination the server prefetched. If the user picked a different store in
+  // localStorage, SWR fetches normally for the new key.
+  const fallbackData =
+    initialSummary && store === defaultStore && timeRange === "1y"
+      ? initialSummary
+      : undefined;
 
-  useEffect(() => { if (mounted) loadData(); }, [loadData, mounted]);
+  const { data: summary, error: summaryError, isLoading: summaryLoading } =
+    useSWR<SummaryResponse>(summaryUrl, { fallbackData });
+  const { data: leadsData } = useSWR<{ leads: FollowUpLead[] }>(leadsUrl);
+  const { data: configData } = useSWR<{ config: Record<string, number | null> }>(configUrl);
+  const { data: analyticsData } = useSWR<{ months: MonthData[] }>(analyticsUrl);
+  const { data: calendarData } = useSWR<{ leads: FollowUpLead[] }>(calendarUrl);
+
+  const stores = summary?.stores ?? [];
+  const lastSyncedAt = summary?.last_synced_at ?? null;
+  const leads = leadsData?.leads ?? [];
+  const storeDays = configData?.config ?? {};
+  const analytics = analyticsData?.months ?? [];
+  const calendarLeads = calendarData?.leads ?? [];
+  const loading = summaryLoading;
+  const error = summaryError instanceof Error ? summaryError.message : "";
+
+  const { mutate } = useSWRConfig();
+
+  // Invalidate every follow-up cache key for the current store. Used after sync
+  // and timing-config edits since those can touch any view.
+  const invalidateAllForStore = () => {
+    mutate(
+      (key) =>
+        typeof key === "string" &&
+        key.startsWith("/api/customer-service/follow-up") &&
+        key.includes(`store=${store}`)
+    );
+  };
+
+  // Invalidate just summary + leads + calendar — what changes after logging a
+  // follow-up or bulk-closing leads. Analytics + config are unaffected.
+  const invalidateAfterLeadMutation = () => {
+    mutate(
+      (key) =>
+        typeof key === "string" &&
+        key.startsWith("/api/customer-service/follow-up") &&
+        key.includes(`store=${store}`) &&
+        (key.includes("view=summary") || key.includes("view=leads"))
+    );
+  };
 
   const handleSync = async () => {
     setSyncing(true);
@@ -446,8 +478,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
         if (json.auto_won > 0) parts.push(`${json.auto_won} auto-won`);
         if (json.stale_detected > 0) parts.push(`${json.stale_detected} stale`);
         setSyncStatus(parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date");
-        if (json.synced_at) setLastSyncedAt(json.synced_at);
-        loadData();
+        invalidateAllForStore();
       } else {
         setSyncStatus(`Error: ${json.error}`);
       }
@@ -473,7 +504,7 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
     setModalLead(null);
-    loadData();
+    invalidateAfterLeadMutation();
   };
 
   const handleBulkClose = async (leadIds: string[], reason: string) => {
@@ -484,12 +515,11 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
     });
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
-    loadData();
+    invalidateAfterLeadMutation();
   };
 
   const handleStoreChange = (newStore: string) => {
     setStore(newStore);
-    setLastSyncedAt(null);
     localStorage.setItem("cs_followup_store", newStore);
   };
 
@@ -742,17 +772,30 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
           {/* Analytics Chart */}
           <AnalyticsChart data={analytics} />
 
-          {/* Status breakdown pills */}
+          {/* Status breakdown pills — click to filter the lead table */}
           {statusPills.length > 0 && (
             <div className="flex flex-wrap gap-2">
               {statusPills.map(([status, count]) => {
                 const label = FOLLOWUP_CATEGORIES[status as LeadStatus]?.label ?? status;
                 const color = STATUS_PILL_COLORS[status] ?? "bg-sand-100 text-sand-600";
+                const active = leadStatusFilter === status;
                 return (
-                  <span key={status} className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full ${color}`}>
+                  <button
+                    key={status}
+                    type="button"
+                    onClick={() => {
+                      setLeadStatusFilter((prev) => (prev === status ? null : (status as LeadStatus)));
+                      requestAnimationFrame(() => {
+                        document.getElementById("followup-lead-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+                      });
+                    }}
+                    className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full cursor-pointer transition-all hover:brightness-95 ${color} ${
+                      active ? "ring-2 ring-offset-1 ring-current" : ""
+                    }`}
+                  >
                     {label}
                     <span className="font-semibold">{count}</span>
-                  </span>
+                  </button>
                 );
               })}
             </div>
@@ -786,6 +829,22 @@ export default function FollowUpDashboard({ defaultStore }: { defaultStore?: str
               <button
                 onClick={() => { setStaffFilter(null); setDetailStaff(null); }}
                 className="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
+
+          {/* Active lead-status filter chip */}
+          {leadStatusFilter && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50 border border-amber-200 rounded-lg">
+              <span className="text-sm text-amber-800">
+                Showing leads with status:{" "}
+                <strong>{FOLLOWUP_CATEGORIES[leadStatusFilter]?.label ?? leadStatusFilter}</strong>
+              </span>
+              <button
+                onClick={() => setLeadStatusFilter(null)}
+                className="ml-auto text-xs text-amber-700 hover:text-amber-900 font-medium"
               >
                 Clear filter
               </button>
