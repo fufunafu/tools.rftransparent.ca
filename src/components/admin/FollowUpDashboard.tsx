@@ -527,8 +527,11 @@ export default function FollowUpDashboard({
   };
 
   // Build filter counts from summary
+  // "Due Today" tab now bundles today + overdue so the count matches what the
+  // list actually shows. The Summary card metric stays today-only — it's a KPI,
+  // not a workload tally.
   const filterCounts: Record<string, number> = {
-    due_today: summary?.metrics.due_today ?? 0,
+    due_today: (summary?.metrics.due_today ?? 0) + (summary?.metrics.overdue ?? 0),
     overdue: summary?.metrics.overdue ?? 0,
     upcoming: Math.max(0, (summary?.metrics.total_active ?? 0) - (summary?.metrics.due_today ?? 0) - (summary?.metrics.overdue ?? 0)),
     all: summary?.metrics.total_active ?? 0,

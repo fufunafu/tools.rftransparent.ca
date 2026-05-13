@@ -105,6 +105,7 @@ export async function GET(req: NextRequest) {
           },
           by_status: {},
           loss_reasons: {},
+          lead_distribution: {},
           last_synced_at: null,
           stores: STORES,
         });
@@ -126,6 +127,7 @@ export async function GET(req: NextRequest) {
         },
         by_status: summary.by_status,
         loss_reasons: summary.loss_reasons,
+        lead_distribution: summary.lead_distribution,
         last_synced_at: summary.last_synced_at,
         stores: STORES,
       });
@@ -163,7 +165,12 @@ export async function GET(req: NextRequest) {
       }
 
       if (filter === "due_today") {
-        query = query.is("closed_at", null).gte("next_followup_at", today).lt("next_followup_at", tomorrow);
+        // Pulls today's + overdue rows together. JS-side reorder below puts
+        // today's leads on top so the tab doubles as the rep's daily to-do.
+        query = query
+          .is("closed_at", null)
+          .not("next_followup_at", "is", null)
+          .lt("next_followup_at", tomorrow);
       } else if (filter === "overdue") {
         query = query.is("closed_at", null).lt("next_followup_at", today).not("next_followup_at", "is", null);
       } else if (filter === "upcoming") {
@@ -194,12 +201,36 @@ export async function GET(req: NextRequest) {
         query = query.eq("lead_status", leadStatus);
       }
 
-      const { data, error } = await query;
-      if (error) throw new Error(error.message);
+      // Supabase caps a single request at 1000 rows. Paginate so the
+      // table (and "Export CSV") can include every matching lead.
+      const PAGE = 1000;
+      let leads: FollowUpLead[] = [];
+      for (let from = 0; ; from += PAGE) {
+        const { data, error } = await query.range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        leads.push(...(data as FollowUpLead[]));
+        if (data.length < PAGE) break;
+      }
+
+      // For "due_today" we fetched today + overdue with a single query; partition
+      // them so today's leads land on top. Both buckets stay in the default
+      // ascending next_followup_at order — for today that means earliest time
+      // of day first, for overdue it means oldest (most overdue) first.
+      if (filter === "due_today") {
+        const todayLeads: FollowUpLead[] = [];
+        const overdueLeads: FollowUpLead[] = [];
+        for (const l of leads) {
+          if (!l.next_followup_at) continue;
+          if (l.next_followup_at >= today) todayLeads.push(l);
+          else overdueLeads.push(l);
+        }
+        leads = [...todayLeads, ...overdueLeads];
+      }
 
       return NextResponse.json({
-        leads: data ?? [],
-        total: (data ?? []).length,
+        leads,
+        total: leads.length,
         filter,
         creator: creator ?? null,
       });
