@@ -115,6 +115,7 @@ export default function FollowUpTestDashboard() {
           </button>
           <Link
             href="/customer-service/follow-up"
+            prefetch={false}
             className="px-3 py-1.5 text-xs font-medium rounded-lg bg-white border border-amber-300 text-amber-900 hover:bg-amber-50 transition-colors"
           >
             Back to live dashboard

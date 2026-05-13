@@ -609,7 +609,7 @@ export default function FollowUpDashboard({
         </div>
         <div className="flex items-center gap-3 flex-wrap">
           <Link
-            href="/customer-service/follow-up/test"
+            href="/customer-service/follow-up?test=1"
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 transition-colors"
             title="Practice follow-ups on 10 fake leads — no real data is touched"
           >
