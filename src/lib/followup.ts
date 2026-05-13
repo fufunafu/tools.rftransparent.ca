@@ -471,6 +471,18 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+/** Add N business days to `start`, skipping Saturdays and Sundays. */
+function addBusinessDays(start: Date, days: number): Date {
+  const result = new Date(start);
+  let remaining = Math.max(0, days);
+  while (remaining > 0) {
+    result.setDate(result.getDate() + 1);
+    const dow = result.getDay(); // 0 = Sun, 6 = Sat
+    if (dow !== 0 && dow !== 6) remaining--;
+  }
+  return result;
+}
+
 export function computeNextFollowup(
   status: LeadStatus,
   storeDays: Record<string, number | null>,
@@ -478,8 +490,10 @@ export function computeNextFollowup(
 ): string | null {
   const cat = FOLLOWUP_CATEGORIES[status];
   if (cat.terminal) return null;
+  // future_project: the user explicitly picked a date — respect it as-is.
   if (status === "future_project" && customDate) return new Date(customDate).toISOString();
   const days = storeDays[status] ?? cat.followupDays;
   if (days === null) return null;
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+  // No one works weekends — "2 days from Friday" means Tuesday, not Sunday.
+  return addBusinessDays(new Date(), days).toISOString();
 }
