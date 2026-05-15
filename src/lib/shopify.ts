@@ -5,18 +5,20 @@ export interface ShopifyStoreConfig {
   id: string;
   label: string;
   store: string;
-  clientId: string;
-  clientSecret: string;
+  // Only used when doing an OAuth client_credentials exchange. Optional —
+  // stores that authenticate via a custom-app shpat_ access token don't
+  // need these.
+  clientId?: string;
+  clientSecret?: string;
   accessToken?: string;
   // Secondary app ("Quotation") — has `read_users` / staffMembers access.
   // Only queries that need staff identity opt into this via shopifyGraphQL's `app` option.
   quotationAccessToken?: string;
 }
 
-// Build store list from env vars — only include stores with all 3 credentials set.
-// SHOPIFY_ACCESS_TOKEN_N (optional): if set, used directly and the OAuth client_credentials
-// exchange is skipped. This is required for custom apps that don't have the
-// client_credentials grant enabled (most shpat_-token custom apps).
+// Build store list from env vars. A store is included if it has a STORE host
+// AND at least one usable auth mechanism: either a shpat_ access token
+// (SHOPIFY_ACCESS_TOKEN_N) OR the OAuth pair (CLIENT_ID + CLIENT_SECRET).
 // SHOPIFY_QUOTATION_ACCESS_TOKEN_N (optional): shpat_ token for the "Quotation" app
 // installed on the same store — used only for staff-identity queries.
 function buildStores(): ShopifyStoreConfig[] {
@@ -27,7 +29,9 @@ function buildStores(): ShopifyStoreConfig[] {
     const clientSecret = process.env[`SHOPIFY_CLIENT_SECRET_${i}`];
     const accessToken = process.env[`SHOPIFY_ACCESS_TOKEN_${i}`];
     const quotationAccessToken = process.env[`SHOPIFY_QUOTATION_ACCESS_TOKEN_${i}`];
-    if (store && clientId && clientSecret) {
+    const hasOAuthPair = Boolean(clientId && clientSecret);
+    const hasAccessToken = Boolean(accessToken);
+    if (store && (hasAccessToken || hasOAuthPair)) {
       stores.push({
         id: `store${i}`,
         label: process.env[`SHOPIFY_LABEL_${i}`] ?? `Store ${i}`,
@@ -55,6 +59,13 @@ async function getToken(config: ShopifyStoreConfig): Promise<string> {
   // Prefer a directly-configured Admin API access token (shpat_...) if present —
   // these don't expire and don't need an OAuth exchange.
   if (config.accessToken) return config.accessToken;
+
+  if (!config.clientId || !config.clientSecret) {
+    throw new Error(
+      `${config.label} has no usable auth: set SHOPIFY_ACCESS_TOKEN_${config.id.replace("store", "")} ` +
+        `or both SHOPIFY_CLIENT_ID_${config.id.replace("store", "")} and SHOPIFY_CLIENT_SECRET_${config.id.replace("store", "")}.`,
+    );
+  }
 
   const cached = tokenCache.get(config.id);
   if (cached && Date.now() < cached.expiresAt) {

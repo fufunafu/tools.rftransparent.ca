@@ -149,8 +149,9 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       return { ...prev, [href]: !current };
     });
 
-  // No sidebar on the login page
-  if (pathname === "/login") {
+  // No sidebar on the login page, or on print-friendly routes (PO printouts
+  // open in a new tab and shouldn't carry the app chrome).
+  if (pathname === "/login" || pathname.startsWith("/print/")) {
     return <>{children}</>;
   }
 
