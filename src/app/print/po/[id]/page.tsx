@@ -39,7 +39,12 @@ export default async function PrintPOPage({
 
   const isMontreal = order.order_type === "montreal";
   const documentTitle = isMontreal ? "TRANSFER ORDER" : "PURCHASE ORDER";
-  const partyLabel = isMontreal ? "Transfer to" : "Supplier";
+  // Both order types ship into the Toronto warehouse. Source differs:
+  // Montreal transfers come from the Montreal warehouse, China orders
+  // come from the named supplier.
+  const fromName = isMontreal ? "Montreal warehouse" : order.supplier_name;
+  const shipToName = "RF Transparent — Toronto warehouse";
+  const shipToAddress = "67 Westmore Drive, Toronto, ON";
 
   const totalQty = order.items.reduce((s, it) => s + it.qty_ordered, 0);
   const totalValue = order.items.reduce(
@@ -49,8 +54,14 @@ export default async function PrintPOPage({
 
   return (
     <div className="min-h-screen bg-white text-slate-900 print:bg-white">
+      <style>{`
+        @page {
+          size: A4 portrait;
+          margin: 14mm 12mm;
+        }
+      `}</style>
       <PrintTrigger />
-      <div className="max-w-[820px] mx-auto px-8 py-10 print:px-0 print:py-4">
+      <div className="max-w-[760px] mx-auto px-8 py-10 print:px-0 print:py-0">
         {/* Top header */}
         <div className="flex items-start justify-between pb-4 border-b-2 border-slate-900">
           <div>
@@ -69,14 +80,25 @@ export default async function PrintPOPage({
           </div>
         </div>
 
-        {/* Meta grid */}
+        {/* From / Ship to */}
         <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mt-6">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
-              {partyLabel}
+              From
             </div>
-            <div className="font-medium">{order.supplier_name}</div>
+            <div className="font-medium">{fromName}</div>
           </div>
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
+              Ship to
+            </div>
+            <div className="font-medium">{shipToName}</div>
+            <div className="text-slate-600">{shipToAddress}</div>
+          </div>
+        </div>
+
+        {/* Status / dates */}
+        <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm mt-4">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
               Status
@@ -103,14 +125,21 @@ export default async function PrintPOPage({
               <div>{fmtDate(order.received_date)}</div>
             </div>
           )}
-          {order.created_by_email && (
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
-                Prepared by
-              </div>
-              <div>{order.created_by_email}</div>
-            </div>
-          )}
+        </div>
+
+        {/* Responsible person — promoted to its own block so it's obvious
+            who to follow up with about this shipment. */}
+        <div className="mt-6 border border-slate-300 rounded p-3 text-sm">
+          <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
+            Responsible for this order
+          </div>
+          <div className="font-medium mt-0.5">
+            {order.created_by_email ?? "—"}
+          </div>
+          <div className="text-xs text-slate-500 mt-0.5">
+            Contact this person with questions, ETA updates, or receiving
+            issues.
+          </div>
         </div>
 
         {/* Line items */}

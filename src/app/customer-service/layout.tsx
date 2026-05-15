@@ -1,3 +1,5 @@
+import { SWRProvider } from "@/lib/swr-provider";
+
 export default function CustomerServiceLayout({ children }: { children: React.ReactNode }) {
-  return <>{children}</>;
+  return <SWRProvider>{children}</SWRProvider>;
 }

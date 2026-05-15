@@ -12,7 +12,18 @@ import RecentActivityPanel from "./RecentActivityPanel";
 
 interface Props { initialOrder: PurchaseOrderDetail }
 
-const EDITABLE_STATUSES: ReadonlyArray<OrderStatus> = ["draft", "ordered", "in_transit"];
+// Line items can be edited at any status. For Received POs, qty_ordered
+// changes are harmless (records-only); adding new lines starts at
+// qty_received = 0 (no inventory impact); deleting a line with
+// qty_received > 0 triggers a BEFORE DELETE handler in the DB that
+// subtracts that qty back from on-hand (see migration 044).
+const EDITABLE_STATUSES: ReadonlyArray<OrderStatus> = [
+  "draft",
+  "ordered",
+  "in_transit",
+  "received",
+  "cancelled",
+];
 
 const NEXT_STATUS: Record<OrderStatus, OrderStatus[]> = {
   draft: ["ordered", "cancelled"],
@@ -347,6 +358,8 @@ export default function OrderDetail({ initialOrder }: Props) {
                   <input type="number" step="any" min="0" value={addQty} onChange={(e) => setAddQty(e.target.value)} placeholder="Qty"
                     className="w-24 px-1.5 py-1 text-right rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none" />
                 </td>
+                {/* Qty received — empty when adding a new line */}
+                <td></td>
                 <td className="px-3 py-2 text-right">
                   {addCustom && (
                     <input type="number" step="any" min="0" value={addCustomCost}
@@ -354,7 +367,8 @@ export default function OrderDetail({ initialOrder }: Props) {
                       className="w-24 px-1.5 py-1 text-right rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none" />
                   )}
                 </td>
-                <td colSpan={2}></td>
+                {/* Line value — empty when adding a new line */}
+                <td></td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
                   <button type="button"
                     onClick={() => {
