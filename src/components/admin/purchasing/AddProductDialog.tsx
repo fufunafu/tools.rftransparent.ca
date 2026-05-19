@@ -99,8 +99,19 @@ export default function AddProductDialog({
               className="w-full px-3 py-2 rounded-lg border border-sand-300" /></Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Storage capacity (units)"><input type="number" step="any" min="0" value={storageCapacity}
-              onChange={(e) => setStorageCapacity(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-sand-300" /></Field>
+            {category === "hardware" ? (
+              <Field label="Storage capacity">
+                <div className="w-full px-3 py-2 rounded-lg border border-sand-200 bg-sand-50 text-xs text-sand-600 leading-relaxed">
+                  Auto-derived for hardware:{" "}
+                  <strong>max(50, 3 × monthly × season × growth)</strong>. No
+                  physical capacity limit — we aim for ~3 months of cover at
+                  the current rate.
+                </div>
+              </Field>
+            ) : (
+              <Field label="Storage capacity (units)"><input type="number" step="any" min="0" value={storageCapacity}
+                onChange={(e) => setStorageCapacity(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-sand-300" /></Field>
+            )}
             <Field label="Unit cost (CAD, landed)"><input type="number" step="0.01" min="0" value={unitCost}
               onChange={(e) => setUnitCost(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-sand-300" /></Field>
           </div>

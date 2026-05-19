@@ -100,13 +100,15 @@ export function buildForecast(
     cursorMs += DAY_MS;
   }
 
-  if (stockoutDate === null) {
-    timeline.push({
-      date: horizon,
-      inventory: Math.max(0, cur),
-      event: "horizon",
-    });
-  }
+  // Always emit a horizon anchor so the chart shows the full year
+  // window — including the post-stockout trajectory when late arrivals
+  // refill and then deplete again. The client densifier interpolates
+  // between this point and the last event using seasonality math.
+  timeline.push({
+    date: horizon,
+    inventory: Math.max(0, cur),
+    event: "horizon",
+  });
 
   return {
     product_id: productId,

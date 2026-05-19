@@ -297,7 +297,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center">Inbound<ColumnHint>Units already ordered but not yet received. Computed live as <span className="font-mono">SUM(qty_ordered − qty_received)</span> across every PO whose status is <em>Ordered</em> or <em>In transit</em>.</ColumnHint></span>
               </Th>
               <Th sortable sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Capacity<ColumnHint>Max units the warehouse can hold for this SKU. Drives the Overstock and Perfect Number calculations.</ColumnHint></span>
+                <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: auto-derived target = <span className="font-mono">max(50, 3 × monthly × season × growth)</span> — three months of cover at the current month&apos;s sales rate, with a 50-unit floor for SKUs with no sales data. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
               </Th>
               {showSalesDetail && (
                 <>

@@ -109,7 +109,10 @@ export default async function PrintPOPage({
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
               Order date
             </div>
-            <div>{fmtDate(order.order_date)}</div>
+            {/* order_date is only set when the PO transitions Draft → Ordered.
+                Fall back to created_at so a Draft printout still carries a
+                meaningful date. */}
+            <div>{fmtDate(order.order_date ?? order.created_at)}</div>
           </div>
           <div>
             <div className="text-[10px] uppercase tracking-wider text-slate-500 font-medium">
@@ -189,9 +192,9 @@ export default async function PrintPOPage({
                 </td>
               </tr>
             )}
-          </tbody>
-          {order.items.length > 0 && (
-            <tfoot>
+            {/* Total row inside tbody (not tfoot) — tfoot is repeated by
+                browsers on every print page; tbody rows render once. */}
+            {order.items.length > 0 && (
               <tr className="border-t-2 border-slate-900 font-semibold">
                 <td className="py-3 pr-3" colSpan={2}>
                   Total ({order.items.length}{" "}
@@ -209,8 +212,8 @@ export default async function PrintPOPage({
                   </>
                 )}
               </tr>
-            </tfoot>
-          )}
+            )}
+          </tbody>
         </table>
 
         {/* Notes */}

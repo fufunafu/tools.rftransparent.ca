@@ -125,17 +125,52 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                   {arrivals.length > 0 && `, after factoring in ${arrivals.length} incoming PO${arrivals.length === 1 ? "" : "s"}`}
                 </div>
               </div>
-            ) : (
-              <div>
-                <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
-                <div className="text-xl font-semibold text-green-700">Safe — no stockout within the next year</div>
-                {arrivals.length > 0 && (
-                  <div className="text-sand-600 text-xs mt-0.5">
-                    {arrivals.length} incoming PO{arrivals.length === 1 ? "" : "s"} included
+            ) : (() => {
+              // No projected stockout doesn't always mean "safe" — for SKUs
+              // flagged for reorder because they're under the target stock
+              // (especially hardware with no sales data → 50-unit floor),
+              // the forecast can't predict a stockout because daily_sales
+              // is 0 or the projection ends above zero, but the SKU still
+              // needs to be topped up to the target.
+              const onHandPlusInbound = product.current_inventory + product.inbound;
+              const target = product.storage_capacity;
+              const belowTarget = onHandPlusInbound < target;
+              const flaggedForReorder =
+                product.sop_label === "reorder" ||
+                product.sop_label === "reorder_plus_montreal" ||
+                product.sop_label === "montreal_transfer";
+
+              if (belowTarget && flaggedForReorder) {
+                const gap = Math.max(0, target - onHandPlusInbound);
+                return (
+                  <div>
+                    <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Status</div>
+                    <div className="text-xl font-semibold text-amber-700">
+                      Below target stock
+                    </div>
+                    <div className="text-sand-600 text-xs mt-0.5">
+                      On hand + inbound = {onHandPlusInbound.toLocaleString("en-CA")} units,
+                      target is {target.toLocaleString("en-CA")}. Short by{" "}
+                      {gap.toLocaleString("en-CA")}.
+                      {product.avg_monthly_sales_grs + product.avg_monthly_sales_rf === 0 &&
+                        " The chart shows no stockout because this SKU has no sales history yet — we still want to keep the minimum on hand."}
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
+                );
+              }
+
+              return (
+                <div>
+                  <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
+                  <div className="text-xl font-semibold text-green-700">Safe — no stockout within the next year</div>
+                  {arrivals.length > 0 && (
+                    <div className="text-sand-600 text-xs mt-0.5">
+                      {arrivals.length} incoming PO{arrivals.length === 1 ? "" : "s"} included
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
           {points.length >= 2 && (
             <div className="bg-white rounded-xl border border-sand-200/60 p-4">
@@ -146,6 +181,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="t" type="number" scale="time" domain={xDomain}
                       tick={{ fontSize: 11 }}
+                      minTickGap={50}
                       tickFormatter={(ms) => new Date(ms).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip labelFormatter={(ms) => fmtDate(isoFromMs(ms as number))}
