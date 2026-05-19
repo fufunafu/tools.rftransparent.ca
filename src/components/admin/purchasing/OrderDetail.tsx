@@ -47,6 +47,8 @@ export default function OrderDetail({ initialOrder }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [etaDraft, setEtaDraft] = useState(order.eta_date ?? "");
+  const [poDraft, setPoDraft] = useState(order.po_number);
+  const [editingPo, setEditingPo] = useState(false);
   const [notesDraft, setNotesDraft] = useState(order.notes ?? "");
 
   const totals = useMemo(() => {
@@ -218,7 +220,65 @@ export default function OrderDetail({ initialOrder }: Props) {
       </div>
       <div className="bg-white rounded-xl border border-sand-200/60 p-5 space-y-4">
         <div className="flex flex-wrap items-baseline gap-3">
-          <h2 className="text-lg font-semibold font-mono">{order.po_number}</h2>
+          {editingPo ? (
+            <span className="flex items-baseline gap-2">
+              <input
+                type="text"
+                value={poDraft}
+                onChange={(e) => setPoDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    if (poDraft.trim() && poDraft !== order.po_number) {
+                      patchOrder({ po_number: poDraft.trim() }).then(() => setEditingPo(false));
+                    } else {
+                      setEditingPo(false);
+                    }
+                  } else if (e.key === "Escape") {
+                    setPoDraft(order.po_number);
+                    setEditingPo(false);
+                  }
+                }}
+                className="text-lg font-semibold font-mono px-2 py-0.5 rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (poDraft.trim() && poDraft !== order.po_number) {
+                    patchOrder({ po_number: poDraft.trim() }).then(() => setEditingPo(false));
+                  } else {
+                    setEditingPo(false);
+                  }
+                }}
+                disabled={busy || !poDraft.trim()}
+                className="px-2 py-1 text-xs rounded bg-accent text-white hover:bg-accent/90 disabled:opacity-50"
+              >
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPoDraft(order.po_number);
+                  setEditingPo(false);
+                }}
+                className="px-2 py-1 text-xs rounded border border-sand-300 text-sand-600 hover:bg-sand-50"
+              >
+                Cancel
+              </button>
+            </span>
+          ) : (
+            <h2
+              className="text-lg font-semibold font-mono hover:bg-sand-50 rounded px-1 -mx-1 cursor-pointer"
+              title="Click to rename"
+              onClick={() => {
+                setPoDraft(order.po_number);
+                setEditingPo(true);
+              }}
+            >
+              {order.po_number}
+            </h2>
+          )}
           <span className={
             "inline-block px-2 py-0.5 rounded-md border text-[11px] " +
             (order.order_type === "montreal"

@@ -21,6 +21,7 @@ const VALID_STATUS: OrderStatus[] = [
 ];
 
 const PATCH_FIELDS = new Set([
+  "po_number",
   "status",
   "supplier_name",
   "order_date",
@@ -77,6 +78,16 @@ export async function PATCH(
         { error: `status must be one of ${VALID_STATUS.join(", ")}` },
         { status: 400 },
       );
+    }
+    if (payload.po_number !== undefined) {
+      const trimmed = typeof payload.po_number === "string" ? payload.po_number.trim() : "";
+      if (!trimmed) {
+        return NextResponse.json(
+          { error: "PO number cannot be empty" },
+          { status: 400 },
+        );
+      }
+      payload.po_number = trimmed;
     }
     if (payload.status === "ordered" && payload.order_date === undefined) {
       payload.order_date = new Date().toISOString().slice(0, 10);
