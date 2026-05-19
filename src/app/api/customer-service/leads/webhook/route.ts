@@ -1,6 +1,8 @@
 // Public webhook endpoint that receives form submissions from the customer's
-// browser via the "After form loaded" script in Powerful Form Builder, and
-// (later) Meta lead-ad webhooks.
+// browser via the "After form loaded" script in Powerful Form Builder.
+//
+// Meta lead-ad webhooks have a different shape (signed POST, then a Graph API
+// callback to fetch the data) and live at /api/customer-service/leads/meta-webhook.
 //
 // Auth: a shared secret in the ?secret=... query param. The secret is visible
 // in the browser's network tab, so it stops drive-by spam but isn't a strong
@@ -10,8 +12,11 @@
 // any origin. The secret is the gate.
 
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabase } from "@/lib/supabase";
-import { extractContactFields, type LeadSource } from "@/lib/customer-service/leads";
+import {
+  extractContactFields,
+  findOrInsertLead,
+  type LeadSource,
+} from "@/lib/customer-service/leads";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -67,35 +72,28 @@ export async function POST(req: NextRequest) {
 
   const { name, email, phone, message } = extractContactFields(payload);
 
-  // Source detail — prefer an explicit form_name/source_detail, fall back to page URL.
   const sourceDetail =
     pickStr(payload, "source_detail") ??
     pickStr(payload, "form_name") ??
     pickStr(payload, "page_url") ??
     null;
 
-  const supabase = getSupabase();
-  const { data, error } = await supabase
-    .from("leads")
-    .insert({
-      source,
-      source_detail: sourceDetail,
-      form_id: pickStr(payload, "form_id"),
-      page_url: pickStr(payload, "page_url"),
-      name,
-      email,
-      phone,
-      message,
-      raw_payload: payload,
-    })
-    .select("id")
-    .single();
+  const result = await findOrInsertLead({
+    source,
+    source_detail: sourceDetail,
+    form_id: pickStr(payload, "form_id"),
+    page_url: pickStr(payload, "page_url"),
+    name,
+    email,
+    phone,
+    message,
+    raw_payload: payload,
+  });
 
-  if (error) {
-    return jsonResponse({ error: error.message }, 500);
+  if (!result.ok) {
+    return jsonResponse({ error: result.error }, 500);
   }
-
-  return jsonResponse({ ok: true, lead_id: data.id });
+  return jsonResponse(result);
 }
 
 function pickStr(obj: Record<string, unknown>, key: string): string | null {

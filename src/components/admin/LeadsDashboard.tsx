@@ -81,23 +81,33 @@ function LeadDetailPanel({
   const [logging, setLogging] = useState(false);
   const [callResult, setCallResult] = useState("");
   const [callNotes, setCallNotes] = useState("");
+  const [logError, setLogError] = useState<string | null>(null);
 
   const [editingQuote, setEditingQuote] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
 
   const handleLogCall = async () => {
-    if (!callResult.trim()) return;
     setLogging(true);
+    setLogError(null);
+    // Blank result is fine — default to "Called" so a one-click log works.
+    const result = callResult.trim() || "Called";
     try {
-      await fetch("/api/customer-service/leads?action=log_call", {
+      const res = await fetch("/api/customer-service/leads?action=log_call", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_id: lead.id, result: callResult.trim(), notes: callNotes.trim() || undefined }),
+        body: JSON.stringify({ lead_id: lead.id, result, notes: callNotes.trim() || undefined }),
       });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setLogError(body.error ?? `Failed to log call (${res.status})`);
+        return;
+      }
       setCallResult("");
       setCallNotes("");
       onChanged();
+    } catch (err) {
+      setLogError(err instanceof Error ? err.message : "Network error");
     } finally {
       setLogging(false);
     }
@@ -225,11 +235,14 @@ function LeadDetailPanel({
             />
             <button
               onClick={handleLogCall}
-              disabled={logging || !callResult.trim()}
+              disabled={logging}
               className="w-full px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {logging ? "Logging..." : "+ Log Call"}
             </button>
+            {logError && (
+              <p className="text-xs text-red-600">{logError}</p>
+            )}
           </div>
         </div>
 
@@ -334,119 +347,6 @@ function LeadDetailPanel({
   );
 }
 
-// ─── Setup banner ────────────────────────────────────────────────────────────
-
-function SetupBanner({ count }: { count: number }) {
-  const [open, setOpen] = useState(count === 0);
-
-  return (
-    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-      <button
-        onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-sand-50"
-      >
-        <div className="flex items-center gap-3">
-          <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${count > 0 ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
-              {count > 0 ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-              )}
-            </svg>
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-sand-900">
-              {count > 0 ? `Website connected — ${count} lead${count === 1 ? "" : "s"} received` : "Website not connected yet"}
-            </p>
-            <p className="text-xs text-sand-500">
-              {count > 0 ? "Click for setup instructions" : "Paste a small script into Powerful Form Builder to start receiving submissions"}
-            </p>
-          </div>
-        </div>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 text-sand-400 transition-transform ${open ? "rotate-180" : ""}`}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
-        </svg>
-      </button>
-
-      {open && (
-        <div className="border-t border-sand-200/60 px-4 py-4 space-y-4 text-sm">
-          <ol className="list-decimal list-inside space-y-2 text-sand-700">
-            <li>In Shopify, open <strong>Powerful Form Builder → Forms</strong> and edit the form you want to track.</li>
-            <li>Go to <strong>Settings</strong> and check <strong>“After form loaded, run this script”</strong> (not the &ldquo;After form submitted&rdquo; one — that runs after the form clears).</li>
-            <li>Paste the snippet below into the script box.</li>
-            <li>
-              Replace <code className="px-1 py-0.5 bg-sand-100 rounded">YOUR_SECRET</code> with the value of the{" "}
-              <code className="px-1 py-0.5 bg-sand-100 rounded">LEADS_WEBHOOK_SECRET</code> env var (set in Vercel).
-            </li>
-            <li>Save the form. Submit a test entry from your live site — it should appear here within seconds.</li>
-            <li>Repeat for each form you want to capture leads from.</li>
-          </ol>
-
-          <div>
-            <p className="text-xs font-medium text-sand-500 mb-1">Script to paste:</p>
-            <pre className="p-3 rounded-lg bg-sand-900 text-sand-100 text-[11px] overflow-x-auto leading-relaxed">{INSTALL_SNIPPET}</pre>
-          </div>
-
-          <div className="text-xs text-sand-500">
-            <p><strong>Why &ldquo;After form loaded&rdquo; instead of &ldquo;After form submitted&rdquo;?</strong> The after-submit hook runs after Powerful Form Builder clears the form, so by then we can&rsquo;t read the values. The after-loaded hook lets us register a submit listener and capture data at the right moment.</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const INSTALL_SNIPPET = `// Sends Powerful Form Builder submissions to the Leads dashboard.
-// Paste this into Settings → "After form loaded, run this script".
-(function () {
-  // ─── EDIT FOR EACH FORM ─────────────────────────────────────────────
-  // Map your Globo field names (what's inside {{...}} in the "Form inputs"
-  // list) to the contact fields the dashboard cares about. Leave a value
-  // as "" if your form doesn't have that field.
-  var FIELD_MAP = {
-    name:    "text",        // {{text}}
-    email:   "email",       // {{email}}
-    phone:   "phone-1",     // {{phone-1}}
-    message: "textarea-1",  // {{textarea-1}}
-  };
-  // ────────────────────────────────────────────────────────────────────
-
-  var WEBHOOK = "https://tools.rftransparent.ca/api/customer-service/leads/webhook?source=website&secret=YOUR_SECRET";
-
-  document.querySelectorAll("form").forEach(function (form) {
-    if (form.__rfHooked) return;
-    form.__rfHooked = true;
-    form.addEventListener("submit", function () {
-      var fields = {};
-      try {
-        new FormData(form).forEach(function (v, k) { fields[k] = v; });
-      } catch (e) {}
-
-      var mapped = {};
-      for (var key in FIELD_MAP) {
-        var src = FIELD_MAP[key];
-        if (src && fields[src]) mapped[key] = fields[src];
-      }
-
-      try {
-        fetch(WEBHOOK, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            fields: fields,
-            mapped: mapped,
-            form_id: form.id || null,
-            page_url: window.location.href,
-            source_detail: document.title,
-          }),
-          keepalive: true,
-        }).catch(function () {});
-      } catch (e) {}
-    });
-  });
-})();`;
-
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
 export default function LeadsDashboard() {
@@ -518,9 +418,6 @@ export default function LeadsDashboard() {
           </p>
         </div>
       </div>
-
-      {/* Setup banner */}
-      <SetupBanner count={metrics.fromWebsite} />
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
