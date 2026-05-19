@@ -85,33 +85,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   );
 }
 
-function exportCSV(leads: FollowUpLead[]) {
-  const headers = ["Draft #", "Customer Name", "Email", "Phone", "Created By", "Amount", "Status", "Due Date", "Attempts", "Lifetime Orders", "Quoted Date", "Notes"];
-  const rows = leads.map((l) => [
-    l.draft_name,
-    l.customer_name || "",
-    l.customer_email || "",
-    l.customer_phone || "",
-    l.created_by_staff || "",
-    Number(l.quote_amount).toFixed(2),
-    FOLLOWUP_CATEGORIES[l.lead_status as LeadStatus]?.label ?? l.lead_status,
-    l.next_followup_at ? l.next_followup_at.split("T")[0] : "",
-    String(l.followup_count),
-    l.customer_orders_count != null ? String(l.customer_orders_count) : "",
-    (l.shopify_created_at || l.created_at).split("T")[0],
-    (l.notes || "").replace(/"/g, '""'),
-  ]);
-
-  const csv = [headers, ...rows].map((r) => r.map((v) => `"${v}"`).join(",")).join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `followup-leads-${new Date().toISOString().split("T")[0]}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp, onViewDetail, onBulkClose, filterCounts }: Props) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
@@ -202,15 +175,6 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
             placeholder="Search by name, email, phone, draft #..."
             className="w-full sm:w-64 px-3 py-1.5 text-sm border border-sand-200 rounded-lg bg-sand-50 text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white"
           />
-          {sorted.length > 0 && (
-            <button
-              onClick={() => exportCSV(sorted)}
-              className="shrink-0 px-3 py-1.5 text-xs font-medium text-sand-600 border border-sand-200 rounded-lg hover:bg-sand-50 transition-colors"
-              title="Export visible leads as CSV"
-            >
-              Export CSV
-            </button>
-          )}
         </div>
       </div>
 
