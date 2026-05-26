@@ -1,5 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase-server";
-import { getSupabase } from "@/lib/supabase";
+import { isAuthorizedEmail, isAdminEmail, isManagementEmail } from "@/lib/authz";
 import type { User } from "@supabase/supabase-js";
 
 export async function getAuthenticatedUser(): Promise<User | null> {
@@ -10,49 +10,7 @@ export async function getAuthenticatedUser(): Promise<User | null> {
   const user = session?.user ?? null;
   if (!user || !user.email) return null;
 
-  const email = user.email.toLowerCase();
-
-  // Owner account — always has access
-  if (email === "fuannegao25@gmail.com") return user;
-
-  const allowedDomains = process.env.ADMIN_ALLOWED_DOMAINS
-    ?.split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
-
-  // No restriction configured — allow all authenticated users
-  if (!allowedDomains?.length) return user;
-
-  // Domain match — allow
-  const domain = email.split("@")[1];
-  if (allowedDomains.includes(domain)) return user;
-
-  // Not on the allowed domain — check employees table (active employees with an email)
-  try {
-    const { data: emp } = await getSupabase()
-      .from("employees")
-      .select("id")
-      .eq("email", email)
-      .eq("active", true)
-      .maybeSingle();
-    if (emp) return user;
-  } catch {
-    // email column may not exist yet
-  }
-
-  // Final fallback — check admin_users table for one-off manual overrides
-  try {
-    const { data } = await getSupabase()
-      .from("admin_users")
-      .select("email")
-      .eq("email", email)
-      .maybeSingle();
-    if (data) return user;
-  } catch {
-    // admin_users table may not exist yet
-  }
-
-  return null;
+  return (await isAuthorizedEmail(user.email)) ? user : null;
 }
 
 export async function isAuthenticated(): Promise<boolean> {
@@ -64,31 +22,7 @@ export async function isAuthenticated(): Promise<boolean> {
 // approval-style actions where employees should only see their own data.
 export async function isAdminUser(): Promise<boolean> {
   const user = await getAuthenticatedUser();
-  if (!user?.email) return false;
-  const email = user.email.toLowerCase();
-
-  if (email === "fuannegao25@gmail.com") return true;
-
-  const allowedDomains = process.env.ADMIN_ALLOWED_DOMAINS
-    ?.split(",")
-    .map((d) => d.trim().toLowerCase())
-    .filter(Boolean);
-  if (allowedDomains?.length && allowedDomains.includes(email.split("@")[1])) {
-    return true;
-  }
-
-  try {
-    const { data } = await getSupabase()
-      .from("admin_users")
-      .select("email")
-      .eq("email", email)
-      .maybeSingle();
-    if (data) return true;
-  } catch {
-    // admin_users table may not exist yet
-  }
-
-  return false;
+  return isAdminEmail(user?.email);
 }
 
 // Approve/reject gates for the reimbursement workflow. Admin status (domain
@@ -96,23 +30,7 @@ export async function isAdminUser(): Promise<boolean> {
 // expenses — only people in the management department do. Owner always passes.
 export async function isManagementUser(): Promise<boolean> {
   const user = await getAuthenticatedUser();
-  if (!user?.email) return false;
-  const email = user.email.toLowerCase();
-
-  if (email === "fuannegao25@gmail.com") return true;
-
-  try {
-    const { data } = await getSupabase()
-      .from("employees")
-      .select("id")
-      .eq("email", email)
-      .eq("active", true)
-      .eq("department", "management")
-      .maybeSingle();
-    return !!data;
-  } catch {
-    return false;
-  }
+  return isManagementEmail(user?.email);
 }
 
 export async function clearSessionCookie(): Promise<void> {

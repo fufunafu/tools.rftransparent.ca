@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const body = await req.json();
-  const { name, email, department, location_id, shopify_tags, active, phone, birthday } = body;
+  const { name, email, email_alt, department, location_id, shopify_tags, active, phone, birthday } = body;
 
   if (!name || !department)
     return NextResponse.json(
@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     .insert({
       name,
       email: email || null,
+      email_alt: email_alt || null,
       department,
       location_id: location_id || null,
       shopify_tags: Array.isArray(shopify_tags) ? shopify_tags.filter(Boolean) : [],

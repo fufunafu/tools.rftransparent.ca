@@ -14,6 +14,7 @@ interface Employee {
   id: string;
   name: string;
   email: string | null;
+  email_alt: string | null;
   phone: string | null;
   birthday: string | null;
   department: string;
@@ -48,6 +49,7 @@ function emptyDraft(): EditDraft {
   return {
     name: "",
     email: "",
+    email_alt: "",
     phone: "",
     birthday: "",
     department: "sales",
@@ -61,6 +63,7 @@ function draftFromEmployee(emp: Employee): EditDraft {
   return {
     name: emp.name,
     email: emp.email ?? "",
+    email_alt: emp.email_alt ?? "",
     phone: emp.phone ?? "",
     birthday: emp.birthday ?? "",
     department: emp.department,
@@ -102,6 +105,7 @@ export default function EmployeeList() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -128,6 +132,13 @@ export default function EmployeeList() {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    fetch("/api/admin/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(Boolean(d?.isAdmin)))
+      .catch(() => {});
+  }, []);
+
   const departmentCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const e of employees) counts[e.department] = (counts[e.department] ?? 0) + 1;
@@ -145,7 +156,7 @@ export default function EmployeeList() {
       if (departmentFilter && e.department !== departmentFilter) return false;
       if (locationFilter && e.location_id !== locationFilter) return false;
       if (q) {
-        const hay = `${e.name} ${e.email ?? ""}`.toLowerCase();
+        const hay = `${e.name} ${e.email ?? ""} ${e.email_alt ?? ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -200,6 +211,7 @@ export default function EmployeeList() {
       const body = {
         name: draft.name.trim(),
         email: draft.email.trim().toLowerCase() || null,
+        email_alt: draft.email_alt.trim().toLowerCase() || null,
         phone: draft.phone.trim() || null,
         birthday: draft.birthday || null,
         department: draft.department,
@@ -387,6 +399,8 @@ export default function EmployeeList() {
         onCancel={cancelEdit}
         onDelete={drawerMode === "edit" ? handleDelete : undefined}
         deleting={deleting}
+        isAdmin={isAdmin}
+        employeeId={editingId && editingId !== NEW_ID ? editingId : null}
       />
     </div>
   );

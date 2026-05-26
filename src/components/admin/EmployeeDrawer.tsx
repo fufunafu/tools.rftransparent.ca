@@ -11,6 +11,7 @@ interface Location {
 export interface EditDraft {
   name: string;
   email: string;
+  email_alt: string;
   phone: string;
   birthday: string;
   department: string;
@@ -31,6 +32,8 @@ interface Props {
   onCancel: () => void;
   onDelete?: () => void;
   deleting?: boolean;
+  isAdmin?: boolean;
+  employeeId?: string | null;
 }
 
 const DEPARTMENTS = [
@@ -58,9 +61,59 @@ export default function EmployeeDrawer({
   onCancel,
   onDelete,
   deleting = false,
+  isAdmin = false,
+  employeeId = null,
 }: Props) {
   const nameRef = useRef<HTMLInputElement | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwError, setPwError] = useState("");
+  const [pwSuccess, setPwSuccess] = useState("");
+
+  useEffect(() => {
+    if (!passwordOpen) {
+      setNewPassword("");
+      setPwError("");
+    }
+  }, [passwordOpen]);
+
+  useEffect(() => {
+    if (!open) setPwSuccess("");
+  }, [open]);
+
+  const handleSetPassword = async () => {
+    if (!employeeId) return;
+    if (newPassword.length < 8) {
+      setPwError("Password must be at least 8 characters.");
+      return;
+    }
+    setPwSaving(true);
+    setPwError("");
+    try {
+      const res = await fetch("/api/admin/users/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ employeeId, password: newPassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setPwError(data.error || "Failed to set password.");
+        return;
+      }
+      setPwSuccess(
+        data.status === "created"
+          ? `Login created. They can sign in with ${data.email} and the password you just set.`
+          : `Password updated. They can sign in with ${data.email} and the new password.`,
+      );
+      setPasswordOpen(false);
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setPwSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -141,14 +194,28 @@ export default function EmployeeDrawer({
 
             <div>
               <label className={LABEL_CLS}>
-                Google Email
-                <span className="text-sand-400 font-normal ml-1">(grants admin access)</span>
+                Work Email
+                <span className="text-sand-400 font-normal ml-1">(grants access)</span>
               </label>
               <input
                 type="email"
                 value={draft.email}
                 onChange={(e) => setField("email", e.target.value)}
-                placeholder="employee@example.com"
+                placeholder="employee@glass-railing.com"
+                className={FIELD_CLS}
+              />
+            </div>
+
+            <div>
+              <label className={LABEL_CLS}>
+                Personal Email
+                <span className="text-sand-400 font-normal ml-1">(optional, also grants access)</span>
+              </label>
+              <input
+                type="email"
+                value={draft.email_alt}
+                onChange={(e) => setField("email_alt", e.target.value)}
+                placeholder="employee@gmail.com"
                 className={FIELD_CLS}
               />
             </div>
@@ -226,6 +293,33 @@ export default function EmployeeDrawer({
               </p>
             </div>
 
+            {isAdmin && mode === "edit" && (
+              <div className="border-t border-sand-100 pt-4">
+                <label className={LABEL_CLS}>
+                  Sign-in & Password
+                  <span className="text-sand-400 font-normal ml-1">(for employees without Google)</span>
+                </label>
+                <p className="text-xs text-sand-500 mb-2">
+                  {draft.email
+                    ? `They'll sign in at the login page with ${draft.email} and the password you set.`
+                    : "Set a work email above first — it becomes their login username."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setPasswordOpen(true)}
+                  disabled={!draft.email || saving || deleting}
+                  className="px-3 py-1.5 text-sm font-medium rounded-lg border border-sand-300 bg-white text-sand-700 hover:bg-sand-50 transition-colors disabled:opacity-50"
+                >
+                  Set / reset password
+                </button>
+                {pwSuccess && (
+                  <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2 mt-2">
+                    {pwSuccess}
+                  </p>
+                )}
+              </div>
+            )}
+
             <label className="flex items-center gap-2 cursor-pointer pt-1">
               <input
                 type="checkbox"
@@ -288,6 +382,59 @@ export default function EmployeeDrawer({
         }}
         onCancel={() => setConfirmDelete(false)}
       />
+
+      {passwordOpen && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4"
+          onClick={() => !pwSaving && setPasswordOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl border border-sand-200 shadow-xl w-full max-w-sm p-6 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-base font-semibold text-sand-900">Set password</h3>
+            <p className="text-sm text-sand-600">
+              They&apos;ll sign in with <span className="font-medium">{draft.email}</span> and the password you set
+              here. Tell them in person — we don&apos;t send it by email.
+            </p>
+            <div>
+              <label className={LABEL_CLS}>New password</label>
+              <input
+                type="text"
+                autoComplete="new-password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className={FIELD_CLS}
+                autoFocus
+              />
+            </div>
+            {pwError && (
+              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {pwError}
+              </p>
+            )}
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setPasswordOpen(false)}
+                disabled={pwSaving}
+                className="px-4 py-2 text-sm text-sand-600 hover:text-sand-900 transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSetPassword}
+                disabled={pwSaving || newPassword.length < 8}
+                className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
+              >
+                {pwSaving ? "Saving…" : "Save password"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

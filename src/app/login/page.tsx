@@ -12,7 +12,12 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const { error } = await searchParams;
-  const authError = error === "auth_error" ? "Sign-in failed. Please try again." : undefined;
+  const authError =
+    error === "auth_error"
+      ? "Sign-in failed. Please try again."
+      : error === "not_authorized"
+      ? "This Google account isn't authorized. Ask your manager to add it to your employee profile."
+      : undefined;
 
   return (
     <div className="min-h-screen flex">

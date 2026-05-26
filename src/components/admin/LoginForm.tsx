@@ -7,15 +7,21 @@ export default function LoginForm({ authError }: { authError?: string }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(authError ?? "");
 
+  const [showPassword, setShowPassword] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const supabase = () =>
+    createBrowserClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
   const handleGoogleLogin = async () => {
     setError("");
     setLoading(true);
     try {
-      const supabase = createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-      const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      const { error: oauthError } = await supabase().auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}/api/auth/callback`,
@@ -26,6 +32,28 @@ export default function LoginForm({ authError }: { authError?: string }) {
         setLoading(false);
       }
       // On success the browser is redirected to Google — no further action needed.
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+      setLoading(false);
+    }
+  };
+
+  const handlePasswordLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const { error: signInError } = await supabase().auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
+      if (signInError) {
+        setError("Wrong email or password.");
+        setLoading(false);
+        return;
+      }
+      // Full reload so the proxy re-runs and lands them on the home page.
+      window.location.href = "/";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);
@@ -53,6 +81,66 @@ export default function LoginForm({ authError }: { authError?: string }) {
         </svg>
         {loading ? "Redirecting..." : "Sign in with Google"}
       </button>
+
+      <div className="flex items-center gap-3">
+        <div className="flex-1 h-px bg-slate-200" />
+        <span className="text-xs text-slate-400 uppercase tracking-wider">or</span>
+        <div className="flex-1 h-px bg-slate-200" />
+      </div>
+
+      {!showPassword ? (
+        <button
+          type="button"
+          onClick={() => setShowPassword(true)}
+          disabled={loading}
+          className="w-full text-sm font-medium text-slate-600 hover:text-slate-900 py-2 transition-colors"
+        >
+          Sign in with email and password
+        </button>
+      ) : (
+        <form onSubmit={handlePasswordLogin} className="space-y-3">
+          <div>
+            <label htmlFor="login-email" className="block text-xs font-medium text-slate-600 mb-1">
+              Email
+            </label>
+            <input
+              id="login-email"
+              type="email"
+              autoComplete="username"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              disabled={loading}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <div>
+            <label htmlFor="login-password" className="block text-xs font-medium text-slate-600 mb-1">
+              Password
+            </label>
+            <input
+              id="login-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              disabled={loading}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={loading || !email || !password}
+            className="w-full rounded-xl bg-slate-900 text-white text-sm font-medium px-6 py-2.5 hover:bg-slate-800 transition-colors disabled:opacity-50"
+          >
+            {loading ? "Signing in..." : "Sign in"}
+          </button>
+          <p className="text-xs text-slate-400 text-center">
+            Don&apos;t have a password? Ask a manager to set one up for you.
+          </p>
+        </form>
+      )}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isAuthorizedEmail } from "@/lib/authz";
 
 // IMPORTANT: Do not add any code between createServerClient and getUser().
 // A token refresh may happen here — cookies must be written back before
@@ -45,6 +46,31 @@ export async function proxy(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);
+  }
+
+  // Google OAuth lets any account complete sign-in, so a valid Supabase
+  // session alone doesn't mean the user is allowed in. Reject anyone whose
+  // email isn't owner / allowed-domain / employee / admin_users, sign them
+  // out, and surface a clear "not authorized" message on /login. Without
+  // this, unauthorized users get stuck in a redirect loop between / and
+  // /login (proxy bounces them off /login because they have a session,
+  // page bounces them off / because admin-auth rejects them).
+  if (user && !isPublic) {
+    const allowed = await isAuthorizedEmail(user.email);
+    if (!allowed) {
+      await supabase.auth.signOut();
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.searchParams.set("error", "not_authorized");
+      const redirectResponse = NextResponse.redirect(loginUrl);
+      // signOut() wrote cookie deletions onto supabaseResponse via the
+      // setAll adapter — copy them onto the redirect so the session is
+      // actually cleared in the browser.
+      supabaseResponse.cookies.getAll().forEach((c) => {
+        redirectResponse.cookies.set(c.name, c.value, c);
+      });
+      return redirectResponse;
+    }
   }
 
   if (user && pathname === "/login") {
