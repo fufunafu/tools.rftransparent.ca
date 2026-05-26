@@ -166,9 +166,9 @@ export default function StaffBreakdown({
       </div>
 
       {expanded && (
-        <div className="border-t border-sand-200/60 overflow-x-auto">
+        <div className="border-t border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-20 bg-sand-50">
               <tr className="border-b border-sand-200/60 bg-sand-50/50">
                 {columns.map((col) => (
                   <th

@@ -314,9 +314,9 @@ export default function EmployeeList() {
       />
 
       <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-20 bg-white">
               <tr className="border-b border-sand-100">
                 <SortHeader label="Name" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
                 <SortHeader label="Department" active={sortKey === "department"} dir={sortDir} onClick={() => toggleSort("department")} />

@@ -1049,9 +1049,9 @@ export default function PipelineDashboard() {
             {sortedLeaderboard.length > 0 && (
               <div className="bg-white rounded-xl border border-sand-200 p-5">
                 <h3 className="text-sm font-medium text-sand-700 mb-4">Rep Leaderboard</h3>
-                <div className="overflow-x-auto">
+                <div className="overflow-auto max-h-[calc(100vh-260px)]">
                   <table className="w-full">
-                    <thead>
+                    <thead className="sticky top-0 z-20 bg-white">
                       <tr className="border-b border-sand-100">
                         {([
                           ["repName", "Rep"],

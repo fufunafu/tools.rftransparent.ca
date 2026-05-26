@@ -13,13 +13,19 @@ interface StaffActivity {
 }
 
 interface ApiResponse {
-  days: number;
+  days: number | "all";
   total: number;
   staff: StaffActivity[];
 }
 
-const RANGE_OPTIONS = [3, 7, 14, 30] as const;
-type Range = (typeof RANGE_OPTIONS)[number];
+const RANGE_OPTIONS = [
+  { value: "1", label: "24h", description: "24 hours" },
+  { value: "7", label: "7d", description: "7 days" },
+  { value: "14", label: "14d", description: "14 days" },
+  { value: "30", label: "30d", description: "30 days" },
+  { value: "all", label: "All", description: "all time" },
+] as const;
+type RangeValue = (typeof RANGE_OPTIONS)[number]["value"];
 
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
@@ -37,14 +43,17 @@ function relativeTime(iso: string): string {
 }
 
 export default function RecentActivityPanel({ store }: { store: string }) {
-  const [days, setDays] = useState<Range>(7);
+  const [range, setRange] = useState<RangeValue>("7");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const rangeDescription =
+    RANGE_OPTIONS.find((o) => o.value === range)?.description ?? "7 days";
 
   useEffect(() => {
     const ctrl = new AbortController();
     setLoading(true);
-    fetch(`/api/customer-service/follow-up?view=recent_activity&store=${store}&days=${days}`, {
+    fetch(`/api/customer-service/follow-up?view=recent_activity&store=${store}&days=${range}`, {
       signal: ctrl.signal,
     })
       .then((r) => r.json())
@@ -52,7 +61,7 @@ export default function RecentActivityPanel({ store }: { store: string }) {
       .catch((e) => { if (e.name !== "AbortError") setData(null); })
       .finally(() => setLoading(false));
     return () => ctrl.abort();
-  }, [store, days]);
+  }, [store, range]);
 
   if (loading) {
     return (
@@ -73,21 +82,22 @@ export default function RecentActivityPanel({ store }: { store: string }) {
           </span>
           <span className="text-sm text-sand-600">
             <span className="font-semibold text-sand-900">{data.total}</span>{" "}
-            follow-up{data.total === 1 ? "" : "s"} in the last {days} days
+            follow-up{data.total === 1 ? "" : "s"}{" "}
+            {range === "all" ? "all time" : `in the last ${rangeDescription}`}
           </span>
         </div>
         <div className="flex items-center gap-1 bg-sand-50 rounded-lg p-0.5">
-          {RANGE_OPTIONS.map((d) => (
+          {RANGE_OPTIONS.map((opt) => (
             <button
-              key={d}
-              onClick={() => setDays(d)}
+              key={opt.value}
+              onClick={() => setRange(opt.value)}
               className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
-                days === d
+                range === opt.value
                   ? "bg-white text-sand-900 shadow-sm"
                   : "text-sand-500 hover:text-sand-700"
               }`}
             >
-              {d}d
+              {opt.label}
             </button>
           ))}
         </div>
@@ -96,13 +106,13 @@ export default function RecentActivityPanel({ store }: { store: string }) {
       {data.staff.length === 0 ? (
         <div className="border-t border-sand-200/60 px-5 py-6">
           <p className="text-sm text-sand-400 text-center">
-            No follow-ups logged in the last {days} days.
+            No follow-ups logged {range === "all" ? "yet" : `in the last ${rangeDescription}`}.
           </p>
         </div>
       ) : (
-        <div className="border-t border-sand-200/60 overflow-x-auto">
+        <div className="border-t border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-20 bg-sand-50">
               <tr className="border-b border-sand-200/60 bg-sand-50/50">
                 <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Staff</th>
                 <th className="text-right px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Follow-ups</th>

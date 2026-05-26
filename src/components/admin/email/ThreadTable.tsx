@@ -117,9 +117,9 @@ export default function ThreadTable({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-260px)]">
             <table className="w-full text-sm">
-              <thead>
+              <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-100 text-left">
                   <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">From</th>
                   <th className="px-4 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Subject</th>

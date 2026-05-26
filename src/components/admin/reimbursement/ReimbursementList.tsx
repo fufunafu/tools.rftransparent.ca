@@ -75,9 +75,9 @@ export default function ReimbursementList({ rows, showSubmitter, isAdmin, onChan
 
   return (
     <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-      <div className="overflow-x-auto">
+      <div className="overflow-auto max-h-[calc(100vh-260px)]">
         <table className="w-full text-sm">
-          <thead>
+          <thead className="sticky top-0 z-20 bg-white">
             <tr className="border-b border-sand-200/60 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
               <th className="text-left px-4 py-3">#</th>
               <th className="text-left px-4 py-3">Date</th>

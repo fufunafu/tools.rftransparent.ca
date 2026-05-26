@@ -54,6 +54,7 @@ const FILTER_TABS = [
   { value: "due_today", label: "Due Today" },
   { value: "overdue", label: "Overdue" },
   { value: "upcoming", label: "Upcoming" },
+  { value: "addressed_today", label: "Addressed Today" },
   { value: "all", label: "All Active" },
   { value: "closed", label: "Closed" },
 ];
@@ -243,9 +244,9 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
           {search ? "No leads match your search." : "No leads to show for this filter."}
         </div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead>
+            <thead className="sticky top-0 z-20 bg-white">
               <tr className="border-b border-sand-200/60">
                 <th className="px-3 py-3 w-10">
                   <input
