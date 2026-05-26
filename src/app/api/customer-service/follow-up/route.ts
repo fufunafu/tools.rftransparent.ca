@@ -133,6 +133,26 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    // ── Addressed-today count (for the tab badge) ──
+    if (view === "addressed_today_count") {
+      const PAGE = 1000;
+      const seen = new Set<string>();
+      for (let from = 0; ; from += PAGE) {
+        const { data } = await supabase
+          .from("followup_logs")
+          .select("lead_id, followup_leads!inner(store_id)")
+          .eq("followup_leads.store_id", storeId)
+          .gte("created_at", today)
+          .lt("created_at", tomorrow)
+          .neq("logged_by", "system")
+          .range(from, from + PAGE - 1);
+        if (!data || data.length === 0) break;
+        for (const r of data as { lead_id: string }[]) seen.add(r.lead_id);
+        if (data.length < PAGE) break;
+      }
+      return NextResponse.json({ count: seen.size });
+    }
+
     // ── Leads list ──
     if (view === "leads") {
       const filter = req.nextUrl.searchParams.get("filter") || "due_today";
@@ -143,6 +163,33 @@ export async function GET(req: NextRequest) {
 
       const SKIP_EMAILS = ["application@gmail.com"];
       const skipFilter = SKIP_EMAILS.map((e) => `customer_email.neq.${e}`).join(",");
+
+      // "Addressed Today" needs the set of lead IDs that got a non-system log
+      // today. Preserve the log order (newest first) so the table shows the
+      // most recently worked lead on top.
+      let addressedTodayIds: string[] | null = null;
+      if (filter === "addressed_today") {
+        const { data: logRows } = await supabase
+          .from("followup_logs")
+          .select("lead_id, created_at, followup_leads!inner(store_id)")
+          .eq("followup_leads.store_id", storeId)
+          .gte("created_at", today)
+          .lt("created_at", tomorrow)
+          .neq("logged_by", "system")
+          .order("created_at", { ascending: false });
+        const seen = new Set<string>();
+        const ordered: string[] = [];
+        for (const r of (logRows ?? []) as { lead_id: string }[]) {
+          if (!seen.has(r.lead_id)) {
+            seen.add(r.lead_id);
+            ordered.push(r.lead_id);
+          }
+        }
+        addressedTodayIds = ordered;
+        if (addressedTodayIds.length === 0) {
+          return NextResponse.json({ leads: [], total: 0, filter, creator: creator ?? null });
+        }
+      }
 
       let query = supabase
         .from("followup_leads")
@@ -156,11 +203,14 @@ export async function GET(req: NextRequest) {
         query = query.gte("shopify_created_at", cutoff);
       }
 
-      // When filtering by creator (from a Quotes-by-Staff click), order by
-      // newest draft first — that's the most useful view for spot-checking.
-      if (creator) {
+      // Default ordering by filter:
+      //   - creator (Quotes-by-Staff drill-in) and due_today both prioritize
+      //     newest quote first — recent leads are the warmest workload.
+      //   - addressed_today reorders client-side by log time (preserved above).
+      //   - everything else falls back to soonest-due first.
+      if (creator || filter === "due_today") {
         query = query.order("shopify_created_at", { ascending: false, nullsFirst: false });
-      } else {
+      } else if (filter !== "addressed_today") {
         query = query.order("next_followup_at", { ascending: true, nullsFirst: false });
       }
 
@@ -177,6 +227,8 @@ export async function GET(req: NextRequest) {
         query = query.is("closed_at", null).gte("next_followup_at", tomorrow);
       } else if (filter === "all") {
         query = query.is("closed_at", null);
+      } else if (filter === "addressed_today" && addressedTodayIds) {
+        query = query.in("id", addressedTodayIds);
       } else if (filter === "closed") {
         query = query.not("closed_at", "is", null).order("closed_at", { ascending: false });
       }
@@ -214,9 +266,8 @@ export async function GET(req: NextRequest) {
       }
 
       // For "due_today" we fetched today + overdue with a single query; partition
-      // them so today's leads land on top. Both buckets stay in the default
-      // ascending next_followup_at order — for today that means earliest time
-      // of day first, for overdue it means oldest (most overdue) first.
+      // them so today's leads land on top. Both buckets keep the SQL-side
+      // shopify_created_at desc order — newest quotes are the warmest workload.
       if (filter === "due_today") {
         const todayLeads: FollowUpLead[] = [];
         const overdueLeads: FollowUpLead[] = [];
@@ -226,6 +277,13 @@ export async function GET(req: NextRequest) {
           else overdueLeads.push(l);
         }
         leads = [...todayLeads, ...overdueLeads];
+      }
+
+      // "Addressed Today": reorder to match the log-time order (most recently
+      // worked lead first), since the SQL `.in()` doesn't preserve list order.
+      if (filter === "addressed_today" && addressedTodayIds) {
+        const pos = new Map(addressedTodayIds.map((id, i) => [id, i]));
+        leads.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
       }
 
       return NextResponse.json({
@@ -382,9 +440,17 @@ export async function GET(req: NextRequest) {
     // "who actually worked the queue this week?" — separate from
     // `by_staff` which counts who *created* the quotes.
     if (view === "recent_activity") {
-      const daysRaw = parseInt(req.nextUrl.searchParams.get("days") ?? "7", 10);
-      const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(90, daysRaw)) : 7;
-      const cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+      const daysParam = req.nextUrl.searchParams.get("days") ?? "7";
+      let days: number | "all";
+      let cutoff: string | null;
+      if (daysParam === "all") {
+        days = "all";
+        cutoff = null;
+      } else {
+        const daysRaw = parseInt(daysParam, 10);
+        days = Number.isFinite(daysRaw) ? Math.max(1, daysRaw) : 7;
+        cutoff = new Date(Date.now() - days * 86400_000).toISOString();
+      }
 
       const PAGE = 1000;
       const rows: {
@@ -394,16 +460,16 @@ export async function GET(req: NextRequest) {
         followup_leads: { store_id: string } | null;
       }[] = [];
       for (let from = 0; ; from += PAGE) {
-        const { data } = await supabase
+        let q = supabase
           .from("followup_logs")
           .select("logged_by, outcome, created_at, followup_leads!inner(store_id)")
           .eq("followup_leads.store_id", storeId)
-          .gte("created_at", cutoff)
           // "system" logs are sync-time auto-wins (Shopify reported the draft
           // completed without a rep logging it) — not real follow-up activity.
           .neq("logged_by", "system")
-          .order("created_at", { ascending: false })
-          .range(from, from + PAGE - 1);
+          .order("created_at", { ascending: false });
+        if (cutoff) q = q.gte("created_at", cutoff);
+        const { data } = await q.range(from, from + PAGE - 1);
         if (!data || data.length === 0) break;
         // PostgREST returns the joined row as an object when using !inner, but the
         // generated types think it's an array — coerce defensively.
@@ -425,17 +491,21 @@ export async function GET(req: NextRequest) {
       }
 
       // Resolve display names: one query, build email → name map.
+      // Index both `email` (work identity) and `email_alt` (personal sign-in)
+      // so reps who logged the follow-up under either address still get their
+      // real name shown in the activity table.
       const nameMap = new Map<string, string>();
       try {
         const { data: emps } = await supabase
           .from("employees")
-          .select("email, name")
-          .not("email", "is", null);
-        for (const e of (emps ?? []) as { email: string; name: string }[]) {
+          .select("email, email_alt, name");
+        for (const e of (emps ?? []) as { email: string | null; email_alt: string | null; name: string }[]) {
           if (e.email) nameMap.set(e.email.toLowerCase(), e.name);
+          if (e.email_alt) nameMap.set(e.email_alt.toLowerCase(), e.name);
         }
       } catch {
-        // employees.email may not exist in all environments — fall back to email-only display.
+        // employees table or columns may not exist in all environments —
+        // fall back to email-only display.
       }
 
       interface StaffAgg {
@@ -448,12 +518,24 @@ export async function GET(req: NextRequest) {
         last_at: string;
       }
 
+      // Fallback display name when an email isn't in the employees table:
+      // turn "yousif@glass-railing.com" into "Yousif" so the table never
+      // shows a raw address.
+      const displayFromEmail = (email: string): string => {
+        const local = email.split("@")[0] ?? email;
+        return local
+          .split(/[._-]+/)
+          .filter(Boolean)
+          .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+          .join(" ") || email;
+      };
+
       const byEmail = new Map<string, StaffAgg>();
       for (const r of rows) {
         const email = (r.logged_by || "unknown").toLowerCase();
         const agg = byEmail.get(email) ?? {
           email,
-          name: nameMap.get(email) ?? r.logged_by ?? "unknown",
+          name: nameMap.get(email) ?? displayFromEmail(email),
           total: 0,
           won: 0,
           lost: 0,

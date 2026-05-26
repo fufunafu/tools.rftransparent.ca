@@ -418,6 +418,9 @@ export default function FollowUpDashboard({
   const calendarUrl = mounted
     ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=all${rangeParam}`
     : null;
+  const addressedTodayCountUrl = mounted
+    ? `/api/customer-service/follow-up?view=addressed_today_count&store=${store}`
+    : null;
 
   // Fallback only applies when SWR's current key matches the (defaultStore, '1y')
   // combination the server prefetched. If the user picked a different store in
@@ -433,6 +436,7 @@ export default function FollowUpDashboard({
   const { data: configData } = useSWR<{ config: Record<string, number | null> }>(configUrl);
   const { data: analyticsData } = useSWR<{ months: MonthData[] }>(analyticsUrl);
   const { data: calendarData } = useSWR<{ leads: FollowUpLead[] }>(calendarUrl);
+  const { data: addressedTodayCountData } = useSWR<{ count: number }>(addressedTodayCountUrl);
 
   const stores = summary?.stores ?? [];
   const lastSyncedAt = summary?.last_synced_at ?? null;
@@ -540,6 +544,7 @@ export default function FollowUpDashboard({
     due_today: (summary?.metrics.due_today ?? 0) + (summary?.metrics.overdue ?? 0),
     overdue: summary?.metrics.overdue ?? 0,
     upcoming: Math.max(0, (summary?.metrics.total_active ?? 0) - (summary?.metrics.due_today ?? 0) - (summary?.metrics.overdue ?? 0)),
+    addressed_today: addressedTodayCountData?.count ?? 0,
     all: summary?.metrics.total_active ?? 0,
     closed: summary?.metrics.total_closed ?? 0,
   };
