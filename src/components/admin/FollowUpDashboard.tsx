@@ -480,7 +480,13 @@ export default function FollowUpDashboard({
         if (json.updated_leads > 0) parts.push(`${json.updated_leads} updated`);
         if (json.auto_won > 0) parts.push(`${json.auto_won} auto-won`);
         if (json.stale_detected > 0) parts.push(`${json.stale_detected} stale`);
-        setSyncStatus(parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date");
+        const base = parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date";
+        if (json.errors > 0) {
+          const detail = json.first_error ? ` — first: ${json.first_error}` : "";
+          setSyncStatus(`${base} (${json.errors} write errors${detail})`);
+        } else {
+          setSyncStatus(base);
+        }
         invalidateAllForStore();
       } else {
         setSyncStatus(`Error: ${json.error}`);

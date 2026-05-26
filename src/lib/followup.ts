@@ -216,11 +216,27 @@ export interface SyncResult {
   updated_leads: number;
   auto_won: number;
   stale_detected: number;
+  errors: number;
+  first_error: string | null;
+}
+
+function recordError(result: SyncResult, context: string, error: { message?: string } | null) {
+  result.errors++;
+  const msg = `[followup-sync] ${context}: ${error?.message ?? "unknown error"}`;
+  console.error(msg);
+  if (!result.first_error) result.first_error = msg;
 }
 
 export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResult> {
   const supabase = getSupabase();
-  const result: SyncResult = { new_leads: 0, updated_leads: 0, auto_won: 0, stale_detected: 0 };
+  const result: SyncResult = {
+    new_leads: 0,
+    updated_leads: 0,
+    auto_won: 0,
+    stale_detected: 0,
+    errors: 0,
+    first_error: null,
+  };
 
   // Load store-specific follow-up day config
   const storeDays = await getFollowupDaysForStore(storeId);
@@ -332,13 +348,18 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           last_synced_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
-        }).eq("id", existing.id).then(async () => {
-          await supabase.from("followup_logs").insert({
+        }).eq("id", existing.id).then(async ({ error }) => {
+          if (error) {
+            recordError(result, `auto-win update lead ${existing.id}`, error);
+            return;
+          }
+          const { error: logError } = await supabase.from("followup_logs").insert({
             lead_id: existing.id,
             outcome: "won",
             notes: "Auto-detected: draft order has a linked order",
             logged_by: "system",
           });
+          if (logError) recordError(result, `auto-win log for ${existing.id}`, logError);
           result.auto_won++;
         })
       );
@@ -356,7 +377,10 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           updated_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
-        }).eq("id", existing.id).then(() => { result.updated_leads++; })
+        }).eq("id", existing.id).then(({ error }) => {
+          if (error) recordError(result, `update lead ${existing.id}`, error);
+          else result.updated_leads++;
+        })
       );
     }
   }
@@ -364,12 +388,16 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   // Batch-insert new leads (100 at a time)
   const BATCH = 100;
   for (let i = 0; i < newActiveLeads.length; i += BATCH) {
-    const { error } = await supabase.from("followup_leads").insert(newActiveLeads.slice(i, i + BATCH));
-    if (!error) result.new_leads += newActiveLeads.slice(i, i + BATCH).length;
+    const slice = newActiveLeads.slice(i, i + BATCH);
+    const { error } = await supabase.from("followup_leads").insert(slice);
+    if (error) recordError(result, `insert ${slice.length} new active leads`, error);
+    else result.new_leads += slice.length;
   }
   for (let i = 0; i < newWonLeads.length; i += BATCH) {
-    const { error } = await supabase.from("followup_leads").insert(newWonLeads.slice(i, i + BATCH));
-    if (!error) result.auto_won += newWonLeads.slice(i, i + BATCH).length;
+    const slice = newWonLeads.slice(i, i + BATCH);
+    const { error } = await supabase.from("followup_leads").insert(slice);
+    if (error) recordError(result, `insert ${slice.length} new won leads`, error);
+    else result.auto_won += slice.length;
   }
   // Run all updates in parallel
   await Promise.all(updatePromises);
@@ -398,13 +426,18 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           updated_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
-        }).eq("id", existing.id).then(async () => {
-          await supabase.from("followup_logs").insert({
+        }).eq("id", existing.id).then(async ({ error }) => {
+          if (error) {
+            recordError(result, `completed-win update lead ${existing.id}`, error);
+            return;
+          }
+          const { error: logError } = await supabase.from("followup_logs").insert({
             lead_id: existing.id,
             outcome: "won",
             notes: "Auto-detected from Shopify COMPLETED status",
             logged_by: "system",
           });
+          if (logError) recordError(result, `completed-win log for ${existing.id}`, logError);
           result.auto_won++;
         })
       );
@@ -435,14 +468,19 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_synced_at: now,
-        }).eq("id", existing.id).then(() => { result.updated_leads++; })
+        }).eq("id", existing.id).then(({ error }) => {
+          if (error) recordError(result, `backfill lead ${existing.id}`, error);
+          else result.updated_leads++;
+        })
       );
     }
   }
 
   for (let i = 0; i < newCompletedLeads.length; i += BATCH) {
-    const { error } = await supabase.from("followup_leads").insert(newCompletedLeads.slice(i, i + BATCH));
-    if (!error) result.auto_won += newCompletedLeads.slice(i, i + BATCH).length;
+    const slice = newCompletedLeads.slice(i, i + BATCH);
+    const { error } = await supabase.from("followup_leads").insert(slice);
+    if (error) recordError(result, `insert ${slice.length} completed leads`, error);
+    else result.auto_won += slice.length;
   }
   await Promise.all(completedUpdatePromises);
 
@@ -460,7 +498,10 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         supabase.from("followup_leads")
           .update({ shopify_status: "DELETED", updated_at: now })
           .eq("id", existing.id)
-          .then(() => { result.stale_detected++; })
+          .then(({ error }) => {
+            if (error) recordError(result, `mark stale lead ${existing.id}`, error);
+            else result.stale_detected++;
+          })
       );
     }
   }
