@@ -20,7 +20,9 @@ import {
 } from "@/lib/customer-service/followup-queries";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 120;
+// Matches /api/cron/sync-followup — the manual Sync button does the same work
+// as the cron and was timing out at 120s with the full draft set.
+export const maxDuration = 300;
 
 const STORES = getStores().map((s) => ({ id: s.id, label: s.label, shop_domain: s.store }));
 
@@ -167,9 +169,16 @@ export async function GET(req: NextRequest) {
       // "Addressed Today" needs the set of lead IDs that got a non-system log
       // today. Preserve the log order (newest first) so the table shows the
       // most recently worked lead on top.
+      //
+      // Optional drill-down params (used by RecentActivityPanel clicks):
+      //   logged_by  — restrict to logs by a single staff email
+      //   outcome    — "won" | "lost" (incl. duplicate) | "ongoing" (non-terminal)
       let addressedTodayIds: string[] | null = null;
       if (filter === "addressed_today") {
-        const { data: logRows } = await supabase
+        const loggedByFilter = req.nextUrl.searchParams.get("logged_by");
+        const outcomeFilter = req.nextUrl.searchParams.get("outcome");
+
+        let logQ = supabase
           .from("followup_logs")
           .select("lead_id, created_at, followup_leads!inner(store_id)")
           .eq("followup_leads.store_id", storeId)
@@ -177,6 +186,17 @@ export async function GET(req: NextRequest) {
           .lt("created_at", tomorrow)
           .neq("logged_by", "system")
           .order("created_at", { ascending: false });
+
+        // Case-insensitive: the Recent Activity panel lowercases emails when
+        // bucketing per-staff, so the drill-down always sends a lowercase
+        // value. The raw `logged_by` column can hold mixed case (depends on
+        // what Supabase auth returned), so `.eq` would miss those.
+        if (loggedByFilter) logQ = logQ.ilike("logged_by", loggedByFilter);
+        if (outcomeFilter === "won") logQ = logQ.eq("outcome", "won");
+        else if (outcomeFilter === "lost") logQ = logQ.in("outcome", ["lost", "duplicate"]);
+        else if (outcomeFilter === "ongoing") logQ = logQ.not("outcome", "in", "(won,lost,duplicate)");
+
+        const { data: logRows } = await logQ;
         const seen = new Set<string>();
         const ordered: string[] = [];
         for (const r of (logRows ?? []) as { lead_id: string }[]) {
@@ -195,11 +215,20 @@ export async function GET(req: NextRequest) {
         .from("followup_leads")
         .select("*")
         .eq("store_id", storeId)
-        .or(`customer_email.is.null,${skipFilter}`)
-        // Exclude OPEN (unsent works-in-progress) and DELETED (invoice recalled/voided).
-        .not("shopify_status", "in", "(OPEN,DELETED)");
+        .or(`customer_email.is.null,${skipFilter}`);
 
-      if (cutoff) {
+      // Exclude OPEN (unsent works-in-progress) and DELETED (invoice recalled/voided)
+      // — EXCEPT for Addressed Today. A rep can mark a lead lost AFTER the sync
+      // already flagged it DELETED (Shopify draft gone). That lead still belongs
+      // in today's activity drill — the rep just worked it.
+      if (filter !== "addressed_today") {
+        query = query.not("shopify_status", "in", "(OPEN,DELETED)");
+      }
+
+      // The Last-12-Months filter only restricts when the lead was *quoted*.
+      // For Addressed Today we want every lead that got a log entry today,
+      // even an old quote re-touched by the rep — so skip the cutoff here.
+      if (cutoff && filter !== "addressed_today") {
         query = query.gte("shopify_created_at", cutoff);
       }
 
@@ -441,11 +470,16 @@ export async function GET(req: NextRequest) {
     // `by_staff` which counts who *created* the quotes.
     if (view === "recent_activity") {
       const daysParam = req.nextUrl.searchParams.get("days") ?? "7";
-      let days: number | "all";
+      let days: number | "today" | "all";
       let cutoff: string | null;
       if (daysParam === "all") {
         days = "all";
         cutoff = null;
+      } else if (daysParam === "today") {
+        // Calendar day, not a rolling 24h window — anchored at server-local
+        // midnight (same anchor as `todayStart()` used elsewhere in this route).
+        days = "today";
+        cutoff = today;
       } else {
         const daysRaw = parseInt(daysParam, 10);
         days = Number.isFinite(daysRaw) ? Math.max(1, daysRaw) : 7;

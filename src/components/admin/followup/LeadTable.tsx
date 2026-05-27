@@ -52,7 +52,6 @@ interface Props {
 
 const FILTER_TABS = [
   { value: "due_today", label: "Due Today" },
-  { value: "overdue", label: "Overdue" },
   { value: "upcoming", label: "Upcoming" },
   { value: "addressed_today", label: "Addressed Today" },
   { value: "all", label: "All Active" },

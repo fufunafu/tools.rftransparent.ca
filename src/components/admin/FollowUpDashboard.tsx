@@ -366,6 +366,10 @@ export default function FollowUpDashboard({
   // Click-through from the status pills (Hot Lead / New Lead / etc.). Independent
   // of staffFilter — both can be active at once.
   const [leadStatusFilter, setLeadStatusFilter] = useState<LeadStatus | null>(null);
+  // Drill-down from RecentActivityPanel — restrict Addressed Today to one
+  // staff member's logs, optionally narrowed by outcome bucket.
+  const [addressedLoggedBy, setAddressedLoggedBy] = useState<string | null>(null);
+  const [addressedOutcome, setAddressedOutcome] = useState<"won" | "lost" | "ongoing" | null>(null);
   // "1y" = last 12 months (default — hides legacy Unknowns where Shopify has aged out
   // the creation event). "all" = every lead ever.
   const [timeRange, setTimeRange] = useState<"1y" | "all">("1y");
@@ -401,13 +405,22 @@ export default function FollowUpDashboard({
   const creatorParam = staffFilter ? `&creator=${encodeURIComponent(staffFilter)}` : "";
   const leadStatusParam = leadStatusFilter ? `&lead_status=${leadStatusFilter}` : "";
   const rangeParam = `&range=${timeRange}`;
+  // Drill params only apply on the Addressed Today tab.
+  const loggedByParam =
+    filter === "addressed_today" && addressedLoggedBy
+      ? `&logged_by=${encodeURIComponent(addressedLoggedBy)}`
+      : "";
+  const outcomeParam =
+    filter === "addressed_today" && addressedOutcome
+      ? `&outcome=${addressedOutcome}`
+      : "";
 
   // summaryUrl is computed unconditionally (no `mounted` gate) so the server-rendered
   // HTML can use `initialSummary` as fallback data. Other URLs stay gated on mounted —
   // they don't have fallbacks and avoiding an extra fetch on hydration is cheap.
   const summaryUrl = `/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`;
   const leadsUrl = mounted
-    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${rangeParam}`
+    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${loggedByParam}${outcomeParam}${rangeParam}`
     : null;
   const configUrl = mounted
     ? `/api/customer-service/follow-up?view=config&store=${store}`
@@ -477,23 +490,38 @@ export default function FollowUpDashboard({
     setSyncStatus("");
     try {
       const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=sync`, { method: "POST" });
-      const json = await res.json();
+      // When the function times out, Vercel returns an HTML error page —
+      // res.json() would throw "Unexpected token 'A'". Read as text first
+      // so the user sees a real status code instead of a parser error.
+      const text = await res.text();
+      let json: { status?: string; error?: string; new_leads?: number; updated_leads?: number; auto_won?: number; stale_detected?: number; errors?: number; first_error?: string };
+      try {
+        json = JSON.parse(text);
+      } catch {
+        setSyncStatus(`Sync failed (HTTP ${res.status}). ${res.status === 504 || res.status === 502 ? "Function timed out — try again or check Vercel logs." : "Server returned a non-JSON response."}`);
+        return;
+      }
       if (json.status === "success") {
+        const newLeads = json.new_leads ?? 0;
+        const updatedLeads = json.updated_leads ?? 0;
+        const autoWon = json.auto_won ?? 0;
+        const staleDetected = json.stale_detected ?? 0;
+        const errors = json.errors ?? 0;
         const parts: string[] = [];
-        if (json.new_leads > 0) parts.push(`${json.new_leads} new`);
-        if (json.updated_leads > 0) parts.push(`${json.updated_leads} updated`);
-        if (json.auto_won > 0) parts.push(`${json.auto_won} auto-won`);
-        if (json.stale_detected > 0) parts.push(`${json.stale_detected} stale`);
+        if (newLeads > 0) parts.push(`${newLeads} new`);
+        if (updatedLeads > 0) parts.push(`${updatedLeads} updated`);
+        if (autoWon > 0) parts.push(`${autoWon} auto-won`);
+        if (staleDetected > 0) parts.push(`${staleDetected} stale`);
         const base = parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date";
-        if (json.errors > 0) {
+        if (errors > 0) {
           const detail = json.first_error ? ` — first: ${json.first_error}` : "";
-          setSyncStatus(`${base} (${json.errors} write errors${detail})`);
+          setSyncStatus(`${base} (${errors} write errors${detail})`);
         } else {
           setSyncStatus(base);
         }
         invalidateAllForStore();
       } else {
-        setSyncStatus(`Error: ${json.error}`);
+        setSyncStatus(`Error: ${json.error ?? "Unknown"}`);
       }
     } catch (e) {
       setSyncStatus(`Failed to sync: ${e instanceof Error ? e.message : String(e)}`);
@@ -846,7 +874,24 @@ export default function FollowUpDashboard({
           />
 
           {/* Recent follow-up activity by staff */}
-          <RecentActivityPanel store={store} />
+          <RecentActivityPanel
+            store={store}
+            onDrillDown={(loggedBy, kind) => {
+              setFilter("addressed_today");
+              setAddressedLoggedBy(loggedBy);
+              setAddressedOutcome(kind === "all" ? null : kind);
+              // These supersede the existing creator / status drills.
+              setStaffFilter(null);
+              setLeadStatusFilter(null);
+              // Scroll the lead list into view so the user sees the result.
+              setTimeout(() => {
+                document.getElementById("followup-lead-list")?.scrollIntoView({
+                  behavior: "smooth",
+                  block: "start",
+                });
+              }, 50);
+            }}
+          />
 
           {/* Active staff filter chip */}
           {staffFilter && (
@@ -857,6 +902,25 @@ export default function FollowUpDashboard({
               <button
                 onClick={() => { setStaffFilter(null); setDetailStaff(null); }}
                 className="ml-auto text-xs text-blue-600 hover:text-blue-800 font-medium"
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
+
+          {/* Active "Addressed Today by staff" drill-down chip */}
+          {filter === "addressed_today" && addressedLoggedBy && (
+            <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
+              <span className="text-sm text-emerald-800">
+                Today&apos;s
+                {addressedOutcome === "won" && " won"}
+                {addressedOutcome === "lost" && " lost"}
+                {addressedOutcome === "ongoing" && " open"}
+                {" "}follow-ups by <strong>{addressedLoggedBy}</strong>
+              </span>
+              <button
+                onClick={() => { setAddressedLoggedBy(null); setAddressedOutcome(null); }}
+                className="ml-auto text-xs text-emerald-700 hover:text-emerald-900 font-medium"
               >
                 Clear filter
               </button>
@@ -910,7 +974,15 @@ export default function FollowUpDashboard({
           <LeadTable
             leads={leads}
             filter={filter}
-            onFilterChange={(f) => setFilter(f)}
+            onFilterChange={(f) => {
+              setFilter(f);
+              // Tab change clears the Recent Activity drill — the drill only
+              // makes sense within Addressed Today.
+              if (f !== "addressed_today") {
+                setAddressedLoggedBy(null);
+                setAddressedOutcome(null);
+              }
+            }}
             onLogFollowUp={(lead) => setModalLead(lead)}
             onViewDetail={(lead) => setDetailLead(lead)}
             onBulkClose={handleBulkClose}

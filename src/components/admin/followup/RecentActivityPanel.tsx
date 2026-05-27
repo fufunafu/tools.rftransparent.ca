@@ -19,7 +19,7 @@ interface ApiResponse {
 }
 
 const RANGE_OPTIONS = [
-  { value: "1", label: "24h", description: "24 hours" },
+  { value: "today", label: "Today", description: "today" },
   { value: "7", label: "7d", description: "7 days" },
   { value: "14", label: "14d", description: "14 days" },
   { value: "30", label: "30d", description: "30 days" },
@@ -42,13 +42,24 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
-export default function RecentActivityPanel({ store }: { store: string }) {
+export type ActivityDrillKind = "all" | "won" | "lost" | "ongoing";
+
+export default function RecentActivityPanel({
+  store,
+  onDrillDown,
+}: {
+  store: string;
+  onDrillDown?: (loggedBy: string, kind: ActivityDrillKind) => void;
+}) {
   const [range, setRange] = useState<RangeValue>("7");
   const [data, setData] = useState<ApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const rangeDescription =
     RANGE_OPTIONS.find((o) => o.value === range)?.description ?? "7 days";
+  // "Today" and "all" already read as a noun phrase; the other options need
+  // "in the last …" to scan correctly.
+  const rangeUsesInTheLast = range !== "today" && range !== "all";
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -83,7 +94,7 @@ export default function RecentActivityPanel({ store }: { store: string }) {
           <span className="text-sm text-sand-600">
             <span className="font-semibold text-sand-900">{data.total}</span>{" "}
             follow-up{data.total === 1 ? "" : "s"}{" "}
-            {range === "all" ? "all time" : `in the last ${rangeDescription}`}
+            {rangeUsesInTheLast ? `in the last ${rangeDescription}` : rangeDescription}
           </span>
         </div>
         <div className="flex items-center gap-1 bg-sand-50 rounded-lg p-0.5">
@@ -106,7 +117,13 @@ export default function RecentActivityPanel({ store }: { store: string }) {
       {data.staff.length === 0 ? (
         <div className="border-t border-sand-200/60 px-5 py-6">
           <p className="text-sm text-sand-400 text-center">
-            No follow-ups logged {range === "all" ? "yet" : `in the last ${rangeDescription}`}.
+            No follow-ups logged{" "}
+            {range === "all"
+              ? "yet"
+              : rangeUsesInTheLast
+              ? `in the last ${rangeDescription}`
+              : rangeDescription}
+            .
           </p>
         </div>
       ) : (
@@ -123,18 +140,42 @@ export default function RecentActivityPanel({ store }: { store: string }) {
               </tr>
             </thead>
             <tbody>
-              {data.staff.map((s) => (
-                <tr key={s.email} className="border-b border-sand-100 last:border-b-0">
-                  <td className="px-4 py-3 font-medium text-sand-900">{s.name}</td>
-                  <td className="px-4 py-3 text-right text-sand-900 font-semibold">{s.total}</td>
-                  <td className="px-4 py-3 text-right text-green-600 font-medium">{s.won || "—"}</td>
-                  <td className="px-4 py-3 text-right text-red-500">{s.lost || "—"}</td>
-                  <td className="px-4 py-3 text-right text-sand-600">{s.ongoing || "—"}</td>
-                  <td className="px-4 py-3 text-right text-sand-500 text-xs whitespace-nowrap">
-                    {relativeTime(s.last_at)}
-                  </td>
-                </tr>
-              ))}
+              {data.staff.map((s) => {
+                // A drill cell is a button when both onDrillDown is wired AND
+                // there's something to show (count > 0). Otherwise a plain span.
+                const drill = (kind: ActivityDrillKind, count: number, className: string) =>
+                  onDrillDown && count > 0 ? (
+                    <button
+                      onClick={() => onDrillDown(s.email, kind)}
+                      className={`${className} hover:underline underline-offset-2 cursor-pointer`}
+                    >
+                      {count}
+                    </button>
+                  ) : (
+                    <span className={className}>{count || "—"}</span>
+                  );
+
+                return (
+                  <tr key={s.email} className="border-b border-sand-100 last:border-b-0">
+                    <td className="px-4 py-3 font-medium text-sand-900">{s.name}</td>
+                    <td className="px-4 py-3 text-right">
+                      {drill("all", s.total, "text-sand-900 font-semibold")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {drill("won", s.won, "text-green-600 font-medium")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {drill("lost", s.lost, "text-red-500")}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {drill("ongoing", s.ongoing, "text-sand-600")}
+                    </td>
+                    <td className="px-4 py-3 text-right text-sand-500 text-xs whitespace-nowrap">
+                      {relativeTime(s.last_at)}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
