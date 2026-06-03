@@ -24,6 +24,18 @@ type SortKey =
   | "won_value";
 type SortDir = "asc" | "desc";
 
+// Time-window toggle — mirrors the Recent Activity panel. Filters by when the
+// quote was sent (shopify_created_at). "All" = every quote in the dashboard's
+// current range.
+const RANGE_OPTIONS = [
+  { value: "today", label: "Today" },
+  { value: "7", label: "7d" },
+  { value: "14", label: "14d" },
+  { value: "30", label: "30d" },
+  { value: "all", label: "All" },
+] as const;
+type DaysValue = (typeof RANGE_OPTIONS)[number]["value"];
+
 function formatCurrency(n: number): string {
   return new Intl.NumberFormat("en-CA", {
     style: "currency",
@@ -56,14 +68,24 @@ export default function StaffBreakdown({
   const [showDeleted, setShowDeleted] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("total");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
+  // Local time window. "all" defers to the dashboard's coarse range prop (1y/all);
+  // any other value sends an explicit `days=` that the API windows server-side.
+  const [days, setDays] = useState<DaysValue>("all");
 
   useEffect(() => {
+    const ctrl = new AbortController();
     setLoading(true);
-    fetch(`/api/customer-service/follow-up?view=by_staff&store=${store}&range=${range}`)
+    const url =
+      days === "all"
+        ? `/api/customer-service/follow-up?view=by_staff&store=${store}&range=${range}`
+        : `/api/customer-service/follow-up?view=by_staff&store=${store}&days=${days}`;
+    fetch(url, { signal: ctrl.signal })
       .then((r) => r.json())
       .then((d) => setStaff(d.staff ?? []))
+      .catch((e) => { if (e.name !== "AbortError") setStaff([]); })
       .finally(() => setLoading(false));
-  }, [store, range]);
+    return () => ctrl.abort();
+  }, [store, range, days]);
 
   const hasDeleted = staff.some((s) => s.staff.endsWith(" (deleted)"));
 
@@ -90,18 +112,8 @@ export default function StaffBreakdown({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4">
-        <p className="text-sm text-sand-400">Loading staff breakdown…</p>
-      </div>
-    );
-  }
-
-  if (sorted.length === 0) {
-    return null;
-  }
-
+  // The toggle/header always render so the user can switch windows even when a
+  // window has zero quotes — an early `return null` would trap them on empty.
   const columns: { key: SortKey; label: string; align: "left" | "right" }[] = [
     { key: "staff", label: "Staff", align: "left" },
     { key: "total", label: "Quotes", align: "right" },
@@ -120,26 +132,48 @@ export default function StaffBreakdown({
           <span className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">
             Quotes by Staff
           </span>
-          <div className="flex flex-wrap gap-1.5">
-            {sorted.slice(0, 6).map((s) => (
+          {loading ? (
+            <span className="text-xs text-sand-400">Loading…</span>
+          ) : sorted.length === 0 ? (
+            <span className="text-xs text-sand-400">No quotes in this window</span>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {sorted.slice(0, 6).map((s) => (
+                <button
+                  key={s.staff}
+                  onClick={() => onStaffClick?.(s.staff)}
+                  disabled={!onStaffClick}
+                  className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-sand-100 text-sand-700 hover:bg-blue-100 hover:text-blue-700 transition-colors disabled:cursor-default disabled:hover:bg-sand-100 disabled:hover:text-sand-700"
+                  title={onStaffClick ? `Show leads by ${s.staff}` : undefined}
+                >
+                  {s.staff}
+                  <span className="font-semibold">{s.total}</span>
+                </button>
+              ))}
+              {sorted.length > 6 && (
+                <span className="text-xs text-sand-400 self-center">
+                  +{sorted.length - 6} more
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1 bg-sand-50 rounded-lg p-0.5">
+            {RANGE_OPTIONS.map((opt) => (
               <button
-                key={s.staff}
-                onClick={() => onStaffClick?.(s.staff)}
-                disabled={!onStaffClick}
-                className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-sand-100 text-sand-700 hover:bg-blue-100 hover:text-blue-700 transition-colors disabled:cursor-default disabled:hover:bg-sand-100 disabled:hover:text-sand-700"
-                title={onStaffClick ? `Show leads by ${s.staff}` : undefined}
+                key={opt.value}
+                onClick={() => setDays(opt.value)}
+                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                  days === opt.value
+                    ? "bg-white text-sand-900 shadow-sm"
+                    : "text-sand-500 hover:text-sand-700"
+                }`}
               >
-                {s.staff}
-                <span className="font-semibold">{s.total}</span>
+                {opt.label}
               </button>
             ))}
-            {sorted.length > 6 && (
-              <span className="text-xs text-sand-400 self-center">
-                +{sorted.length - 6} more
-              </span>
-            )}
           </div>
-        </div>
         {hasDeleted && (
           <button
             onClick={() => setShowDeleted(!showDeleted)}
@@ -163,9 +197,10 @@ export default function StaffBreakdown({
             <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
           </svg>
         </button>
+        </div>
       </div>
 
-      {expanded && (
+      {expanded && sorted.length > 0 && (
         <div className="border-t border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
             <thead className="sticky top-0 z-20 bg-sand-50">

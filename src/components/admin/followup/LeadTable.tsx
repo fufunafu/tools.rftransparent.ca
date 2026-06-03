@@ -265,10 +265,16 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                   <th
                     key={col.key}
                     onClick={() => handleSort(col.key)}
-                    className={`${col.align} px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium cursor-pointer hover:text-sand-600 select-none`}
+                    className={`${col.align} align-bottom px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium cursor-pointer hover:text-sand-600 select-none`}
                   >
-                    {col.label}
-                    <SortIcon active={sortKey === col.key} dir={sortDir} />
+                    {/* Keep label + sort caret on the same baseline. Without
+                        this, multi-word headers (DRAFT #, LIFETIME ORDERS)
+                        wrap and drop the caret below, making the row taller
+                        than its single-line neighbors. */}
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                      {col.label}
+                      <SortIcon active={sortKey === col.key} dir={sortDir} />
+                    </span>
                   </th>
                 ))}
                 <th className="px-4 py-3"></th>

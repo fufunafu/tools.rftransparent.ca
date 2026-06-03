@@ -227,6 +227,21 @@ function recordError(result: SyncResult, context: string, error: { message?: str
   if (!result.first_error) result.first_error = msg;
 }
 
+// Cap concurrent Supabase writes. Firing 2000+ updates via Promise.all all at
+// once caused Cloudflare 522s from Supabase ("Connection timed out"). A small
+// concurrency window keeps the connection pool healthy without blowing past
+// the function timeout.
+const WRITE_CONCURRENCY = 25;
+
+async function runWithConcurrency(
+  fns: Array<() => PromiseLike<unknown>>,
+  concurrency: number,
+): Promise<void> {
+  for (let i = 0; i < fns.length; i += concurrency) {
+    await Promise.all(fns.slice(i, i + concurrency).map((fn) => fn()));
+  }
+}
+
 export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResult> {
   const supabase = getSupabase();
   const result: SyncResult = {
@@ -284,7 +299,10 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
   const newActiveLeads: Record<string, unknown>[] = [];
   const newWonLeads: Record<string, unknown>[] = [];
-  const updatePromises: PromiseLike<unknown>[] = [];
+  // Build update FACTORIES, not pending promises. Eager promises would all
+  // start immediately when pushed; factories let runWithConcurrency cap how
+  // many are in flight at a time.
+  const updateFns: Array<() => PromiseLike<unknown>> = [];
 
   for (const draft of shopifyDrafts) {
     const existing = existingByDraftId.get(draft.id);
@@ -338,7 +356,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         });
       }
     } else if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
-      updatePromises.push(
+      updateFns.push(() =>
         supabase.from("followup_leads").update({
           lead_status: "won",
           shopify_status: draft.status,
@@ -364,7 +382,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         })
       );
     } else if (existing) {
-      updatePromises.push(
+      updateFns.push(() =>
         supabase.from("followup_leads").update({
           draft_name: draft.name,
           customer_name: draft.customer?.displayName || null,
@@ -385,28 +403,33 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     }
   }
 
-  // Batch-insert new leads (100 at a time)
+  // Batch-insert new leads (100 at a time). Use upsert + ignoreDuplicates
+  // because a concurrent sync (cron + manual click, or two manual clicks)
+  // can insert the same draft between our load of existingLeads and the
+  // insert. The unique key (store_id, shopify_draft_id) would otherwise
+  // throw, even though "do nothing" is the right answer.
   const BATCH = 100;
+  const UPSERT_OPTS = { onConflict: "store_id,shopify_draft_id", ignoreDuplicates: true } as const;
   for (let i = 0; i < newActiveLeads.length; i += BATCH) {
     const slice = newActiveLeads.slice(i, i + BATCH);
-    const { error } = await supabase.from("followup_leads").insert(slice);
+    const { error } = await supabase.from("followup_leads").upsert(slice, UPSERT_OPTS);
     if (error) recordError(result, `insert ${slice.length} new active leads`, error);
     else result.new_leads += slice.length;
   }
   for (let i = 0; i < newWonLeads.length; i += BATCH) {
     const slice = newWonLeads.slice(i, i + BATCH);
-    const { error } = await supabase.from("followup_leads").insert(slice);
+    const { error } = await supabase.from("followup_leads").upsert(slice, UPSERT_OPTS);
     if (error) recordError(result, `insert ${slice.length} new won leads`, error);
     else result.auto_won += slice.length;
   }
-  // Run all updates in parallel
-  await Promise.all(updatePromises);
+  // Run updates with a small concurrency window (see WRITE_CONCURRENCY).
+  await runWithConcurrency(updateFns, WRITE_CONCURRENCY);
 
   // 4. Detect completions — fetch COMPLETED drafts
   const completedDrafts = await fetchDraftsForSync(storeId, fromDateStr, "status:completed");
 
   const newCompletedLeads: Record<string, unknown>[] = [];
-  const completedUpdatePromises: PromiseLike<unknown>[] = [];
+  const completedUpdateFns: Array<() => PromiseLike<unknown>> = [];
 
   for (const draft of completedDrafts) {
     const existing = existingByDraftId.get(draft.id);
@@ -417,7 +440,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       : null;
 
     if (existing && existing.lead_status !== "won" && existing.lead_status !== "lost") {
-      completedUpdatePromises.push(
+      completedUpdateFns.push(() =>
         supabase.from("followup_leads").update({
           lead_status: "won",
           shopify_status: "COMPLETED",
@@ -463,7 +486,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       });
     } else {
       // Already won/lost — backfill creator + last_synced_at without touching status.
-      completedUpdatePromises.push(
+      completedUpdateFns.push(() =>
         supabase.from("followup_leads").update({
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
@@ -478,14 +501,14 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
   for (let i = 0; i < newCompletedLeads.length; i += BATCH) {
     const slice = newCompletedLeads.slice(i, i + BATCH);
-    const { error } = await supabase.from("followup_leads").insert(slice);
+    const { error } = await supabase.from("followup_leads").upsert(slice, UPSERT_OPTS);
     if (error) recordError(result, `insert ${slice.length} completed leads`, error);
     else result.auto_won += slice.length;
   }
-  await Promise.all(completedUpdatePromises);
+  await runWithConcurrency(completedUpdateFns, WRITE_CONCURRENCY);
 
   // 5. Detect stale — leads in DB but missing from Shopify
-  const stalePromises: PromiseLike<unknown>[] = [];
+  const staleFns: Array<() => PromiseLike<unknown>> = [];
   for (const [draftId, existing] of existingByDraftId) {
     if (
       !shopifyDraftIds.has(draftId) &&
@@ -494,7 +517,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       existing.lead_status !== "lost" &&
       existing.lead_status !== "duplicate"
     ) {
-      stalePromises.push(
+      staleFns.push(() =>
         supabase.from("followup_leads")
           .update({ shopify_status: "DELETED", updated_at: now })
           .eq("id", existing.id)
@@ -505,7 +528,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
       );
     }
   }
-  await Promise.all(stalePromises);
+  await runWithConcurrency(staleFns, WRITE_CONCURRENCY);
 
   return result;
 }

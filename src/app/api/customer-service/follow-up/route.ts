@@ -17,6 +17,7 @@ import {
   getFollowupSummary,
   getFollowupAnalytics,
   getFollowupByStaff,
+  type FollowupStaffRow,
 } from "@/lib/customer-service/followup-queries";
 
 export const dynamic = "force-dynamic";
@@ -325,6 +326,42 @@ export async function GET(req: NextRequest) {
 
     // ── Per-staff breakdown ──
     if (view === "by_staff") {
+      // `days` (Today/7d/14d/30d/All) takes precedence over the coarse
+      // `range` (1y/all). Its cutoff floats with "now", so it can't share the
+      // day-stable unstable_cache used by getFollowupByStaff — call the RPC
+      // directly. The RPC already filters on shopify_created_at >= p_cutoff.
+      const daysParam = req.nextUrl.searchParams.get("days");
+      if (daysParam) {
+        let cutoff: string | null;
+        if (daysParam === "all") {
+          cutoff = null;
+        } else if (daysParam === "today") {
+          cutoff = today;
+        } else {
+          const d = parseInt(daysParam, 10);
+          const n = Number.isFinite(d) ? Math.max(1, d) : 7;
+          cutoff = new Date(Date.now() - n * 86400_000).toISOString();
+        }
+        const { data, error } = await supabase.rpc("cs_followup_by_staff", {
+          p_store_id: storeId,
+          p_cutoff: cutoff,
+        });
+        if (error) throw new Error(error.message);
+        // PostgREST can return numeric columns as strings — coerce so the
+        // client gets real numbers (matches getFollowupByStaff).
+        const staff = (data ?? []).map((r: FollowupStaffRow) => ({
+          staff: r.staff,
+          total: Number(r.total),
+          won: Number(r.won),
+          lost: Number(r.lost),
+          active: Number(r.active),
+          quoted_value: Number(r.quoted_value),
+          won_value: Number(r.won_value),
+          conversion_rate: Number(r.conversion_rate),
+        }));
+        return NextResponse.json({ staff });
+      }
+
       const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
       const staff = await getFollowupByStaff(storeId, cutoff);
       return NextResponse.json({ staff });
