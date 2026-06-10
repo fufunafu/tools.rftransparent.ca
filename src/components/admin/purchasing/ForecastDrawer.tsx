@@ -66,6 +66,76 @@ interface Props {
   onClose: () => void;
 }
 
+const fmtN = (n: number) => Math.round(n).toLocaleString("en-CA");
+
+// Mirrors the sop_label decision in purchasing_reorder_view (migration 048)
+// so the drawer can say in plain words *why* a SKU is flagged.
+function reorderReasons(
+  product: ProductWithMetrics,
+  settings: PurchasingSettings,
+): string[] {
+  const label = product.sop_label;
+  if (label === "ok" || label === "no_sales_data") return [];
+
+  const monthly = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
+  const total = product.total_inventory;
+  const lead = settings.lead_time_days;
+  const capacity = product.storage_capacity;
+  const target = product.restock_target;
+  // reorder_point is target + lead-time demand, so the demand piece is
+  // recoverable exactly without re-doing the seasonality math.
+  const leadDemand = product.reorder_point - product.restock_target;
+  const reasons: string[] = [];
+
+  if (monthly === 0) {
+    reasons.push(
+      `No sales history yet — hardware SKUs are kept at a minimum of 50 units, and on hand + inbound is only ${fmtN(total)}.`,
+    );
+    return reasons;
+  }
+
+  if (label === "montreal_transfer" || label === "reorder_plus_montreal") {
+    const waitDays = product.days_until_next_arrival ?? lead;
+    const waitLabel =
+      product.days_until_next_arrival !== null
+        ? `the next inbound PO arrives in ~${fmtN(waitDays)} days`
+        : `new stock can arrive (lead time is ${lead} days)`;
+    reasons.push(
+      `On hand alone covers about ${fmtN(product.days_of_stock_left ?? 0)} days — not enough to last until ${waitLabel}, so a Montreal transfer is needed to bridge the gap.`,
+    );
+  }
+
+  if (label === "reorder" || label === "reorder_plus_montreal") {
+    reasons.push(
+      `On hand + inbound (${fmtN(total)}) is below the order point of ${fmtN(product.reorder_point)} units: customers will buy ~${fmtN(leadDemand)} while a new order ships (${lead} days), and we want ${fmtN(target)} still on the shelf when it lands.`,
+    );
+    // Explain where the target number comes from.
+    if (product.category === "hardware") {
+      reasons.push(
+        `The ${fmtN(target)}-unit target is ~3 months of sales at the current rate (minimum 50 units).`,
+      );
+    } else {
+      const fillFloor = settings.expected_fill * capacity;
+      const covered = leadDemand * (settings.restock_cover_pct / 100);
+      if (covered >= capacity) {
+        reasons.push(
+          `The target would be ${fmtN(covered)} (${fmtN(settings.restock_cover_pct)}% of a lead time of sales) but is capped at the storage capacity of ${fmtN(capacity)}.`,
+        );
+      } else if (fillFloor > covered) {
+        reasons.push(
+          `The ${fmtN(target)}-unit target comes from the minimum-fill setting: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(capacity)}.`,
+        );
+      } else {
+        reasons.push(
+          `The ${fmtN(target)}-unit target is ${fmtN(settings.restock_cover_pct)}% of one lead time of sales (~${fmtN(leadDemand)}) — the cover set in Settings.`,
+        );
+      }
+    }
+  }
+
+  return reasons;
+}
+
 function fmtDate(iso: string): string {
   return new Date(iso + "T00:00:00").toLocaleDateString("en-CA", {
     month: "short", day: "numeric", year: "numeric",
@@ -79,7 +149,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const points = forecast?.timeline ?? [];
+  const points = useMemo(() => forecast?.timeline ?? [], [forecast]);
   const arrivals = points.filter((p) => p.event === "arrival");
   const stockoutPoint = points.find((p) => p.event === "stockout");
 
@@ -95,6 +165,20 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
   const xDomain: [number, number] = chartData.length >= 2
     ? [chartData[0].t, chartData[chartData.length - 1].t]
     : [0, 1];
+
+  const reasons = reorderReasons(product, settings);
+  // For hardware the fill floor *is* the capacity line, so only glass gets
+  // a separate min-stock line.
+  const fillFloor =
+    product.category === "hardware"
+      ? null
+      : settings.expected_fill * product.storage_capacity;
+  const fillPct = Math.round(settings.expected_fill * 100);
+  // Skip the target line when it coincides with capacity (always true for
+  // hardware, and for fast movers whose buffered demand hits the cap).
+  const showTarget =
+    Math.abs(product.restock_target - product.storage_capacity) >
+    product.storage_capacity * 0.02;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex justify-end" onClick={onClose}>
@@ -133,7 +217,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               // is 0 or the projection ends above zero, but the SKU still
               // needs to be topped up to the target.
               const onHandPlusInbound = product.current_inventory + product.inbound;
-              const target = product.storage_capacity;
+              const target = product.reorder_point;
               const belowTarget = onHandPlusInbound < target;
               const flaggedForReorder =
                 product.sop_label === "reorder" ||
@@ -146,12 +230,12 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                   <div>
                     <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Status</div>
                     <div className="text-xl font-semibold text-amber-700">
-                      Below target stock
+                      Below order point
                     </div>
                     <div className="text-sand-600 text-xs mt-0.5">
                       On hand + inbound = {onHandPlusInbound.toLocaleString("en-CA")} units,
-                      target is {target.toLocaleString("en-CA")}. Short by{" "}
-                      {gap.toLocaleString("en-CA")}.
+                      order point is {fmtN(target)}. Short by{" "}
+                      {fmtN(gap)}.
                       {product.avg_monthly_sales_grs + product.avg_monthly_sales_rf === 0 &&
                         " The chart shows no stockout because this SKU has no sales history yet — we still want to keep the minimum on hand."}
                     </div>
@@ -172,6 +256,18 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               );
             })()}
           </div>
+          {reasons.length > 0 && (
+            <div className="bg-amber-50 rounded-xl border border-amber-200/60 p-4 text-sm">
+              <div className="text-[11px] text-amber-600 uppercase tracking-wider font-medium mb-1.5">
+                Why a reorder is suggested
+              </div>
+              <ul className="space-y-1.5 text-amber-900 text-xs leading-relaxed list-disc pl-4">
+                {reasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           {points.length >= 2 && (
             <div className="bg-white rounded-xl border border-sand-200/60 p-4">
               <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-3">Projected inventory</div>
@@ -186,8 +282,20 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip labelFormatter={(ms) => fmtDate(isoFromMs(ms as number))}
                       formatter={(v) => [Number(v).toLocaleString("en-CA", { maximumFractionDigits: 0 }), "units"]} />
-                    <ReferenceLine y={product.storage_capacity} stroke="#94a3b8" strokeDasharray="4 4"
+                    <ReferenceLine y={product.storage_capacity} stroke="#94a3b8" strokeDasharray="4 4" ifOverflow="extendDomain"
                       label={{ value: "Capacity", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }} />
+                    {fillFloor !== null && fillFloor > 0 && (
+                      <ReferenceLine y={fillFloor} stroke="#8b5cf6" strokeDasharray="4 4" ifOverflow="extendDomain"
+                        label={{ value: `Min stock (${fillPct}%)`, position: "insideBottomRight", fontSize: 10, fill: "#8b5cf6" }} />
+                    )}
+                    {showTarget && product.restock_target > 0 && (
+                      <ReferenceLine y={product.restock_target} stroke="#10b981" strokeDasharray="4 4" ifOverflow="extendDomain"
+                        label={{ value: "Target at arrival", position: "insideBottomLeft", fontSize: 10, fill: "#10b981" }} />
+                    )}
+                    {product.reorder_point > 0 && (
+                      <ReferenceLine y={product.reorder_point} stroke="#d97706" strokeDasharray="4 4" ifOverflow="extendDomain"
+                        label={{ value: "Order point", position: "insideTopLeft", fontSize: 10, fill: "#d97706" }} />
+                    )}
                     <ReferenceLine y={0} stroke="#dc2626" />
                     <Line type="linear" dataKey="inventory" stroke="#3b82f6" strokeWidth={2} dot={false} />
                     {arrivals.map((a) => (
@@ -204,6 +312,15 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                 <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5" />PO arrival</span>
                 <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1.5" />Stockout</span>
                 <span><span className="inline-block w-3 border-t border-dashed border-sand-400 mr-1.5 align-middle" />Capacity</span>
+                {product.reorder_point > 0 && (
+                  <span><span className="inline-block w-3 border-t border-dashed border-amber-600 mr-1.5 align-middle" />Order point</span>
+                )}
+                {showTarget && product.restock_target > 0 && (
+                  <span><span className="inline-block w-3 border-t border-dashed border-emerald-500 mr-1.5 align-middle" />Target at arrival</span>
+                )}
+                {fillFloor !== null && fillFloor > 0 && (
+                  <span><span className="inline-block w-3 border-t border-dashed border-violet-500 mr-1.5 align-middle" />Min stock ({fillPct}%)</span>
+                )}
               </div>
             </div>
           )}

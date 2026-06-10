@@ -45,6 +45,12 @@ export interface ProductWithMetrics {
   days_of_stock_left: number | null;
   days_of_stock_with_inbound: number | null;
   reorder_point: number;
+  // Stock we want left when a PO arrives: for glass the higher of the
+  // expected-fill floor or lead-time demand × (1 + buffer), capped at
+  // capacity. For hardware it equals the derived capacity/target.
+  restock_target: number;
+  // Days until the soonest open PO lands, null when nothing is inbound.
+  days_until_next_arrival: number | null;
   perfect_qty: number;
   suggested_qty: number;
   // Minimum units to pull from Montreal so we don't stock out before the
@@ -138,6 +144,9 @@ export interface PurchasingSettings {
   // than last year across every month. Compounds with seasonality:
   // effective = season_multipliers[m] × (1 + annual_growth_pct / 100).
   annual_growth_pct: number;
+  // Target cover at PO arrival, as a percent of one lead time of sales.
+  // 100 = land with a full lead time still on the shelf, 75 = 0.75.
+  restock_cover_pct: number;
 }
 
 export const SOP_LABEL_DISPLAY: Record<SopLabel, string> = {

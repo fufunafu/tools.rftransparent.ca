@@ -59,6 +59,8 @@ export async function listProductsWithMetrics(
     days_of_stock_left: numOrNull(r.days_of_stock_left),
     days_of_stock_with_inbound: numOrNull(r.days_of_stock_with_inbound),
     reorder_point: num(r.reorder_point),
+    restock_target: num(r.restock_target),
+    days_until_next_arrival: numOrNull(r.days_until_next_arrival),
     perfect_qty: num(r.perfect_qty),
     suggested_qty: num(r.suggested_qty),
     transfer_requirement: num(r.transfer_requirement),
@@ -255,7 +257,7 @@ export async function getPurchasingSettings(): Promise<PurchasingSettings> {
   const { data, error } = await getSupabase()
     .from("purchasing_settings")
     .select(
-      "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct",
+      "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct, restock_cover_pct",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -271,5 +273,6 @@ export async function getPurchasingSettings(): Promise<PurchasingSettings> {
     crate_size: num(data?.crate_size, 35),
     season_multipliers,
     annual_growth_pct: num(data?.annual_growth_pct, 0),
+    restock_cover_pct: num(data?.restock_cover_pct, 100),
   };
 }

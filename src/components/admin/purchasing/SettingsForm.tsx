@@ -51,6 +51,9 @@ export default function SettingsForm({ initialSettings }: Props) {
   const [annualGrowth, setAnnualGrowth] = useState(
     String(initialSettings.annual_growth_pct),
   );
+  const [coverPct, setCoverPct] = useState(
+    String(initialSettings.restock_cover_pct),
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -66,7 +69,8 @@ export default function SettingsForm({ initialSettings }: Props) {
     expectedFillPct !== String(Math.round(initialSettings.expected_fill * 100)) ||
     crateSize !== String(initialSettings.crate_size) ||
     multipliers.some((m, i) => m !== String(initialSettings.season_multipliers[i])) ||
-    annualGrowth !== String(initialSettings.annual_growth_pct);
+    annualGrowth !== String(initialSettings.annual_growth_pct) ||
+    coverPct !== String(initialSettings.restock_cover_pct);
 
   async function recompute() {
     setRecomputing(true);
@@ -117,6 +121,11 @@ export default function SettingsForm({ initialSettings }: Props) {
       setError("Annual growth must be a number between -100 and 1000.");
       return;
     }
+    const cover = parseFloat(coverPct);
+    if (!Number.isFinite(cover) || cover < 0 || cover > 500) {
+      setError("Target at arrival % must be between 0 and 500.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -129,6 +138,7 @@ export default function SettingsForm({ initialSettings }: Props) {
           crate_size: crate,
           season_multipliers: mults,
           annual_growth_pct: growthPct,
+          restock_cover_pct: cover,
         }),
       });
       if (!res.ok) {
@@ -167,7 +177,7 @@ export default function SettingsForm({ initialSettings }: Props) {
             status labels on the Inventory page.
           </p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           <Field
             label="Lead time days"
             help="How long a PO usually takes to arrive — also doubles as the safety buffer. 90 is the safe default for shipments from China. Drop to 60 if your supplier is reliable; raise to 120 if shipments tend to slip."
@@ -201,8 +211,25 @@ export default function SettingsForm({ initialSettings }: Props) {
             </div>
           </Field>
           <Field
+            label="Target at arrival"
+            help="How much stock to still have on the shelf when a new PO lands, as a percent of one lead time of sales. 100 = a full lead time (~90 days of cover), 75 = three-quarters, 150 = one and a half. Higher = order earlier and more."
+          >
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min="0"
+                max="500"
+                step="1"
+                value={coverPct}
+                onChange={(e) => setCoverPct(e.target.value)}
+                className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
+              />
+              <span className="text-sm text-sand-500">%</span>
+            </div>
+          </Field>
+          <Field
             label="Expected fill"
-            help="Minimum warehouse fill to maintain, even for slow-moving SKUs. Reorder fires when total inventory drops below this percent of capacity. At 70%: capacity 35 → reorder when on-hand &lt; 25."
+            help="Floor on the restock target, as a percent of capacity — keeps slow movers from going bare. The stock to have left when a PO arrives is the higher of this floor or lead-time sales + buffer, capped at capacity."
           >
             <div className="flex items-center gap-2">
               <input
