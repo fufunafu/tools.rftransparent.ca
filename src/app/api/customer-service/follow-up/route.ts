@@ -270,10 +270,17 @@ export async function GET(req: NextRequest) {
         query = query.not("closed_at", "is", null).order("closed_at", { ascending: false });
       }
 
+      // Attribution = last invoice sender, falling back to creator (matches the
+      // Quotes-by-Staff RPC). So "leads by X" = last_invoice_sender is X, OR it's
+      // unset and created_by_staff is X. Values are double-quoted so names with
+      // spaces/commas/parentheses (e.g. "zakaria touzami (deleted)") stay safe.
       if (creator === "__unknown__") {
-        query = query.is("created_by_staff", null);
+        query = query.is("last_invoice_sender", null).is("created_by_staff", null);
       } else if (creator) {
-        query = query.eq("created_by_staff", creator);
+        const v = creator.replace(/"/g, '');
+        query = query.or(
+          `last_invoice_sender.eq."${v}",and(last_invoice_sender.is.null,created_by_staff.eq."${v}")`,
+        );
       }
 
       if (closeReason) {
@@ -347,13 +354,14 @@ export async function GET(req: NextRequest) {
         const PAGE = 1000;
         const rows: {
           created_by_staff: string | null;
+          last_invoice_sender: string | null;
           lead_status: string;
           quote_amount: number | string | null;
         }[] = [];
         for (let from = 0; ; from += PAGE) {
           const { data, error } = await supabase
             .from("followup_leads")
-            .select("created_by_staff, lead_status, quote_amount")
+            .select("created_by_staff, last_invoice_sender, lead_status, quote_amount")
             .eq("store_id", storeId)
             .not("shopify_status", "in", "(OPEN,DELETED)")
             .gte("shopify_created_at", start)
@@ -371,7 +379,11 @@ export async function GET(req: NextRequest) {
         }
         const map = new Map<string, Agg>();
         for (const r of rows) {
-          const name = (r.created_by_staff && r.created_by_staff.trim()) || "Unknown";
+          // Attribution = last invoice sender, falling back to creator (matches the RPC).
+          const name =
+            (r.last_invoice_sender && r.last_invoice_sender.trim()) ||
+            (r.created_by_staff && r.created_by_staff.trim()) ||
+            "Unknown";
           const agg = map.get(name) ?? {
             staff: name, total: 0, won: 0, lost: 0, active: 0,
             quoted_value: 0, won_value: 0, conversion_rate: 0,
@@ -457,10 +469,14 @@ export async function GET(req: NextRequest) {
           .eq("store_id", storeId)
           .not("shopify_status", "in", "(OPEN,DELETED)");
         if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        // Attribution = last invoice sender, falling back to creator (matches by_staff).
         if (staffParam === "__unknown__") {
-          q = q.is("created_by_staff", null);
+          q = q.is("last_invoice_sender", null).is("created_by_staff", null);
         } else {
-          q = q.eq("created_by_staff", staffParam);
+          const v = staffParam.replace(/"/g, '');
+          q = q.or(
+            `last_invoice_sender.eq."${v}",and(last_invoice_sender.is.null,created_by_staff.eq."${v}")`,
+          );
         }
         const { data } = await q.range(from, from + PAGE - 1);
         if (!data || data.length === 0) break;

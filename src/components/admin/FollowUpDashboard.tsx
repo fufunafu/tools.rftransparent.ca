@@ -171,6 +171,34 @@ function LeadDetailPanel({
             </div>
           </div>
 
+          {/* Contributors — everyone who created or invoiced this quote */}
+          {lead.contributors && lead.contributors.length > 0 && (
+            <div>
+              <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-2">
+                Contributors
+              </h4>
+              <div className="flex flex-wrap gap-1.5">
+                {lead.contributors.map((name) => (
+                  <span
+                    key={name}
+                    className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${
+                      name === lead.last_invoice_sender
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-sand-100 text-sand-600"
+                    }`}
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+              {lead.last_invoice_sender && lead.contributors.length > 1 && (
+                <p className="text-[11px] text-sand-400 mt-1.5">
+                  Conversion credited to <strong className="text-sand-600">{lead.last_invoice_sender}</strong> (last invoice sent).
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Close reason */}
           {lead.close_reason && (
             <div>

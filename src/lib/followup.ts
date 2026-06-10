@@ -88,6 +88,10 @@ export interface FollowUpLead {
   updated_at: string;
   created_by_staff: string | null;
   customer_orders_count: number | null;
+  // Everyone who created or invoiced the quote (parsed from the Shopify event
+  // timeline). last_invoice_sender drives Quotes-by-Staff attribution.
+  last_invoice_sender: string | null;
+  contributors: string[] | null;
 }
 
 export interface FollowUpLog {
@@ -175,6 +179,50 @@ function extractCreator(draft: ShopifyDraftNode): string | null {
     if (match) return match[1].trim();
   }
   return null;
+}
+
+/**
+ * Parse the draft's event timeline for everyone who worked the quote and who
+ * sent the most recent invoice. Names are parsed from event message text
+ * (e.g. "Yousif Kola created this draft order.", "Shanaz Rohoman sent an
+ * invoice to …") — the same English patterns extractCreator relies on.
+ *
+ *   - lastInvoiceSender: staff on the most recent "sent an invoice" event.
+ *     This drives Quotes-by-Staff attribution (falls back to created_by_staff
+ *     when a quote was never invoiced).
+ *   - contributors: distinct staff who created or invoiced the draft, in the
+ *     order they first appear.
+ */
+function extractContributors(draft: ShopifyDraftNode): {
+  lastInvoiceSender: string | null;
+  contributors: string[];
+} {
+  const events = draft.events?.edges ?? []; // CREATED_AT ascending (oldest first)
+  let lastInvoiceSender: string | null = null;
+  const contributors: string[] = [];
+  const seen = new Set<string>();
+  const add = (raw: string | null | undefined) => {
+    const name = raw?.trim();
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      contributors.push(name);
+    }
+  };
+
+  for (const { node } of events) {
+    const created = node.message.match(/^(.+?) created this draft order\.?$/);
+    if (created) { add(created[1]); continue; }
+    const invoiced = node.message.match(/^(.+?) sent an invoice to /);
+    if (invoiced) { lastInvoiceSender = invoiced[1].trim(); add(invoiced[1]); continue; }
+  }
+
+  // Converted drafts also expose the closing staff member on the linked order.
+  const staff = draft.order?.staffMember;
+  if (staff?.firstName || staff?.lastName) {
+    add([staff.firstName, staff.lastName].filter(Boolean).join(" "));
+  }
+
+  return { lastInvoiceSender, contributors };
 }
 
 const MAX_PAGES = 80;
@@ -310,6 +358,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     const hasOrder = draft.order !== null;
 
     const createdBy = extractCreator(draft);
+    const contrib = extractContributors(draft);
     const ordersCount = draft.customer?.numberOfOrders != null
       ? parseInt(draft.customer.numberOfOrders, 10)
       : null;
@@ -334,6 +383,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           last_synced_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         });
       } else {
         newActiveLeads.push({
@@ -353,6 +404,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           last_synced_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         });
       }
     } else if (hasOrder && existing.lead_status !== "won" && existing.lead_status !== "lost") {
@@ -366,6 +419,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           last_synced_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
             recordError(result, `auto-win update lead ${existing.id}`, error);
@@ -395,6 +450,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           updated_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `update lead ${existing.id}`, error);
           else result.updated_leads++;
@@ -440,6 +497,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
     const existing = existingByDraftId.get(draft.id);
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
     const createdBy = extractCreator(draft);
+    const contrib = extractContributors(draft);
     const ordersCount = draft.customer?.numberOfOrders != null
       ? parseInt(draft.customer.numberOfOrders, 10)
       : null;
@@ -454,6 +512,8 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           updated_at: now,
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
             recordError(result, `completed-win update lead ${existing.id}`, error);
@@ -488,14 +548,18 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         last_synced_at: now,
         created_by_staff: createdBy,
         customer_orders_count: ordersCount,
+        last_invoice_sender: contrib.lastInvoiceSender,
+        contributors: contrib.contributors,
       });
     } else {
-      // Already won/lost — backfill creator + last_synced_at without touching status.
+      // Already won/lost — backfill creator/contributors + last_synced_at without touching status.
       completedUpdateFns.push(() =>
         supabase.from("followup_leads").update({
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_synced_at: now,
+          last_invoice_sender: contrib.lastInvoiceSender,
+          contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `backfill lead ${existing.id}`, error);
           else result.updated_leads++;

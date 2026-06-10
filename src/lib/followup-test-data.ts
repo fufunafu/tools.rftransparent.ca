@@ -42,14 +42,15 @@ function seedLeads(): FollowUpLead[] {
     quote_amount: number;
     lead_status: LeadStatus;
     created_by_staff: string;
+    contributors?: string[];
     daysSinceCreated: number;
     daysToFollowup: number;
   }> = [
     { draft_name: "#TD2001", customer_name: "Marie Tremblay", customer_email: "marie.t@example.com", customer_phone: "+15145550101", quote_amount: 4250, lead_status: "new", created_by_staff: "Anne", daysSinceCreated: 1, daysToFollowup: 0 },
-    { draft_name: "#TD2002", customer_name: "Jonathan Lee", customer_email: "jon.lee@example.com", customer_phone: "+15145550102", quote_amount: 12800, lead_status: "hot_lead", created_by_staff: "Anne", daysSinceCreated: 2, daysToFollowup: -1 },
+    { draft_name: "#TD2002", customer_name: "Jonathan Lee", customer_email: "jon.lee@example.com", customer_phone: "+15145550102", quote_amount: 12800, lead_status: "hot_lead", created_by_staff: "Anne", contributors: ["Anne", "Jun"], daysSinceCreated: 2, daysToFollowup: -1 },
     { draft_name: "#TD2003", customer_name: "Sophie Bergeron", customer_email: "sophie.b@example.com", customer_phone: "+15145550103", quote_amount: 3100, lead_status: "considering", created_by_staff: "Jun", daysSinceCreated: 5, daysToFollowup: 2 },
     { draft_name: "#TD2004", customer_name: "Ahmed Khan", customer_email: "ahmed.k@example.com", customer_phone: "+15145550104", quote_amount: 7600, lead_status: "no_answer", created_by_staff: "Jun", daysSinceCreated: 4, daysToFollowup: -2 },
-    { draft_name: "#TD2005", customer_name: "Olivia Roy", customer_email: "olivia.r@example.com", customer_phone: "+15145550105", quote_amount: 18900, lead_status: "price_shopping", created_by_staff: "Anne", daysSinceCreated: 6, daysToFollowup: 1 },
+    { draft_name: "#TD2005", customer_name: "Olivia Roy", customer_email: "olivia.r@example.com", customer_phone: "+15145550105", quote_amount: 18900, lead_status: "price_shopping", created_by_staff: "Anne", contributors: ["Anne", "Fuanne"], daysSinceCreated: 6, daysToFollowup: 1 },
     { draft_name: "#TD2006", customer_name: "Liam Bouchard", customer_email: "liam.b@example.com", customer_phone: "+15145550106", quote_amount: 2400, lead_status: "future_project", created_by_staff: "Fuanne", daysSinceCreated: 10, daysToFollowup: 30 },
     { draft_name: "#TD2007", customer_name: "Emma Côté", customer_email: "emma.c@example.com", customer_phone: "+15145550107", quote_amount: 9500, lead_status: "new", created_by_staff: "Fuanne", daysSinceCreated: 0, daysToFollowup: 0 },
     { draft_name: "#TD2008", customer_name: "Noah Gauthier", customer_email: "noah.g@example.com", customer_phone: "+15145550108", quote_amount: 5400, lead_status: "hot_lead", created_by_staff: "Jun", daysSinceCreated: 3, daysToFollowup: 0 },
@@ -59,6 +60,7 @@ function seedLeads(): FollowUpLead[] {
 
   return base.map((b) => {
     const createdAt = daysAgoISO(b.daysSinceCreated);
+    const contributors = b.contributors ?? [b.created_by_staff];
     return {
       id: uuid(),
       store_id: "test",
@@ -82,6 +84,8 @@ function seedLeads(): FollowUpLead[] {
       updated_at: now,
       created_by_staff: b.created_by_staff,
       customer_orders_count: 0,
+      last_invoice_sender: contributors[contributors.length - 1],
+      contributors,
     };
   });
 }
