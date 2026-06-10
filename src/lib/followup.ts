@@ -427,6 +427,11 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
 
   // 4. Detect completions — fetch COMPLETED drafts
   const completedDrafts = await fetchDraftsForSync(storeId, fromDateStr, "status:completed");
+  // Drafts completed this run must NOT be treated as "missing/stale" in step 5.
+  // A draft that completes between syncs drops out of the OPEN-drafts list, so
+  // without this guard step 5 would overwrite its fresh COMPLETED status with
+  // DELETED (it decides off the pre-sync snapshot, which still says INVOICE_SENT).
+  const completedDraftIds = new Set(completedDrafts.map((d) => d.id));
 
   const newCompletedLeads: Record<string, unknown>[] = [];
   const completedUpdateFns: Array<() => PromiseLike<unknown>> = [];
@@ -512,6 +517,7 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   for (const [draftId, existing] of existingByDraftId) {
     if (
       !shopifyDraftIds.has(draftId) &&
+      !completedDraftIds.has(draftId) && // completed this run — not stale (step 4 just won it)
       (existing.shopify_status === "OPEN" || existing.shopify_status === "INVOICE_SENT") &&
       existing.lead_status !== "won" &&
       existing.lead_status !== "lost" &&
