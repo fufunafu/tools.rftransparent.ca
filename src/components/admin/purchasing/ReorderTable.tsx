@@ -195,7 +195,7 @@ export default function ReorderTable({ initialProducts }: Props) {
               <th className="text-right px-3 py-2 font-medium">Capacity</th>
               <th className="text-right px-3 py-2 font-medium" title="Average monthly sales = GRS + RF channels">Monthly</th>
               <th className="text-right px-3 py-2 font-medium" title="Days you can keep selling using only what's on hand (ignores inbound): on_hand / (monthly / 30) — seasonality and growth applied.">Days left</th>
-              <th className="text-right px-3 py-2 font-medium" title="The exact math result — fill capacity + cover lead-time demand">Perfect</th>
+              <th className="text-right px-3 py-2 font-medium" title="The exact math result — reach the restock target after covering lead-time demand">Perfect</th>
               <th className="text-right px-3 py-2 font-medium" title="Minimum to transfer from Montreal so we don't stock out before the next China shipment lands. Click to copy into Order qty (then use 'Create draft Montreal transfer'). Independent of the China refill on the right — for a 'Reorder + Montreal transfer' SKU you may want to do BOTH (a Montreal transfer now AND a China order to refill long-term).">Transfer</th>
               <th className="text-right px-3 py-2 font-medium" title="Crate-rounded China refill — what you'd actually order from the main supplier. Click to copy into Order qty (then use 'Create draft China order').">Suggested</th>
               <th className="text-right px-3 py-2 font-medium">Order qty</th>

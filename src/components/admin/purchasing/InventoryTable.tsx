@@ -327,13 +327,13 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center">Days (w/ inbound)<ColumnHint>Days of coverage if every inbound PO landed today: <span className="font-mono">(on_hand + inbound) / (monthly / 30)</span>. Click 📈 for real per-ETA projection.</ColumnHint></span>
               </Th>
               <Th sortable sortKey="reorder_point" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Reorder pt<ColumnHint>The on-hand level at which we should already have placed a new order: <span className="font-mono">(monthly / 30) × lead_time_days</span>.</ColumnHint></span>
+                <span className="inline-flex items-center">Reorder pt<ColumnHint>The total-stock level (on hand + inbound) at which a new order should be placed: <span className="font-mono">target_at_arrival + lead_time_sales</span>. The target is the higher of the Expected-fill floor or the Target-at-arrival cover (% of a lead time of sales, see Settings), capped at capacity. Drops below this → status flips to Reorder.</ColumnHint></span>
               </Th>
               <th className="text-left px-3 py-2 font-medium">
                 <span className="inline-flex items-center gap-1">Status<ColumnHint>
-                  <span className="block"><strong>Reorder + Montreal transfer</strong> — on hand runs out before the next PO arrives AND total cover (or capacity fill) is still below target. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
-                  <span className="block mt-1"><strong>Montreal transfer</strong> — on hand runs out before the next PO arrives, but once it arrives total cover is comfortable. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
-                  <span className="block mt-1"><strong>Reorder now</strong> — inbound arrives in time, so no Montreal needed, but either total cover (on hand + inbound) is below the safety buffer OR total inventory is below the target capacity fill (see Settings).</span>
+                  <span className="block"><strong>Reorder + Montreal transfer</strong> — on hand runs out before the next PO arrives AND total stock (on hand + inbound) is below the reorder point. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
+                  <span className="block mt-1"><strong>Montreal transfer</strong> — on hand runs out before the next PO arrives, but total stock is still above the reorder point. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
+                  <span className="block mt-1"><strong>Reorder now</strong> — total stock (on hand + inbound) is below the reorder point, i.e. ordering today would no longer land you at the target stock when the PO arrives (see Settings for the target cover and fill floor).</span>
                   <span className="block mt-1"><strong>OK</strong> — sufficient cover and inbound timing is safe.</span>
                   <span className="block mt-1"><strong>No sales data</strong> — monthly sales is 0.</span>
                 </ColumnHint>

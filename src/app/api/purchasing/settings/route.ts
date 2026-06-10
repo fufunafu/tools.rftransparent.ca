@@ -46,6 +46,16 @@ export async function PATCH(req: NextRequest) {
       }
       payload.annual_growth_pct = n;
     }
+    if (body.restock_cover_pct !== undefined) {
+      const n = Number(body.restock_cover_pct);
+      if (!Number.isFinite(n) || n < 0 || n > 500) {
+        return NextResponse.json(
+          { error: "restock_cover_pct must be a number between 0 and 500" },
+          { status: 400 },
+        );
+      }
+      payload.restock_cover_pct = n;
+    }
     if (body.season_multipliers !== undefined) {
       const raw = body.season_multipliers;
       if (!Array.isArray(raw) || raw.length !== 12) {
@@ -70,7 +80,7 @@ export async function PATCH(req: NextRequest) {
     const { data: before } = await supabase
       .from("purchasing_settings")
       .select(
-        "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct",
+        "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct, restock_cover_pct",
       )
       .eq("id", 1)
       .maybeSingle();
