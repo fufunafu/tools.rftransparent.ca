@@ -33,6 +33,13 @@ function todayStart() {
   return d.toISOString();
 }
 
+function yesterdayStart() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
 function tomorrowStart() {
   const d = new Date();
   d.setDate(d.getDate() + 1);
@@ -331,6 +338,63 @@ export async function GET(req: NextRequest) {
       // day-stable unstable_cache used by getFollowupByStaff — call the RPC
       // directly. The RPC already filters on shopify_created_at >= p_cutoff.
       const daysParam = req.nextUrl.searchParams.get("days");
+
+      // "Yesterday" is a *bounded* window [yesterday 00:00, today 00:00). The
+      // RPC only supports a lower cutoff, so aggregate followup_leads directly
+      // to the exact same shape the RPC returns.
+      if (daysParam === "yesterday") {
+        const start = yesterdayStart();
+        const PAGE = 1000;
+        const rows: {
+          created_by_staff: string | null;
+          lead_status: string;
+          quote_amount: number | string | null;
+        }[] = [];
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await supabase
+            .from("followup_leads")
+            .select("created_by_staff, lead_status, quote_amount")
+            .eq("store_id", storeId)
+            .not("shopify_status", "in", "(OPEN,DELETED)")
+            .gte("shopify_created_at", start)
+            .lt("shopify_created_at", today)
+            .range(from, from + PAGE - 1);
+          if (error) throw new Error(error.message);
+          if (!data || data.length === 0) break;
+          rows.push(...(data as typeof rows));
+          if (data.length < PAGE) break;
+        }
+
+        interface Agg {
+          staff: string; total: number; won: number; lost: number;
+          active: number; quoted_value: number; won_value: number; conversion_rate: number;
+        }
+        const map = new Map<string, Agg>();
+        for (const r of rows) {
+          const name = (r.created_by_staff && r.created_by_staff.trim()) || "Unknown";
+          const agg = map.get(name) ?? {
+            staff: name, total: 0, won: 0, lost: 0, active: 0,
+            quoted_value: 0, won_value: 0, conversion_rate: 0,
+          };
+          const amt = Number(r.quote_amount) || 0;
+          agg.total++;
+          agg.quoted_value += amt;
+          if (r.lead_status === "won") { agg.won++; agg.won_value += amt; }
+          else if (r.lead_status === "lost") agg.lost++;
+          else agg.active++; // matches the RPC: active = not won/lost
+          map.set(name, agg);
+        }
+        const staff = Array.from(map.values())
+          .map((a) => ({
+            ...a,
+            quoted_value: Math.round(a.quoted_value),
+            won_value: Math.round(a.won_value),
+            conversion_rate: a.total > 0 ? Math.round((a.won / a.total) * 1000) / 10 : 0,
+          }))
+          .sort((x, y) => y.total - x.total);
+        return NextResponse.json({ staff });
+      }
+
       if (daysParam) {
         let cutoff: string | null;
         if (daysParam === "all") {
@@ -507,8 +571,11 @@ export async function GET(req: NextRequest) {
     // `by_staff` which counts who *created* the quotes.
     if (view === "recent_activity") {
       const daysParam = req.nextUrl.searchParams.get("days") ?? "7";
-      let days: number | "today" | "all";
+      let days: number | "today" | "yesterday" | "all";
       let cutoff: string | null;
+      // Optional upper bound — only "yesterday" is a bounded window; the others
+      // run from `cutoff` up to now.
+      let until: string | null = null;
       if (daysParam === "all") {
         days = "all";
         cutoff = null;
@@ -517,6 +584,11 @@ export async function GET(req: NextRequest) {
         // midnight (same anchor as `todayStart()` used elsewhere in this route).
         days = "today";
         cutoff = today;
+      } else if (daysParam === "yesterday") {
+        // Bounded calendar day: [yesterday 00:00, today 00:00).
+        days = "yesterday";
+        cutoff = yesterdayStart();
+        until = today;
       } else {
         const daysRaw = parseInt(daysParam, 10);
         days = Number.isFinite(daysRaw) ? Math.max(1, daysRaw) : 7;
@@ -540,6 +612,7 @@ export async function GET(req: NextRequest) {
           .neq("logged_by", "system")
           .order("created_at", { ascending: false });
         if (cutoff) q = q.gte("created_at", cutoff);
+        if (until) q = q.lt("created_at", until);
         const { data } = await q.range(from, from + PAGE - 1);
         if (!data || data.length === 0) break;
         // PostgREST returns the joined row as an object when using !inner, but the

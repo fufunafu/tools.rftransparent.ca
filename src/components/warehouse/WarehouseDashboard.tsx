@@ -21,8 +21,7 @@ interface Report {
   report_date: string;
   boxes_built: number;
   orders_packed: number;
-  boxes_closed: number;
-  shipments_booked: number;
+  walkin_pickup: number;
   notes: string | null;
   employees: { id: string; name: string };
 }
@@ -32,8 +31,7 @@ interface EmployeeSummary {
   name: string;
   boxes_built: number;
   orders_packed: number;
-  boxes_closed: number;
-  shipments_booked: number;
+  walkin_pickup: number;
   total: number;
 }
 
@@ -41,8 +39,7 @@ interface DayData {
   date: string;
   boxes_built: number;
   orders_packed: number;
-  boxes_closed: number;
-  shipments_booked: number;
+  walkin_pickup: number;
 }
 
 const PERIOD_LABELS: Record<Period, string> = {
@@ -54,15 +51,13 @@ const PERIOD_LABELS: Record<Period, string> = {
 const STEP_COLORS = {
   boxes_built: "#6366f1",
   orders_packed: "#f59e0b",
-  boxes_closed: "#10b981",
-  shipments_booked: "#3b82f6",
+  walkin_pickup: "#10b981",
 };
 
 const STEP_LABELS: Record<string, string> = {
   boxes_built: "Boxes Built",
   orders_packed: "Orders Packed",
-  boxes_closed: "Boxes Closed",
-  shipments_booked: "Shipments Booked",
+  walkin_pickup: "Walk-in / Pick-up",
 };
 
 function getDateRange(period: Period, dateStr: string) {
@@ -133,10 +128,9 @@ export default function WarehouseDashboard() {
     (acc, r) => ({
       boxes_built: acc.boxes_built + r.boxes_built,
       orders_packed: acc.orders_packed + r.orders_packed,
-      boxes_closed: acc.boxes_closed + r.boxes_closed,
-      shipments_booked: acc.shipments_booked + r.shipments_booked,
+      walkin_pickup: acc.walkin_pickup + (r.walkin_pickup ?? 0),
     }),
-    { boxes_built: 0, orders_packed: 0, boxes_closed: 0, shipments_booked: 0 }
+    { boxes_built: 0, orders_packed: 0, walkin_pickup: 0 }
   );
 
   // Per-employee breakdown
@@ -147,16 +141,14 @@ export default function WarehouseDashboard() {
       name: r.employees?.name || "Unknown",
       boxes_built: 0,
       orders_packed: 0,
-      boxes_closed: 0,
-      shipments_booked: 0,
+      walkin_pickup: 0,
       total: 0,
     };
     existing.boxes_built += r.boxes_built;
     existing.orders_packed += r.orders_packed;
-    existing.boxes_closed += r.boxes_closed;
-    existing.shipments_booked += r.shipments_booked;
+    existing.walkin_pickup += r.walkin_pickup ?? 0;
     existing.total +=
-      r.boxes_built + r.orders_packed + r.boxes_closed + r.shipments_booked;
+      r.boxes_built + r.orders_packed + (r.walkin_pickup ?? 0);
     employeeMap.set(r.employee_id, existing);
   }
 
@@ -173,13 +165,11 @@ export default function WarehouseDashboard() {
       date: r.report_date,
       boxes_built: 0,
       orders_packed: 0,
-      boxes_closed: 0,
-      shipments_booked: 0,
+      walkin_pickup: 0,
     };
     existing.boxes_built += r.boxes_built;
     existing.orders_packed += r.orders_packed;
-    existing.boxes_closed += r.boxes_closed;
-    existing.shipments_booked += r.shipments_booked;
+    existing.walkin_pickup += r.walkin_pickup ?? 0;
     dayMap.set(r.report_date, existing);
   }
   const chartData = [...dayMap.values()].sort((a, b) =>
@@ -198,8 +188,7 @@ export default function WarehouseDashboard() {
   const summaryCards = [
     { key: "boxes_built", label: "Boxes Built", value: totals.boxes_built },
     { key: "orders_packed", label: "Orders Packed", value: totals.orders_packed },
-    { key: "boxes_closed", label: "Boxes Closed", value: totals.boxes_closed },
-    { key: "shipments_booked", label: "Shipments Booked", value: totals.shipments_booked },
+    { key: "walkin_pickup", label: "Walk-in / Pick-up", value: totals.walkin_pickup },
   ];
 
   return (
@@ -278,7 +267,7 @@ export default function WarehouseDashboard() {
           )}
 
           {/* Summary cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {summaryCards.map((card) => (
               <div
                 key={card.key}
@@ -338,16 +327,10 @@ export default function WarehouseDashboard() {
                     fill={STEP_COLORS.orders_packed}
                   />
                   <Bar
-                    dataKey="boxes_closed"
-                    name="Boxes Closed"
+                    dataKey="walkin_pickup"
+                    name="Walk-in / Pick-up"
                     stackId="a"
-                    fill={STEP_COLORS.boxes_closed}
-                  />
-                  <Bar
-                    dataKey="shipments_booked"
-                    name="Shipments Booked"
-                    stackId="a"
-                    fill={STEP_COLORS.shipments_booked}
+                    fill={STEP_COLORS.walkin_pickup}
                     radius={[4, 4, 0, 0]}
                   />
                 </BarChart>
@@ -395,7 +378,7 @@ export default function WarehouseDashboard() {
                   {employeeSummaries.length === 0 && !loading && (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={5}
                         className="px-4 py-8 text-center text-sand-400"
                       >
                         No reports for this period.
@@ -417,10 +400,7 @@ export default function WarehouseDashboard() {
                         {emp.orders_packed}
                       </td>
                       <td className="px-4 py-3 text-right text-sand-900">
-                        {emp.boxes_closed}
-                      </td>
-                      <td className="px-4 py-3 text-right text-sand-900">
-                        {emp.shipments_booked}
+                        {emp.walkin_pickup}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-sand-900">
                         {emp.total}
@@ -440,13 +420,10 @@ export default function WarehouseDashboard() {
                         {totals.orders_packed}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-sand-700">
-                        {totals.boxes_closed}
+                        {totals.walkin_pickup}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-sand-700">
-                        {totals.shipments_booked}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-sand-700">
-                        {totals.boxes_built + totals.orders_packed + totals.boxes_closed + totals.shipments_booked}
+                        {totals.boxes_built + totals.orders_packed + totals.walkin_pickup}
                       </td>
                     </tr>
                   )}

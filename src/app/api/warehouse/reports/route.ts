@@ -30,8 +30,7 @@ export async function POST(req: NextRequest) {
     report_date,
     boxes_built,
     orders_packed,
-    boxes_closed,
-    shipments_booked,
+    walkin_pickup,
     notes,
   } = body;
 
@@ -49,8 +48,7 @@ export async function POST(req: NextRequest) {
         report_date,
         boxes_built: boxes_built ?? 0,
         orders_packed: orders_packed ?? 0,
-        boxes_closed: boxes_closed ?? 0,
-        shipments_booked: shipments_booked ?? 0,
+        walkin_pickup: walkin_pickup ?? 0,
         notes: notes || null,
         updated_at: new Date().toISOString(),
       },

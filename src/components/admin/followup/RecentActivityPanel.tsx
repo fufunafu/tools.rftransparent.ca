@@ -20,6 +20,7 @@ interface ApiResponse {
 
 const RANGE_OPTIONS = [
   { value: "today", label: "Today", description: "today" },
+  { value: "yesterday", label: "Yesterday", description: "yesterday" },
   { value: "7", label: "7d", description: "7 days" },
   { value: "14", label: "14d", description: "14 days" },
   { value: "30", label: "30d", description: "30 days" },
@@ -57,9 +58,10 @@ export default function RecentActivityPanel({
 
   const rangeDescription =
     RANGE_OPTIONS.find((o) => o.value === range)?.description ?? "7 days";
-  // "Today" and "all" already read as a noun phrase; the other options need
-  // "in the last …" to scan correctly.
-  const rangeUsesInTheLast = range !== "today" && range !== "all";
+  // "Today", "yesterday" and "all" already read as a noun phrase; the other
+  // options need "in the last …" to scan correctly.
+  const rangeUsesInTheLast =
+    range !== "today" && range !== "yesterday" && range !== "all";
 
   useEffect(() => {
     const ctrl = new AbortController();

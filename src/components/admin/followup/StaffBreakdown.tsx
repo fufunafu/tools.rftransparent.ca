@@ -29,6 +29,7 @@ type SortDir = "asc" | "desc";
 // current range.
 const RANGE_OPTIONS = [
   { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
   { value: "7", label: "7d" },
   { value: "14", label: "14d" },
   { value: "30", label: "30d" },

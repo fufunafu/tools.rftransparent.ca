@@ -12,6 +12,9 @@ interface NavItem {
   label: string;
   status: Status;
   icon: React.ReactNode;
+  // When true, `href` is an absolute URL to a separate site — rendered as a
+  // plain <a target="_blank"> instead of a Next.js <Link>.
+  external?: boolean;
   children?: { href: string; label: string; status: Status }[];
 }
 
@@ -131,6 +134,17 @@ const NAV_ITEMS: NavItem[] = [
       </svg>
     ),
   },
+  {
+    href: "https://orderstream-checker.vercel.app/",
+    label: "Tax Check",
+    status: "done" as Status,
+    external: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25l6-6m4.5-3.493V21.75l-3.75-1.5-3.75 1.5-3.75-1.5-3.75 1.5V4.757c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0c1.1.128 1.907 1.077 1.907 2.185ZM9.75 9h.008v.008H9.75V9Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm4.125 4.5h.008v.008h-.008V13.5Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+      </svg>
+    ),
+  },
 ];
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
@@ -236,6 +250,25 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                       <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
                     </svg>
                   </button>
+                ) : item.external ? (
+                  <a
+                    href={item.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={rowClass}
+                    title={collapsed ? item.label : undefined}
+                  >
+                    <span className="shrink-0 text-slate-400">{item.icon}</span>
+                    {!collapsed && (
+                      <>
+                        <span className="flex-1">{item.label}</span>
+                        {/* External-link arrow — signals this opens a new tab */}
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-slate-300">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                        </svg>
+                      </>
+                    )}
+                  </a>
                 ) : (
                   <Link
                     href={hasChildren ? item.children![0].href : item.href}

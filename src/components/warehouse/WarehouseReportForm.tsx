@@ -13,8 +13,7 @@ interface Report {
   report_date: string;
   boxes_built: number;
   orders_packed: number;
-  boxes_closed: number;
-  shipments_booked: number;
+  walkin_pickup: number;
   notes: string | null;
   updated_at: string;
 }
@@ -27,8 +26,7 @@ export default function WarehouseReportForm() {
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
   const [boxesBuilt, setBoxesBuilt] = useState("");
   const [ordersPacked, setOrdersPacked] = useState("");
-  const [boxesClosed, setBoxesClosed] = useState("");
-  const [shipmentsBooked, setShipmentsBooked] = useState("");
+  const [walkinPickup, setWalkinPickup] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -66,15 +64,13 @@ export default function WarehouseReportForm() {
         setExistingReport(r);
         setBoxesBuilt(String(r.boxes_built));
         setOrdersPacked(String(r.orders_packed));
-        setBoxesClosed(String(r.boxes_closed));
-        setShipmentsBooked(String(r.shipments_booked));
+        setWalkinPickup(String(r.walkin_pickup ?? 0));
         setNotes(r.notes || "");
       } else {
         setExistingReport(null);
         setBoxesBuilt("");
         setOrdersPacked("");
-        setBoxesClosed("");
-        setShipmentsBooked("");
+        setWalkinPickup("");
         setNotes("");
       }
     } catch {
@@ -111,8 +107,7 @@ export default function WarehouseReportForm() {
           report_date: date,
           boxes_built: parseInt(boxesBuilt) || 0,
           orders_packed: parseInt(ordersPacked) || 0,
-          boxes_closed: parseInt(boxesClosed) || 0,
-          shipments_booked: parseInt(shipmentsBooked) || 0,
+          walkin_pickup: parseInt(walkinPickup) || 0,
           notes: notes.trim() || null,
         }),
       });
@@ -227,26 +222,13 @@ export default function WarehouseReportForm() {
           </div>
           <div>
             <label className="block text-sm font-medium text-sand-700 mb-1">
-              Boxes Closed
+              Walk-in / Pick-up
             </label>
             <input
               type="number"
               min="0"
-              value={boxesClosed}
-              onChange={(e) => setBoxesClosed(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-sand-700 mb-1">
-              Shipments Booked
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={shipmentsBooked}
-              onChange={(e) => setShipmentsBooked(e.target.value)}
+              value={walkinPickup}
+              onChange={(e) => setWalkinPickup(e.target.value)}
               placeholder="0"
               className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
             />
