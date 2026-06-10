@@ -15,7 +15,7 @@ import {
   Bar,
 } from "recharts";
 
-type Range = "today" | "7d" | "30d" | "90d" | "custom";
+type Range = "today" | "yesterday" | "7d" | "30d" | "90d" | "custom";
 type Tab = "overview" | "callbacks" | "call-log";
 
 interface Metrics {
@@ -35,6 +35,9 @@ interface Metrics {
   outbound_callbacks_made: number;
   first_time_callers: number;
   returning_callers: number;
+  total_minutes: number;
+  inbound_minutes: number;
+  outbound_minutes: number;
 }
 
 interface SummaryResponse {
@@ -119,6 +122,15 @@ function daysAgoStr(n: number) {
 
 function formatNumber(n: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(n * 100) / 100);
+}
+
+// Total minutes → "Xh Ym" (or "Ym" when under an hour).
+function formatMinutesLong(mins: number): string {
+  if (!mins || mins <= 0) return "0 min";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m} min`;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
 function formatShortDate(label: unknown) {
@@ -256,6 +268,7 @@ function ChangeBadge({
 
 const RANGE_OPTIONS: { value: Range; label: string; days: number }[] = [
   { value: "today", label: "Today", days: 0 },
+  { value: "yesterday", label: "Yesterday", days: 1 },
   { value: "7d", label: "7 Days", days: 7 },
   { value: "30d", label: "30 Days", days: 30 },
   { value: "90d", label: "90 Days", days: 90 },
@@ -445,8 +458,16 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   const [syncSchedule, setSyncSchedule] = useState<{ enabled: boolean; hours: number[]; timezone: string } | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
 
-  const from = range === "custom" ? customFrom : range === "today" ? todayStr() : daysAgoStr(RANGE_OPTIONS.find((r) => r.value === range)?.days ?? 7);
-  const to = range === "custom" ? customTo : todayStr();
+  const from =
+    range === "custom" ? customFrom
+    : range === "today" ? todayStr()
+    : range === "yesterday" ? daysAgoStr(1)
+    : daysAgoStr(RANGE_OPTIONS.find((r) => r.value === range)?.days ?? 7);
+  // "Yesterday" is a single calendar day, so its window ends yesterday too.
+  const to =
+    range === "custom" ? customTo
+    : range === "yesterday" ? daysAgoStr(1)
+    : todayStr();
 
   const loadSummary = useCallback(async () => {
     try {
@@ -926,6 +947,31 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
           </button>
         </div>
       </div>
+
+      {/* Total time on the phone — for the currently filtered period */}
+      {data?.current && (
+        <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4 flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <span className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">
+              Total Time on the Phone
+            </span>
+            <span className="text-2xl font-semibold text-sand-900">
+              {formatNumber(data.current.total_minutes)}
+              <span className="text-sm font-normal text-sand-400 ml-1">min</span>
+            </span>
+            <span className="text-sm text-sand-500">
+              {formatMinutesLong(data.current.total_minutes)}
+            </span>
+            {data.change?.total_minutes != null && (
+              <ChangeBadge value={data.change.total_minutes} />
+            )}
+          </div>
+          <div className="text-xs text-sand-400">
+            Inbound {formatNumber(data.current.inbound_minutes)} min &middot;{" "}
+            Outbound {formatNumber(data.current.outbound_minutes)} min
+          </div>
+        </div>
+      )}
 
       {/* Sync progress & status (admin only) */}
       {mounted && mode === "admin" && syncAllRunning && <SyncInProgress label="Syncing All (CIK + Grasshopper)" elapsed={syncAllElapsed} color="sand" />}

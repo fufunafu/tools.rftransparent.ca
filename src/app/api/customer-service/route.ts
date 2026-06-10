@@ -627,6 +627,7 @@ export async function GET(req: NextRequest) {
         avg_duration_inbound: pctChange(current.avg_duration_inbound, previous.avg_duration_inbound),
         avg_duration_outbound: pctChange(current.avg_duration_outbound, previous.avg_duration_outbound),
         outbound_callback_rate: pctChange(current.outbound_callback_rate, previous.outbound_callback_rate),
+        total_minutes: pctChange(current.total_minutes, previous.total_minutes),
       },
       dateRange: {
         current: { from, to },

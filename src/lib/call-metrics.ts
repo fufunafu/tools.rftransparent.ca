@@ -143,6 +143,11 @@ export function computeMetrics(records: CallRecord[]) {
     ? Math.round((responseTimes.length / unansweredCalls.length) * 1000) / 10
     : 0;
 
+  // Total time spent on the phone (all calls, inbound + outbound), in minutes.
+  const inboundMinutes = Math.round(inbound.reduce((s, r) => s + Number(r.duration_min || 0), 0));
+  const outboundMinutes = Math.round(outbound.reduce((s, r) => s + Number(r.duration_min || 0), 0));
+  const totalMinutes = inboundMinutes + outboundMinutes;
+
   return {
     total_calls: total,
     inbound_calls: inbound.length,
@@ -158,6 +163,9 @@ export function computeMetrics(records: CallRecord[]) {
     recovery_rate: recoveryRate,
     outbound_callback_rate: outboundCallbackRate,
     outbound_callbacks_made: responseTimes.length,
+    total_minutes: totalMinutes,
+    inbound_minutes: inboundMinutes,
+    outbound_minutes: outboundMinutes,
   };
 }
 
