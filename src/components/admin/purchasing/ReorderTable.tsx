@@ -36,7 +36,7 @@ function fmtCAD(n: number): string {
 
 export default function ReorderTable({ initialProducts }: Props) {
   const router = useRouter();
-  const [category, setCategory] = useState<Category | "all">("all");
+  const [category, setCategory] = useState<Category>("glass");
   const [showOk, setShowOk] = useState(false);
   const [search, setSearch] = useState("");
   // null = show all actionable statuses; otherwise pin to a single one.
@@ -61,7 +61,7 @@ export default function ReorderTable({ initialProducts }: Props) {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     return initialProducts.filter((p) => {
-      if (category !== "all" && p.category !== category) return false;
+      if (p.category !== category) return false;
       if (!showOk && p.sop_label === "ok") return false;
       if (statusFilter && p.sop_label !== statusFilter) return false;
       if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
@@ -133,7 +133,7 @@ export default function ReorderTable({ initialProducts }: Props) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["all", "glass", "hardware"] as const).map((c) => (
+          {(["glass", "hardware"] as const).map((c) => (
             <button key={c} onClick={() => setCategory(c)}
               className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>
               {c}

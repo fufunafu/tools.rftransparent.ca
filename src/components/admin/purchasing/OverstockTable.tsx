@@ -21,7 +21,7 @@ function daysUntilCapacity(p: ProductWithMetrics): number | null {
 }
 
 export default function OverstockTable({ initialProducts }: Props) {
-  const [category, setCategory] = useState<Category | "all">("all");
+  const [category, setCategory] = useState<Category>("glass");
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("overstock");
@@ -38,7 +38,7 @@ export default function OverstockTable({ initialProducts }: Props) {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = enriched.filter((p) => {
-      if (category !== "all" && p.category !== category) return false;
+      if (p.category !== category) return false;
       if (!showAll && p.overstock <= 0) return false;
       if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
       return true;
@@ -73,7 +73,7 @@ export default function OverstockTable({ initialProducts }: Props) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["all", "glass", "hardware"] as const).map((c) => (
+          {(["glass", "hardware"] as const).map((c) => (
             <button key={c} onClick={() => setCategory(c)}
               className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>{c}</button>
           ))}

@@ -67,7 +67,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   );
   const products = data?.products ?? initialProducts;
 
-  const [category, setCategory] = useState<Category | "all">("all");
+  const [category, setCategory] = useState<Category>("glass");
   const [height, setHeight] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sort_order");
@@ -95,7 +95,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = products.filter((p) => {
-      if (category !== "all" && p.category !== category) return false;
+      if (p.category !== category) return false;
       if (height !== "all" && heightBucket(p.height) !== height) return false;
       if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
       return true;
@@ -226,7 +226,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["all", "glass", "hardware"] as const).map((c) => (
+          {(["glass", "hardware"] as const).map((c) => (
             <button key={c} onClick={() => setCategory(c)}
               className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>{c}</button>
           ))}
