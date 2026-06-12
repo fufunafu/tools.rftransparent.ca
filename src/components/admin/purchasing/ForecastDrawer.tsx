@@ -322,6 +322,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                   <span><span className="inline-block w-3 border-t border-dashed border-violet-500 mr-1.5 align-middle" />Min stock ({fillPct}%)</span>
                 )}
               </div>
+              <CalcNote product={product} settings={settings} />
             </div>
           )}
           {arrivals.length > 0 && (
@@ -341,6 +342,84 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Step-by-step breakdown of how the Order point and Target-at-arrival
+// lines were computed for this SKU, shown under the chart for every
+// product (not just flagged ones).
+function CalcNote({
+  product,
+  settings,
+}: {
+  product: ProductWithMetrics;
+  settings: PurchasingSettings;
+}) {
+  const baseMonthly = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
+  const lead = settings.lead_time_days;
+  // reorder_point = restock_target + lead-time demand in the view, so the
+  // demand piece is recoverable exactly without redoing seasonality math.
+  const leadDemand = product.reorder_point - product.restock_target;
+  const monthName = new Date().toLocaleDateString("en-CA", { month: "long" });
+
+  const rows: Array<[string, string]> = [];
+  if (baseMonthly === 0) {
+    rows.push([
+      "Target at arrival",
+      product.category === "hardware"
+        ? "no sales history — kept at the 50-unit minimum"
+        : `no sales history — min stock floor: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(product.storage_capacity)} = ${fmtN(product.restock_target)}`,
+    ]);
+    rows.push([
+      "Order point",
+      `${fmtN(product.reorder_point)} — same as the target, since nothing sells during the lead time`,
+    ]);
+  } else {
+    const scaledMonthly = product.daily_sales * 30;
+    const factor = scaledMonthly / baseMonthly;
+    rows.push([
+      `Selling rate (${monthName})`,
+      `${baseMonthly.toFixed(1)}/mo average × ${factor.toFixed(2)} seasonality & growth ≈ ${scaledMonthly.toFixed(1)}/mo`,
+    ]);
+    rows.push([
+      `Sold during ${lead}-day lead time`,
+      `${scaledMonthly.toFixed(1)}/mo × ${lead}/30 ≈ ${fmtN(leadDemand)} units`,
+    ]);
+    if (product.category === "hardware") {
+      rows.push([
+        "Target at arrival",
+        `3 months of sales ≈ ${fmtN(product.restock_target)} (50-unit minimum)`,
+      ]);
+    } else {
+      const covered = leadDemand * (settings.restock_cover_pct / 100);
+      let detail = `${fmtN(settings.restock_cover_pct)}% of lead-time sales = ${fmtN(covered)}`;
+      if (product.restock_target > covered + 0.5) {
+        detail += ` → raised to the ${Math.round(settings.expected_fill * 100)}% min-stock floor of ${fmtN(product.restock_target)}`;
+      } else if (product.restock_target < covered - 0.5) {
+        detail += ` → capped at capacity ${fmtN(product.storage_capacity)}`;
+      }
+      rows.push(["Target at arrival", detail]);
+    }
+    rows.push([
+      "Order point",
+      `${fmtN(leadDemand)} sold in transit + ${fmtN(product.restock_target)} target ≈ ${fmtN(product.reorder_point)}`,
+    ]);
+  }
+
+  return (
+    <div className="mt-3 pt-3 border-t border-sand-100">
+      <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-1.5">
+        How the lines are calculated
+      </div>
+      <div className="space-y-1">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex gap-2 text-xs">
+            <span className="text-sand-500 w-48 shrink-0">{label}</span>
+            <span className="text-sand-700 tabular-nums">{value}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
