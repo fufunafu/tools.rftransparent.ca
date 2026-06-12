@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
-import { listProductsWithMetrics } from "@/lib/purchasing/queries";
+import {
+  getPurchasingSettings,
+  listProductsWithMetrics,
+} from "@/lib/purchasing/queries";
+import { getInventoryForecasts } from "@/lib/purchasing/forecast";
 import ReorderTable from "@/components/admin/purchasing/ReorderTable";
 
 export const metadata: Metadata = {
@@ -8,6 +12,16 @@ export const metadata: Metadata = {
 };
 
 export default async function PurchasingReorderPage() {
-  const products = await listProductsWithMetrics();
-  return <ReorderTable initialProducts={products} />;
+  const [products, forecasts, settings] = await Promise.all([
+    listProductsWithMetrics(),
+    getInventoryForecasts().catch(() => ({})),
+    getPurchasingSettings(),
+  ]);
+  return (
+    <ReorderTable
+      initialProducts={products}
+      initialForecasts={forecasts}
+      settings={settings}
+    />
+  );
 }

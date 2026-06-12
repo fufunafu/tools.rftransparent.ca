@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import {
   SOP_LABEL_DISPLAY,
   type Category,
+  type InventoryForecast,
   type OrderType,
   type ProductWithMetrics,
+  type PurchasingSettings,
   type SopLabel,
 } from "@/lib/purchasing/types";
+import ForecastDrawer from "./ForecastDrawer";
 
 const ACTIONABLE_STATUSES: SopLabel[] = [
   "reorder_plus_montreal",
@@ -16,7 +19,11 @@ const ACTIONABLE_STATUSES: SopLabel[] = [
   "reorder",
 ];
 
-interface Props { initialProducts: ProductWithMetrics[] }
+interface Props {
+  initialProducts: ProductWithMetrics[];
+  initialForecasts: Record<string, InventoryForecast>;
+  settings: PurchasingSettings;
+}
 
 const SOP_BADGE: Record<SopLabel, string> = {
   reorder_plus_montreal: "bg-red-50 text-red-700 border-red-200",
@@ -34,8 +41,9 @@ function fmtCAD(n: number): string {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
 }
 
-export default function ReorderTable({ initialProducts }: Props) {
+export default function ReorderTable({ initialProducts, initialForecasts, settings }: Props) {
   const router = useRouter();
+  const [forecastId, setForecastId] = useState<string | null>(null);
   const [category, setCategory] = useState<Category>("glass");
   const [showOk, setShowOk] = useState(false);
   const [search, setSearch] = useState("");
@@ -209,7 +217,13 @@ export default function ReorderTable({ initialProducts }: Props) {
               const lineValue = Number.isFinite(q) ? q * p.unit_cost_landed : 0;
               return (
                 <tr key={p.id}>
-                  <td className="px-3 py-2 font-mono text-xs">{p.sku}</td>
+                  <td className="px-3 py-2 font-mono text-xs">
+                    <span className="inline-flex items-center gap-1.5">
+                      {p.sku}
+                      <button type="button" onClick={() => setForecastId(p.id)} title="Projected inventory & how the order point was calculated"
+                        className="text-sand-400 hover:text-accent text-sm">📈</button>
+                    </span>
+                  </td>
                   <td className="px-3 py-2 text-sand-700">{p.name}</td>
                   <td className="px-3 py-2">
                     <span className={"inline-block px-2 py-0.5 rounded-md border text-[11px] " + (SOP_BADGE[p.sop_label] ?? "bg-sand-100 text-sand-600 border-sand-200")}>
@@ -294,6 +308,14 @@ export default function ReorderTable({ initialProducts }: Props) {
           {creating === "montreal" ? "Creating…" : "Create draft Montreal transfer"}
         </button>
       </div>
+      {forecastId && (() => {
+        const p = initialProducts.find((x) => x.id === forecastId);
+        if (!p) return null;
+        return (
+          <ForecastDrawer product={p} forecast={initialForecasts[forecastId] ?? null}
+            settings={settings} onClose={() => setForecastId(null)} />
+        );
+      })()}
     </div>
   );
 }
