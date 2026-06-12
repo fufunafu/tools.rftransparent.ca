@@ -27,24 +27,52 @@ export const maxDuration = 300;
 
 const STORES = getStores().map((s) => ({ id: s.id, label: s.label, shop_domain: s.store }));
 
+// All "today"/"yesterday" boundaries anchor to the business timezone (Montreal
+// / Eastern), NOT the server's UTC clock. On Vercel the server runs in UTC, so
+// d.setHours(0,…) would roll the day over at 8 PM Eastern and push the evening's
+// activity into "yesterday". `businessDayStart(n)` returns the UTC instant of
+// midnight, n days from today, in BUSINESS_TZ.
+const BUSINESS_TZ = "America/Toronto";
+
+function businessDayStart(offsetDays = 0): string {
+  const target = new Date(Date.now() + offsetDays * 86400_000);
+  // Calendar date (Y-M-D) as it reads in the business timezone.
+  const ymd = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BUSINESS_TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(target); // e.g. "2026-06-11"
+
+  const wallAsUTC = new Date(`${ymd}T00:00:00Z`).getTime();
+  // How far the business timezone sits from UTC at that wall time (handles DST).
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TZ,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(new Date(wallAsUTC));
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const easternAsUTC = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour % 24, +m.minute, +m.second);
+  const offsetMs = easternAsUTC - wallAsUTC;
+  return new Date(wallAsUTC - offsetMs).toISOString();
+}
+
 function todayStart() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return businessDayStart(0);
 }
 
 function yesterdayStart() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return businessDayStart(-1);
 }
 
 function tomorrowStart() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString();
+  return businessDayStart(1);
 }
 
 /** Resolve a ?range=1y|all param into a cutoff ISO timestamp, or null for "all time". */
