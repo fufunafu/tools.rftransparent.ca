@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { EmployeeTab } from "@/components/admin/KPIDashboard";
 
-type Period = "daily" | "weekly" | "monthly";
+type Period = "daily" | "yesterday" | "weekly" | "monthly" | "yearly";
 type Tab = "reports" | "fulfillment";
 
 interface Report {
@@ -44,8 +44,10 @@ interface DayData {
 
 const PERIOD_LABELS: Record<Period, string> = {
   daily: "Daily",
+  yesterday: "Yesterday",
   weekly: "Weekly",
   monthly: "Monthly",
+  yearly: "Yearly",
 };
 
 const STEP_COLORS = {
@@ -68,15 +70,22 @@ function getDateRange(period: Period, dateStr: string) {
   if (period === "daily") {
     from = d;
     to = d;
+  } else if (period === "yesterday") {
+    from = new Date(d);
+    from.setDate(d.getDate() - 1);
+    to = from;
   } else if (period === "weekly") {
     const day = d.getDay();
     from = new Date(d);
     from.setDate(d.getDate() - ((day + 6) % 7)); // Monday
     to = new Date(from);
     to.setDate(from.getDate() + 6); // Sunday
-  } else {
+  } else if (period === "monthly") {
     from = new Date(d.getFullYear(), d.getMonth(), 1);
     to = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  } else {
+    from = new Date(d.getFullYear(), 0, 1);
+    to = new Date(d.getFullYear(), 11, 31);
   }
 
   return {
@@ -225,7 +234,7 @@ export default function WarehouseDashboard() {
           {/* Controls */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-              {(["daily", "weekly", "monthly"] as Period[]).map((p) => (
+              {(["daily", "yesterday", "weekly", "monthly", "yearly"] as Period[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
