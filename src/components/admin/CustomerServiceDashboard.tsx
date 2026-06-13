@@ -110,14 +110,23 @@ interface CallbacksResponse {
   highPriority: number;
 }
 
+// Dates are Montreal (Eastern) calendar days, not UTC — otherwise after ~8 PM
+// EDT "today" would already roll to the next UTC date and the API would return
+// the wrong day's calls. en-CA formats as YYYY-MM-DD.
+const BUSINESS_TZ = "America/Toronto";
+const ymdFmt = new Intl.DateTimeFormat("en-CA", {
+  timeZone: BUSINESS_TZ,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return ymdFmt.format(new Date());
 }
 
 function daysAgoStr(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split("T")[0];
+  return ymdFmt.format(new Date(Date.now() - n * 86400000));
 }
 
 function formatNumber(n: number) {

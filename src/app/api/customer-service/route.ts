@@ -11,6 +11,33 @@ function toDateStr(d: Date) {
   return d.toISOString().split("T")[0];
 }
 
+// Call-date windows anchor to the business timezone (Montreal / Eastern), not
+// the server's UTC clock. A "YYYY-MM-DD" from the client is a Montreal calendar
+// day, so its DB bounds must be Montreal midnight → next Montreal midnight,
+// otherwise "Today" at 9 PM EDT would start at the wrong (UTC) instant.
+const BUSINESS_TZ = "America/Toronto";
+
+/** UTC instant of midnight (start of day) in BUSINESS_TZ for a YYYY-MM-DD. */
+function dayStartUTC(ymd: string): string {
+  const wallAsUTC = new Date(`${ymd}T00:00:00Z`).getTime();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: BUSINESS_TZ, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }).formatToParts(new Date(wallAsUTC));
+  const m: Record<string, string> = {};
+  for (const p of parts) m[p.type] = p.value;
+  const easternAsUTC = Date.UTC(+m.year, +m.month - 1, +m.day, +m.hour % 24, +m.minute, +m.second);
+  return new Date(wallAsUTC - (easternAsUTC - wallAsUTC)).toISOString();
+}
+
+/** Exclusive upper bound: Montreal midnight of the day AFTER ymd. */
+function dayEndUTC(ymd: string): string {
+  const next = new Date(`${ymd}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + 1);
+  return dayStartUTC(next.toISOString().slice(0, 10));
+}
+
 const STORES = [
   { id: "bc_transparent", label: "BC Transparent" },
   { id: "rf_transparent", label: "RF Transparent" },
@@ -27,8 +54,8 @@ async function fetchRecords(from: string, to: string, storeId: string, source?: 
       .from("call_records")
       .select("*")
       .eq("store_id", storeId)
-      .gte("call_start", from + "T00:00:00")
-      .lt("call_start", to + "T23:59:59")
+      .gte("call_start", dayStartUTC(from))
+      .lt("call_start", dayEndUTC(to))
       .order("call_start", { ascending: true })
       .range(offset, offset + pageSize - 1);
 
@@ -179,8 +206,8 @@ export async function GET(req: NextRequest) {
         .from("call_records")
         .select("id,call_start,from_number,to_number,direction,duration_min,endpoint,source", { count: "exact" })
         .eq("store_id", storeId)
-        .gte("call_start", from + "T00:00:00")
-        .lt("call_start", to + "T23:59:59")
+        .gte("call_start", dayStartUTC(from))
+        .lt("call_start", dayEndUTC(to))
         .order("call_start", { ascending: false })
         .range(offset, offset + pageSize - 1);
 
@@ -228,7 +255,7 @@ export async function GET(req: NextRequest) {
             .select("from_number")
             .eq("store_id", storeId)
             .eq("direction", "inbound")
-            .lt("call_start", from + "T00:00:00")
+            .lt("call_start", dayStartUTC(from))
             .in("from_number", inboundNumbers)
         : { data: [] };
       const priorLogSet = new Set((priorLogCallers ?? []).map((r) => r.from_number));
@@ -239,8 +266,8 @@ export async function GET(req: NextRequest) {
         .select("from_number")
         .eq("store_id", storeId)
         .eq("direction", "inbound")
-        .gte("call_start", from + "T00:00:00")
-        .lt("call_start", to + "T23:59:59");
+        .gte("call_start", dayStartUTC(from))
+        .lt("call_start", dayEndUTC(to));
       const callCountMap = new Map<string, number>();
       for (const r of callCounts ?? []) {
         callCountMap.set(r.from_number, (callCountMap.get(r.from_number) ?? 0) + 1);
@@ -374,7 +401,7 @@ export async function GET(req: NextRequest) {
           .select("from_number")
           .eq("store_id", storeId)
           .eq("direction", "inbound")
-          .lt("call_start", from + "T00:00:00")
+          .lt("call_start", dayStartUTC(from))
           .in("from_number", callbackNumbers.length > 0 ? callbackNumbers : [""]),
       ]);
 
@@ -597,7 +624,7 @@ export async function GET(req: NextRequest) {
         .select("from_number")
         .eq("store_id", storeId)
         .eq("direction", "inbound")
-        .lt("call_start", from + "T00:00:00")
+        .lt("call_start", dayStartUTC(from))
         .in("from_number", batch);
       if (priorBatch) {
         for (const r of priorBatch) priorSet.add(r.from_number);
