@@ -85,7 +85,6 @@ function seedLeads(): FollowUpLead[] {
       created_by_staff: b.created_by_staff,
       customer_orders_count: 0,
       last_invoice_sender: contributors[contributors.length - 1],
-      last_invoice_sent_at: createdAt,
       contributors,
     };
   });

@@ -89,10 +89,8 @@ export interface FollowUpLead {
   created_by_staff: string | null;
   customer_orders_count: number | null;
   // Everyone who created or invoiced the quote (parsed from the Shopify event
-  // timeline). last_invoice_sender drives Quotes-by-Staff attribution, and
-  // last_invoice_sent_at drives which time window the quote falls into.
+  // timeline). last_invoice_sender drives Quotes-by-Staff attribution.
   last_invoice_sender: string | null;
-  last_invoice_sent_at: string | null;
   contributors: string[] | null;
 }
 
@@ -197,12 +195,10 @@ function extractCreator(draft: ShopifyDraftNode): string | null {
  */
 function extractContributors(draft: ShopifyDraftNode): {
   lastInvoiceSender: string | null;
-  lastInvoiceSentAt: string | null;
   contributors: string[];
 } {
   const events = draft.events?.edges ?? []; // CREATED_AT ascending (oldest first)
   let lastInvoiceSender: string | null = null;
-  let lastInvoiceSentAt: string | null = null;
   const contributors: string[] = [];
   const seen = new Set<string>();
   const add = (raw: string | null | undefined) => {
@@ -217,12 +213,7 @@ function extractContributors(draft: ShopifyDraftNode): {
     const created = node.message.match(/^(.+?) created this draft order\.?$/);
     if (created) { add(created[1]); continue; }
     const invoiced = node.message.match(/^(.+?) sent an invoice to /);
-    if (invoiced) {
-      lastInvoiceSender = invoiced[1].trim();
-      lastInvoiceSentAt = node.createdAt; // ascending order, so this lands on the latest
-      add(invoiced[1]);
-      continue;
-    }
+    if (invoiced) { lastInvoiceSender = invoiced[1].trim(); add(invoiced[1]); continue; }
   }
 
   // Converted drafts also expose the closing staff member on the linked order.
@@ -231,7 +222,7 @@ function extractContributors(draft: ShopifyDraftNode): {
     add([staff.firstName, staff.lastName].filter(Boolean).join(" "));
   }
 
-  return { lastInvoiceSender, lastInvoiceSentAt, contributors };
+  return { lastInvoiceSender, contributors };
 }
 
 const MAX_PAGES = 80;
@@ -393,7 +384,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         });
       } else {
@@ -415,7 +405,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         });
       }
@@ -431,7 +420,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
@@ -463,7 +451,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `update lead ${existing.id}`, error);
@@ -526,7 +513,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
@@ -563,7 +549,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
         created_by_staff: createdBy,
         customer_orders_count: ordersCount,
         last_invoice_sender: contrib.lastInvoiceSender,
-        last_invoice_sent_at: contrib.lastInvoiceSentAt,
         contributors: contrib.contributors,
       });
     } else {
@@ -574,7 +559,6 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
           customer_orders_count: ordersCount,
           last_synced_at: now,
           last_invoice_sender: contrib.lastInvoiceSender,
-          last_invoice_sent_at: contrib.lastInvoiceSentAt,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `backfill lead ${existing.id}`, error);

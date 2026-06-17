@@ -392,12 +392,8 @@ export async function GET(req: NextRequest) {
             .select("created_by_staff, last_invoice_sender, lead_status, quote_amount")
             .eq("store_id", storeId)
             .not("shopify_status", "in", "(OPEN,DELETED)")
-            // Window by when the quote was last sent (fall back to creation),
-            // matching the RPC's coalesce(last_invoice_sent_at, shopify_created_at).
-            .or(
-              `and(last_invoice_sent_at.gte.${start},last_invoice_sent_at.lt.${today}),` +
-              `and(last_invoice_sent_at.is.null,shopify_created_at.gte.${start},shopify_created_at.lt.${today})`,
-            )
+            .gte("shopify_created_at", start)
+            .lt("shopify_created_at", today)
             .range(from, from + PAGE - 1);
           if (error) throw new Error(error.message);
           if (!data || data.length === 0) break;
@@ -489,7 +485,6 @@ export async function GET(req: NextRequest) {
       const PAGE = 1000;
       const rows: {
         shopify_created_at: string | null;
-        last_invoice_sent_at: string | null;
         closed_at: string | null;
         lead_status: string;
         quote_amount: number;
@@ -498,7 +493,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; ; from += PAGE) {
         let q = supabase
           .from("followup_leads")
-          .select("shopify_created_at, last_invoice_sent_at, closed_at, lead_status, quote_amount")
+          .select("shopify_created_at, closed_at, lead_status, quote_amount")
           .eq("store_id", storeId)
           .not("shopify_status", "in", "(OPEN,DELETED)");
         if (cutoff) q = q.gte("shopify_created_at", cutoff);
@@ -534,9 +529,7 @@ export async function GET(req: NextRequest) {
       // Monthly bucketing (same shape as the `analytics` view).
       const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
       for (const r of rows) {
-        // Bucket by last-sent date (fall back to creation/close) so the trend
-        // aligns with the last-sender windowing in Quotes-by-Staff.
-        const dateStr = r.last_invoice_sent_at || r.shopify_created_at || r.closed_at;
+        const dateStr = r.shopify_created_at || r.closed_at;
         if (!dateStr) continue;
         const month = dateStr.slice(0, 7);
         const entry = monthMap.get(month) ?? { total: 0, won: 0, lost: 0, quoted_value: 0, won_value: 0 };
