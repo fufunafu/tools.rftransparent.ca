@@ -55,6 +55,8 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   // Required acknowledgement when closing as Lost / Too expensive — pushes the
   // rep to either try a discount first, or confirm a discount isn't appropriate.
   const [discountAck, setDiscountAck] = useState<"" | "declined" | "not_appropriate">("");
+  // Optional: which competitor the customer went with (only when lost to one).
+  const [competitor, setCompetitor] = useState("");
 
   const nearMax = lead.followup_count >= MAX_ATTEMPTS - 1;
   const atMax = lead.followup_count >= MAX_ATTEMPTS;
@@ -63,6 +65,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   const isLost = outcome === "lost";
   const isFutureProject = outcome === "future_project";
   const isTooExpensive = isLost && closeReason === "Too expensive";
+  const isWentWithCompetitor = isLost && closeReason === "Went with competitor";
 
   const canSubmit =
     outcome !== "" &&
@@ -77,10 +80,16 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
     if (!canSubmit || !outcome) return;
     setSubmitting(true);
     try {
+      // Record the competitor (if given) at the top of the notes so it's kept
+      // in the lead's follow-up history.
+      const finalNotes =
+        isWentWithCompetitor && competitor.trim()
+          ? `Competitor: ${competitor.trim()}\n${notes.trim()}`.trim()
+          : notes.trim();
       await onSubmit({
         lead_id: lead.id,
         outcome,
-        notes: notes.trim() || undefined,
+        notes: finalNotes || undefined,
         close_reason: isLost ? closeReason : undefined,
         custom_date: isFutureProject ? customDate : undefined,
       });
@@ -169,6 +178,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                       onChange={() => {
                         setCloseReason(reason);
                         if (reason !== "Too expensive") setDiscountAck("");
+                        if (reason !== "Went with competitor") setCompetitor("");
                       }}
                       className="text-blue-600"
                     />
@@ -231,6 +241,23 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                 onChange={(e) => setCustomDate(e.target.value)}
                 min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
                 className="w-full px-3 py-2 border border-sand-200 rounded-lg text-sm text-sand-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </div>
+          )}
+
+          {/* Which competitor — optional, only when lost to a competitor */}
+          {isWentWithCompetitor && (
+            <div>
+              <label className="block text-sm font-medium text-sand-700 mb-2">
+                Which competitor?{" "}
+                <span className="text-sand-400 font-normal">(optional)</span>
+              </label>
+              <input
+                type="text"
+                value={competitor}
+                onChange={(e) => setCompetitor(e.target.value)}
+                placeholder="e.g. competitor name, if known"
+                className="w-full rounded-lg border border-sand-200 px-3 py-2 text-sm text-sand-900 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
           )}
