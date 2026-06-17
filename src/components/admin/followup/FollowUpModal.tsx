@@ -53,8 +53,8 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   const [customDate, setCustomDate] = useState("");
   const [submitting, setSubmitting] = useState(false);
   // Required acknowledgement when closing as Lost / Too expensive — pushes the
-  // rep to try a discount before giving up.
-  const [discountOffered, setDiscountOffered] = useState(false);
+  // rep to either try a discount first, or confirm a discount isn't appropriate.
+  const [discountAck, setDiscountAck] = useState<"" | "declined" | "not_appropriate">("");
 
   const nearMax = lead.followup_count >= MAX_ATTEMPTS - 1;
   const atMax = lead.followup_count >= MAX_ATTEMPTS;
@@ -69,7 +69,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
     (!requiresNotes || notes.trim()) &&
     (!isLost || closeReason) &&
     (!isLost || notes.trim().length >= 50) &&
-    (!isTooExpensive || discountOffered) &&
+    (!isTooExpensive || discountAck !== "") &&
     (!isFutureProject || customDate) &&
     !submitting;
 
@@ -168,7 +168,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                       checked={closeReason === reason}
                       onChange={() => {
                         setCloseReason(reason);
-                        if (reason !== "Too expensive") setDiscountOffered(false);
+                        if (reason !== "Too expensive") setDiscountAck("");
                       }}
                       className="text-blue-600"
                     />
@@ -187,17 +187,31 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
               {isTooExpensive && (
                 <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 space-y-2">
                   <p className="text-sm text-amber-800">
-                    Hey — have you tried offering this customer a 5% discount before marking them lost?
+                    Hey — have you tried offering this customer a 5% discount before marking them lost?{" "}
+                    <span className="text-red-500">*</span>
                   </p>
                   <label className="flex items-start gap-2 cursor-pointer">
                     <input
-                      type="checkbox"
-                      checked={discountOffered}
-                      onChange={(e) => setDiscountOffered(e.target.checked)}
+                      type="radio"
+                      name="discount-ack"
+                      checked={discountAck === "declined"}
+                      onChange={() => setDiscountAck("declined")}
                       className="mt-0.5 text-blue-600"
                     />
                     <span className="text-sm text-amber-900">
-                      I offered a discount and they still declined. <span className="text-red-500">*</span>
+                      I offered a discount and they still declined.
+                    </span>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="discount-ack"
+                      checked={discountAck === "not_appropriate"}
+                      onChange={() => setDiscountAck("not_appropriate")}
+                      className="mt-0.5 text-blue-600"
+                    />
+                    <span className="text-sm text-amber-900">
+                      It&apos;s not appropriate to offer a discount at this time.
                     </span>
                   </label>
                 </div>
