@@ -12,7 +12,7 @@ import {
 } from "recharts";
 import { EmployeeTab } from "@/components/admin/KPIDashboard";
 
-type Period = "daily" | "yesterday" | "weekly" | "monthly" | "yearly";
+type Period = "daily" | "yesterday" | "weekly" | "last_week" | "monthly" | "yearly";
 type Tab = "reports" | "fulfillment";
 
 interface Report {
@@ -46,6 +46,7 @@ const PERIOD_LABELS: Record<Period, string> = {
   daily: "Daily",
   yesterday: "Yesterday",
   weekly: "Weekly",
+  last_week: "Last Week",
   monthly: "Monthly",
   yearly: "Yearly",
 };
@@ -80,6 +81,13 @@ function getDateRange(period: Period, dateStr: string) {
     from.setDate(d.getDate() - ((day + 6) % 7)); // Monday
     to = new Date(from);
     to.setDate(from.getDate() + 6); // Sunday
+  } else if (period === "last_week") {
+    // Monday–Sunday of the week BEFORE the one containing the selected date.
+    const day = d.getDay();
+    from = new Date(d);
+    from.setDate(d.getDate() - ((day + 6) % 7) - 7); // Monday of last week
+    to = new Date(from);
+    to.setDate(from.getDate() + 6); // Sunday of last week
   } else if (period === "monthly") {
     from = new Date(d.getFullYear(), d.getMonth(), 1);
     to = new Date(d.getFullYear(), d.getMonth() + 1, 0);
@@ -234,7 +242,7 @@ export default function WarehouseDashboard() {
           {/* Controls */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-              {(["daily", "yesterday", "weekly", "monthly", "yearly"] as Period[]).map((p) => (
+              {(["daily", "yesterday", "weekly", "last_week", "monthly", "yearly"] as Period[]).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPeriod(p)}
