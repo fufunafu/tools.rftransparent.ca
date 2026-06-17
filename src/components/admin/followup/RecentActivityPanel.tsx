@@ -50,7 +50,7 @@ export default function RecentActivityPanel({
   onDrillDown,
 }: {
   store: string;
-  onDrillDown?: (loggedBy: string, kind: ActivityDrillKind) => void;
+  onDrillDown?: (loggedBy: string, kind: ActivityDrillKind, days: string) => void;
 }) {
   const [range, setRange] = useState<RangeValue>("7");
   const [data, setData] = useState<ApiResponse | null>(null);
@@ -148,7 +148,7 @@ export default function RecentActivityPanel({
                 const drill = (kind: ActivityDrillKind, count: number, className: string) =>
                   onDrillDown && count > 0 ? (
                     <button
-                      onClick={() => onDrillDown(s.email, kind)}
+                      onClick={() => onDrillDown(s.email, kind, range)}
                       className={`${className} hover:underline underline-offset-2 cursor-pointer`}
                     >
                       {count}

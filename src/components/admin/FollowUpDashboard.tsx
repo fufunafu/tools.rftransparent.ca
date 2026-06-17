@@ -398,6 +398,9 @@ export default function FollowUpDashboard({
   // staff member's logs, optionally narrowed by outcome bucket.
   const [addressedLoggedBy, setAddressedLoggedBy] = useState<string | null>(null);
   const [addressedOutcome, setAddressedOutcome] = useState<"won" | "lost" | "ongoing" | null>(null);
+  // Which Recent Activity window the drill came from (today/yesterday/7/14/30/all),
+  // so the leads shown match the follow-ups that were counted there.
+  const [addressedDays, setAddressedDays] = useState<string>("today");
   // "1y" = last 12 months (default — hides legacy Unknowns where Shopify has aged out
   // the creation event). "all" = every lead ever.
   const [timeRange, setTimeRange] = useState<"1y" | "all">("1y");
@@ -442,13 +445,17 @@ export default function FollowUpDashboard({
     filter === "addressed_today" && addressedOutcome
       ? `&outcome=${addressedOutcome}`
       : "";
+  const addressedDaysParam =
+    filter === "addressed_today" && addressedLoggedBy
+      ? `&addressed_days=${addressedDays}`
+      : "";
 
   // summaryUrl is computed unconditionally (no `mounted` gate) so the server-rendered
   // HTML can use `initialSummary` as fallback data. Other URLs stay gated on mounted —
   // they don't have fallbacks and avoiding an extra fetch on hydration is cheap.
   const summaryUrl = `/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`;
   const leadsUrl = mounted
-    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${loggedByParam}${outcomeParam}${rangeParam}`
+    ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${loggedByParam}${outcomeParam}${addressedDaysParam}${rangeParam}`
     : null;
   const configUrl = mounted
     ? `/api/customer-service/follow-up?view=config&store=${store}`
@@ -904,10 +911,11 @@ export default function FollowUpDashboard({
           {/* Recent follow-up activity by staff */}
           <RecentActivityPanel
             store={store}
-            onDrillDown={(loggedBy, kind) => {
+            onDrillDown={(loggedBy, kind, days) => {
               setFilter("addressed_today");
               setAddressedLoggedBy(loggedBy);
               setAddressedOutcome(kind === "all" ? null : kind);
+              setAddressedDays(days);
               // These supersede the existing creator / status drills.
               setStaffFilter(null);
               setLeadStatusFilter(null);
@@ -940,7 +948,13 @@ export default function FollowUpDashboard({
           {filter === "addressed_today" && addressedLoggedBy && (
             <div className="flex items-center gap-2 px-4 py-2.5 bg-emerald-50 border border-emerald-200 rounded-lg">
               <span className="text-sm text-emerald-800">
-                Today&apos;s
+                {addressedDays === "today"
+                  ? "Today's"
+                  : addressedDays === "yesterday"
+                  ? "Yesterday's"
+                  : addressedDays === "all"
+                  ? "All-time"
+                  : `Last ${addressedDays} days'`}
                 {addressedOutcome === "won" && " won"}
                 {addressedOutcome === "lost" && " lost"}
                 {addressedOutcome === "ongoing" && " open"}

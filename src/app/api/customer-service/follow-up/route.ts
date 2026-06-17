@@ -213,15 +213,34 @@ export async function GET(req: NextRequest) {
       if (filter === "addressed_today") {
         const loggedByFilter = req.nextUrl.searchParams.get("logged_by");
         const outcomeFilter = req.nextUrl.searchParams.get("outcome");
+        // Window the logs to match the Recent Activity panel's range, so drilling
+        // from a 7d/14d/30d/All view shows the leads worked in *that* window — not
+        // just today. Mirrors recent_activity's windowing. Defaults to today.
+        const addressedDays = req.nextUrl.searchParams.get("addressed_days");
+        let addrStart: string | null = today;
+        let addrEnd: string | null = tomorrow;
+        if (addressedDays === "all") {
+          addrStart = null;
+          addrEnd = null;
+        } else if (addressedDays === "yesterday") {
+          addrStart = yesterdayStart();
+          addrEnd = today;
+        } else if (addressedDays && addressedDays !== "today") {
+          const n = parseInt(addressedDays, 10);
+          if (Number.isFinite(n)) {
+            addrStart = new Date(Date.now() - Math.max(1, n) * 86400_000).toISOString();
+            addrEnd = null; // up to now
+          }
+        }
 
         let logQ = supabase
           .from("followup_logs")
           .select("lead_id, created_at, followup_leads!inner(store_id)")
           .eq("followup_leads.store_id", storeId)
-          .gte("created_at", today)
-          .lt("created_at", tomorrow)
           .neq("logged_by", "system")
           .order("created_at", { ascending: false });
+        if (addrStart) logQ = logQ.gte("created_at", addrStart);
+        if (addrEnd) logQ = logQ.lt("created_at", addrEnd);
 
         // Case-insensitive: the Recent Activity panel lowercases emails when
         // bucketing per-staff, so the drill-down always sends a lowercase
