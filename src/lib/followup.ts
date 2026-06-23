@@ -29,7 +29,7 @@ export const FOLLOWUP_CATEGORIES: Record<string, {
   future_project: { label: "Future Project", followupDays: null, color: "purple", terminal: false, requiresNotes: true  },
   no_answer:      { label: "No Answer",      followupDays: 2,    color: "gray",   terminal: false, requiresNotes: false },
   lost:           { label: "Lost",           followupDays: null, color: "slate",  terminal: true,  requiresNotes: true  },
-  duplicate:      { label: "Duplicate",      followupDays: null, color: "slate",  terminal: true,  requiresNotes: false },
+  duplicate:      { label: "Duplicate",      followupDays: null, color: "slate",  terminal: true,  requiresNotes: true  },
   won:            { label: "Won",            followupDays: null, color: "green",  terminal: true,  requiresNotes: false },
 };
 

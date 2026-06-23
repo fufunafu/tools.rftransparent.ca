@@ -269,6 +269,9 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
               {outcome === "considering" && (
                 <span className="text-sand-400 font-normal"> — what are they considering?</span>
               )}
+              {outcome === "duplicate" && (
+                <span className="text-sand-400 font-normal"> — which order(s) is this a duplicate of? Give the order number(s).</span>
+              )}
             </label>
             <textarea
               value={notes}
@@ -276,6 +279,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
               placeholder={
                 outcome === "considering" ? "e.g., Needs to discuss with spouse, comparing materials..."
                 : outcome === "lost" ? "Explain why the lead was lost..."
+                : outcome === "duplicate" ? "e.g., Duplicate of #D1234 (same customer/project)"
                 : "Optional notes about this follow-up..."
               }
               rows={3}
