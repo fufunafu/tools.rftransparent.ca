@@ -74,11 +74,13 @@ function LeadDetailPanel({
   shopDomain,
   onClose,
   onLogFollowUp,
+  onRequote,
 }: {
   lead: FollowUpLead;
   shopDomain: string;
   onClose: () => void;
   onLogFollowUp: () => void;
+  onRequote: () => void;
 }) {
   const { data: logsData } = useSWR<{ logs: FollowUpLog[] }>(
     `/api/customer-service/follow-up?view=logs&lead_id=${lead.id}`
@@ -215,15 +217,29 @@ function LeadDetailPanel({
             </div>
           )}
 
-          {/* Action */}
-          {!lead.closed_at && (
+          {/* Actions */}
+          <div className="space-y-2">
+            {!lead.closed_at && (
+              <button
+                onClick={onLogFollowUp}
+                className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                Log Follow-up
+              </button>
+            )}
+            {/* Re-Quote: refresh an existing quote (new measurements) or revive a
+                lost lead that came back — resets the follow-up without making a
+                new quote. */}
             <button
-              onClick={onLogFollowUp}
-              className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={onRequote}
+              className="w-full py-2.5 border border-sand-300 text-sand-700 text-sm font-medium rounded-lg hover:bg-sand-50 transition-colors flex items-center justify-center gap-1.5"
             >
-              Log Follow-up
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-4 h-4">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+              {lead.closed_at ? "Re-Quote (reopen & reset follow-up)" : "Re-Quote (reset follow-up)"}
             </button>
-          )}
+          </div>
 
           {/* Follow-up Timeline */}
           <div>
@@ -581,6 +597,28 @@ export default function FollowUpDashboard({
     if (json.status !== "success") throw new Error(json.error);
     setModalLead(null);
     invalidateAfterLeadMutation();
+  };
+
+  // Re-Quote: reset the follow-up for an existing quote (new measurements) or
+  // revive a lost lead that came back — without creating a new quote.
+  const handleRequote = async (lead: FollowUpLead) => {
+    const verb = lead.closed_at ? "reopen this lead and reset its follow-up" : "reset the follow-up for this quote";
+    if (!window.confirm(`Re-quote ${lead.draft_name}? This will ${verb}, re-date it, and reschedule the first follow-up.`)) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=requote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_id: lead.id }),
+      });
+      const json = await res.json();
+      if (json.status !== "success") throw new Error(json.error);
+      setDetailLead(null);
+      invalidateAfterLeadMutation();
+    } catch (e) {
+      alert(`Re-quote failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
   };
 
   const handleBulkClose = async (leadIds: string[], reason: string) => {
@@ -1071,6 +1109,7 @@ export default function FollowUpDashboard({
             setModalLead(detailLead);
             setDetailLead(null);
           }}
+          onRequote={() => handleRequote(detailLead)}
         />
       )}
 

@@ -70,7 +70,7 @@ function getSortValue(lead: FollowUpLead, key: SortKey): string | number {
     case "status": return lead.lead_status;
     case "due": return lead.next_followup_at || "9999";
     case "attempts": return lead.followup_count;
-    case "quoted": return lead.shopify_created_at || lead.created_at;
+    case "quoted": return lead.requoted_at || lead.shopify_created_at || lead.created_at;
     // Sort unknowns (null) last regardless of direction by parking them above any real count.
     case "orders": return lead.customer_orders_count ?? Number.MAX_SAFE_INTEGER;
   }
@@ -365,7 +365,17 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                         <span className="text-sand-700">{lead.customer_orders_count}</span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sand-500">{formatDate(lead.shopify_created_at || lead.created_at)}</td>
+                    <td className="px-4 py-3 text-sand-500 whitespace-nowrap">
+                      {formatDate(lead.requoted_at || lead.shopify_created_at || lead.created_at)}
+                      {lead.requoted_at && (
+                        <span
+                          title={`Re-quoted ${formatDate(lead.requoted_at)} (originally ${formatDate(lead.shopify_created_at || lead.created_at)})`}
+                          className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-600 text-[10px] font-medium cursor-help"
+                        >
+                          re-quoted
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       {!lead.closed_at && (
                         <button

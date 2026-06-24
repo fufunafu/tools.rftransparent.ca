@@ -889,6 +889,58 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", lead: updatedLead });
     }
 
+    // ── Re-quote: reset the follow-up clock without creating a new quote ──
+    // Used when an existing quote changes (e.g. new measurements) or a lead that
+    // was lost to unresponsiveness comes back. Resets the follow-up counter,
+    // reschedules the first follow-up, reopens the lead if it was closed, and
+    // stamps requoted_at so it can show the re-quote date.
+    if (action === "requote") {
+      const body = await req.json();
+      const { lead_id } = body as { lead_id: string };
+      if (!lead_id) {
+        return NextResponse.json({ error: "lead_id required" }, { status: 400 });
+      }
+
+      const supabase = getSupabase();
+      const now = new Date().toISOString();
+      const storeDays = await getFollowupDaysForStore(storeId);
+      const nextFollowup = computeNextFollowup("new", storeDays);
+
+      const { data: updatedLead, error: updateError } = await supabase
+        .from("followup_leads")
+        .update({
+          lead_status: "new",
+          followup_count: 0,
+          next_followup_at: nextFollowup,
+          closed_at: null,
+          close_reason: null,
+          updated_at: now,
+        })
+        .eq("id", lead_id)
+        .select()
+        .single();
+      if (updateError) throw new Error(updateError.message);
+
+      // Best-effort date stamp — the requoted_at column is optional. If the
+      // migration hasn't run yet this errors silently; the reset above still works.
+      const { error: stampErr } = await supabase
+        .from("followup_leads")
+        .update({ requoted_at: now })
+        .eq("id", lead_id);
+      if (stampErr) console.warn("[Follow-up requote] requoted_at not stamped:", stampErr.message);
+
+      // Record it in the lead's history.
+      await supabase.from("followup_logs").insert({
+        lead_id,
+        outcome: "new",
+        notes: "Re-quoted — follow-up reset and quote re-dated.",
+        logged_by: loggedBy,
+      });
+
+      revalidateTag(`cs:followup:${storeId}`, "max");
+      return NextResponse.json({ status: "success", lead: updatedLead });
+    }
+
     // ── Bulk close leads ──
     if (action === "bulk_close") {
       const body = await req.json();

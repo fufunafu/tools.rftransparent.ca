@@ -92,6 +92,10 @@ export interface FollowUpLead {
   // timeline). last_invoice_sender drives Quotes-by-Staff attribution.
   last_invoice_sender: string | null;
   contributors: string[] | null;
+  // Set by the Re-Quote action when an existing quote is refreshed (new
+  // measurements, or a lost lead that came back). Optional — populated once the
+  // requoted_at migration is applied.
+  requoted_at?: string | null;
 }
 
 export interface FollowUpLog {
