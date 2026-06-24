@@ -96,6 +96,10 @@ export interface FollowUpLead {
   // measurements, or a lost lead that came back). Optional — populated once the
   // requoted_at migration is applied.
   requoted_at?: string | null;
+  // Set when staff dismiss this lead's email group as "not a duplicate" in the
+  // Duplicates tab. Optional — populated once migration 056 is applied.
+  dup_dismissed_at?: string | null;
+  dup_dismissed_by?: string | null;
 }
 
 export interface FollowUpLog {
@@ -137,11 +141,11 @@ interface DraftEdge {
   cursor: string;
 }
 
-function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor?: string) {
+function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor?: string, dateField = "created_at") {
   const after = cursor ? `, after: "${cursor}"` : "";
   return `
     query {
-      draftOrders(first: 250, sortKey: ID, reverse: true, query: "created_at:>='${dateFilter}' AND ${statusFilter}"${after}) {
+      draftOrders(first: 250, sortKey: ID, reverse: true, query: "${dateField}:>='${dateFilter}' AND ${statusFilter}"${after}) {
         edges {
           node {
             id name createdAt status
@@ -235,6 +239,7 @@ async function fetchDraftsForSync(
   storeId: string,
   fromDate: string,
   statusFilter: string,
+  dateField = "created_at",
 ): Promise<ShopifyDraftNode[]> {
   const allDrafts: ShopifyDraftNode[] = [];
   let cursor: string | undefined;
@@ -246,7 +251,7 @@ async function fetchDraftsForSync(
       draftOrders: { edges: DraftEdge[]; pageInfo: { hasNextPage: boolean } };
     }>(
       storeId,
-      makeFollowUpDraftQuery(fromDate, statusFilter, cursor),
+      makeFollowUpDraftQuery(fromDate, statusFilter, cursor, dateField),
       undefined,
       { app: "quotation" }, // Quotation app has read_users, required for events + staffMember
     );
@@ -294,7 +299,29 @@ async function runWithConcurrency(
   }
 }
 
-export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResult> {
+// How far back an incremental sync looks. A stateless lookback buffer (rather
+// than a stored cursor) that tolerates skipped/overlapping timer ticks — every
+// write is an idempotent upsert or no-op update, so re-pulling a draft we
+// already have is harmless.
+const INCREMENTAL_LOOKBACK_MS = 10 * 60 * 1000;
+
+/**
+ * Sync draft orders from Shopify into followup_leads.
+ *
+ * Full mode (default): pulls every INVOICE_SENT + COMPLETED draft all-time and
+ * runs stale detection. Heavy (30–60s) — used by the daily cron and the manual
+ * "Sync from Shopify" button.
+ *
+ * Incremental mode ({ incremental: true }): pulls only drafts whose `updated_at`
+ * falls in the last few minutes, loads just the matching DB rows, and skips
+ * stale detection (which needs the full draft list to know what's missing).
+ * Cheap enough to run on a short client-side timer for near-live refresh.
+ */
+export async function syncDraftOrdersForStore(
+  storeId: string,
+  opts: { incremental?: boolean } = {},
+): Promise<SyncResult> {
+  const incremental = opts.incremental ?? false;
   const supabase = getSupabase();
   const result: SyncResult = {
     new_leads: 0,
@@ -309,8 +336,12 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   const storeDays = await getFollowupDaysForStore(storeId);
   const newLeadDays = storeDays["new"] ?? DEFAULT_FOLLOWUP_DAYS["new"] ?? 3;
 
-  // All-time sync — Shopify paginates up to 20,000 records which is plenty
-  const fromDateStr = "2020-01-01";
+  // Full sync scans all-time (Shopify paginates up to 20,000 records, plenty);
+  // incremental scans only drafts changed in the recent lookback window.
+  const dateField = incremental ? "updated_at" : "created_at";
+  const fromDateStr = incremental
+    ? new Date(Date.now() - INCREMENTAL_LOOKBACK_MS).toISOString()
+    : "2020-01-01";
 
   // System/placeholder emails that should never appear as leads
   const SKIP_EMAILS = new Set(["application@gmail.com"]);
@@ -318,14 +349,36 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   // 1. Fetch only INVOICE_SENT drafts — open drafts are unsent works-in-progress.
   //    Filter out system emails before building the ID set so stale detection
   //    will later mark any existing DB records with those emails as DELETED.
-  const shopifyDrafts = (await fetchDraftsForSync(storeId, fromDateStr, "status:invoice_sent"))
+  const shopifyDrafts = (await fetchDraftsForSync(storeId, fromDateStr, "status:invoice_sent", dateField))
     .filter((d) => !SKIP_EMAILS.has((d.customer?.email ?? "").toLowerCase()));
   const shopifyDraftIds = new Set(shopifyDrafts.map((d) => d.id));
 
-  // 2. Get existing leads for this store — paginate in 1000-row pages to
-  //    bypass PostgREST's server-side db-max-rows cap (client .limit() can't exceed it)
+  // Incremental mode fetches the COMPLETED drafts once here (to scope the
+  // existing-rows load) and reuses them in step 4, instead of querying Shopify
+  // twice on every timer tick. Full mode fetches them lazily in step 4.
+  let completedDraftsPrefetched: ShopifyDraftNode[] | null = null;
+
+  // 2. Get existing leads. Full sync loads every row for the store (needed for
+  //    stale detection); incremental loads only the rows matching the drafts we
+  //    just fetched, which is far cheaper.
   const existingLeads: { id: string; shopify_draft_id: string; lead_status: string; shopify_status: string }[] = [];
-  {
+  if (incremental) {
+    // The completed-drafts pass (step 4) needs the matching rows too, so load
+    // for both the invoice_sent and completed draft IDs.
+    completedDraftsPrefetched = await fetchDraftsForSync(storeId, fromDateStr, "status:completed", dateField);
+    const wantedIds = Array.from(new Set([...shopifyDraftIds, ...completedDraftsPrefetched.map((d) => d.id)]));
+    const PAGE = 200;
+    for (let i = 0; i < wantedIds.length; i += PAGE) {
+      const { data } = await supabase
+        .from("followup_leads")
+        .select("id, shopify_draft_id, lead_status, shopify_status")
+        .eq("store_id", storeId)
+        .in("shopify_draft_id", wantedIds.slice(i, i + PAGE));
+      if (data) existingLeads.push(...data);
+    }
+  } else {
+    // Paginate in 1000-row pages to bypass PostgREST's server-side db-max-rows
+    // cap (client .limit() can't exceed it).
     const PAGE = 1000;
     let from = 0;
     while (true) {
@@ -486,8 +539,10 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   // Run updates with a small concurrency window (see WRITE_CONCURRENCY).
   await runWithConcurrency(updateFns, WRITE_CONCURRENCY);
 
-  // 4. Detect completions — fetch COMPLETED drafts
-  const completedDrafts = await fetchDraftsForSync(storeId, fromDateStr, "status:completed");
+  // 4. Detect completions — fetch COMPLETED drafts (reuse the incremental
+  //    prefetch from step 2 when present).
+  const completedDrafts = completedDraftsPrefetched
+    ?? await fetchDraftsForSync(storeId, fromDateStr, "status:completed", dateField);
   // Drafts completed this run must NOT be treated as "missing/stale" in step 5.
   // A draft that completes between syncs drops out of the OPEN-drafts list, so
   // without this guard step 5 would overwrite its fresh COMPLETED status with
@@ -580,9 +635,11 @@ export async function syncDraftOrdersForStore(storeId: string): Promise<SyncResu
   }
   await runWithConcurrency(completedUpdateFns, WRITE_CONCURRENCY);
 
-  // 5. Detect stale — leads in DB but missing from Shopify
+  // 5. Detect stale — leads in DB but missing from Shopify. Requires the full
+  //    draft list to know what's missing, so incremental mode skips it and
+  //    leaves stale detection to the full sync (cron + manual button).
   const staleFns: Array<() => PromiseLike<unknown>> = [];
-  for (const [draftId, existing] of existingByDraftId) {
+  if (!incremental) for (const [draftId, existing] of existingByDraftId) {
     if (
       !shopifyDraftIds.has(draftId) &&
       !completedDraftIds.has(draftId) && // completed this run — not stale (step 4 just won it)

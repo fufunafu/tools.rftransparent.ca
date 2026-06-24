@@ -5,6 +5,7 @@ import Link from "next/link";
 import useSWR, { useSWRConfig } from "swr";
 import SummaryCards from "@/components/admin/followup/SummaryCards";
 import LeadTable from "@/components/admin/followup/LeadTable";
+import { type DupGroup } from "@/components/admin/followup/DuplicatesPanel";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
 import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
 import CalendarView from "@/components/admin/followup/CalendarView";
@@ -422,6 +423,13 @@ export default function FollowUpDashboard({
   const [timeRange, setTimeRange] = useState<"1y" | "all">("1y");
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState("");
+  // Live auto-refresh: while on and the tab is visible, the dashboard polls the
+  // DB (SWR refreshInterval) and runs a lightweight incremental Shopify sync on
+  // a timer, so new quotes/wins appear without clicking "Sync from Shopify".
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  // Set true when an auto-sync tick fails, so we can show a subtle indicator
+  // instead of the loud manual-sync error banner.
+  const [autoSyncError, setAutoSyncError] = useState(false);
 
   // Modal / detail / help / analytics state
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
@@ -437,6 +445,8 @@ export default function FollowUpDashboard({
     if (saved) setStore(saved);
     const savedRange = localStorage.getItem("cs_followup_range");
     if (savedRange === "all" || savedRange === "1y") setTimeRange(savedRange);
+    const savedAuto = localStorage.getItem("cs_followup_autorefresh");
+    if (savedAuto === "off") setAutoRefresh(false);
     setMounted(true);
   }, []);
 
@@ -470,8 +480,13 @@ export default function FollowUpDashboard({
   // HTML can use `initialSummary` as fallback data. Other URLs stay gated on mounted —
   // they don't have fallbacks and avoiding an extra fetch on hydration is cheap.
   const summaryUrl = `/api/customer-service/follow-up?view=summary&store=${store}${rangeParam}`;
-  const leadsUrl = mounted
+  const leadsUrl = mounted && filter !== "duplicates"
     ? `/api/customer-service/follow-up?view=leads&store=${store}&filter=${leadsFilter}${creatorParam}${leadStatusParam}${loggedByParam}${outcomeParam}${addressedDaysParam}${rangeParam}`
+    : null;
+  // Always fetched (when mounted) so the Duplicates tab badge stays live; the
+  // grouped payload is small (only emails with 2+ open quotes).
+  const duplicatesUrl = mounted
+    ? `/api/customer-service/follow-up?view=duplicates&store=${store}${rangeParam}`
     : null;
   const configUrl = mounted
     ? `/api/customer-service/follow-up?view=config&store=${store}`
@@ -494,17 +509,25 @@ export default function FollowUpDashboard({
       ? initialSummary
       : undefined;
 
+  // Poll the DB so the screen updates on its own while auto-refresh is on.
+  // 0 disables polling (SWR convention) when the user turns auto-refresh off.
+  const pollMs = mounted && autoRefresh ? 15000 : 0;
+  const live = { refreshInterval: pollMs };
+
   const { data: summary, error: summaryError, isLoading: summaryLoading } =
-    useSWR<SummaryResponse>(summaryUrl, { fallbackData });
-  const { data: leadsData } = useSWR<{ leads: FollowUpLead[] }>(leadsUrl);
+    useSWR<SummaryResponse>(summaryUrl, { fallbackData, refreshInterval: pollMs });
+  const { data: leadsData } = useSWR<{ leads: FollowUpLead[] }>(leadsUrl, live);
   const { data: configData } = useSWR<{ config: Record<string, number | null> }>(configUrl);
-  const { data: analyticsData } = useSWR<{ months: MonthData[] }>(analyticsUrl);
-  const { data: calendarData } = useSWR<{ leads: FollowUpLead[] }>(calendarUrl);
-  const { data: addressedTodayCountData } = useSWR<{ count: number }>(addressedTodayCountUrl);
+  const { data: analyticsData } = useSWR<{ months: MonthData[] }>(analyticsUrl, live);
+  const { data: calendarData } = useSWR<{ leads: FollowUpLead[] }>(calendarUrl, live);
+  const { data: addressedTodayCountData } = useSWR<{ count: number }>(addressedTodayCountUrl, live);
+  const { data: duplicatesData, isLoading: duplicatesLoading } =
+    useSWR<{ groups: DupGroup[] }>(duplicatesUrl, live);
 
   const stores = summary?.stores ?? [];
   const lastSyncedAt = summary?.last_synced_at ?? null;
   const leads = leadsData?.leads ?? [];
+  const duplicateGroups = duplicatesData?.groups ?? [];
   const storeDays = configData?.config ?? {};
   const analytics = analyticsData?.months ?? [];
   const calendarLeads = calendarData?.leads ?? [];
@@ -535,6 +558,62 @@ export default function FollowUpDashboard({
         (key.includes("view=summary") || key.includes("view=leads"))
     );
   };
+
+  // ── Live auto-refresh: incremental Shopify sync on a timer ──────────────────
+  // While auto-refresh is on and the tab is visible, run the cheap "changed
+  // only" sync (mode=incremental) every 30s and repaint summary + leads. The
+  // SWR refreshInterval above keeps the screen fresh against the DB between
+  // ticks; this is what pulls new Shopify activity into the DB. Pauses when the
+  // tab is hidden and fires once immediately when it becomes visible again.
+  useEffect(() => {
+    if (!mounted || !autoRefresh) return;
+
+    let cancelled = false;
+    const inFlight = { current: false };
+
+    const tick = async () => {
+      if (cancelled || inFlight.current) return;
+      if (document.visibilityState !== "visible") return;
+      inFlight.current = true;
+      try {
+        const res = await fetch(
+          `/api/customer-service/follow-up?store=${store}&action=sync&mode=incremental`,
+          { method: "POST" },
+        );
+        if (cancelled) return;
+        if (res.ok) {
+          setAutoSyncError(false);
+          // Repaint the views the incremental sync can change.
+          mutate(
+            (key) =>
+              typeof key === "string" &&
+              key.startsWith("/api/customer-service/follow-up") &&
+              key.includes(`store=${store}`) &&
+              (key.includes("view=summary") || key.includes("view=leads")),
+          );
+        } else {
+          setAutoSyncError(true);
+        }
+      } catch {
+        if (!cancelled) setAutoSyncError(true);
+      } finally {
+        inFlight.current = false;
+      }
+    };
+
+    const interval = setInterval(tick, 30000);
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    tick(); // kick off one immediately
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [mounted, autoRefresh, store, mutate]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -632,6 +711,42 @@ export default function FollowUpDashboard({
     invalidateAfterLeadMutation();
   };
 
+  // Invalidate summary + leads + the duplicates group list. Used after
+  // resolving/dismissing a duplicate group so the tab badge and list refresh.
+  const invalidateAfterDuplicateMutation = () => {
+    mutate(
+      (key) =>
+        typeof key === "string" &&
+        key.startsWith("/api/customer-service/follow-up") &&
+        key.includes(`store=${store}`) &&
+        (key.includes("view=summary") || key.includes("view=leads") || key.includes("view=duplicates")),
+    );
+  };
+
+  // Duplicates tab: keep the newest quote, close the rest as duplicate.
+  const handleResolveDuplicates = async (group: DupGroup) => {
+    const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=resolve_duplicates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lead_ids: group.leads.map((l) => l.id) }),
+    });
+    const json = await res.json();
+    if (json.status !== "success") throw new Error(json.error);
+    invalidateAfterDuplicateMutation();
+  };
+
+  // Duplicates tab: mark the group as genuinely-separate orders (not a dup).
+  const handleDismissDuplicates = async (group: DupGroup) => {
+    const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=dismiss_duplicates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lead_ids: group.leads.map((l) => l.id) }),
+    });
+    const json = await res.json();
+    if (json.status !== "success") throw new Error(json.error);
+    invalidateAfterDuplicateMutation();
+  };
+
   const handleStoreChange = (newStore: string) => {
     setStore(newStore);
     localStorage.setItem("cs_followup_store", newStore);
@@ -650,6 +765,8 @@ export default function FollowUpDashboard({
     closed: summary?.metrics.total_closed ?? 0,
     // "All" = active + closed in one list.
     everything: (summary?.metrics.total_active ?? 0) + (summary?.metrics.total_closed ?? 0),
+    // Number of customers (email groups) with 2+ open quotes still to review.
+    duplicates: duplicateGroups.length,
   };
 
   const metrics = summary?.metrics;
@@ -780,6 +897,41 @@ export default function FollowUpDashboard({
               Last synced {formatDate(lastSyncedAt)}
             </p>
           )}
+          {/* Live auto-refresh toggle — when on, the board pulls fresh Shopify
+              activity on a timer without clicking Sync. */}
+          <button
+            onClick={() => {
+              const next = !autoRefresh;
+              setAutoRefresh(next);
+              localStorage.setItem("cs_followup_autorefresh", next ? "on" : "off");
+              if (!next) setAutoSyncError(false);
+            }}
+            title={
+              autoRefresh
+                ? autoSyncError
+                  ? "Auto-refresh is on but the last update failed — click to turn off"
+                  : "Auto-refresh is on — updating from Shopify automatically"
+                : "Auto-refresh is off — click to turn on"
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
+              autoRefresh
+                ? autoSyncError
+                  ? "bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                  : "bg-green-50 text-green-700 border-green-200 hover:bg-green-100"
+                : "bg-white text-sand-500 border-sand-200 hover:bg-sand-50"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                autoRefresh
+                  ? autoSyncError
+                    ? "bg-amber-500"
+                    : "bg-green-500 animate-pulse"
+                  : "bg-sand-300"
+              }`}
+            />
+            {autoRefresh ? "Live" : "Live off"}
+          </button>
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -1069,6 +1221,10 @@ export default function FollowUpDashboard({
             onViewDetail={(lead) => setDetailLead(lead)}
             onBulkClose={handleBulkClose}
             filterCounts={filterCounts}
+            duplicateGroups={duplicateGroups}
+            duplicatesLoading={duplicatesLoading}
+            onResolveDuplicates={handleResolveDuplicates}
+            onDismissDuplicates={handleDismissDuplicates}
           />
           )}
           </div>

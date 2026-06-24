@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { FOLLOWUP_CATEGORIES, MAX_ATTEMPTS, LOSS_REASONS, type LeadStatus } from "@/lib/followup";
 import type { FollowUpLead } from "@/lib/followup";
+import DuplicatesPanel, { type DupGroup } from "./DuplicatesPanel";
 
 const STATUS_COLORS: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
@@ -48,6 +49,11 @@ interface Props {
   onViewDetail: (lead: FollowUpLead) => void;
   onBulkClose: (leadIds: string[], reason: string) => Promise<void>;
   filterCounts: Record<string, number>;
+  // Duplicates tab (filter === "everything" excluded; these power filter === "duplicates").
+  duplicateGroups?: DupGroup[];
+  duplicatesLoading?: boolean;
+  onResolveDuplicates?: (group: DupGroup) => Promise<void>;
+  onDismissDuplicates?: (group: DupGroup) => Promise<void>;
 }
 
 const FILTER_TABS = [
@@ -57,6 +63,7 @@ const FILTER_TABS = [
   { value: "all", label: "All Active" },
   { value: "closed", label: "Closed" },
   { value: "everything", label: "All" },
+  { value: "duplicates", label: "Duplicates" },
 ];
 
 type SortKey = "draft_name" | "customer" | "created_by" | "amount" | "status" | "due" | "attempts" | "quoted" | "orders";
@@ -86,7 +93,7 @@ function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   );
 }
 
-export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp, onViewDetail, onBulkClose, filterCounts }: Props) {
+export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp, onViewDetail, onBulkClose, filterCounts, duplicateGroups, duplicatesLoading, onResolveDuplicates, onDismissDuplicates }: Props) {
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
@@ -179,6 +186,16 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
         </div>
       </div>
 
+      {filter === "duplicates" ? (
+        <DuplicatesPanel
+          groups={duplicateGroups ?? []}
+          loading={!!duplicatesLoading}
+          onResolve={onResolveDuplicates ?? (async () => {})}
+          onDismiss={onDismissDuplicates ?? (async () => {})}
+          onViewDetail={onViewDetail}
+        />
+      ) : (
+      <>
       {/* Bulk action toolbar */}
       {selected.size > 0 && (
         <div className="flex items-center justify-between px-4 py-2.5 bg-blue-50 border-b border-blue-200">
@@ -393,6 +410,8 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
             </tbody>
           </table>
         </div>
+      )}
+      </>
       )}
     </div>
   );

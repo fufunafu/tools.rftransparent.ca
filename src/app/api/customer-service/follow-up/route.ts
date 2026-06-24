@@ -785,6 +785,74 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ logs: data ?? [] });
     }
 
+    // ── Possible duplicates, grouped by customer email ──
+    // Surfaces every email with 2+ OPEN quotes — the daily "is this person
+    // double-entered?" review. Groups already dismissed as "not a duplicate"
+    // (every lead stamped via dup_dismissed_at) are hidden until a NEW
+    // un-stamped quote for that email appears.
+    if (view === "duplicates") {
+      const cutoff = rangeCutoff(req.nextUrl.searchParams.get("range"));
+      const SKIP = new Set(["application@gmail.com"]);
+      const PAGE = 1000;
+      const rows: FollowUpLead[] = [];
+      for (let from = 0; ; from += PAGE) {
+        let q = supabase
+          .from("followup_leads")
+          .select("*")
+          .eq("store_id", storeId)
+          .is("closed_at", null)
+          .not("shopify_status", "in", "(OPEN,DELETED)")
+          .not("customer_email", "is", null);
+        if (cutoff) q = q.gte("shopify_created_at", cutoff);
+        const { data, error } = await q.range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        rows.push(...(data as FollowUpLead[]));
+        if (data.length < PAGE) break;
+      }
+
+      // Bucket by normalized email.
+      const buckets = new Map<string, FollowUpLead[]>();
+      for (const l of rows) {
+        const email = (l.customer_email || "").trim().toLowerCase();
+        if (!email || SKIP.has(email)) continue;
+        const arr = buckets.get(email);
+        if (arr) arr.push(l);
+        else buckets.set(email, [l]);
+      }
+
+      const sortKey = (l: FollowUpLead) => l.shopify_created_at || l.created_at || "";
+      const groups: {
+        email: string;
+        customer_name: string | null;
+        count: number;
+        total_amount: number;
+        leads: FollowUpLead[];
+      }[] = [];
+      for (const [email, groupLeads] of buckets) {
+        if (groupLeads.length < 2) continue;
+        // Hide a group only if EVERY lead has been reviewed as not-a-duplicate.
+        // A new un-stamped quote re-surfaces the whole group.
+        if (groupLeads.every((l) => l.dup_dismissed_at)) continue;
+        groupLeads.sort((a, b) => sortKey(b).localeCompare(sortKey(a))); // newest first = the keeper
+        groups.push({
+          email,
+          customer_name: groupLeads.find((l) => l.customer_name)?.customer_name ?? null,
+          count: groupLeads.length,
+          total_amount: groupLeads.reduce((s, l) => s + Number(l.quote_amount || 0), 0),
+          leads: groupLeads,
+        });
+      }
+      // Most quotes first, then newest activity.
+      groups.sort((a, b) => b.count - a.count || sortKey(b.leads[0]).localeCompare(sortKey(a.leads[0])));
+
+      return NextResponse.json({
+        groups,
+        total_groups: groups.length,
+        total_leads: groups.reduce((s, g) => s + g.count, 0),
+      });
+    }
+
     return NextResponse.json({ error: "Invalid view" }, { status: 400 });
   } catch (err) {
     console.error("[Follow-up API]", err);
@@ -818,7 +886,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `Unknown store: ${storeId}` }, { status: 400 });
       }
 
-      const result = await syncDraftOrdersForStore(storeId);
+      // mode=incremental → cheap "changed only" pass for live auto-refresh.
+      // Anything else → the full all-time sync (manual button, cron).
+      const incremental = req.nextUrl.searchParams.get("mode") === "incremental";
+      const result = await syncDraftOrdersForStore(storeId, { incremental });
       revalidateTag(`cs:followup:${storeId}`, "max");
       return NextResponse.json({ status: "success", synced_at: new Date().toISOString(), ...result });
     }
@@ -986,6 +1057,89 @@ export async function POST(req: NextRequest) {
 
       revalidateTag(`cs:followup:${storeId}`, "max");
       return NextResponse.json({ status: "success", closed: lead_ids.length });
+    }
+
+    // ── Resolve a duplicate group: keep the newest quote, close the rest ──
+    // Used by the Duplicates tab. Closes every passed lead except the newest
+    // as `duplicate`, recording which quote was kept in each log note.
+    if (action === "resolve_duplicates") {
+      const body = await req.json();
+      const { lead_ids } = body as { lead_ids: string[] };
+      if (!lead_ids || lead_ids.length < 2) {
+        return NextResponse.json({ error: "need 2+ lead_ids" }, { status: 400 });
+      }
+
+      const supabase = getSupabase();
+      const now = new Date().toISOString();
+
+      const { data: rows, error: readErr } = await supabase
+        .from("followup_leads")
+        .select("id, draft_name, shopify_created_at, created_at")
+        .in("id", lead_ids)
+        .is("closed_at", null);
+      if (readErr) throw new Error(readErr.message);
+      const found = rows ?? [];
+      if (found.length < 2) {
+        return NextResponse.json({ error: "Fewer than 2 open leads to merge" }, { status: 400 });
+      }
+
+      // Newest quote (by Shopify creation, falling back to row creation) is the keeper.
+      const key = (l: { shopify_created_at: string | null; created_at: string }) => l.shopify_created_at || l.created_at || "";
+      found.sort((a, b) => key(b).localeCompare(key(a)));
+      const keep = found[0];
+      const closeIds = found.slice(1).map((l) => l.id);
+
+      const { error: upErr } = await supabase
+        .from("followup_leads")
+        .update({ lead_status: "duplicate", closed_at: now, next_followup_at: null, updated_at: now })
+        .in("id", closeIds);
+      if (upErr) throw new Error(upErr.message);
+
+      const { error: logErr } = await supabase.from("followup_logs").insert(
+        closeIds.map((id) => ({
+          lead_id: id,
+          outcome: "duplicate",
+          notes: `Duplicate of ${keep.draft_name} — kept the newest quote for this customer.`,
+          logged_by: loggedBy,
+        })),
+      );
+      if (logErr) throw new Error(logErr.message);
+
+      revalidateTag(`cs:followup:${storeId}`, "max");
+      return NextResponse.json({ status: "success", kept: keep.draft_name, closed: closeIds.length });
+    }
+
+    // ── Dismiss a duplicate group as "not a duplicate" ──
+    // Stamps each passed lead so the group drops off the Duplicates tab. A new
+    // un-stamped quote for the same email later re-surfaces it. Logged for audit.
+    if (action === "dismiss_duplicates") {
+      const body = await req.json();
+      const { lead_ids } = body as { lead_ids: string[] };
+      if (!lead_ids?.length) {
+        return NextResponse.json({ error: "lead_ids required" }, { status: 400 });
+      }
+
+      const supabase = getSupabase();
+      const now = new Date().toISOString();
+
+      const { error: upErr } = await supabase
+        .from("followup_leads")
+        .update({ dup_dismissed_at: now, dup_dismissed_by: loggedBy, updated_at: now })
+        .in("id", lead_ids);
+      if (upErr) throw new Error(upErr.message);
+
+      const { error: logErr } = await supabase.from("followup_logs").insert(
+        lead_ids.map((id) => ({
+          lead_id: id,
+          outcome: "not_duplicate",
+          notes: "Reviewed — separate orders for the same customer (not a duplicate).",
+          logged_by: loggedBy,
+        })),
+      );
+      if (logErr) throw new Error(logErr.message);
+
+      revalidateTag(`cs:followup:${storeId}`, "max");
+      return NextResponse.json({ status: "success", dismissed: lead_ids.length });
     }
 
     return NextResponse.json({ error: "Invalid action" }, { status: 400 });
