@@ -56,6 +56,7 @@ const FILTER_TABS = [
   { value: "addressed_today", label: "Addressed Today" },
   { value: "all", label: "All Active" },
   { value: "closed", label: "Closed" },
+  { value: "everything", label: "All" },
 ];
 
 type SortKey = "draft_name" | "customer" | "created_by" | "amount" | "status" | "due" | "attempts" | "quoted" | "orders";

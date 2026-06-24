@@ -292,7 +292,8 @@ export async function GET(req: NextRequest) {
       //     newest quote first — recent leads are the warmest workload.
       //   - addressed_today reorders client-side by log time (preserved above).
       //   - everything else falls back to soonest-due first.
-      if (creator || filter === "due_today") {
+      //   - "everything" (active + closed in one list) reads best newest-first.
+      if (creator || filter === "due_today" || filter === "everything") {
         query = query.order("shopify_created_at", { ascending: false, nullsFirst: false });
       } else if (filter !== "addressed_today") {
         query = query.order("next_followup_at", { ascending: true, nullsFirst: false });
@@ -315,6 +316,9 @@ export async function GET(req: NextRequest) {
         query = query.in("id", addressedTodayIds);
       } else if (filter === "closed") {
         query = query.not("closed_at", "is", null).order("closed_at", { ascending: false });
+      } else if (filter === "everything") {
+        // "All" — no closed_at filter, so active and closed leads come back
+        // together (still excludes OPEN/DELETED, same as the other tabs).
       }
 
       // Attribution = last invoice sender, falling back to creator (matches the

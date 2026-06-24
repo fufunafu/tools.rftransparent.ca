@@ -648,6 +648,8 @@ export default function FollowUpDashboard({
     addressed_today: addressedTodayCountData?.count ?? 0,
     all: summary?.metrics.total_active ?? 0,
     closed: summary?.metrics.total_closed ?? 0,
+    // "All" = active + closed in one list.
+    everything: (summary?.metrics.total_active ?? 0) + (summary?.metrics.total_closed ?? 0),
   };
 
   const metrics = summary?.metrics;
