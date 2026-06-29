@@ -41,3 +41,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# Local PII backups & one-off scripts — never commit (customer data)
+followup-revert-backup-*.pdf
+followup-revert-backup-*.xlsx
+/scripts/
+
+# Supabase CLI cache
+supabase/.temp/
