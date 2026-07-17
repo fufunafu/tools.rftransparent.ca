@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
 
 interface SearchTermData {
   term: string;
@@ -57,14 +58,6 @@ const COLUMN_TOOLTIPS: Partial<Record<SortKey, string>> = {
   roas: "Return on Ad Spend = Revenue / Spend. A ROAS of 3x means $3 earned for every $1 spent.",
 };
 
-const MKT_LS_PREFIX = "marketing_cache_v1:";
-function lsSave(key: string, data: unknown): void {
-  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
-}
-function lsLoad<T>(key: string): T | null {
-  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-
 export default function SearchTermsTab({
   from,
   to,
@@ -87,7 +80,7 @@ export default function SearchTermsTab({
     let cancelled = false;
     const cacheKey = `search:${from}:${to}:${demo}`;
 
-    const cached = lsLoad<SearchTermData[]>(cacheKey);
+    const cached = mktCacheLoad<SearchTermData[]>(cacheKey);
     if (cached) {
       setData(cached);
       setLoading(false);
@@ -105,7 +98,7 @@ export default function SearchTermsTab({
         if (json.error) throw new Error(json.error);
         const terms = json.searchTerms ?? [];
         setData(terms);
-        lsSave(cacheKey, terms);
+        mktCacheSave(cacheKey, terms);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);

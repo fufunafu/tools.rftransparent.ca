@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
 import {
   ResponsiveContainer,
   PieChart,
@@ -109,14 +110,6 @@ const GENDER_COLORS = ["#2563eb", "#ec4899", "#94a3b8"];
 
 type GeoSortKey = "region" | "ad_spend" | "revenue" | "roas" | "clicks" | "conversions";
 
-const MKT_LS_PREFIX = "marketing_cache_v1:";
-function lsSave(key: string, data: unknown): void {
-  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
-}
-function lsLoad<T>(key: string): T | null {
-  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-
 interface AudienceCacheEntry {
   devices: DeviceData[];
   geo: GeoData[];
@@ -170,7 +163,7 @@ export default function AudienceTab({
     let cancelled = false;
     const cacheKey = `audience:${from}:${to}:${market}:${demo}`;
 
-    const cached = lsLoad<AudienceCacheEntry>(cacheKey);
+    const cached = mktCacheLoad<AudienceCacheEntry>(cacheKey);
     if (cached) {
       setDevices(cached.devices ?? []);
       setGeo(cached.geo ?? []);
@@ -210,7 +203,7 @@ export default function AudienceTab({
         setAgeData(entry.age);
         setGenderData(entry.gender);
         setLanguages(entry.languages);
-        lsSave(cacheKey, entry);
+        mktCacheSave(cacheKey, entry);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);

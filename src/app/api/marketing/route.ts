@@ -20,6 +20,31 @@ import { isGA4Configured, getDailySessions } from "@/lib/google-analytics";
 
 const ADS_STORE_ID = "store2"; // Glass Railing Store — the ad-driven store
 
+// All reporting dates are business-local (America/Toronto) to match the Google
+// Ads account timezone; server clock is UTC on Vercel.
+const REPORT_TZ = "America/Toronto";
+
+function todayStr() {
+  return new Date().toLocaleDateString("en-CA", { timeZone: REPORT_TZ });
+}
+
+// Date-only arithmetic on YYYY-MM-DD strings, immune to server timezone.
+function addDaysStr(dateStr: string, n: number) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().split("T")[0];
+}
+
+function daysBetween(from: string, to: string) {
+  return Math.round(
+    (new Date(to + "T12:00:00Z").getTime() - new Date(from + "T12:00:00Z").getTime()) / 86400000
+  );
+}
+
+function torontoDateOf(isoTimestamp: string) {
+  return new Date(isoTimestamp).toLocaleDateString("en-CA", { timeZone: REPORT_TZ });
+}
+
 interface OrderNode extends RevenueFields {
   createdAt: string;
   shippingAddress: { countryCode: string; province: string | null } | null;
@@ -59,16 +84,30 @@ async function fetchAllOrders(startDate: string, endDate: string): Promise<Order
   return allNodes;
 }
 
+interface LocalOrderNode extends OrderNode {
+  localDate: string;
+}
+
+// Fetch orders and bucket them by Toronto calendar date. The Shopify query
+// window is widened by a day on each side so orders near midnight aren't lost
+// to the UTC/local boundary, then filtered back to the requested local range.
+async function fetchOrdersInRange(startDate: string, endDate: string): Promise<LocalOrderNode[]> {
+  const nodes = await fetchAllOrders(addDaysStr(startDate, -1), addDaysStr(endDate, 1));
+  return nodes
+    .map((n) => ({ ...n, localDate: torontoDateOf(n.createdAt) }))
+    .filter((n) => n.localDate >= startDate && n.localDate <= endDate);
+}
+
 const MARKET_COUNTRY_CODES: Record<string, string> = { us: "US", ca: "CA" };
 
-function filterOrdersByMarket(orders: OrderNode[], market: Market): OrderNode[] {
+function filterOrdersByMarket<T extends OrderNode>(orders: T[], market: Market): T[] {
   if (market === "all") return orders;
   const code = MARKET_COUNTRY_CODES[market];
   return orders.filter((o) => o.shippingAddress?.countryCode === code);
 }
 
 async function getShopifyStats(startDate: string, endDate: string, market: Market = "all"): Promise<{ revenue: number; orders: number }> {
-  const allOrders = await fetchAllOrders(startDate, endDate);
+  const allOrders = await fetchOrdersInRange(startDate, endDate);
   const orders = filterOrdersByMarket(allOrders, market);
   const revenue = orders.reduce((sum, o) => sum + calcNetRevenue(o), 0);
   return { revenue, orders: orders.length };
@@ -79,11 +118,11 @@ async function getDailyShopifyStats(
   endDate: string,
   market: Market = "all"
 ): Promise<Map<string, { revenue: number; orders: number }>> {
-  const allOrders = await fetchAllOrders(startDate, endDate);
+  const allOrders = await fetchOrdersInRange(startDate, endDate);
   const orders = filterOrdersByMarket(allOrders, market);
   const byDate = new Map<string, { revenue: number; orders: number }>();
   for (const node of orders) {
-    const d = node.createdAt.split("T")[0];
+    const d = node.localDate;
     const existing = byDate.get(d) ?? { revenue: 0, orders: 0 };
     existing.revenue += calcNetRevenue(node);
     existing.orders += 1;
@@ -107,7 +146,7 @@ interface ShopifyGeoData {
 }
 
 async function getShopifyGeoBreakdown(startDate: string, endDate: string): Promise<ShopifyGeoData> {
-  const allOrders = await fetchAllOrders(startDate, endDate);
+  const allOrders = await fetchOrdersInRange(startDate, endDate);
   const byCountry = new Map<string, { revenue: number; orders: number }>();
   const byProvince = new Map<string, { revenue: number; orders: number }>();
 
@@ -134,10 +173,6 @@ async function getShopifyGeoBreakdown(startDate: string, endDate: string): Promi
   return { byCountry, byProvince };
 }
 
-function toDateStr(d: Date) {
-  return d.toISOString().split("T")[0];
-}
-
 function generateDemoData(days: number) {
   const multiplier = Math.max(1, days);
   const base = {
@@ -147,6 +182,8 @@ function generateDemoData(days: number) {
     conversions: Math.round(12 * multiplier),
     revenue: Math.round(384 * multiplier),
     roas: 3.2,
+    ads_revenue: Math.round(310 * multiplier),
+    google_roas: 2.58,
     order_count: Math.round(8 * multiplier),
   };
   const prev = {
@@ -156,35 +193,37 @@ function generateDemoData(days: number) {
     conversions: Math.round(10 * multiplier),
     revenue: Math.round(378 * multiplier),
     roas: 2.8,
+    ads_revenue: Math.round(295 * multiplier),
+    google_roas: 2.19,
     order_count: Math.round(7 * multiplier),
   };
   return { current: base, previous: prev };
 }
 
 function generateDemoHistory(from: string, to: string) {
-  const start = new Date(from + "T00:00:00");
-  const end = new Date(to + "T00:00:00");
   const history = [];
-  const totalDays = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+  const totalDays = daysBetween(from, to) + 1;
   for (let i = 0; i < totalDays; i++) {
-    const d = new Date(start);
-    d.setDate(d.getDate() + i);
-    const dayOfWeek = d.getDay();
+    const date = addDaysStr(from, i);
+    const dayOfWeek = new Date(date + "T12:00:00Z").getUTCDay();
     const weekendDip = dayOfWeek === 0 || dayOfWeek === 6 ? 0.6 : 1;
     const trend = 1 + i * 0.008;
     const noise = 0.85 + Math.random() * 0.3;
     const factor = weekendDip * trend * noise;
     const adSpend = Math.round(120 * factor);
     const revenue = Math.round(384 * factor * (0.9 + Math.random() * 0.2));
+    const adsRevenue = Math.round(revenue * (0.7 + Math.random() * 0.2));
     const orderCount = Math.max(1, Math.round(8 * factor * (0.8 + Math.random() * 0.4)));
     history.push({
-      date: toDateStr(d),
+      date,
       ad_spend: adSpend,
       clicks: Math.round(85 * factor),
       impressions: Math.round(4200 * factor),
       conversions: Math.round(12 * factor),
       revenue,
       roas: adSpend > 0 ? Math.round((revenue / adSpend) * 100) / 100 : 0,
+      ads_revenue: adsRevenue,
+      google_roas: adSpend > 0 ? Math.round((adsRevenue / adSpend) * 100) / 100 : 0,
       order_count: orderCount,
     });
   }
@@ -268,21 +307,15 @@ export async function GET(req: NextRequest) {
   const demo = req.nextUrl.searchParams.get("demo") === "true";
   const market = (req.nextUrl.searchParams.get("market") || "all") as Market;
 
-  // Parse from/to date range
-  const today = toDateStr(new Date());
+  // Parse from/to date range (business-local Toronto dates)
+  const today = todayStr();
   const from = req.nextUrl.searchParams.get("from") || today;
   const to = req.nextUrl.searchParams.get("to") || today;
-  const fromDate = new Date(from + "T00:00:00");
-  const toDate = new Date(to + "T00:00:00");
-  const rangeDays = Math.round((toDate.getTime() - fromDate.getTime()) / 86400000);
+  const rangeDays = daysBetween(from, to);
 
   // Calculate previous period (same length, immediately before)
-  const prevTo = new Date(fromDate);
-  prevTo.setDate(prevTo.getDate() - 1);
-  const prevFrom = new Date(prevTo);
-  prevFrom.setDate(prevFrom.getDate() - rangeDays);
-  const prevFromStr = toDateStr(prevFrom);
-  const prevToStr = toDateStr(prevTo);
+  const prevToStr = addDaysStr(from, -1);
+  const prevFromStr = addDaysStr(prevToStr, -rangeDays);
 
   const pctChange = (cur: number, prev: number) =>
     prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
@@ -520,6 +553,10 @@ export async function GET(req: NextRequest) {
         const rev = Math.round(stats.revenue * 100) / 100;
         return {
           ...day,
+          // Google-attributed value from conversion tracking, before we
+          // overwrite revenue/roas with the blended Shopify numbers
+          ads_revenue: day.revenue,
+          google_roas: day.roas,
           revenue: rev,
           roas: day.ad_spend > 0 ? Math.round((rev / day.ad_spend) * 100) / 100 : 0,
           order_count: stats.orders,
@@ -573,14 +610,20 @@ export async function GET(req: NextRequest) {
       getShopifyStats(prevFromStr, prevToStr, market),
     ]);
 
+    // revenue/roas are blended (all Shopify revenue over spend, i.e. MER);
+    // ads_revenue/google_roas keep Google's conversion-tracked attribution.
     const current = {
       ...currentAds,
+      ads_revenue: currentAds.revenue,
+      google_roas: currentAds.roas,
       revenue: Math.round(currentShopify.revenue * 100) / 100,
       roas: currentAds.ad_spend > 0 ? Math.round((currentShopify.revenue / currentAds.ad_spend) * 100) / 100 : 0,
       order_count: currentShopify.orders,
     };
     const previous = {
       ...previousAds,
+      ads_revenue: previousAds.revenue,
+      google_roas: previousAds.roas,
       revenue: Math.round(previousShopify.revenue * 100) / 100,
       roas: previousAds.ad_spend > 0 ? Math.round((previousShopify.revenue / previousAds.ad_spend) * 100) / 100 : 0,
       order_count: previousShopify.orders,

@@ -7,12 +7,14 @@ import {
   Area,
   LineChart,
   Line,
+  ComposedChart,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   ReferenceLine,
 } from "recharts";
+import { mktCacheSave, mktCacheLoad, mktCacheClearAll } from "@/lib/marketing-cache";
 import CampaignsTab from "./marketing/CampaignsTab";
 import AudienceTab from "./marketing/AudienceTab";
 import SearchTermsTab from "./marketing/SearchTermsTab";
@@ -27,6 +29,8 @@ interface AdMetrics {
   conversions: number;
   revenue: number;
   roas: number;
+  ads_revenue?: number;
+  google_roas?: number;
   order_count: number;
 }
 
@@ -50,6 +54,8 @@ interface DailyPoint {
   conversions: number;
   revenue: number;
   roas: number;
+  ads_revenue?: number;
+  google_roas?: number;
   order_count: number;
   sessions?: number;
 }
@@ -59,15 +65,20 @@ interface DerivedPoint extends DailyPoint {
   ctr: number;
   profit: number;
   aov: number;
+  revenue_ma7: number;
 }
 
+// Business dates are America/Toronto (matches the Google Ads account timezone),
+// regardless of the viewer's or server's clock.
+const REPORT_TZ = "America/Toronto";
+
 function todayStr() {
-  return new Date().toISOString().split("T")[0];
+  return new Date().toLocaleDateString("en-CA", { timeZone: REPORT_TZ });
 }
 
 function daysAgoStr(n: number) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
+  const d = new Date(todayStr() + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - n);
   return d.toISOString().split("T")[0];
 }
 
@@ -94,6 +105,13 @@ function formatNumber(n: number) {
 
 function formatPct(n: number) {
   return `${n.toFixed(2)}%`;
+}
+
+// Compact currency for chart axes: $80000 -> $80k
+function formatAxisCurrency(v: number) {
+  const abs = Math.abs(v);
+  if (abs >= 1000) return `$${(v / 1000).toFixed(abs >= 10000 ? 0 : 1).replace(/\.0$/, "")}k`;
+  return `$${v}`;
 }
 
 function ChangeBadge({ value }: { value: number | null }) {
@@ -123,7 +141,7 @@ const METRICS: {
 }[] = [
   { key: "revenue", label: "Revenue", format: formatCurrency },
   { key: "ad_spend", label: "Ad Spend", format: formatCurrency },
-  { key: "roas", label: "ROAS", format: (v) => `${v}x` },
+  { key: "roas", label: "Blended ROAS", format: (v) => `${v}x` },
   { key: "clicks", label: "Clicks", format: formatNumber },
   { key: "impressions", label: "Impressions", format: formatNumber },
   { key: "conversions", label: "Conversions", format: formatNumber },
@@ -138,6 +156,17 @@ interface DerivedMetric {
 }
 
 const DERIVED_METRICS: DerivedMetric[] = [
+  {
+    label: "Google ROAS",
+    key: "google_roas",
+    compute: (d) => d.google_roas ?? 0,
+    format: (v) => `${v.toFixed(2)}x`,
+    change: (c, p) => {
+      const cur = c.google_roas ?? 0;
+      const prev = p.google_roas ?? 0;
+      return prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
+    },
+  },
   {
     label: "Orders",
     key: "order_count",
@@ -222,11 +251,11 @@ function InfoTooltip({ text }: { text: string }) {
 
 const CHART_INFO: Record<string, string> = {
   "Revenue vs Ad Spend":
-    "Revenue is total sales from the Glass Railing Store (Shopify). Ad Spend is the total amount spent on Google Ads campaigns. When the green line (revenue) is above the red line (spend), your ads are profitable.",
+    "Two aligned panels sharing the same dates: total store revenue (Shopify) on top with a 7-day average trend line, and Google Ads spend below on its own scale (spend is much smaller than revenue, so it gets its own panel to stay readable). Look for spend changes followed by revenue changes a few days later.",
   "Ad Spend":
     "Daily Google Ads spend across all campaigns. Track spending trends to spot budget fluctuations and correlate with revenue changes.",
   ROAS:
-    "Return on Ad Spend = Revenue / Ad Spend. A ROAS of 4x means every $1 spent on ads generated $4 in revenue. Above 3x is generally strong, 1x means break-even.",
+    "Two ways of measuring return on ad spend. Blended (also called MER) = ALL store revenue / ad spend — includes organic, repeat, and direct sales, so it overstates what ads alone earn. Google ROAS uses only revenue that Google's conversion tracking attributes to ad clicks — more conservative, closer to the ads' true return. The truth is usually between the two.",
   Conversions:
     "A conversion is tracked by Google Ads when someone completes a desired action (e.g. a purchase or form submission) after clicking your ad.",
   Clicks:
@@ -248,7 +277,8 @@ const CHART_INFO: Record<string, string> = {
 const METRIC_INFO: Record<string, string> = {
   revenue: "Total sales from the Glass Railing Store (Shopify) during this period.",
   ad_spend: "Total amount spent on Google Ads campaigns during this period.",
-  roas: "Return on Ad Spend = Revenue / Ad Spend. Shows how much revenue each ad dollar generates.",
+  roas: "Blended ROAS (also called MER) = ALL store revenue / ad spend. Includes organic, repeat, and direct sales — not just orders from ads — so it overstates what ads alone earn. Compare with Google ROAS below.",
+  google_roas: "Google ROAS = ad-attributed revenue / ad spend, using only orders Google's conversion tracking credits to ad clicks. More conservative than Blended ROAS; the ads' true return is usually between the two.",
   clicks: "Number of times people clicked on your Google Ads.",
   impressions: "Number of times your ads were shown to people. Not all impressions lead to clicks.",
   conversions: "Actions completed after clicking your ad, as tracked by Google Ads conversion tags.",
@@ -259,15 +289,30 @@ const METRIC_INFO: Record<string, string> = {
   aov: "Average Order Value = Revenue / Orders. Average revenue per order.",
 };
 
+function LegendDot({ color, label, line }: { color: string; label: string; line?: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs text-sand-500">
+      {line ? (
+        <span className="w-3.5 h-0.5 rounded-full" style={{ background: color }} />
+      ) : (
+        <span className="w-2 h-2 rounded-full" style={{ background: color }} />
+      )}
+      {label}
+    </span>
+  );
+}
+
 function ChartCard({
   title,
   chartKey,
   avg,
+  legend,
   children,
 }: {
   title: string;
   chartKey: string;
   avg?: string;
+  legend?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -285,6 +330,7 @@ function ChartCard({
           </span>
         )}
       </div>
+      {legend && <div className="flex flex-wrap gap-4 mb-3 -mt-2">{legend}</div>}
       <div className="h-52">{children}</div>
     </div>
   );
@@ -302,18 +348,25 @@ function InsightsPanel({
   const c = data.current;
   const insights: { icon: string; text: string; color: string }[] = [];
 
-  // ROAS explanation
+  // ROAS explanation — assess on Google-attributed ROAS when available, since
+  // blended ROAS includes revenue the ads didn't generate
   if (c.roas > 0) {
-    const roasColor = c.roas >= 3 ? "text-green-700" : c.roas >= 1 ? "text-amber-700" : "text-red-600";
+    const attributed = c.google_roas ?? 0;
+    const assessOn = attributed > 0 ? attributed : c.roas;
+    const roasColor = assessOn >= 3 ? "text-green-700" : assessOn >= 1 ? "text-amber-700" : "text-red-600";
     insights.push({
-      icon: c.roas >= 3 ? "+" : c.roas >= 1 ? "~" : "!",
+      icon: assessOn >= 3 ? "+" : assessOn >= 1 ? "~" : "!",
       color: roasColor,
-      text: `ROAS of ${c.roas}x means for every $1 spent on ads, you earned $${c.roas.toFixed(2)} in revenue.${
-        c.roas >= 3
-          ? " This is a strong return."
-          : c.roas >= 1
-            ? " You're breaking even or slightly profitable. Consider optimizing ad targeting."
-            : " You're spending more on ads than you're earning back. Review underperforming campaigns."
+      text: `Blended ROAS is ${c.roas}x — every $1 of ad spend coincided with $${c.roas.toFixed(2)} in total store revenue (all sources, not just ads).${
+        attributed > 0
+          ? ` Google's conversion tracking attributes ${attributed.toFixed(2)}x directly to ad clicks.`
+          : ""
+      }${
+        assessOn >= 3
+          ? " That attributed return is strong."
+          : assessOn >= 1
+            ? " The attributed return is around break-even. Consider optimizing ad targeting."
+            : " Ads are earning back less than they cost by Google's attribution. Review underperforming campaigns."
       }`,
     });
   }
@@ -476,15 +529,6 @@ function InsightsPanel({
   );
 }
 
-// Persistent cache: survives page reloads — only updated on explicit Refresh
-const MKT_LS_PREFIX = "marketing_cache_v1:";
-function mktLsSave(key: string, data: unknown): void {
-  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
-}
-function mktLsLoad<T>(key: string): T | null {
-  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-
 export default function MarketingDashboard() {
   const [range, setRange] = useState<Range>("7d");
   const [customFrom, setCustomFrom] = useState(() => daysAgoStr(30));
@@ -516,7 +560,7 @@ export default function MarketingDashboard() {
     // Check localStorage unless forcing a refresh
     if (!force) {
       const cacheKey = `overview:${from}:${to}:${market}:${demo}`;
-      const cached = mktLsLoad<{ data: MarketingResponse; history: DailyPoint[]; hasGA4: boolean }>(cacheKey);
+      const cached = mktCacheLoad<{ data: MarketingResponse; history: DailyPoint[]; hasGA4: boolean }>(cacheKey);
       if (cached) {
         setData(cached.data);
         setHistory(cached.history ?? []);
@@ -560,7 +604,7 @@ export default function MarketingDashboard() {
         setHasGA4(hasGA4Val);
       }
 
-      mktLsSave(`overview:${from}:${to}:${market}:${demo}`, { data: summaryData, history: histData, hasGA4: hasGA4Val });
+      mktCacheSave(`overview:${from}:${to}:${market}:${demo}`, { data: summaryData, history: histData, hasGA4: hasGA4Val });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -570,11 +614,7 @@ export default function MarketingDashboard() {
 
   const handleRefresh = useCallback(() => {
     // Clear all marketing cache entries so sub-tabs also fetch fresh
-    try {
-      Object.keys(localStorage)
-        .filter((k) => k.startsWith(MKT_LS_PREFIX))
-        .forEach((k) => localStorage.removeItem(k));
-    } catch {}
+    mktCacheClearAll();
     forceNextRef.current = true;
     setRefreshKey((k) => k + 1);
     loadData();
@@ -584,16 +624,26 @@ export default function MarketingDashboard() {
     loadData();
   }, [loadData]);
 
-  // Compute derived chart data
-  const derivedHistory: DerivedPoint[] = useMemo(
-    () =>
-      history.map((d) => ({
+  // Compute derived chart data. Today is excluded from charts — it's a partial
+  // day and always looks like a crash next to complete days.
+  const derivedHistory: DerivedPoint[] = useMemo(() => {
+    const complete = history.filter((d) => d.date !== todayStr());
+    return complete.map((d, i) => {
+      const window = complete.slice(Math.max(0, i - 6), i + 1);
+      const ma7 = window.reduce((s, w) => s + w.revenue, 0) / window.length;
+      return {
         ...d,
         cpc: d.clicks > 0 ? Math.round((d.ad_spend / d.clicks) * 100) / 100 : 0,
         ctr: d.impressions > 0 ? Math.round((d.clicks / d.impressions) * 10000) / 100 : 0,
         profit: Math.round((d.revenue - d.ad_spend) * 100) / 100,
         aov: d.order_count > 0 ? Math.round((d.revenue / d.order_count) * 100) / 100 : 0,
-      })),
+        revenue_ma7: Math.round(ma7 * 100) / 100,
+      };
+    });
+  }, [history]);
+
+  const chartsExcludeToday = useMemo(
+    () => history.some((d) => d.date === todayStr()),
     [history]
   );
 
@@ -606,11 +656,13 @@ export default function MarketingDashboard() {
     const totalClicks = derivedHistory.reduce((s, d) => s + d.clicks, 0);
     const totalImpressions = derivedHistory.reduce((s, d) => s + d.impressions, 0);
     const totalRevenue = derivedHistory.reduce((s, d) => s + d.revenue, 0);
+    const totalAdsRevenue = derivedHistory.reduce((s, d) => s + (d.ads_revenue ?? 0), 0);
     const totalOrders = derivedHistory.reduce((s, d) => s + d.order_count, 0);
     return {
       revenue: sum((d) => d.revenue),
       ad_spend: sum((d) => d.ad_spend),
       roas: totalSpend > 0 ? Math.round((totalRevenue / totalSpend) * 100) / 100 : 0,
+      google_roas: totalSpend > 0 ? Math.round((totalAdsRevenue / totalSpend) * 100) / 100 : 0,
       conversions: sum((d) => d.conversions),
       clicks: sum((d) => d.clicks),
       cpc: totalClicks > 0 ? Math.round((totalSpend / totalClicks) * 100) / 100 : 0,
@@ -763,6 +815,7 @@ export default function MarketingDashboard() {
           Showing: {data.dateRange.current.from} &rarr; {data.dateRange.current.to}
           {" · "}
           Compared to previous {rangeLabel}: {data.dateRange.previous.from} &rarr; {data.dateRange.previous.to}
+          {chartsExcludeToday && " · charts exclude today (partial day)"}
         </p>
       )}
 
@@ -784,11 +837,11 @@ export default function MarketingDashboard() {
                     {METRIC_INFO[m.key] && <InfoTooltip text={METRIC_INFO[m.key]} />}
                   </div>
                   <p className="text-2xl font-semibold text-sand-900 mt-2">
-                    {m.format(data.current[m.key])}
+                    {m.format(data.current[m.key] ?? 0)}
                   </p>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs text-sand-400">
-                      was {m.format(data.previous[m.key])}
+                      was {m.format(data.previous[m.key] ?? 0)}
                     </span>
                     <ChangeBadge value={data.change[m.key] ?? null} />
                   </div>
@@ -799,7 +852,7 @@ export default function MarketingDashboard() {
 
           {/* Metric cards — row 2: derived metrics */}
           {data && !loading && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
               {DERIVED_METRICS.map((m) => {
                 const curVal = m.compute(data.current);
                 const prevVal = m.compute(data.previous);
@@ -835,31 +888,61 @@ export default function MarketingDashboard() {
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
               {/* Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                {/* Revenue vs Ad Spend */}
-                <ChartCard title={`Revenue vs Ad Spend (${rangeLabel})`} chartKey="Revenue vs Ad Spend" avg={`${formatCurrency(avgs.revenue)} rev / ${formatCurrency(avgs.ad_spend)} spend`}>
-                  <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
-                      <defs>
-                        <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#16a34a" stopOpacity={0.15} />
-                          <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
-                        </linearGradient>
-                        <linearGradient id="gradSpend" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0%" stopColor="#dc2626" stopOpacity={0.1} />
-                          <stop offset="100%" stopColor="#dc2626" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
-                      <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "Ad Spend"]} />
-                      <ReferenceLine y={avgs.revenue} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <ReferenceLine y={avgs.ad_spend} stroke="#dc2626" strokeDasharray="4 4" strokeOpacity={0.5} />
-                      <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={2} fill="url(#gradRevenue)" />
-                      <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradSpend)" />
-                    </AreaChart>
-                  </ResponsiveContainer>
-                </ChartCard>
+                {/* Revenue & Ad Spend — aligned panels, each on its own scale.
+                    Spend is ~1/10th of revenue, so a shared axis flattens it
+                    into an unreadable line. */}
+                <div className="bg-white rounded-xl border border-sand-200/60 p-5">
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center">
+                      <p className="text-xs text-sand-400 uppercase tracking-wider">
+                        Revenue & Ad Spend ({rangeLabel})
+                      </p>
+                      <InfoTooltip text={CHART_INFO["Revenue vs Ad Spend"]} />
+                    </div>
+                    <span className="text-xs text-sand-500 font-medium">
+                      avg/day: <span className="text-sand-700">{formatCurrency(avgs.revenue)} rev / {formatCurrency(avgs.ad_spend)} spend</span>
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-4 mb-2">
+                    <LegendDot color="#16a34a" label="Revenue (daily)" />
+                    <LegendDot color="#166534" label="7-day avg" line />
+                    <LegendDot color="#dc2626" label="Ad spend (own scale)" />
+                  </div>
+                  <div className="h-36">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <ComposedChart data={derivedHistory} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+                        <defs>
+                          <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#16a34a" stopOpacity={0.15} />
+                            <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
+                        <XAxis dataKey="date" hide />
+                        <YAxis width={44} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
+                        <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "7-day avg"]} />
+                        <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={1.5} strokeOpacity={0.6} fill="url(#gradRevenue)" />
+                        <Line type="monotone" dataKey="revenue_ma7" stroke="#166534" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#166534" }} />
+                      </ComposedChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="h-16 mt-1">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={derivedHistory} margin={{ top: 2, right: 4, bottom: 0, left: 0 }}>
+                        <defs>
+                          <linearGradient id="gradSpendPanel" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#dc2626" stopOpacity={0.15} />
+                            <stop offset="100%" stopColor="#dc2626" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
+                        <YAxis width={44} tick={{ fontSize: 10, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} tickCount={3} />
+                        <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
+                        <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradSpendPanel)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
 
                 {/* Ad Spend */}
                 <ChartCard title={`Ad Spend (${rangeLabel})`} chartKey="Ad Spend" avg={formatCurrency(avgs.ad_spend)}>
@@ -873,7 +956,7 @@ export default function MarketingDashboard() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                      <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
                       <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
                       <ReferenceLine y={avgs.ad_spend} stroke="#dc2626" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradAdSpend)" />
@@ -881,16 +964,27 @@ export default function MarketingDashboard() {
                   </ResponsiveContainer>
                 </ChartCard>
 
-                {/* ROAS */}
-                <ChartCard title={`ROAS (${rangeLabel})`} chartKey="ROAS" avg={`${avgs.roas}x`}>
+                {/* ROAS — blended vs Google-attributed */}
+                <ChartCard
+                  title={`ROAS (${rangeLabel})`}
+                  chartKey="ROAS"
+                  avg={`${avgs.roas}x blended / ${avgs.google_roas}x Google`}
+                  legend={
+                    <>
+                      <LegendDot color="#b45309" label="Blended (all revenue)" line />
+                      <LegendDot color="#0f766e" label="Google-attributed" line />
+                    </>
+                  }
+                >
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={derivedHistory}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}x`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [`${value}x`, "ROAS"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [`${value}x`, name === "roas" ? "Blended" : "Google-attributed"]} />
                       <ReferenceLine y={avgs.roas} stroke="#b45309" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Line type="monotone" dataKey="roas" stroke="#b45309" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#b45309" }} />
+                      <Line type="monotone" dataKey="google_roas" stroke="#0f766e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#0f766e" }} />
                     </LineChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -975,7 +1069,7 @@ export default function MarketingDashboard() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
+                      <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
                       <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Profit"]} />
                       <ReferenceLine y={0} stroke="#a39e93" strokeDasharray="3 3" />
                       <ReferenceLine y={avgs.profit} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.5} />

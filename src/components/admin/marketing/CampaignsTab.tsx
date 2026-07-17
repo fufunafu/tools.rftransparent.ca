@@ -10,6 +10,7 @@ import {
   CartesianGrid,
   Tooltip,
 } from "recharts";
+import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
 
 interface CampaignData {
   campaign: string;
@@ -35,14 +36,6 @@ function formatNumber(n: number) {
 
 type SortKey = "campaign" | "ad_spend" | "revenue" | "roas" | "clicks" | "impressions" | "conversions";
 
-const MKT_LS_PREFIX = "marketing_cache_v1:";
-function lsSave(key: string, data: unknown): void {
-  try { localStorage.setItem(MKT_LS_PREFIX + key, JSON.stringify(data)); } catch {}
-}
-function lsLoad<T>(key: string): T | null {
-  try { const raw = localStorage.getItem(MKT_LS_PREFIX + key); return raw ? JSON.parse(raw) : null; } catch { return null; }
-}
-
 export default function CampaignsTab({
   from,
   to,
@@ -66,7 +59,7 @@ export default function CampaignsTab({
     let cancelled = false;
     const cacheKey = `campaigns:${from}:${to}:${market}:${demo}`;
 
-    const cached = lsLoad<CampaignData[]>(cacheKey);
+    const cached = mktCacheLoad<CampaignData[]>(cacheKey);
     if (cached) {
       setData(cached);
       setLoading(false);
@@ -85,7 +78,7 @@ export default function CampaignsTab({
         if (json.error) throw new Error(json.error);
         const campaigns = json.campaigns ?? [];
         setData(campaigns);
-        lsSave(cacheKey, campaigns);
+        mktCacheSave(cacheKey, campaigns);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
