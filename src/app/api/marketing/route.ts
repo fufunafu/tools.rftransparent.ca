@@ -88,11 +88,35 @@ interface LocalOrderNode extends OrderNode {
   localDate: string;
 }
 
+// In-memory cache for Shopify order downloads. One dashboard load requests the
+// same ranges up to three times (summary, comparison period, daily history),
+// and Fluid Compute reuses instances across requests, so this removes most
+// repeat full-history downloads. Storing the promise also dedupes concurrent
+// requests for the same range.
+const ordersCache = new Map<string, { ts: number; promise: Promise<OrderNode[]> }>();
+const ORDERS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+function fetchAllOrdersCached(startDate: string, endDate: string, fresh = false): Promise<OrderNode[]> {
+  const key = `${startDate}:${endDate}`;
+  const hit = ordersCache.get(key);
+  if (!fresh && hit && Date.now() - hit.ts < ORDERS_CACHE_TTL_MS) return hit.promise;
+  const promise = fetchAllOrders(startDate, endDate).catch((err) => {
+    ordersCache.delete(key);
+    throw err;
+  });
+  if (ordersCache.size >= 20) {
+    const oldest = [...ordersCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) ordersCache.delete(oldest[0]);
+  }
+  ordersCache.set(key, { ts: Date.now(), promise });
+  return promise;
+}
+
 // Fetch orders and bucket them by Toronto calendar date. The Shopify query
 // window is widened by a day on each side so orders near midnight aren't lost
 // to the UTC/local boundary, then filtered back to the requested local range.
-async function fetchOrdersInRange(startDate: string, endDate: string): Promise<LocalOrderNode[]> {
-  const nodes = await fetchAllOrders(addDaysStr(startDate, -1), addDaysStr(endDate, 1));
+async function fetchOrdersInRange(startDate: string, endDate: string, fresh = false): Promise<LocalOrderNode[]> {
+  const nodes = await fetchAllOrdersCached(addDaysStr(startDate, -1), addDaysStr(endDate, 1), fresh);
   return nodes
     .map((n) => ({ ...n, localDate: torontoDateOf(n.createdAt) }))
     .filter((n) => n.localDate >= startDate && n.localDate <= endDate);
@@ -106,8 +130,8 @@ function filterOrdersByMarket<T extends OrderNode>(orders: T[], market: Market):
   return orders.filter((o) => o.shippingAddress?.countryCode === code);
 }
 
-async function getShopifyStats(startDate: string, endDate: string, market: Market = "all"): Promise<{ revenue: number; orders: number }> {
-  const allOrders = await fetchOrdersInRange(startDate, endDate);
+async function getShopifyStats(startDate: string, endDate: string, market: Market = "all", fresh = false): Promise<{ revenue: number; orders: number }> {
+  const allOrders = await fetchOrdersInRange(startDate, endDate, fresh);
   const orders = filterOrdersByMarket(allOrders, market);
   const revenue = orders.reduce((sum, o) => sum + calcNetRevenue(o), 0);
   return { revenue, orders: orders.length };
@@ -116,9 +140,10 @@ async function getShopifyStats(startDate: string, endDate: string, market: Marke
 async function getDailyShopifyStats(
   startDate: string,
   endDate: string,
-  market: Market = "all"
+  market: Market = "all",
+  fresh = false
 ): Promise<Map<string, { revenue: number; orders: number }>> {
-  const allOrders = await fetchOrdersInRange(startDate, endDate);
+  const allOrders = await fetchOrdersInRange(startDate, endDate, fresh);
   const orders = filterOrdersByMarket(allOrders, market);
   const byDate = new Map<string, { revenue: number; orders: number }>();
   for (const node of orders) {
@@ -306,6 +331,9 @@ export async function GET(req: NextRequest) {
   const view = req.nextUrl.searchParams.get("view");
   const demo = req.nextUrl.searchParams.get("demo") === "true";
   const market = (req.nextUrl.searchParams.get("market") || "all") as Market;
+  // fresh=1 (sent by the dashboard's Refresh button) bypasses the server-side
+  // orders cache so an explicit refresh always re-downloads.
+  const fresh = req.nextUrl.searchParams.get("fresh") === "1";
 
   // Parse from/to date range (business-local Toronto dates)
   const today = todayStr();
@@ -538,7 +566,7 @@ export async function GET(req: NextRequest) {
     try {
       const fetches: [Promise<Awaited<ReturnType<typeof getDailyAdMetrics>>>, Promise<Awaited<ReturnType<typeof getDailyShopifyStats>>>, Promise<Map<string, number> | null>] = [
         getDailyAdMetrics(from, to, market),
-        getDailyShopifyStats(from, to, market),
+        getDailyShopifyStats(from, to, market, fresh),
         isGA4Configured()
           ? getDailySessions(from, to).then((rows) => {
               const m = new Map<string, number>();
@@ -606,8 +634,8 @@ export async function GET(req: NextRequest) {
     const [currentAds, previousAds, currentShopify, previousShopify] = await Promise.all([
       getAdMetrics(from, to, market),
       getAdMetrics(prevFromStr, prevToStr, market),
-      getShopifyStats(from, to, market),
-      getShopifyStats(prevFromStr, prevToStr, market),
+      getShopifyStats(from, to, market, fresh),
+      getShopifyStats(prevFromStr, prevToStr, market, fresh),
     ]);
 
     // revenue/roas are blended (all Shopify revenue over spend, i.e. MER);

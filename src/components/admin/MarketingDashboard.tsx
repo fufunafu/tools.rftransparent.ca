@@ -82,6 +82,19 @@ function daysAgoStr(n: number) {
   return d.toISOString().split("T")[0];
 }
 
+// Monday of the week containing the given date, as YYYY-MM-DD
+function weekStartStr(dateStr: string) {
+  const d = new Date(dateStr + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().split("T")[0];
+}
+
+interface SearchTermLite {
+  term: string;
+  ad_spend: number;
+  conversions: number;
+}
+
 function formatCurrency(n: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -251,7 +264,7 @@ function InfoTooltip({ text }: { text: string }) {
 
 const CHART_INFO: Record<string, string> = {
   "Revenue vs Ad Spend":
-    "Two aligned panels sharing the same dates: total store revenue (Shopify) on top with a 7-day average trend line, and Google Ads spend below on its own scale (spend is much smaller than revenue, so it gets its own panel to stay readable). Look for spend changes followed by revenue changes a few days later.",
+    "Two aligned panels sharing the same dates: total store revenue (Shopify) on top with a 7-day average trend line, and Google Ads spend below on its own scale (spend is much smaller than revenue, so it gets its own panel to stay readable). On ranges over ~2 months, charts switch to weekly totals so trends stay readable. Look for spend changes followed by revenue changes shortly after.",
   "Ad Spend":
     "Daily Google Ads spend across all campaigns. Track spending trends to spot budget fluctuations and correlate with revenue changes.",
   ROAS:
@@ -403,7 +416,8 @@ function ChartCard({
 
 // The two aligned Revenue / Ad Spend panels. Rendered small inside the card
 // and large inside the expand modal, so heights are parameterized.
-function RevenueSpendPanels({ data, big }: { data: DerivedPoint[]; big?: boolean }) {
+function RevenueSpendPanels({ data, big, weekly }: { data: DerivedPoint[]; big?: boolean; weekly?: boolean }) {
+  const label = (l: unknown) => (weekly ? `Week of ${formatShortDate(l)}` : formatShortDate(l));
   return (
     <>
       <div className={big ? "h-[46vh]" : "h-32"}>
@@ -418,9 +432,9 @@ function RevenueSpendPanels({ data, big }: { data: DerivedPoint[]; big?: boolean
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
             <XAxis dataKey="date" hide />
             <YAxis width={44} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
-            <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "7-day avg"]} />
-            <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={1.5} strokeOpacity={0.6} fill="url(#gradRevenue)" />
-            <Line type="monotone" dataKey="revenue_ma7" stroke="#166534" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#166534" }} />
+            <Tooltip {...tooltipStyle} labelFormatter={label} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "7-day avg"]} />
+            <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={weekly ? 2 : 1.5} strokeOpacity={weekly ? 1 : 0.6} fill="url(#gradRevenue)" />
+            {!weekly && <Line type="monotone" dataKey="revenue_ma7" stroke="#166534" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#166534" }} />}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
@@ -436,7 +450,7 @@ function RevenueSpendPanels({ data, big }: { data: DerivedPoint[]; big?: boolean
             <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
             <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
             <YAxis width={44} tick={{ fontSize: 10, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} tickCount={big ? 5 : 3} />
-            <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
+            <Tooltip {...tooltipStyle} labelFormatter={label} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
             <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradSpendPanel)" />
           </AreaChart>
         </ResponsiveContainer>
@@ -450,18 +464,20 @@ function RevenueSpendCard({
   avgRev,
   avgSpend,
   rangeLabel,
+  weekly,
 }: {
   data: DerivedPoint[];
   avgRev: number;
   avgSpend: number;
   rangeLabel: string;
+  weekly?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const title = `Revenue & Ad Spend (${rangeLabel})`;
   const legend = (
     <>
-      <LegendDot color="#16a34a" label="Revenue (daily)" />
-      <LegendDot color="#166534" label="7-day avg" line />
+      <LegendDot color="#16a34a" label={weekly ? "Revenue (weekly)" : "Revenue (daily)"} />
+      {!weekly && <LegendDot color="#166534" label="7-day avg" line />}
       <LegendDot color="#dc2626" label="Ad spend (own scale)" />
     </>
   );
@@ -473,16 +489,16 @@ function RevenueSpendCard({
           <InfoTooltip text={CHART_INFO["Revenue vs Ad Spend"]} />
         </div>
         <span className="text-xs text-sand-500 font-medium">
-          avg/day: <span className="text-sand-700">{formatCurrency(avgRev)} rev / {formatCurrency(avgSpend)} spend</span>
+          avg/{weekly ? "week" : "day"}: <span className="text-sand-700">{formatCurrency(avgRev)} rev / {formatCurrency(avgSpend)} spend</span>
         </span>
       </div>
       <div className="flex flex-wrap gap-4 mb-2">{legend}</div>
       <div className="cursor-zoom-in" title="Click to enlarge" onClick={() => setExpanded(true)}>
-        <RevenueSpendPanels data={data} />
+        <RevenueSpendPanels data={data} weekly={weekly} />
       </div>
       {expanded && (
         <ChartModal title={title} legend={legend} onClose={() => setExpanded(false)}>
-          <RevenueSpendPanels data={data} big />
+          <RevenueSpendPanels data={data} big weekly={weekly} />
         </ChartModal>
       )}
     </div>
@@ -493,13 +509,34 @@ function InsightsPanel({
   data,
   history,
   days,
+  terms,
 }: {
   data: MarketingResponse;
   history: DailyPoint[];
   days: number;
+  terms?: SearchTermLite[];
 }) {
   const c = data.current;
   const insights: { icon: string; text: string; color: string }[] = [];
+
+  // Wasted spend — search terms that cost real money and converted nothing
+  if (terms && terms.length > 0) {
+    const wasteful = terms
+      .filter((t) => t.ad_spend > 50 && t.conversions === 0)
+      .sort((a, b) => b.ad_spend - a.ad_spend);
+    if (wasteful.length > 0) {
+      const totalWaste = wasteful.reduce((s, t) => s + t.ad_spend, 0);
+      const top = wasteful
+        .slice(0, 3)
+        .map((t) => `"${t.term}" (${formatCurrency(t.ad_spend)})`)
+        .join(", ");
+      insights.push({
+        icon: "!",
+        color: "text-red-600",
+        text: `${formatCurrency(totalWaste)} went to ${wasteful.length} search term${wasteful.length === 1 ? "" : "s"} with zero conversions. Biggest: ${top}. Consider adding these as negative keywords — see the Search Terms tab.`,
+      });
+    }
+  }
 
   // ROAS explanation — assess on Google-attributed ROAS when available, since
   // blended ROAS includes revenue the ads didn't generate
@@ -695,6 +732,7 @@ export default function MarketingDashboard() {
   const [hasGA4, setHasGA4] = useState(false);
   const [market, setMarket] = useState<"all" | "us" | "ca">("all");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [searchTerms, setSearchTerms] = useState<SearchTermLite[]>([]);
   const forceNextRef = useRef(false);
 
   const getDateRange = useCallback(() => {
@@ -713,11 +751,12 @@ export default function MarketingDashboard() {
     // Check localStorage unless forcing a refresh
     if (!force) {
       const cacheKey = `overview:${from}:${to}:${market}:${demo}`;
-      const cached = mktCacheLoad<{ data: MarketingResponse; history: DailyPoint[]; hasGA4: boolean }>(cacheKey);
+      const cached = mktCacheLoad<{ data: MarketingResponse; history: DailyPoint[]; hasGA4: boolean; terms?: SearchTermLite[] }>(cacheKey);
       if (cached) {
         setData(cached.data);
         setHistory(cached.history ?? []);
         setHasGA4(cached.hasGA4 ?? false);
+        setSearchTerms(cached.terms ?? []);
         return;
       }
     }
@@ -729,14 +768,20 @@ export default function MarketingDashboard() {
       const params = new URLSearchParams({ from, to });
       if (demo) params.set("demo", "true");
       if (market !== "all") params.set("market", market);
+      if (force) params.set("fresh", "1");
 
       const histParams = new URLSearchParams({ view: "history", from, to });
       if (demo) histParams.set("demo", "true");
       if (market !== "all") histParams.set("market", market);
+      if (force) histParams.set("fresh", "1");
 
-      const [summaryRes, historyRes] = await Promise.all([
+      const termsParams = new URLSearchParams({ view: "search-terms", from, to });
+      if (demo) termsParams.set("demo", "true");
+
+      const [summaryRes, historyRes, termsRes] = await Promise.all([
         fetch(`/api/marketing?${params}`),
         fetch(`/api/marketing?${histParams}`),
+        fetch(`/api/marketing?${termsParams}`).catch(() => null),
       ]);
 
       if (!summaryRes.ok) {
@@ -757,7 +802,17 @@ export default function MarketingDashboard() {
         setHasGA4(hasGA4Val);
       }
 
-      mktCacheSave(`overview:${from}:${to}:${market}:${demo}`, { data: summaryData, history: histData, hasGA4: hasGA4Val });
+      // Search terms feed the wasted-spend insight; saving under the Search
+      // Terms tab's cache key also makes that tab load instantly.
+      let termsData: SearchTermLite[] = [];
+      if (termsRes?.ok) {
+        const termsJson = await termsRes.json();
+        termsData = termsJson.searchTerms ?? [];
+        mktCacheSave(`search:${from}:${to}:${demo}`, termsData);
+      }
+      setSearchTerms(termsData);
+
+      mktCacheSave(`overview:${from}:${to}:${market}:${demo}`, { data: summaryData, history: histData, hasGA4: hasGA4Val, terms: termsData });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -779,7 +834,7 @@ export default function MarketingDashboard() {
 
   // Compute derived chart data. Today is excluded from charts — it's a partial
   // day and always looks like a crash next to complete days.
-  const derivedHistory: DerivedPoint[] = useMemo(() => {
+  const dailyHistory: DerivedPoint[] = useMemo(() => {
     const complete = history.filter((d) => d.date !== todayStr());
     return complete.map((d, i) => {
       const window = complete.slice(Math.max(0, i - 6), i + 1);
@@ -795,22 +850,72 @@ export default function MarketingDashboard() {
     });
   }, [history]);
 
+  // Long ranges aggregate to complete calendar weeks (Mon–Sun) — hundreds of
+  // daily points are unreadable noise for a low-volume, high-value store.
+  const isWeekly = dailyHistory.length > 70;
+  const chartData: DerivedPoint[] = useMemo(() => {
+    if (!isWeekly) return dailyHistory;
+    const byWeek = new Map<string, DerivedPoint[]>();
+    for (const d of dailyHistory) {
+      const w = weekStartStr(d.date);
+      const arr = byWeek.get(w) ?? [];
+      arr.push(d);
+      byWeek.set(w, arr);
+    }
+    const r2 = (n: number) => Math.round(n * 100) / 100;
+    return [...byWeek.entries()]
+      .filter(([, days]) => days.length === 7) // partial edge weeks would plot as fake dips
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, days]) => {
+        const sum = (f: (d: DerivedPoint) => number) => days.reduce((s, d) => s + f(d), 0);
+        const ad_spend = r2(sum((d) => d.ad_spend));
+        const revenue = r2(sum((d) => d.revenue));
+        const ads_revenue = r2(sum((d) => d.ads_revenue ?? 0));
+        const clicks = sum((d) => d.clicks);
+        const impressions = sum((d) => d.impressions);
+        const conversions = r2(sum((d) => d.conversions));
+        const order_count = sum((d) => d.order_count);
+        const hasSessions = days.some((d) => d.sessions !== undefined);
+        return {
+          date,
+          ad_spend,
+          revenue,
+          ads_revenue,
+          clicks,
+          impressions,
+          conversions,
+          order_count,
+          ...(hasSessions ? { sessions: sum((d) => d.sessions ?? 0) } : {}),
+          roas: ad_spend > 0 ? r2(revenue / ad_spend) : 0,
+          google_roas: ad_spend > 0 ? r2(ads_revenue / ad_spend) : 0,
+          cpc: clicks > 0 ? r2(ad_spend / clicks) : 0,
+          ctr: impressions > 0 ? r2((clicks / impressions) * 100) : 0,
+          profit: r2(revenue - ad_spend),
+          aov: order_count > 0 ? r2(revenue / order_count) : 0,
+          revenue_ma7: 0,
+        };
+      });
+  }, [dailyHistory, isWeekly]);
+
   const chartsExcludeToday = useMemo(
     () => history.some((d) => d.date === todayStr()),
     [history]
   );
 
+  const chartLabel = (l: unknown) => (isWeekly ? `Week of ${formatShortDate(l)}` : formatShortDate(l));
+  const perUnit = isWeekly ? "/wk" : "";
+
   // Period averages for reference lines
   const avgs = useMemo(() => {
-    const n = derivedHistory.length || 1;
+    const n = chartData.length || 1;
     const sum = (fn: (d: DerivedPoint) => number) =>
-      Math.round((derivedHistory.reduce((s, d) => s + fn(d), 0) / n) * 100) / 100;
-    const totalSpend = derivedHistory.reduce((s, d) => s + d.ad_spend, 0);
-    const totalClicks = derivedHistory.reduce((s, d) => s + d.clicks, 0);
-    const totalImpressions = derivedHistory.reduce((s, d) => s + d.impressions, 0);
-    const totalRevenue = derivedHistory.reduce((s, d) => s + d.revenue, 0);
-    const totalAdsRevenue = derivedHistory.reduce((s, d) => s + (d.ads_revenue ?? 0), 0);
-    const totalOrders = derivedHistory.reduce((s, d) => s + d.order_count, 0);
+      Math.round((chartData.reduce((s, d) => s + fn(d), 0) / n) * 100) / 100;
+    const totalSpend = chartData.reduce((s, d) => s + d.ad_spend, 0);
+    const totalClicks = chartData.reduce((s, d) => s + d.clicks, 0);
+    const totalImpressions = chartData.reduce((s, d) => s + d.impressions, 0);
+    const totalRevenue = chartData.reduce((s, d) => s + d.revenue, 0);
+    const totalAdsRevenue = chartData.reduce((s, d) => s + (d.ads_revenue ?? 0), 0);
+    const totalOrders = chartData.reduce((s, d) => s + d.order_count, 0);
     return {
       revenue: sum((d) => d.revenue),
       ad_spend: sum((d) => d.ad_spend),
@@ -824,7 +929,7 @@ export default function MarketingDashboard() {
       aov: totalOrders > 0 ? Math.round((totalRevenue / totalOrders) * 100) / 100 : 0,
       order_count: sum((d) => d.order_count),
     };
-  }, [derivedHistory]);
+  }, [chartData]);
 
   const { from, to } = getDateRange();
   const days = Math.round(
@@ -959,7 +1064,11 @@ export default function MarketingDashboard() {
           Showing: {data.dateRange.current.from} &rarr; {data.dateRange.current.to}
           {" · "}
           Compared to previous {rangeLabel}: {data.dateRange.previous.from} &rarr; {data.dateRange.previous.to}
-          {chartsExcludeToday && " · charts exclude today (partial day)"}
+          {isWeekly
+            ? " · charts show weekly totals (partial weeks excluded)"
+            : chartsExcludeToday
+              ? " · charts exclude today (partial day)"
+              : ""}
         </p>
       )}
 
@@ -1028,7 +1137,7 @@ export default function MarketingDashboard() {
           )}
 
           {/* Charts + Insights */}
-          {derivedHistory.length > 0 && !loading && data && (
+          {dailyHistory.length > 0 && !loading && data && (
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_340px] gap-6">
               {/* Charts */}
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -1036,16 +1145,17 @@ export default function MarketingDashboard() {
                     Spend is ~1/10th of revenue, so a shared axis flattens it
                     into an unreadable line. */}
                 <RevenueSpendCard
-                  data={derivedHistory}
+                  data={chartData}
                   avgRev={avgs.revenue}
                   avgSpend={avgs.ad_spend}
                   rangeLabel={rangeLabel}
+                  weekly={isWeekly}
                 />
 
                 {/* Ad Spend */}
-                <ChartCard title={`Ad Spend (${rangeLabel})`} chartKey="Ad Spend" avg={formatCurrency(avgs.ad_spend)}>
+                <ChartCard title={`Ad Spend (${rangeLabel})`} chartKey="Ad Spend" avg={formatCurrency(avgs.ad_spend) + perUnit}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
+                    <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="gradAdSpend" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#dc2626" stopOpacity={0.15} />
@@ -1055,7 +1165,7 @@ export default function MarketingDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
                       <ReferenceLine y={avgs.ad_spend} stroke="#dc2626" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradAdSpend)" />
                     </AreaChart>
@@ -1075,11 +1185,11 @@ export default function MarketingDashboard() {
                   }
                 >
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={derivedHistory}>
+                    <LineChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}x`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [`${value}x`, name === "roas" ? "Blended" : "Google-attributed"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown, name: unknown) => [`${value}x`, name === "roas" ? "Blended" : "Google-attributed"]} />
                       <ReferenceLine y={avgs.roas} stroke="#b45309" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Line type="monotone" dataKey="roas" stroke="#b45309" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#b45309" }} />
                       <Line type="monotone" dataKey="google_roas" stroke="#0f766e" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#0f766e" }} />
@@ -1088,9 +1198,9 @@ export default function MarketingDashboard() {
                 </ChartCard>
 
                 {/* Conversions */}
-                <ChartCard title={`Conversions (${rangeLabel})`} chartKey="Conversions" avg={formatNumber(avgs.conversions)}>
+                <ChartCard title={`Conversions (${rangeLabel})`} chartKey="Conversions" avg={formatNumber(avgs.conversions) + perUnit}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
+                    <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="gradConv" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.15} />
@@ -1100,7 +1210,7 @@ export default function MarketingDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatNumber(Number(value)), "Conversions"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatNumber(Number(value)), "Conversions"]} />
                       <ReferenceLine y={avgs.conversions} stroke="#7c3aed" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="conversions" stroke="#7c3aed" strokeWidth={2} fill="url(#gradConv)" />
                     </AreaChart>
@@ -1108,9 +1218,9 @@ export default function MarketingDashboard() {
                 </ChartCard>
 
                 {/* Clicks */}
-                <ChartCard title={`Clicks (${rangeLabel})`} chartKey="Clicks" avg={formatNumber(avgs.clicks)}>
+                <ChartCard title={`Clicks (${rangeLabel})`} chartKey="Clicks" avg={formatNumber(avgs.clicks) + perUnit}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
+                    <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="gradClicks" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#2563eb" stopOpacity={0.15} />
@@ -1120,7 +1230,7 @@ export default function MarketingDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatNumber(Number(value)), "Clicks"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatNumber(Number(value)), "Clicks"]} />
                       <ReferenceLine y={avgs.clicks} stroke="#2563eb" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="clicks" stroke="#2563eb" strokeWidth={2} fill="url(#gradClicks)" />
                     </AreaChart>
@@ -1130,11 +1240,11 @@ export default function MarketingDashboard() {
                 {/* CPC Over Time */}
                 <ChartCard title={`CPC (${rangeLabel})`} chartKey="CPC" avg={formatCurrency2(avgs.cpc)}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={derivedHistory}>
+                    <LineChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency2(Number(value)), "CPC"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatCurrency2(Number(value)), "CPC"]} />
                       <ReferenceLine y={avgs.cpc} stroke="#0891b2" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Line type="monotone" dataKey="cpc" stroke="#0891b2" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#0891b2" }} />
                     </LineChart>
@@ -1144,11 +1254,11 @@ export default function MarketingDashboard() {
                 {/* CTR Over Time */}
                 <ChartCard title={`CTR (${rangeLabel})`} chartKey="CTR" avg={formatPct(avgs.ctr)}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={derivedHistory}>
+                    <LineChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${v}%`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatPct(Number(value)), "CTR"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatPct(Number(value)), "CTR"]} />
                       <ReferenceLine y={avgs.ctr} stroke="#ea580c" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Line type="monotone" dataKey="ctr" stroke="#ea580c" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#ea580c" }} />
                     </LineChart>
@@ -1156,9 +1266,9 @@ export default function MarketingDashboard() {
                 </ChartCard>
 
                 {/* Profit Over Time */}
-                <ChartCard title={`Profit (${rangeLabel})`} chartKey="Profit" avg={formatCurrency(avgs.profit)}>
+                <ChartCard title={`Profit (${rangeLabel})`} chartKey="Profit" avg={formatCurrency(avgs.profit) + perUnit}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
+                    <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="gradProfit" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#16a34a" stopOpacity={0.2} />
@@ -1168,7 +1278,7 @@ export default function MarketingDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Profit"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatCurrency(Number(value)), "Profit"]} />
                       <ReferenceLine y={0} stroke="#a39e93" strokeDasharray="3 3" />
                       <ReferenceLine y={avgs.profit} stroke="#16a34a" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="profit" stroke="#16a34a" strokeWidth={2} fill="url(#gradProfit)" />
@@ -1179,11 +1289,11 @@ export default function MarketingDashboard() {
                 {/* AOV Over Time */}
                 <ChartCard title={`Avg Order Value (${rangeLabel})`} chartKey="AOV" avg={formatCurrency2(avgs.aov)}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={derivedHistory}>
+                    <LineChart data={chartData}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `$${v}`} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency2(Number(value)), "AOV"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatCurrency2(Number(value)), "AOV"]} />
                       <ReferenceLine y={avgs.aov} stroke="#9333ea" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Line type="monotone" dataKey="aov" stroke="#9333ea" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#9333ea" }} />
                     </LineChart>
@@ -1191,9 +1301,9 @@ export default function MarketingDashboard() {
                 </ChartCard>
 
                 {/* Order Count Per Day */}
-                <ChartCard title={`Orders Per Day (${rangeLabel})`} chartKey="Order Count" avg={formatNumber(avgs.order_count)}>
+                <ChartCard title={`Orders Per  ()`} chartKey="Order Count" avg={formatNumber(avgs.order_count) + perUnit}>
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={derivedHistory}>
+                    <AreaChart data={chartData}>
                       <defs>
                         <linearGradient id="gradOrders" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#d946ef" stopOpacity={0.15} />
@@ -1203,7 +1313,7 @@ export default function MarketingDashboard() {
                       <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                       <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                       <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                      <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatNumber(Number(value)), "Orders"]} />
+                      <Tooltip {...tooltipStyle} labelFormatter={chartLabel} formatter={(value: unknown) => [formatNumber(Number(value)), "Orders"]} />
                       <ReferenceLine y={avgs.order_count} stroke="#d946ef" strokeDasharray="4 4" strokeOpacity={0.5} />
                       <Area type="monotone" dataKey="order_count" stroke="#d946ef" strokeWidth={2} fill="url(#gradOrders)" />
                     </AreaChart>
@@ -1211,17 +1321,17 @@ export default function MarketingDashboard() {
                 </ChartCard>
 
                 {/* Impressions vs Website Visits (only if GA4 data available) */}
-                {hasGA4 && derivedHistory.some((d) => d.sessions !== undefined) && (
+                {hasGA4 && chartData.some((d) => d.sessions !== undefined) && (
                   <ChartCard title={`Impressions vs Visits (${rangeLabel})`} chartKey="Impressions vs Visits">
                     <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={derivedHistory}>
+                      <LineChart data={chartData}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
                         <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                         <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`} />
                         <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
                         <Tooltip
                           {...tooltipStyle}
-                          labelFormatter={formatShortDate}
+                          labelFormatter={chartLabel}
                           formatter={(value: unknown, name: unknown) => [
                             formatNumber(Number(value)),
                             name === "impressions" ? "Impressions" : "Website Visits",
@@ -1247,7 +1357,7 @@ export default function MarketingDashboard() {
               </div>
 
               {/* Insights Panel */}
-              <InsightsPanel data={data} history={history} days={days} />
+              <InsightsPanel data={data} history={history} days={days} terms={searchTerms} />
             </div>
           )}
 

@@ -123,16 +123,47 @@ export default function CampaignsTab({
     contentStyle: { background: "#faf9f7", border: "1px solid #e5e0d8", borderRadius: "8px", fontSize: "12px" },
   };
 
+  const topCampaigns = [...data].sort((a, b) => b.ad_spend - a.ad_spend).slice(0, 10);
+
+  const totals = data.reduce(
+    (t, c) => ({
+      ad_spend: t.ad_spend + c.ad_spend,
+      revenue: t.revenue + c.revenue,
+      clicks: t.clicks + c.clicks,
+      impressions: t.impressions + c.impressions,
+      conversions: t.conversions + c.conversions,
+    }),
+    { ad_spend: 0, revenue: 0, clicks: 0, impressions: 0, conversions: 0 }
+  );
+  const totalRoas = totals.ad_spend > 0 ? (totals.revenue / totals.ad_spend).toFixed(2) : "0";
+  const totalCtr = totals.impressions > 0 ? ((totals.clicks / totals.impressions) * 100).toFixed(2) : "0";
+  const totalCpc = totals.clicks > 0 ? (totals.ad_spend / totals.clicks).toFixed(2) : "0";
+
   return (
     <div className="space-y-6">
-      {/* Bar chart */}
+      {/* Bar chart — top campaigns only; 50 rows in one chart is unreadable */}
       <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-        <p className="text-xs text-sand-400 uppercase tracking-wider mb-4">Revenue vs Ad Spend by Campaign</p>
-        <div className="h-64">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-sand-400 uppercase tracking-wider">
+            Revenue vs Ad Spend by Campaign
+            {data.length > topCampaigns.length && (
+              <span className="normal-case tracking-normal"> · top {topCampaigns.length} of {data.length} by spend</span>
+            )}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-4 mb-3">
+          <span className="inline-flex items-center gap-1.5 text-xs text-sand-500">
+            <span className="w-2 h-2 rounded-full" style={{ background: "#16a34a" }} /> Revenue
+          </span>
+          <span className="inline-flex items-center gap-1.5 text-xs text-sand-500">
+            <span className="w-2 h-2 rounded-full" style={{ background: "#dc2626" }} /> Ad Spend
+          </span>
+        </div>
+        <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} layout="vertical">
+            <BarChart data={topCampaigns} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
-              <XAxis type="number" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v) => `$${v}`} />
+              <XAxis type="number" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v) => (Math.abs(v) >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`)} />
               <YAxis
                 type="category"
                 dataKey="campaign"
@@ -191,6 +222,23 @@ export default function CampaignsTab({
                 );
               })}
             </tbody>
+            <tfoot className="bg-sand-50 border-t border-sand-200/60">
+              <tr>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">Total ({data.length} campaigns)</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCurrency(totals.ad_spend)}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCurrency(totals.revenue)}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{totalRoas}x</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">
+                  {formatNumber(totals.clicks)}
+                  <span className="text-sand-400 text-xs ml-1 font-normal">({totalCtr}% CTR)</span>
+                </td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatNumber(totals.impressions)}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">
+                  {formatNumber(totals.conversions)}
+                  <span className="text-sand-400 text-xs ml-1 font-normal">(${totalCpc}/click)</span>
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>
