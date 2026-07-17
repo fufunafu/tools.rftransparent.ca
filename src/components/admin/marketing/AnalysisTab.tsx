@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 interface Analysis {
   id: string;
@@ -90,6 +90,40 @@ function MarkdownLite({ content }: { content: string }) {
   return <div className="space-y-3">{blocks}</div>;
 }
 
+// Rich analyses are stored as complete self-contained HTML documents and
+// rendered in a sandboxed iframe (scripts allowed, no same-origin access).
+// The document posts {rfAnalysisHeight} so the frame grows to fit.
+function HtmlReport({ html }: { html: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(1400);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.source !== ref.current?.contentWindow) return;
+      const h = (e.data as { rfAnalysisHeight?: number })?.rfAnalysisHeight;
+      if (typeof h === "number" && h > 200 && h < 40000) setHeight(h + 8);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  return (
+    <iframe
+      ref={ref}
+      sandbox="allow-scripts"
+      srcDoc={html}
+      title="Analysis report"
+      className="w-full rounded-lg border border-sand-200/60 bg-white"
+      style={{ height }}
+    />
+  );
+}
+
+function isHtmlContent(content: string) {
+  const head = content.trimStart().slice(0, 200).toLowerCase();
+  return head.startsWith("<!doctype") || head.startsWith("<html");
+}
+
 export default function AnalysisTab() {
   const [analyses, setAnalyses] = useState<Analysis[]>([]);
   const [loading, setLoading] = useState(true);
@@ -163,7 +197,7 @@ export default function AnalysisTab() {
   if (loading) return <div className="text-center py-12 text-sand-400">Loading analyses...</div>;
 
   return (
-    <div className="space-y-4 max-w-4xl">
+    <div className="space-y-4 max-w-5xl">
       {error && (
         <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {error}
@@ -195,7 +229,7 @@ export default function AnalysisTab() {
             className="w-full rounded-lg border border-sand-200 px-3 py-2 text-sm text-sand-900 bg-white"
           />
           <textarea
-            placeholder={"Write the analysis here. Markdown basics supported:\n## Section heading\n- bullet point\n**bold**"}
+            placeholder={"Write the analysis here. Markdown basics supported:\n## Section heading\n- bullet point\n**bold**\n\nPasting a complete HTML document (starting with <!doctype html>) renders it as a full styled report instead."}
             value={content}
             onChange={(e) => setContent(e.target.value)}
             rows={14}
@@ -227,7 +261,11 @@ export default function AnalysisTab() {
             </button>
             {open && (
               <div className="px-5 pb-5 border-t border-sand-100 pt-4">
-                <MarkdownLite content={a.content} />
+                {isHtmlContent(a.content) ? (
+                  <HtmlReport html={a.content} />
+                ) : (
+                  <MarkdownLite content={a.content} />
+                )}
                 <div className="mt-5 flex items-center justify-end gap-2">
                   {confirmDeleteId === a.id ? (
                     <>
