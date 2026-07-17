@@ -302,6 +302,59 @@ function LegendDot({ color, label, line }: { color: string; label: string; line?
   );
 }
 
+const tooltipStyle = {
+  contentStyle: {
+    background: "#faf9f7",
+    border: "1px solid #e5e0d8",
+    borderRadius: "8px",
+    fontSize: "12px",
+  },
+};
+
+function ChartModal({
+  title,
+  legend,
+  onClose,
+  children,
+}: {
+  title: string;
+  legend?: React.ReactNode;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-sand-900/50 flex items-center justify-center p-4 sm:p-8"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl max-h-full overflow-auto p-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-sm font-medium text-sand-700 uppercase tracking-wider">{title}</p>
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-sm rounded-lg border border-sand-200 text-sand-600 hover:bg-sand-50 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+        {legend && <div className="flex flex-wrap gap-4 mb-3">{legend}</div>}
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function ChartCard({
   title,
   chartKey,
@@ -315,6 +368,7 @@ function ChartCard({
   legend?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="bg-white rounded-xl border border-sand-200/60 p-5">
       <div className="flex items-center justify-between mb-4">
@@ -331,7 +385,106 @@ function ChartCard({
         )}
       </div>
       {legend && <div className="flex flex-wrap gap-4 mb-3 -mt-2">{legend}</div>}
-      <div className="h-52">{children}</div>
+      <div
+        className="h-52 cursor-zoom-in"
+        title="Click to enlarge"
+        onClick={() => setExpanded(true)}
+      >
+        {children}
+      </div>
+      {expanded && (
+        <ChartModal title={title} legend={legend} onClose={() => setExpanded(false)}>
+          <div className="h-[70vh]">{children}</div>
+        </ChartModal>
+      )}
+    </div>
+  );
+}
+
+// The two aligned Revenue / Ad Spend panels. Rendered small inside the card
+// and large inside the expand modal, so heights are parameterized.
+function RevenueSpendPanels({ data, big }: { data: DerivedPoint[]; big?: boolean }) {
+  return (
+    <>
+      <div className={big ? "h-[46vh]" : "h-32"}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={data} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#16a34a" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
+            <XAxis dataKey="date" hide />
+            <YAxis width={44} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
+            <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "7-day avg"]} />
+            <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={1.5} strokeOpacity={0.6} fill="url(#gradRevenue)" />
+            <Line type="monotone" dataKey="revenue_ma7" stroke="#166534" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#166534" }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className={big ? "h-[20vh] mt-2" : "h-24 mt-1"}>
+        <ResponsiveContainer width="100%" height="100%">
+          <AreaChart data={data} margin={{ top: 2, right: 4, bottom: 0, left: 0 }}>
+            <defs>
+              <linearGradient id="gradSpendPanel" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#dc2626" stopOpacity={0.15} />
+                <stop offset="100%" stopColor="#dc2626" stopOpacity={0} />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
+            <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
+            <YAxis width={44} tick={{ fontSize: 10, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} tickCount={big ? 5 : 3} />
+            <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
+            <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradSpendPanel)" />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  );
+}
+
+function RevenueSpendCard({
+  data,
+  avgRev,
+  avgSpend,
+  rangeLabel,
+}: {
+  data: DerivedPoint[];
+  avgRev: number;
+  avgSpend: number;
+  rangeLabel: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const title = `Revenue & Ad Spend (${rangeLabel})`;
+  const legend = (
+    <>
+      <LegendDot color="#16a34a" label="Revenue (daily)" />
+      <LegendDot color="#166534" label="7-day avg" line />
+      <LegendDot color="#dc2626" label="Ad spend (own scale)" />
+    </>
+  );
+  return (
+    <div className="bg-white rounded-xl border border-sand-200/60 p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center">
+          <p className="text-xs text-sand-400 uppercase tracking-wider">{title}</p>
+          <InfoTooltip text={CHART_INFO["Revenue vs Ad Spend"]} />
+        </div>
+        <span className="text-xs text-sand-500 font-medium">
+          avg/day: <span className="text-sand-700">{formatCurrency(avgRev)} rev / {formatCurrency(avgSpend)} spend</span>
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-4 mb-2">{legend}</div>
+      <div className="cursor-zoom-in" title="Click to enlarge" onClick={() => setExpanded(true)}>
+        <RevenueSpendPanels data={data} />
+      </div>
+      {expanded && (
+        <ChartModal title={title} legend={legend} onClose={() => setExpanded(false)}>
+          <RevenueSpendPanels data={data} big />
+        </ChartModal>
+      )}
     </div>
   );
 }
@@ -673,15 +826,6 @@ export default function MarketingDashboard() {
     };
   }, [derivedHistory]);
 
-  const tooltipStyle = {
-    contentStyle: {
-      background: "#faf9f7",
-      border: "1px solid #e5e0d8",
-      borderRadius: "8px",
-      fontSize: "12px",
-    },
-  };
-
   const { from, to } = getDateRange();
   const days = Math.round(
     (new Date(to).getTime() - new Date(from).getTime()) / 86400000
@@ -891,58 +1035,12 @@ export default function MarketingDashboard() {
                 {/* Revenue & Ad Spend — aligned panels, each on its own scale.
                     Spend is ~1/10th of revenue, so a shared axis flattens it
                     into an unreadable line. */}
-                <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center">
-                      <p className="text-xs text-sand-400 uppercase tracking-wider">
-                        Revenue & Ad Spend ({rangeLabel})
-                      </p>
-                      <InfoTooltip text={CHART_INFO["Revenue vs Ad Spend"]} />
-                    </div>
-                    <span className="text-xs text-sand-500 font-medium">
-                      avg/day: <span className="text-sand-700">{formatCurrency(avgs.revenue)} rev / {formatCurrency(avgs.ad_spend)} spend</span>
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap gap-4 mb-2">
-                    <LegendDot color="#16a34a" label="Revenue (daily)" />
-                    <LegendDot color="#166534" label="7-day avg" line />
-                    <LegendDot color="#dc2626" label="Ad spend (own scale)" />
-                  </div>
-                  <div className="h-36">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ComposedChart data={derivedHistory} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
-                        <defs>
-                          <linearGradient id="gradRevenue" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#16a34a" stopOpacity={0.15} />
-                            <stop offset="100%" stopColor="#16a34a" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
-                        <XAxis dataKey="date" hide />
-                        <YAxis width={44} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} />
-                        <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown, name: unknown) => [formatCurrency(Number(value)), name === "revenue" ? "Revenue" : "7-day avg"]} />
-                        <Area type="monotone" dataKey="revenue" stroke="#16a34a" strokeWidth={1.5} strokeOpacity={0.6} fill="url(#gradRevenue)" />
-                        <Line type="monotone" dataKey="revenue_ma7" stroke="#166534" strokeWidth={2} dot={false} activeDot={{ r: 4, fill: "#166534" }} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="h-16 mt-1">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={derivedHistory} margin={{ top: 2, right: 4, bottom: 0, left: 0 }}>
-                        <defs>
-                          <linearGradient id="gradSpendPanel" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#dc2626" stopOpacity={0.15} />
-                            <stop offset="100%" stopColor="#dc2626" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <XAxis dataKey="date" tickFormatter={formatShortDate} tick={{ fontSize: 11, fill: "#a39e93" }} axisLine={false} tickLine={false} />
-                        <YAxis width={44} tick={{ fontSize: 10, fill: "#a39e93" }} axisLine={false} tickLine={false} tickFormatter={formatAxisCurrency} tickCount={3} />
-                        <Tooltip {...tooltipStyle} labelFormatter={formatShortDate} formatter={(value: unknown) => [formatCurrency(Number(value)), "Ad Spend"]} />
-                        <Area type="monotone" dataKey="ad_spend" stroke="#dc2626" strokeWidth={2} fill="url(#gradSpendPanel)" />
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                <RevenueSpendCard
+                  data={derivedHistory}
+                  avgRev={avgs.revenue}
+                  avgSpend={avgs.ad_spend}
+                  rangeLabel={rangeLabel}
+                />
 
                 {/* Ad Spend */}
                 <ChartCard title={`Ad Spend (${rangeLabel})`} chartKey="Ad Spend" avg={formatCurrency(avgs.ad_spend)}>
