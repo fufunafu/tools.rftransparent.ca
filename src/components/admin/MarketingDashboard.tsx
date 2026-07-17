@@ -18,9 +18,10 @@ import { mktCacheSave, mktCacheLoad, mktCacheClearAll } from "@/lib/marketing-ca
 import CampaignsTab from "./marketing/CampaignsTab";
 import AudienceTab from "./marketing/AudienceTab";
 import SearchTermsTab from "./marketing/SearchTermsTab";
+import AnalysisTab from "./marketing/AnalysisTab";
 
 type Range = "7d" | "30d" | "60d" | "100d" | "365d" | "2y" | "custom";
-type Tab = "overview" | "campaigns" | "audience" | "search";
+type Tab = "overview" | "campaigns" | "audience" | "search" | "analysis";
 
 interface AdMetrics {
   ad_spend: number;
@@ -942,6 +943,7 @@ export default function MarketingDashboard() {
     { key: "campaigns", label: "Campaigns" },
     { key: "audience", label: "Audience" },
     { key: "search", label: "Search Terms" },
+    { key: "analysis", label: "Analysis" },
   ];
 
   return (
@@ -1372,6 +1374,7 @@ export default function MarketingDashboard() {
       {tab === "campaigns" && <CampaignsTab from={from} to={to} demo={demo} market={market} refreshKey={refreshKey} />}
       {tab === "audience" && <AudienceTab from={from} to={to} demo={demo} market={market} refreshKey={refreshKey} />}
       {tab === "search" && <SearchTermsTab from={from} to={to} demo={demo} refreshKey={refreshKey} />}
+      {tab === "analysis" && <AnalysisTab />}
     </div>
   );
 }
