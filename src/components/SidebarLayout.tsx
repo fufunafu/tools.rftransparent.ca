@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
@@ -173,6 +173,23 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       return { ...prev, [href]: !current };
     });
 
+  // Open problem-ticket count for the sidebar badge. Refetched on every
+  // client-side navigation so resolving a ticket updates the badge promptly.
+  const [openProblems, setOpenProblems] = useState(0);
+  useEffect(() => {
+    if (pathname === "/login" || pathname.startsWith("/print/")) return;
+    let cancelled = false;
+    fetch("/api/problems/count", { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (!cancelled && json && typeof json.open === "number") setOpenProblems(json.open);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [pathname]);
+
   // No sidebar on the login page, or on print-friendly routes (PO printouts
   // open in a new tab and shouldn't carry the app chrome).
   if (pathname === "/login" || pathname.startsWith("/print/")) {
@@ -285,13 +302,27 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                     className={rowClass}
                     title={collapsed ? item.label : undefined}
                   >
-                    <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
+                    <span className={`relative shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
                       {item.icon}
+                      {/* Collapsed sidebar has no room for the count pill — a
+                          corner dot still signals open problem tickets. */}
+                      {collapsed && item.href === "/problems" && openProblems > 0 && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
+                      )}
                     </span>
                     {!collapsed && (
                       <>
                         <span className="flex-1">{item.label}</span>
-                        {statusDot}
+                        {item.href === "/problems" && openProblems > 0 ? (
+                          <span
+                            className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
+                            title={`${openProblems} open problem ticket${openProblems === 1 ? "" : "s"}`}
+                          >
+                            {openProblems}
+                          </span>
+                        ) : (
+                          statusDot
+                        )}
                       </>
                     )}
                   </Link>
