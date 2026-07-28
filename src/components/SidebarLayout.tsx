@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
+import CommandPalette, { type NavTarget } from "@/components/CommandPalette";
 
 type Status = "done" | "wip" | "todo";
 
@@ -163,11 +164,34 @@ const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+// Flat list of every destination the ⌘K palette can jump to. Sections with
+// children contribute their children (tagged with the section name) rather
+// than themselves, so nothing shows up twice.
+const SEARCH_TARGETS: NavTarget[] = NAV_ITEMS.flatMap((item) =>
+  item.children
+    ? item.children.map((child) => ({
+        href: child.href,
+        label: child.label,
+        section: item.label,
+        external: child.external,
+      }))
+    : [{ href: item.href, label: item.label, external: item.external }]
+);
+
+// Shortcut hint for the search box. The platform is only knowable on the
+// client, so the server renders nothing and hydration fills it in — no
+// mismatch, and no "Ctrl" flashing on a Mac.
+const NEVER_CHANGES = () => () => {};
+const readModKey = () => (/Mac|iPhone|iPad/i.test(navigator.userAgent) ? "⌘" : "Ctrl ");
+const noModKey = () => "";
+
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
   // the desktop collapse state. Shadowing `collapsed` here means the existing
   // nav markup below is unchanged.
@@ -180,6 +204,19 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     update();
     mq.addEventListener("change", update);
     return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // ⌘K / Ctrl-K opens the page search from anywhere in the app.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setMobileOpen(false);
+        setSearchOpen((open) => !open);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
   // Lock body scroll while the mobile drawer is open.
@@ -229,6 +266,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className="flex h-screen">
+      {searchOpen && (
+        <CommandPalette targets={SEARCH_TARGETS} onClose={() => setSearchOpen(false)} />
+      )}
+
       {/* Mobile backdrop — dims content and closes the drawer on tap */}
       {mobileOpen && (
         <div
@@ -274,6 +315,33 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
             </svg>
+          </button>
+        </div>
+
+        {/* Page search — opens the same palette as ⌘K */}
+        <div className="px-2 pb-2">
+          <button
+            type="button"
+            onClick={() => {
+              setMobileOpen(false);
+              setSearchOpen(true);
+            }}
+            title={collapsed ? "Search pages" : undefined}
+            className={`w-full flex items-center gap-2 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-colors ${
+              collapsed ? "justify-center py-2" : "px-3 py-2"
+            }`}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4 shrink-0">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+            {!collapsed && (
+              <>
+                <span className="flex-1 text-left text-sm">Search</span>
+                {modKey ? (
+                  <kbd className="text-[11px] font-sans text-slate-300">{modKey}K</kbd>
+                ) : null}
+              </>
+            )}
           </button>
         </div>
 
@@ -493,7 +561,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
             <span className="text-white text-[10px] font-bold">RF</span>
           </div>
-          <span className="text-sm font-semibold text-slate-900">RF Transparent</span>
+          <span className="flex-1 text-sm font-semibold text-slate-900">RF Transparent</span>
+          {/* Phones have no keyboard shortcut, so search gets its own button */}
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="w-9 h-9 -mr-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+            aria-label="Search pages"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+            </svg>
+          </button>
         </div>
 
         {/* Main content */}
