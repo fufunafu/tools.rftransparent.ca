@@ -3,6 +3,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 import { typeLabel, type ProblemTicket } from "@/lib/problem-tickets";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { reportCronFailure } from "@/lib/cron-monitor";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -157,12 +158,18 @@ export async function GET(req: NextRequest) {
     today,
   });
 
-  await getResend().emails.send({
-    from: "RF Tools <noreply@rftransparent.ca>",
-    to: RECIPIENTS,
-    subject: `Problem tickets: ${openTickets.length} open${staleIds.size > 0 ? ` (${staleIds.size} stale)` : ""} — weekly digest`,
-    html,
-  });
+  try {
+    await getResend().emails.send({
+      from: "RF Tools <noreply@rftransparent.ca>",
+      to: RECIPIENTS,
+      subject: `Problem tickets: ${openTickets.length} open${staleIds.size > 0 ? ` (${staleIds.size} stale)` : ""} — weekly digest`,
+      html,
+    });
+  } catch (err) {
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    await reportCronFailure("problems-digest", detail);
+    return NextResponse.json({ error: "Digest send failed" }, { status: 500 });
+  }
 
   return NextResponse.json({
     status: "sent",

@@ -6,6 +6,7 @@ import { FOLLOWUP_CATEGORIES, type FollowUpLead, type LeadStatus } from "@/lib/f
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { startOfDayInTimeZone } from "@/lib/dates";
 import { formatCADWhole } from "@/lib/format";
+import { alertOnSoftFailures } from "@/lib/cron-monitor";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -126,5 +127,6 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  await alertOnSoftFailures("followup-reminders", results);
   return NextResponse.json({ results });
 }

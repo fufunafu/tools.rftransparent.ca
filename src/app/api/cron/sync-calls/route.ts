@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { alertOnSoftFailures } from "@/lib/cron-monitor";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -84,5 +85,6 @@ export async function GET(req: NextRequest) {
   }
 
   console.log("[Cron sync-calls]", JSON.stringify(results));
+  await alertOnSoftFailures("sync-calls", results);
   return NextResponse.json({ results, synced_at: new Date().toISOString() });
 }

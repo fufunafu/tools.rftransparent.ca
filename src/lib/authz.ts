@@ -5,7 +5,7 @@
 
 import { getSupabase } from "@/lib/supabase";
 
-const OWNER_EMAIL = "fuannegao25@gmail.com";
+export const OWNER_EMAIL = "fuannegao25@gmail.com";
 
 function allowedDomains(): string[] {
   return (
