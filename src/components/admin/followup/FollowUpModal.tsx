@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatCADWhole } from "@/lib/format";
 import {
   FOLLOWUP_CATEGORIES,
@@ -77,6 +77,42 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
     (!isFutureProject || customDate) &&
     !submitting;
 
+  // Any typed work in the form marks it dirty — a stray backdrop tap or Escape
+  // must never discard unsaved changes (esp. the mandatory 50-char loss notes).
+  const dirty =
+    outcome !== "" ||
+    notes.trim() !== "" ||
+    closeReason !== "" ||
+    customDate !== "" ||
+    discountAck !== "" ||
+    competitor.trim() !== "";
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+
+  // Escape closes only when nothing is in-flight and the form is pristine —
+  // same guard as the backdrop click.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !submitting && !dirty) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [submitting, dirty, onClose]);
+
+  // Lock body scroll while the modal is open.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => panelRef.current?.focus(), 50);
+    return () => clearTimeout(t);
+  }, []);
+
   const handleSubmit = async () => {
     if (!canSubmit || !outcome) return;
     setSubmitting(true);
@@ -100,9 +136,17 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={() => !submitting && !dirty && onClose()}
+    >
       <div
-        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto"
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Log follow-up"
+        tabIndex={-1}
+        className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

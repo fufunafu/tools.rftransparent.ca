@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 interface Props {
   open: boolean;
@@ -25,15 +25,24 @@ export default function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
+  const cancelRef = useRef<HTMLButtonElement | null>(null);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) onCancel();
-      if (e.key === "Enter" && !busy) onConfirm();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy, onCancel, onConfirm]);
+  }, [open, busy, onCancel]);
+
+  // Autofocus Cancel — the safe default, especially for destructive dialogs.
+  useEffect(() => {
+    if (open) {
+      const t = setTimeout(() => cancelRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [open]);
 
   if (!open) return null;
 
@@ -48,6 +57,9 @@ export default function ConfirmDialog({
       onClick={() => !busy && onCancel()}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
         className="bg-white rounded-xl border border-sand-200 shadow-xl w-full max-w-sm p-6 space-y-3"
         onClick={(e) => e.stopPropagation()}
       >
@@ -55,6 +67,7 @@ export default function ConfirmDialog({
         <p className="text-sm text-sand-600">{message}</p>
         <div className="flex justify-end gap-2 pt-2">
           <button
+            ref={cancelRef}
             type="button"
             onClick={onCancel}
             disabled={busy}

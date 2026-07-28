@@ -40,6 +40,14 @@ export default function KPIEntryForm({ onSave, onCancel }: Props) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !saving) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [saving, onCancel]);
+
   const selectedEmployee = employees.find((e) => e.id === employeeId);
   const suggestions = selectedEmployee
     ? METRIC_SUGGESTIONS[selectedEmployee.department] ?? []
@@ -81,6 +89,9 @@ export default function KPIEntryForm({ onSave, onCancel }: Props) {
     <div className="fixed inset-0 z-[60] bg-black/30 flex items-center justify-center p-4">
       <form
         onSubmit={handleSubmit}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add KPI Entry"
         className="bg-white rounded-xl border border-sand-200 shadow-lg w-full max-w-md p-6 space-y-4"
       >
         <h3 className="text-lg font-semibold text-sand-900">

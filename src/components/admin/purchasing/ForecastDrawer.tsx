@@ -328,17 +328,19 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
           {arrivals.length > 0 && (
             <div className="bg-white rounded-xl border border-sand-200/60 p-4">
               <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-2">Incoming purchase orders</div>
-              <table className="w-full text-sm">
-                <tbody className="divide-y divide-sand-100">
-                  {arrivals.map((a) => (
-                    <tr key={a.date + (a.po_number ?? "")}>
-                      <td className="py-1.5 font-mono text-xs text-accent">{a.po_number}</td>
-                      <td className="py-1.5 text-sand-600">{fmtDate(a.date)}</td>
-                      <td className="py-1.5 text-right tabular-nums">+{a.qty?.toLocaleString("en-CA")}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <tbody className="divide-y divide-sand-100">
+                    {arrivals.map((a) => (
+                      <tr key={a.date + (a.po_number ?? "")}>
+                        <td className="py-1.5 font-mono text-xs text-accent">{a.po_number}</td>
+                        <td className="py-1.5 text-sand-600">{fmtDate(a.date)}</td>
+                        <td className="py-1.5 text-right tabular-nums">+{a.qty?.toLocaleString("en-CA")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

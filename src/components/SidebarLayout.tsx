@@ -159,7 +159,32 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { collapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
+  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  // On phones the drawer always renders expanded (full labels), regardless of
+  // the desktop collapse state. Shadowing `collapsed` here means the existing
+  // nav markup below is unchanged.
+  const collapsed = !isMobile && rawCollapsed;
+
+  // Track viewport (below Tailwind's md breakpoint = phone/small tablet).
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // Lock body scroll while the mobile drawer is open.
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileOpen]);
   // Click-to-expand state for parent items with children. A parent is open if
   // the user explicitly toggled it open OR the current route lives inside it.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
@@ -198,11 +223,25 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
   return (
     <div className="flex h-screen">
-      {/* Sidebar */}
+      {/* Mobile backdrop — dims content and closes the drawer on tap */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* Sidebar — in-flow and resizable on desktop; an off-canvas drawer that
+          slides in over the content below the md breakpoint. */}
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="shrink-0 bg-white border-r border-slate-200 flex flex-col transition-[width] duration-200 relative"
+        className={`bg-white border-r border-slate-200 flex flex-col z-40 relative
+          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:!w-72 max-md:shadow-xl
+          max-md:transition-transform max-md:duration-200
+          ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
+          md:shrink-0 md:transition-[width] md:duration-200`}
       >
         {/* Logo + collapse toggle */}
         <div className="px-3 py-5 flex items-center gap-3">
@@ -210,19 +249,37 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             <span className="text-white text-xs font-bold">RF</span>
           </div>
           {!collapsed && <span className="text-sm font-semibold text-slate-900 flex-1">RF Transparent</span>}
+          {/* Desktop: collapse/expand toggle */}
           <button
             onClick={toggleCollapsed}
-            className="w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            className="max-md:hidden w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
             </svg>
           </button>
+          {/* Mobile: close the drawer */}
+          <button
+            onClick={() => setMobileOpen(false)}
+            className="md:hidden w-8 h-8 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            aria-label="Close menu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
-        {/* Navigation */}
-        <nav className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto">
+        {/* Navigation. On mobile, a click on any nav link (not a section
+            toggle button) closes the drawer — delegated so we don't thread an
+            onClick through every link. */}
+        <nav
+          className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+          }}
+        >
           {NAV_ITEMS.map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + "/");
             const hasChildren = item.children && item.children.length > 0;
@@ -375,21 +432,41 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             {!collapsed && "Sign out"}
           </a>
         </div>
-        {/* Resize handle */}
+        {/* Resize handle — desktop only (drag is mouse-driven) */}
         {!collapsed && (
           <div
             onMouseDown={handleMouseDown}
-            className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors"
+            className="max-md:hidden absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors"
           />
         )}
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-auto bg-slate-100">
-        <div className="p-8">
-          {children}
+      {/* Main column */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Mobile top bar — hamburger opens the drawer */}
+        <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-slate-200 bg-white shrink-0">
+          <button
+            onClick={() => setMobileOpen(true)}
+            className="w-9 h-9 -ml-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+            aria-label="Open menu"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-6 h-6">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
+            </svg>
+          </button>
+          <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+            <span className="text-white text-[10px] font-bold">RF</span>
+          </div>
+          <span className="text-sm font-semibold text-slate-900">RF Transparent</span>
         </div>
-      </main>
+
+        {/* Main content */}
+        <main className="flex-1 overflow-auto bg-slate-100">
+          <div className="p-4 md:p-8">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

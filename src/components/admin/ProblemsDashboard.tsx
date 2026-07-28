@@ -274,16 +274,16 @@ export default function ProblemsDashboard({
     stores.find((s) => s.id === id)?.label ?? null;
 
   const inputClass =
-    "w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
-  const labelClass = "block text-xs font-medium text-slate-500 mb-1";
+    "w-full rounded-lg border border-sand-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500";
+  const labelClass = "block text-xs font-medium text-sand-500 mb-1";
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Problem Tickets</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <h1 className="text-2xl font-bold text-sand-900">Problem Tickets</h1>
+          <p className="text-sm text-sand-500 mt-1">
             Client issues — delivery errors, broken glass, wrong orders — tracked so we
             can see whether we&apos;re improving year over year.
           </p>
@@ -309,10 +309,10 @@ export default function ProblemsDashboard({
       {showForm && (
         <form
           onSubmit={handleSubmit}
-          className="bg-white rounded-xl border border-slate-200 p-5 space-y-4"
+          className="bg-white rounded-xl border border-sand-200 p-5 space-y-4"
         >
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-900">
+            <h2 className="text-sm font-semibold text-sand-900">
               {editingId ? "Edit ticket" : "New ticket"}
             </h2>
             <button
@@ -321,7 +321,7 @@ export default function ProblemsDashboard({
                 setShowForm(false);
                 setEditingId(null);
               }}
-              className="text-sm text-slate-400 hover:text-slate-600"
+              className="text-sm text-sand-400 hover:text-sand-600"
             >
               Cancel
             </button>
@@ -437,43 +437,43 @@ export default function ProblemsDashboard({
 
       {/* Metric cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <div className="text-xs font-medium text-slate-500">Open now</div>
-          <div className="mt-1 text-2xl font-bold text-slate-900">{metrics.openNow}</div>
-          <div className="text-xs text-slate-400 mt-1">all years, still in progress</div>
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <div className="text-xs font-medium text-sand-500">Open now</div>
+          <div className="mt-1 text-2xl font-bold text-sand-900">{metrics.openNow}</div>
+          <div className="text-xs text-sand-400 mt-1">all years, still in progress</div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <div className="text-xs font-medium text-slate-500">Tickets in {year}</div>
-          <div className="mt-1 text-2xl font-bold text-slate-900">{metrics.total}</div>
-          <div className="text-xs text-slate-400 mt-1">
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <div className="text-xs font-medium text-sand-500">Tickets in {year}</div>
+          <div className="mt-1 text-2xl font-bold text-sand-900">{metrics.total}</div>
+          <div className="text-xs text-sand-400 mt-1">
             {year - 1}: {metrics.prevYearTotal}
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <div className="text-xs font-medium text-slate-500">Resolved</div>
-          <div className="mt-1 text-2xl font-bold text-slate-900">
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <div className="text-xs font-medium text-sand-500">Resolved</div>
+          <div className="mt-1 text-2xl font-bold text-sand-900">
             {metrics.resolvedPct === null ? "—" : `${metrics.resolvedPct}%`}
           </div>
-          <div className="text-xs text-slate-400 mt-1">of {year} tickets</div>
+          <div className="text-xs text-sand-400 mt-1">of {year} tickets</div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <div className="text-xs font-medium text-slate-500">Avg days to resolve</div>
-          <div className="mt-1 text-2xl font-bold text-slate-900">
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <div className="text-xs font-medium text-sand-500">Avg days to resolve</div>
+          <div className="mt-1 text-2xl font-bold text-sand-900">
             {metrics.avgDays === null ? "—" : metrics.avgDays}
           </div>
-          <div className="text-xs text-slate-400 mt-1">{year} resolved tickets</div>
+          <div className="text-xs text-sand-400 mt-1">{year} resolved tickets</div>
         </div>
       </div>
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <h2 className="text-sm font-semibold text-sand-900 mb-3">
             Tickets by month — {year}, by type
           </h2>
           <div className="h-64">
             {loading ? (
-              <div className="h-full flex items-center justify-center text-sm text-slate-400">
+              <div className="h-full flex items-center justify-center text-sm text-sand-400">
                 Loading…
               </div>
             ) : (
@@ -484,13 +484,13 @@ export default function ProblemsDashboard({
             )}
           </div>
         </div>
-        <div className="bg-white rounded-xl border border-slate-200 p-5">
-          <h2 className="text-sm font-semibold text-slate-900 mb-3">
+        <div className="bg-white rounded-xl border border-sand-200 p-5">
+          <h2 className="text-sm font-semibold text-sand-900 mb-3">
             Year over year — total tickets per month
           </h2>
           <div className="h-64">
             {loading ? (
-              <div className="h-full flex items-center justify-center text-sm text-slate-400">
+              <div className="h-full flex items-center justify-center text-sm text-sand-400">
                 Loading…
               </div>
             ) : (
@@ -505,7 +505,7 @@ export default function ProblemsDashboard({
         <select
           value={year}
           onChange={(e) => setYear(Number(e.target.value))}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className="rounded-lg border border-sand-300 bg-white px-3 py-1.5 text-sm"
         >
           {years.map((y) => (
             <option key={y} value={y}>
@@ -513,7 +513,7 @@ export default function ProblemsDashboard({
             </option>
           ))}
         </select>
-        <div className="flex rounded-lg border border-slate-200 bg-white p-0.5">
+        <div className="flex rounded-lg border border-sand-200 bg-white p-0.5">
           {(
             [
               ["all", "All"],
@@ -527,7 +527,7 @@ export default function ProblemsDashboard({
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${
                 statusFilter === value
                   ? "bg-blue-50 text-blue-600"
-                  : "text-slate-500 hover:text-slate-700"
+                  : "text-sand-500 hover:text-sand-700"
               }`}
             >
               {label}
@@ -537,7 +537,7 @@ export default function ProblemsDashboard({
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+          className="rounded-lg border border-sand-300 bg-white px-3 py-1.5 text-sm"
         >
           <option value="all">All types</option>
           {PROBLEM_TYPES.map((t) => (
@@ -546,23 +546,23 @@ export default function ProblemsDashboard({
             </option>
           ))}
         </select>
-        <span className="text-sm text-slate-400 ml-auto">
+        <span className="text-sm text-sand-400 ml-auto">
           {filtered.length} ticket{filtered.length === 1 ? "" : "s"}
         </span>
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+      <div className="bg-white rounded-xl border border-sand-200 overflow-x-auto">
         {loading ? (
-          <div className="p-8 text-center text-slate-400 text-sm">Loading…</div>
+          <div className="p-8 text-center text-sand-400 text-sm">Loading…</div>
         ) : filtered.length === 0 ? (
-          <div className="p-8 text-center text-slate-400 text-sm">
+          <div className="p-8 text-center text-sand-400 text-sm">
             No tickets match — add one with “New ticket”.
           </div>
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
+              <tr className="border-b border-sand-200 text-left text-xs text-sand-500">
                 <th className="px-4 py-3 font-medium whitespace-nowrap">Date</th>
                 <th className="px-4 py-3 font-medium">Client</th>
                 <th className="px-4 py-3 font-medium whitespace-nowrap">Type</th>
@@ -575,20 +575,20 @@ export default function ProblemsDashboard({
             </thead>
             <tbody>
               {filtered.map((t) => (
-                <tr key={t.id} className="border-b border-slate-100 last:border-0 align-top hover:bg-slate-50/60">
-                  <td className="px-4 py-3 whitespace-nowrap text-slate-500">
+                <tr key={t.id} className="border-b border-sand-100 last:border-0 align-top hover:bg-sand-50/60">
+                  <td className="px-4 py-3 whitespace-nowrap text-sand-500">
                     {formatDate(t.ticket_date)}
                   </td>
-                  <td className="px-4 py-3 font-medium text-slate-900">
+                  <td className="px-4 py-3 font-medium text-sand-900">
                     {t.client_name}
                     {t.store && storeLabel(t.store) && (
-                      <div className="text-xs font-normal text-slate-400">
+                      <div className="text-xs font-normal text-sand-400">
                         {storeLabel(t.store)}
                       </div>
                     )}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 text-slate-700">
+                    <span className="inline-flex items-center gap-1.5 text-sand-700">
                       <span
                         className="w-2 h-2 rounded-full shrink-0"
                         style={{ background: typeColor(t.type) }}
@@ -596,7 +596,7 @@ export default function ProblemsDashboard({
                       {typeLabel(t.type)}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{t.person || "—"}</td>
+                  <td className="px-4 py-3 text-sand-600">{t.person || "—"}</td>
                   <td className="px-4 py-3 whitespace-nowrap">
                     {t.status === "resolved" ? (
                       <span className="inline-flex items-center gap-1.5 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">
@@ -610,10 +610,10 @@ export default function ProblemsDashboard({
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-slate-600 whitespace-pre-wrap">
+                  <td className="px-4 py-3 text-sand-600 whitespace-pre-wrap">
                     {t.issue || "—"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600 whitespace-pre-wrap">
+                  <td className="px-4 py-3 text-sand-600 whitespace-pre-wrap">
                     {t.resolution || "—"}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-right">
@@ -629,14 +629,14 @@ export default function ProblemsDashboard({
                       ) : (
                         <button
                           onClick={() => handleReopen(t)}
-                          className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 hover:bg-slate-100"
+                          className="rounded-md px-2 py-1 text-xs font-medium text-sand-500 hover:bg-sand-100"
                         >
                           Reopen
                         </button>
                       )}
                       <button
                         onClick={() => openEdit(t)}
-                        className="rounded-md p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+                        className="rounded-md p-1.5 text-sand-400 hover:text-sand-600 hover:bg-sand-100"
                         title="Edit"
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4">
@@ -646,7 +646,7 @@ export default function ProblemsDashboard({
                       {canDelete && (
                         <button
                           onClick={() => handleDelete(t.id)}
-                          className="rounded-md p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50"
+                          className="rounded-md p-1.5 text-sand-400 hover:text-red-600 hover:bg-red-50"
                           title="Delete"
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4">
