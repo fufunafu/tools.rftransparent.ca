@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withCronRun } from "@/lib/automations";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 import { typeLabel, type ProblemTicket } from "@/lib/problem-tickets";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { reportCronFailure } from "@/lib/cron-monitor";
+import { getNotificationSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -11,7 +13,8 @@ export const maxDuration = 60;
 // Weekly Monday-morning digest of problem tickets. The point is adoption:
 // even in a week when nobody opens /problems, the open list (with names and
 // ages) lands in the inbox, so stale tickets can't quietly rot.
-const RECIPIENTS = ["info@glass-railing.com"];
+// Recipients live in Settings → Notifications; the default there matches the
+// address this digest has always used.
 
 const STALE_DAYS = 7;
 
@@ -102,7 +105,7 @@ function buildEmailHtml(opts: {
   `;
 }
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -158,10 +161,15 @@ export async function GET(req: NextRequest) {
     today,
   });
 
+  const { problems_digest: recipients } = await getNotificationSettings();
+  if (recipients.length === 0) {
+    return NextResponse.json({ status: "skipped", reason: "no recipients configured" });
+  }
+
   try {
     await getResend().emails.send({
       from: "RF Tools <noreply@rftransparent.ca>",
-      to: RECIPIENTS,
+      to: recipients,
       subject: `Problem tickets: ${openTickets.length} open${staleIds.size > 0 ? ` (${staleIds.size} stale)` : ""} — weekly digest`,
       html,
     });
@@ -179,3 +187,6 @@ export async function GET(req: NextRequest) {
     resolvedLastWeek,
   });
 }
+
+// Every run — scheduled or manual — is recorded for /settings/automations.
+export const GET = withCronRun("problems-digest", handler);

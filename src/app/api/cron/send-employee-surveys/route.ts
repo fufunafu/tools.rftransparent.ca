@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withCronRun } from "@/lib/automations";
 import { sendSurveys } from "@/lib/employee-surveys";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { reportCronFailure } from "@/lib/cron-monitor";
@@ -6,7 +7,7 @@ import { reportCronFailure } from "@/lib/cron-monitor";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -20,3 +21,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Survey send failed" }, { status: 500 });
   }
 }
+
+// Every run — scheduled or manual — is recorded for /settings/automations.
+export const GET = withCronRun("send-employee-surveys", handler);

@@ -2,6 +2,28 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+
+// Rates for every store at once, shaped as { [storeId]: { [monthIndex]: rate } }.
+// The Pipeline dashboard edits one store at a time; Settings → Rates needs
+// them side by side.
+export async function GET() {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { data, error } = await getSupabase()
+    .from("forecast_mom_rates")
+    .select("store_id, month_index, mom_rate");
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+  const byStore: Record<string, Record<number, number>> = {};
+  for (const row of data ?? []) {
+    (byStore[row.store_id] ??= {})[row.month_index] = Number(row.mom_rate);
+  }
+  return NextResponse.json(byStore);
+}
+
 export async function PUT(req: NextRequest) {
   if (!(await isAuthenticated()))
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

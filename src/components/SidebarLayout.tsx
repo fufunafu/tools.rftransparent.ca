@@ -1,182 +1,11 @@
 "use client";
 
 import { useState, useEffect, useSyncExternalStore } from "react";
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
-import CommandPalette, { type NavTarget } from "@/components/CommandPalette";
-
-type Status = "done" | "wip" | "todo";
-
-interface NavChild {
-  href: string;
-  label: string;
-  status: Status;
-  // Same meaning as on NavItem — an absolute URL to a separate site.
-  external?: boolean;
-}
-
-interface NavItem {
-  href: string;
-  label: string;
-  status: Status;
-  icon: React.ReactNode;
-  // When true, `href` is an absolute URL to a separate site — rendered as a
-  // plain <a target="_blank"> instead of a Next.js <Link>.
-  external?: boolean;
-  children?: NavChild[];
-}
-
-const NAV_ITEMS: NavItem[] = [
-  {
-    href: "/sales",
-    label: "Sales",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/pipeline",
-    label: "Pipeline",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/marketing",
-    label: "Marketing",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/warehouse",
-    label: "Logistics",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z" />
-      </svg>
-    ),
-    children: [
-      { href: "/warehouse", label: "Dashboard", status: "done" as Status },
-      { href: "/warehouse/report", label: "Daily Report", status: "done" as Status },
-      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip" as Status },
-      {
-        href: "https://orderstream-checker.vercel.app/",
-        label: "Order Stream",
-        status: "done" as Status,
-        external: true,
-      },
-      {
-        href: "https://orderstream-checker.vercel.app/customs",
-        label: "Customs Invoice",
-        status: "done" as Status,
-        external: true,
-      },
-    ],
-  },
-  {
-    href: "/customer-service",
-    label: "Customer Service",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 0 1-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
-      </svg>
-    ),
-    children: [
-      { href: "/customer-service/phones", label: "Phones", status: "done" as Status },
-      { href: "/customer-service/emails", label: "Emails", status: "done" as Status },
-      { href: "/customer-service/follow-up", label: "Follow-up", status: "done" as Status },
-      { href: "/customer-service/leads", label: "Leads", status: "wip" as Status },
-      { href: "/customer-service/problems", label: "Problem Tickets", status: "done" as Status },
-    ],
-  },
-  {
-    href: "/accounting",
-    label: "Accounting",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 15.75V18m-7.5-6.75h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V13.5Zm0 2.25h.008v.008H8.25v-.008Zm0 2.25h.008v.008H8.25V18Zm2.498-6.75h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V13.5Zm0 2.25h.007v.008h-.007v-.008Zm0 2.25h.007v.008h-.007V18Zm2.504-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5Zm0 2.25h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V18Zm2.498-6.75h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V13.5ZM8.25 6h7.5v2.25h-7.5V6ZM12 2.25c-1.892 0-3.758.11-5.593.322C5.307 2.7 4.5 3.65 4.5 4.757V19.5a2.25 2.25 0 0 0 2.25 2.25h10.5a2.25 2.25 0 0 0 2.25-2.25V4.757c0-1.108-.806-2.057-1.907-2.185A48.507 48.507 0 0 0 12 2.25Z" />
-      </svg>
-    ),
-    children: [
-      { href: "/accounting/analysis", label: "Analysis", status: "done" as Status },
-      { href: "/accounting/reimbursement", label: "Reimbursement", status: "done" as Status },
-      {
-        href: "https://invoicebox-delta.vercel.app/",
-        label: "InvoiceBox",
-        status: "done" as Status,
-        external: true,
-      },
-    ],
-  },
-  {
-    href: "/shopify",
-    label: "Shopify",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/health-check",
-    label: "System Health",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/todos",
-    label: "Tasks",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/employees",
-    label: "Employees",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
-      </svg>
-    ),
-  },
-];
-
-// Flat list of every destination the ⌘K palette can jump to. Sections with
-// children contribute their children (tagged with the section name) rather
-// than themselves, so nothing shows up twice.
-const SEARCH_TARGETS: NavTarget[] = NAV_ITEMS.flatMap((item) =>
-  item.children
-    ? item.children.map((child) => ({
-        href: child.href,
-        label: child.label,
-        section: item.label,
-        external: child.external,
-      }))
-    : [{ href: item.href, label: item.label, external: item.external }]
-);
+import CommandPalette from "@/components/CommandPalette";
+import SidebarNavRow from "@/components/SidebarNavRow";
+import { NAV_ITEMS, SEARCH_TARGETS, SETTINGS_ITEM, matchesItem, type NavItem } from "@/components/nav-items";
 
 // Shortcut hint for the search box. The platform is only knowable on the
 // client, so the server renders nothing and hydration fills it in — no
@@ -184,6 +13,12 @@ const SEARCH_TARGETS: NavTarget[] = NAV_ITEMS.flatMap((item) =>
 const NEVER_CHANGES = () => () => {};
 const readModKey = () => (/Mac|iPhone|iPad/i.test(navigator.userAgent) ? "⌘" : "Ctrl ");
 const noModKey = () => "";
+
+const SearchIcon = ({ className }: { className: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+  </svg>
+);
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -228,18 +63,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       document.body.style.overflow = prev;
     };
   }, [mobileOpen]);
+
   // Click-to-expand state for parent items with children. A parent is open if
   // the user explicitly toggled it open OR the current route lives inside it.
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
-  const isSectionOpen = (item: NavItem) => {
-    if (openSections[item.href] !== undefined) return openSections[item.href];
-    return pathname === item.href || pathname.startsWith(item.href + "/");
-  };
-  const toggleSection = (href: string) =>
-    setOpenSections((prev) => {
-      const current = prev[href] ?? (pathname === href || pathname.startsWith(href + "/"));
-      return { ...prev, [href]: !current };
-    });
+  const isSectionOpen = (item: NavItem) =>
+    openSections[item.href] ?? matchesItem(item, pathname);
+  const toggleSection = (item: NavItem) =>
+    setOpenSections((prev) => ({
+      ...prev,
+      [item.href]: !(prev[item.href] ?? matchesItem(item, pathname)),
+    }));
 
   // Open problem-ticket count for the sidebar badge. Refetched on every
   // client-side navigation so resolving a ticket updates the badge promptly.
@@ -331,15 +165,11 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               collapsed ? "justify-center py-2" : "px-3 py-2"
             }`}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4 shrink-0">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
+            <SearchIcon className="w-4 h-4 shrink-0" />
             {!collapsed && (
               <>
                 <span className="flex-1 text-left text-sm">Search</span>
-                {modKey ? (
-                  <kbd className="text-[11px] font-sans text-slate-300">{modKey}K</kbd>
-                ) : null}
+                {modKey ? <kbd className="text-[11px] font-sans text-slate-300">{modKey}K</kbd> : null}
               </>
             )}
           </button>
@@ -354,174 +184,36 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
         >
-          {NAV_ITEMS.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(item.href + "/");
-            const hasChildren = item.children && item.children.length > 0;
-            // When the sidebar is collapsed there's no room for child labels, so
-            // tapping a parent still drills straight into its first child (the
-            // old behavior). When expanded, parents become click-to-toggle.
-            const expanded = hasChildren && !collapsed && isSectionOpen(item);
-
-            const statusDot = !collapsed && (
-              <>
-                {item.status === "done" && (
-                  <span className="w-2 h-2 rounded-full bg-green-500" title="Ready" />
-                )}
-                {item.status === "wip" && (
-                  <span className="w-2 h-2 rounded-full bg-amber-400" title="In progress" />
-                )}
-                {item.status === "todo" && (
-                  <span className="w-2 h-2 rounded-full bg-slate-300" title="Not started" />
-                )}
-              </>
-            );
-
-            const rowClass = `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-              active
-                ? "bg-blue-50 text-blue-600"
-                : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-            }`;
-
-            // Open problem tickets live under Customer Service — the count
-            // badge sits on that parent so it stays visible on every page.
-            const problemsBadge =
-              item.href === "/customer-service" && openProblems > 0 ? (
-                <span
-                  className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
-                  title={`${openProblems} open problem ticket${openProblems === 1 ? "" : "s"}`}
-                >
-                  {openProblems}
-                </span>
-              ) : null;
-
-            return (
-              <div key={item.href}>
-                {hasChildren && !collapsed ? (
-                  <button
-                    type="button"
-                    onClick={() => toggleSection(item.href)}
-                    aria-expanded={expanded}
-                    className={`${rowClass} w-full text-left`}
-                  >
-                    <span className={`shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
-                      {item.icon}
-                    </span>
-                    <span className="flex-1">{item.label}</span>
-                    {problemsBadge ?? statusDot}
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth={2}
-                      className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
-                        expanded ? "rotate-90" : ""
-                      }`}
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-                    </svg>
-                  </button>
-                ) : item.external ? (
-                  <a
-                    href={item.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={rowClass}
-                    title={collapsed ? item.label : undefined}
-                  >
-                    <span className="shrink-0 text-slate-400">{item.icon}</span>
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1">{item.label}</span>
-                        {/* External-link arrow — signals this opens a new tab */}
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3.5 h-3.5 text-slate-300">
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                        </svg>
-                      </>
-                    )}
-                  </a>
-                ) : (
-                  <Link
-                    href={hasChildren ? item.children![0].href : item.href}
-                    className={rowClass}
-                    title={collapsed ? item.label : undefined}
-                  >
-                    <span className={`relative shrink-0 ${active ? "text-blue-500" : "text-slate-400"}`}>
-                      {item.icon}
-                      {/* Collapsed sidebar has no room for the count pill — a
-                          corner dot still signals open problem tickets. */}
-                      {collapsed && item.href === "/customer-service" && openProblems > 0 && (
-                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
-                      )}
-                    </span>
-                    {!collapsed && (
-                      <>
-                        <span className="flex-1">{item.label}</span>
-                        {problemsBadge ?? statusDot}
-                      </>
-                    )}
-                  </Link>
-                )}
-                {hasChildren && !collapsed && (
-                  <div
-                    className={`overflow-hidden transition-all duration-200 ${
-                      expanded ? "max-h-60" : "max-h-0"
-                    }`}
-                  >
-                    {item.children!.map((child) => {
-                      const childActive =
-                        !child.external &&
-                        (pathname === child.href || pathname.startsWith(child.href + "/"));
-                      const childBadge =
-                        child.href === "/customer-service/problems" && openProblems > 0;
-                      const childClass = `flex items-center gap-3 pl-11 pr-3 py-1.5 text-[13px] font-medium rounded-lg transition-colors ${
-                        childActive ? "text-blue-600" : "text-slate-400 hover:text-slate-700"
-                      }`;
-                      const childContent = (
-                        <>
-                          <span className="flex-1">{child.label}</span>
-                          {childBadge ? (
-                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
-                              {openProblems}
-                            </span>
-                          ) : child.external ? (
-                            /* External-link arrow — signals this opens a new tab */
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 text-slate-300">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-                            </svg>
-                          ) : (
-                            <>
-                              {child.status === "done" && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                              )}
-                              {child.status === "wip" && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                              )}
-                            </>
-                          )}
-                        </>
-                      );
-                      return child.external ? (
-                        <a
-                          key={child.href}
-                          href={child.href}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className={childClass}
-                        >
-                          {childContent}
-                        </a>
-                      ) : (
-                        <Link key={child.href} href={child.href} className={childClass}>
-                          {childContent}
-                        </Link>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+          {NAV_ITEMS.map((item) => (
+            <SidebarNavRow
+              key={item.href}
+              item={item}
+              pathname={pathname}
+              collapsed={collapsed}
+              expanded={Boolean(item.children?.length) && !collapsed && isSectionOpen(item)}
+              onToggle={() => toggleSection(item)}
+              openProblems={openProblems}
+            />
+          ))}
         </nav>
+
+        {/* Settings — pinned above Sign out so admin pages stay out of the
+            day-to-day list but never scroll out of reach. */}
+        <div
+          className="px-2 py-2 border-t border-slate-200"
+          onClick={(e) => {
+            if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+          }}
+        >
+          <SidebarNavRow
+            item={SETTINGS_ITEM}
+            pathname={pathname}
+            collapsed={collapsed}
+            expanded={!collapsed && isSectionOpen(SETTINGS_ITEM)}
+            onToggle={() => toggleSection(SETTINGS_ITEM)}
+            openProblems={openProblems}
+          />
+        </div>
 
         {/* Sign out */}
         <div className="px-2 py-4 border-t border-slate-200">
@@ -568,9 +260,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             className="w-9 h-9 -mr-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
             aria-label="Search pages"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-            </svg>
+            <SearchIcon className="w-5 h-5" />
           </button>
         </div>
 

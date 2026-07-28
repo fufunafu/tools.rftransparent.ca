@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withCronRun } from "@/lib/automations";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 import { getStores } from "@/lib/shopify";
@@ -7,16 +8,13 @@ import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { startOfDayInTimeZone } from "@/lib/dates";
 import { formatCADWhole } from "@/lib/format";
 import { alertOnSoftFailures } from "@/lib/cron-monitor";
+import { getNotificationSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-// Map Shopify store IDs to notification email addresses
-const STORE_EMAILS: Record<string, string> = {
-  store1: "info@glass-railing.com",
-  store2: "info@glassrailingstore.com",
-  store3: "anne@cloture-verre.com",
-};
+// Store → inbox mapping lives in Settings → Notifications. The defaults
+// there are the addresses this job has always used.
 
 function buildEmailHtml(storeName: string, dueToday: FollowUpLead[], overdue: FollowUpLead[]): string {
   const rows = [...overdue, ...dueToday].slice(0, 20);
@@ -60,7 +58,7 @@ function buildEmailHtml(storeName: string, dueToday: FollowUpLead[], overdue: Fo
   `;
 }
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -68,6 +66,7 @@ export async function GET(req: NextRequest) {
   const supabase = getSupabase();
   const resend = getResend();
   const stores = getStores();
+  const { followup_by_store: storeEmails } = await getNotificationSettings();
   const results: { store: string; status: string; due?: number; overdue?: number; error?: string }[] = [];
 
   const now = new Date();
@@ -75,7 +74,7 @@ export async function GET(req: NextRequest) {
   const tomorrowStart = startOfDayInTimeZone(now, undefined, 1).toISOString();
 
   for (const store of stores) {
-    const email = STORE_EMAILS[store.id];
+    const email = storeEmails[store.id];
     if (!email) {
       results.push({ store: store.id, status: "skipped", error: "No email configured" });
       continue;
@@ -130,3 +129,6 @@ export async function GET(req: NextRequest) {
   await alertOnSoftFailures("followup-reminders", results);
   return NextResponse.json({ results });
 }
+
+// Every run — scheduled or manual — is recorded for /settings/automations.
+export const GET = withCronRun("followup-reminders", handler);

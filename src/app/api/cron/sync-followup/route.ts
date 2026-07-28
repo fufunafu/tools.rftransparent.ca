@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withCronRun } from "@/lib/automations";
 import { getStores } from "@/lib/shopify";
 import { syncDraftOrdersForStore } from "@/lib/followup";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
@@ -7,7 +8,7 @@ import { alertOnSoftFailures } from "@/lib/cron-monitor";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-export async function GET(req: NextRequest) {
+async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -38,3 +39,6 @@ export async function GET(req: NextRequest) {
   await alertOnSoftFailures("sync-followup", results);
   return NextResponse.json({ results, synced_at: new Date().toISOString() });
 }
+
+// Every run — scheduled or manual — is recorded for /settings/automations.
+export const GET = withCronRun("sync-followup", handler);
