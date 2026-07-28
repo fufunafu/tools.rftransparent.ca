@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { cached } from "@/lib/api-cache";
 
 const VALID_RANGES = [7, 30, 90, 365] as const;
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — chart data tolerates slight lag
 
 interface OrderNode extends RevenueFields {
   createdAt: string;
@@ -49,44 +51,54 @@ export async function GET(req: NextRequest) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
   const dateFilter = startDate.toISOString().split("T")[0];
+  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "true";
 
   try {
-    // Paginated fetch of all orders in range
-    const { nodes: allOrders } = await fetchAllPages<OrderNode, OrdersResponse>({
-      storeId,
-      query: CHART_ORDERS_QUERY,
-      getConnection: (data) => data.orders,
-      variables: { search: `created_at:>='${dateFilter}'` },
-      maxPages: days <= 30 ? 10 : 40, // 250 * 40 = 10,000 orders max for longer ranges
-    });
+    const { data: payload, cachedAt } = await cached(
+      `chart:${storeId}:${days}`,
+      CACHE_TTL_MS,
+      async () => {
+        // Paginated fetch of all orders in range
+        const { nodes: allOrders } = await fetchAllPages<OrderNode, OrdersResponse>({
+          storeId,
+          query: CHART_ORDERS_QUERY,
+          getConnection: (data) => data.orders,
+          variables: { search: `created_at:>='${dateFilter}'` },
+          maxPages: days <= 30 ? 10 : 40, // 250 * 40 = 10,000 orders max for longer ranges
+        });
 
-    // Group by date
-    const dailyMap = new Map<string, { revenue: number; orders: number }>();
+        // Group by date
+        const dailyMap = new Map<string, { revenue: number; orders: number }>();
 
-    // Pre-fill all dates in range so chart has no gaps
-    for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
-      dailyMap.set(d.toISOString().split("T")[0], { revenue: 0, orders: 0 });
-    }
+        // Pre-fill all dates in range so chart has no gaps
+        for (let d = new Date(startDate); d <= new Date(); d.setDate(d.getDate() + 1)) {
+          dailyMap.set(d.toISOString().split("T")[0], { revenue: 0, orders: 0 });
+        }
 
-    for (const order of allOrders) {
-      const date = order.createdAt.split("T")[0];
-      const entry = dailyMap.get(date);
-      const amount = calcNetRevenue(order);
-      if (entry) {
-        entry.revenue += amount;
-        entry.orders += 1;
-      }
-    }
+        for (const order of allOrders) {
+          const date = order.createdAt.split("T")[0];
+          const entry = dailyMap.get(date);
+          const amount = calcNetRevenue(order);
+          if (entry) {
+            entry.revenue += amount;
+            entry.orders += 1;
+          }
+        }
 
-    const daily = Array.from(dailyMap.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, data]) => ({
-        date,
-        revenue: Math.round(data.revenue * 100) / 100,
-        orders: data.orders,
-      }));
+        const daily = Array.from(dailyMap.entries())
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([date, data]) => ({
+            date,
+            revenue: Math.round(data.revenue * 100) / 100,
+            orders: data.orders,
+          }));
 
-    return NextResponse.json({ daily, totalOrders: allOrders.length });
+        return { daily, totalOrders: allOrders.length };
+      },
+      { forceRefresh }
+    );
+
+    return NextResponse.json({ ...payload, cachedAt });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[Shopify Chart]", message);

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { cached } from "@/lib/api-cache";
 
 const VALID_RANGES = [7, 30, 90, 365];
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 min — map data tolerates slight lag
 
 interface GeoOrderNode extends RevenueFields {
   name: string;
@@ -68,8 +70,13 @@ export async function GET(req: NextRequest) {
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - days);
   const dateFilter = startDate.toISOString().split("T")[0];
+  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "true";
 
   try {
+    const { data: payload, cachedAt } = await cached(
+      `geo:${storeId}:${days}`,
+      CACHE_TTL_MS,
+      async () => {
     const { nodes: allOrders } = await fetchAllPages<GeoOrderNode, GeoOrdersResponse>({
       storeId,
       query: GEO_ORDERS_QUERY,
@@ -128,12 +135,17 @@ export async function GET(req: NextRequest) {
       .map(([region, data]) => ({ region, ...data }))
       .sort((a, b) => b.revenue - a.revenue);
 
-    return NextResponse.json({
+    return {
       points,
       reps,
       regions,
       currency: allOrders[0]?.totalPriceSet.shopMoney.currencyCode ?? "USD",
-    });
+    };
+      },
+      { forceRefresh }
+    );
+
+    return NextResponse.json({ ...payload, cachedAt });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[Shopify Geo]", message);
