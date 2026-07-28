@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
 
 const VALID_RANGES = [7, 30, 90, 365];
 
@@ -25,29 +25,26 @@ interface GeoOrdersResponse {
   };
 }
 
-function makeQuery(dateFilter: string, cursor?: string) {
-  const after = cursor ? `, after: "${cursor}"` : "";
-  return `
-    query {
-      orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
-        edges {
-          node {
-            name
-            createdAt
-            tags
-            totalPriceSet { shopMoney { amount currencyCode } }
-            ${REVENUE_FIELDS}
-            shippingAddress {
-              city province country latitude longitude
-            }
+const GEO_ORDERS_QUERY = `
+  query($after: String, $search: String) {
+    orders(first: 250, sortKey: CREATED_AT, reverse: true, query: $search, after: $after) {
+      edges {
+        node {
+          name
+          createdAt
+          tags
+          totalPriceSet { shopMoney { amount currencyCode } }
+          ${REVENUE_FIELDS}
+          shippingAddress {
+            city province country latitude longitude
           }
-          cursor
         }
-        pageInfo { hasNextPage }
+        cursor
       }
+      pageInfo { hasNextPage }
     }
-  `;
-}
+  }
+`;
 
 export async function GET(req: NextRequest) {
   const authenticated = await isAuthenticated();
@@ -73,20 +70,13 @@ export async function GET(req: NextRequest) {
   const dateFilter = startDate.toISOString().split("T")[0];
 
   try {
-    const allOrders: GeoOrderNode[] = [];
-    let cursor: string | undefined;
-    let hasNext = true;
-    let pages = 0;
-
-    const maxPages = days <= 30 ? 10 : 40;
-    while (hasNext && pages < maxPages) {
-      const data = await shopifyGraphQL<GeoOrdersResponse>(storeId, makeQuery(dateFilter, cursor));
-      const edges = data.orders.edges;
-      allOrders.push(...edges.map((e) => e.node));
-      hasNext = data.orders.pageInfo.hasNextPage;
-      cursor = edges[edges.length - 1]?.cursor;
-      pages++;
-    }
+    const { nodes: allOrders } = await fetchAllPages<GeoOrderNode, GeoOrdersResponse>({
+      storeId,
+      query: GEO_ORDERS_QUERY,
+      getConnection: (data) => data.orders,
+      variables: { search: `created_at:>='${dateFilter}'` },
+      maxPages: days <= 30 ? 10 : 40,
+    });
 
     // Build location points (only orders with lat/lng)
     const points = allOrders

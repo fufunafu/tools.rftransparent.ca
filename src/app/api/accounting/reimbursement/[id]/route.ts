@@ -2,14 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
+import { formatCAD } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
 const FROM = "RF Tools <noreply@rftransparent.ca>";
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
-}
 
 export async function PATCH(
   req: NextRequest,
@@ -67,7 +64,7 @@ export async function PATCH(
       <div style="font-family:system-ui,sans-serif;line-height:1.5;color:#0f172a">
         <h2 style="margin:0 0 8px">Your reimbursement was ${status}</h2>
         <p style="margin:0 0 16px;color:#475569">
-          Request <strong>#${data.id}</strong> — ${data.vendor} — ${formatAmount(Number(data.amount))}
+          Request <strong>#${data.id}</strong> — ${data.vendor} — ${formatCAD(Number(data.amount))}
         </p>
         ${
           status === "rejected"

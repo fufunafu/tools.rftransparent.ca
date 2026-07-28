@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatCAD } from "@/lib/format";
 
 export interface ReimbursementRow {
   id: number;
@@ -29,10 +30,6 @@ const STATUS_STYLES: Record<ReimbursementRow["status"], string> = {
   approved: "bg-emerald-100 text-emerald-700",
   rejected: "bg-rose-100 text-rose-700",
 };
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
-}
 
 function formatDate(iso: string | null): string {
   if (!iso) return "—";
@@ -104,7 +101,7 @@ export default function ReimbursementList({ rows, showSubmitter, isAdmin, onChan
                 <td className="px-4 py-3 text-sand-700">{r.category}</td>
                 {showSubmitter && <td className="px-4 py-3 text-sand-600">{r.submitted_by_email}</td>}
                 <td className="px-4 py-3 text-right font-medium text-sand-900 tabular-nums">
-                  {formatAmount(Number(r.amount))}
+                  {formatCAD(Number(r.amount))}
                 </td>
                 <td className="px-4 py-3">
                   <span className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${STATUS_STYLES[r.status]}`}>

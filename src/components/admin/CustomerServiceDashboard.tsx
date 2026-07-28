@@ -1,19 +1,22 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-} from "recharts";
+import dynamic from "next/dynamic";
+
+// Charts are split out so recharts loads on demand instead of in the
+// route's initial bundle (same pattern as ShopifyCharts).
+const CallVolumeChart = dynamic(
+  () => import("./CustomerServiceCharts").then((m) => ({ default: m.CallVolumeChart })),
+  { ssr: false, loading: () => <div className="h-full animate-pulse" /> },
+);
+const MissRateChart = dynamic(
+  () => import("./CustomerServiceCharts").then((m) => ({ default: m.MissRateChart })),
+  { ssr: false, loading: () => <div className="h-full animate-pulse" /> },
+);
+const PeakHoursChart = dynamic(
+  () => import("./CustomerServiceCharts").then((m) => ({ default: m.PeakHoursChart })),
+  { ssr: false, loading: () => <div className="h-full animate-pulse" /> },
+);
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "90d" | "custom";
 type Tab = "overview" | "callbacks" | "call-log";
@@ -140,12 +143,6 @@ function formatMinutesLong(mins: number): string {
   const m = mins % 60;
   if (h === 0) return `${m} min`;
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
-}
-
-function formatShortDate(label: unknown) {
-  const dateStr = String(label);
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function formatDateTime(iso: string) {
@@ -1715,43 +1712,7 @@ function OverviewTab({
                 Call Volume
               </p>
               <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={history}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e0da" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatShortDate}
-                      tick={{ fontSize: 11, fill: "#a39e93" }}
-                    />
-                    <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} />
-                    <Tooltip
-                      labelFormatter={formatShortDate}
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: "1px solid #e5e0da",
-                        fontSize: 12,
-                      }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="inbound"
-                      name="Inbound"
-                      stackId="1"
-                      stroke="#5b7a5e"
-                      fill="#5b7a5e"
-                      fillOpacity={0.3}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="outbound"
-                      name="Outbound"
-                      stackId="1"
-                      stroke="#8b7355"
-                      fill="#8b7355"
-                      fillOpacity={0.2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+                <CallVolumeChart history={history} />
               </div>
             </div>
 
@@ -1761,37 +1722,7 @@ function OverviewTab({
                 Miss Rate %
               </p>
               <div className="h-52">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={history}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e0da" />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatShortDate}
-                      tick={{ fontSize: 11, fill: "#a39e93" }}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#a39e93" }}
-                      unit="%"
-                    />
-                    <Tooltip
-                      labelFormatter={formatShortDate}
-                      formatter={(value) => [`${value}%`, "Miss Rate"]}
-                      contentStyle={{
-                        borderRadius: 8,
-                        border: "1px solid #e5e0da",
-                        fontSize: 12,
-                      }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="miss_rate"
-                      name="Miss Rate"
-                      stroke="#c0392b"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: "#c0392b" }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
+                <MissRateChart history={history} />
               </div>
             </div>
           </div>
@@ -1804,40 +1735,7 @@ function OverviewTab({
               Calls by Hour of Day
             </p>
             <div className="h-52">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={hourly.filter((h) => h.hour >= 8 && h.hour <= 20)}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e0da" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: "#a39e93" }}
-                  />
-                  <YAxis tick={{ fontSize: 11, fill: "#a39e93" }} />
-                  <Tooltip
-                    contentStyle={{
-                      borderRadius: 8,
-                      border: "1px solid #e5e0da",
-                      fontSize: 12,
-                    }}
-                    formatter={(value, name) => [value, name]}
-                  />
-                  <Bar
-                    dataKey="answered"
-                    name="Answered"
-                    stackId="a"
-                    fill="#5b7a5e"
-                    fillOpacity={0.7}
-                    radius={[0, 0, 0, 0]}
-                  />
-                  <Bar
-                    dataKey="missed"
-                    name="Missed"
-                    stackId="a"
-                    fill="#c0392b"
-                    fillOpacity={0.7}
-                    radius={[2, 2, 0, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <PeakHoursChart hourly={hourly} />
             </div>
           </div>
         )}

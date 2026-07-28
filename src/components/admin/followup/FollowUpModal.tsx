@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatCADWhole } from "@/lib/format";
 import {
   FOLLOWUP_CATEGORIES,
   DEFAULT_FOLLOWUP_DAYS,
@@ -110,7 +111,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
             <div>
               <h3 className="text-lg font-semibold text-sand-900">Log Follow-up</h3>
               <p className="text-sm text-sand-500 mt-0.5">
-                {lead.draft_name} &middot; {lead.customer_name || "Unknown customer"} &middot; {new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(Number(lead.quote_amount))}
+                {lead.draft_name} &middot; {lead.customer_name || "Unknown customer"} &middot; {formatCADWhole(Number(lead.quote_amount))}
               </p>
             </div>
             <button onClick={onClose} className="text-sand-400 hover:text-sand-600 p-1">

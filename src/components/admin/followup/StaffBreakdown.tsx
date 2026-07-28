@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatCADWhole } from "@/lib/format";
 
 interface StaffAgg {
   staff: string;
@@ -36,14 +37,6 @@ const RANGE_OPTIONS = [
   { value: "all", label: "All" },
 ] as const;
 type DaysValue = (typeof RANGE_OPTIONS)[number]["value"];
-
-function formatCurrency(n: number): string {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
 
 function SortIcon({ active, dir }: { active: boolean; dir: SortDir }) {
   return (
@@ -234,10 +227,10 @@ export default function StaffBreakdown({
                     {s.total > 0 ? `${s.conversion_rate}%` : "—"}
                   </td>
                   <td className="px-4 py-3 text-right text-sand-600">
-                    {formatCurrency(s.quoted_value)}
+                    {formatCADWhole(s.quoted_value)}
                   </td>
                   <td className="px-4 py-3 text-right text-sand-900 font-medium">
-                    {formatCurrency(s.won_value)}
+                    {formatCADWhole(s.won_value)}
                   </td>
                 </tr>
               ))}

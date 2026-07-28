@@ -9,6 +9,7 @@ import {
   type OrderStatus, type ProductWithMetrics, type PurchaseOrderDetail,
 } from "@/lib/purchasing/types";
 import RecentActivityPanel from "./RecentActivityPanel";
+import { formatCAD } from "@/lib/format";
 
 interface Props { initialOrder: PurchaseOrderDetail }
 
@@ -33,9 +34,6 @@ const NEXT_STATUS: Record<OrderStatus, OrderStatus[]> = {
   cancelled: [],
 };
 
-function fmtCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 2 }).format(n);
-}
 function fmtDate(s: string | null): string {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
@@ -380,8 +378,8 @@ export default function OrderDetail({ initialOrder }: Props) {
                       <span className={fullyReceived ? "text-green-700" : ""}>{it.qty_received.toLocaleString("en-CA")}</span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-right text-sand-500">{fmtCAD(it.unit_cost_snapshot)}</td>
-                  <td className="px-3 py-2 text-right">{fmtCAD(it.qty_ordered * it.unit_cost_snapshot)}</td>
+                  <td className="px-3 py-2 text-right text-sand-500">{formatCAD(it.unit_cost_snapshot)}</td>
+                  <td className="px-3 py-2 text-right">{formatCAD(it.qty_ordered * it.unit_cost_snapshot)}</td>
                   <td className="px-3 py-2 text-right">
                     {canEditLines && (
                       <button type="button" onClick={() => deleteItem(it.id)} disabled={busy}
@@ -452,7 +450,7 @@ export default function OrderDetail({ initialOrder }: Props) {
                 <td className="px-3 py-2 text-right">{totals.qty.toLocaleString("en-CA")}</td>
                 <td className="px-3 py-2 text-right">{totals.received.toLocaleString("en-CA")}</td>
                 <td></td>
-                <td className="px-3 py-2 text-right">{fmtCAD(totals.value)}</td>
+                <td className="px-3 py-2 text-right">{formatCAD(totals.value)}</td>
                 <td></td>
               </tr>
             </tfoot>

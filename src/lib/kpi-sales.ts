@@ -1,4 +1,4 @@
-import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields, type ShopifyConnection } from "@/lib/shopify";
 import { OrdersResponseSchema, DraftOrdersResponseSchema } from "@/lib/schemas";
 import { getSupabase } from "@/lib/supabase";
 
@@ -13,13 +13,6 @@ interface OrderNode extends RevenueFields {
   currentSubtotalPriceSet?: { shopMoney: { amount: string } };
 }
 
-interface OrdersResponse {
-  orders: {
-    edges: { node: OrderNode; cursor: string }[];
-    pageInfo: { hasNextPage: boolean };
-  };
-}
-
 interface DraftOrderNode extends RevenueFields {
   id: string;
   name: string;
@@ -27,13 +20,6 @@ interface DraftOrderNode extends RevenueFields {
   status: string; // OPEN, INVOICE_SENT, COMPLETED
   tags: string[];
   order: { id: string; createdAt: string } | null;
-}
-
-interface DraftOrdersResponse {
-  draftOrders: {
-    edges: { node: DraftOrderNode; cursor: string }[];
-    pageInfo: { hasNextPage: boolean };
-  };
 }
 
 export interface SalesMetrics {
@@ -79,40 +65,34 @@ function calcOrderNetRevenue(order: OrderNode): number {
 
 // --------------- Queries ---------------
 
-function makeOrdersQuery(dateFilter: string, cursor?: string) {
-  const after = cursor ? `, after: "${cursor}"` : "";
-  return `
-    query {
-      orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
-        edges {
-          node { id createdAt tags cancelledAt staffMember { firstName lastName } currentSubtotalPriceSet { shopMoney { amount } } ${REVENUE_FIELDS} }
-          cursor
-        }
-        pageInfo { hasNextPage }
+const ORDERS_QUERY = `
+  query($after: String, $search: String) {
+    orders(first: 250, sortKey: CREATED_AT, reverse: true, query: $search, after: $after) {
+      edges {
+        node { id createdAt tags cancelledAt staffMember { firstName lastName } currentSubtotalPriceSet { shopMoney { amount } } ${REVENUE_FIELDS} }
+        cursor
       }
+      pageInfo { hasNextPage }
     }
-  `;
-}
+  }
+`;
 
-function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
-  const after = cursor ? `, after: "${cursor}"` : "";
-  return `
-    query {
-      draftOrders(first: 250, sortKey: ID, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
-        edges {
-          node {
-            id name createdAt status
-            ${REVENUE_FIELDS}
-            tags
-            order { id createdAt }
-          }
-          cursor
+const DRAFT_ORDERS_QUERY = `
+  query($after: String, $search: String) {
+    draftOrders(first: 250, sortKey: ID, reverse: true, query: $search, after: $after) {
+      edges {
+        node {
+          id name createdAt status
+          ${REVENUE_FIELDS}
+          tags
+          order { id createdAt }
         }
-        pageInfo { hasNextPage }
+        cursor
       }
+      pageInfo { hasNextPage }
     }
-  `;
-}
+  }
+`;
 
 // --------------- Data Fetching ---------------
 
@@ -141,24 +121,17 @@ async function fetchAllOrders(
   for (const store of stores) {
     if (!storeIds.includes(store.id)) continue;
     try {
-      let cursor: string | undefined;
-      let hasNext = true;
-      let pages = 0;
-      while (hasNext && pages < MAX_PAGES) {
-        const raw = await shopifyGraphQL(
-          store.id,
-          makeOrdersQuery(fromDate, cursor),
-          undefined,
-          { app: "quotation" }, // Quotation app has read_users, needed for staffMember field
-        );
-        const data = OrdersResponseSchema.parse(raw);
-        const edges = data.orders.edges;
-        allOrders.push(...edges.map((e) => e.node as unknown as OrderNode));
-        hasNext = data.orders.pageInfo.hasNextPage;
-        cursor = edges[edges.length - 1]?.cursor;
-        pages++;
-      }
-      if (pages >= MAX_PAGES) {
+      const { nodes, truncated } = await fetchAllPages<OrderNode>({
+        storeId: store.id,
+        query: ORDERS_QUERY,
+        getConnection: (raw) =>
+          OrdersResponseSchema.parse(raw).orders as unknown as ShopifyConnection<OrderNode>,
+        variables: { search: `created_at:>='${fromDate}'` },
+        maxPages: MAX_PAGES,
+        app: "quotation", // Quotation app has read_users, needed for staffMember field
+      });
+      allOrders.push(...nodes);
+      if (truncated) {
         warnings.push({ storeId: store.id, type: "orders", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
       }
     } catch (err) {
@@ -182,22 +155,16 @@ async function fetchAllDraftOrders(
   for (const store of stores) {
     if (!storeIds.includes(store.id)) continue;
     try {
-      let cursor: string | undefined;
-      let hasNext = true;
-      let pages = 0;
-      while (hasNext && pages < MAX_PAGES) {
-        const raw = await shopifyGraphQL(
-          store.id,
-          makeDraftOrdersQuery(fromDate, cursor)
-        );
-        const data = DraftOrdersResponseSchema.parse(raw);
-        const edges = data.draftOrders.edges;
-        allDrafts.push(...edges.map((e) => e.node as unknown as DraftOrderNode));
-        hasNext = data.draftOrders.pageInfo.hasNextPage;
-        cursor = edges[edges.length - 1]?.cursor;
-        pages++;
-      }
-      if (pages >= MAX_PAGES) {
+      const { nodes, truncated } = await fetchAllPages<DraftOrderNode>({
+        storeId: store.id,
+        query: DRAFT_ORDERS_QUERY,
+        getConnection: (raw) =>
+          DraftOrdersResponseSchema.parse(raw).draftOrders as unknown as ShopifyConnection<DraftOrderNode>,
+        variables: { search: `created_at:>='${fromDate}'` },
+        maxPages: MAX_PAGES,
+      });
+      allDrafts.push(...nodes);
+      if (truncated) {
         warnings.push({ storeId: store.id, type: "drafts", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
       }
     } catch (err) {

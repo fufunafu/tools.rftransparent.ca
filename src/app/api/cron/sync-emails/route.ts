@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { INBOXES, listMessages, classifyDirection, extractEmail } from "@/lib/gmail";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

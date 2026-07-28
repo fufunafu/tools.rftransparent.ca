@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from "recharts";
 import AnalyticsChart from "./AnalyticsChart";
+import { formatCADWhole } from "@/lib/format";
 
 interface MonthData {
   month: string;
@@ -37,14 +38,6 @@ interface ApiResponse {
   staff: string;
   totals: Totals;
   months: MonthData[];
-}
-
-function formatCurrency(n: number): string {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(n);
 }
 
 function formatCurrencyShort(n: number): string {
@@ -84,9 +77,9 @@ function QuotedChart({ data }: { data: MonthData[] }) {
               contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid #e5e5e5" }}
               formatter={(value, name) => {
                 const v = Number(value);
-                if (name === "won_value") return [formatCurrency(v), "Won $"];
-                if (name === "quoted_value") return [formatCurrency(v), "Quoted $"];
-                return [formatCurrency(v), String(name)];
+                if (name === "won_value") return [formatCADWhole(v), "Won $"];
+                if (name === "quoted_value") return [formatCADWhole(v), "Quoted $"];
+                return [formatCADWhole(v), String(name)];
               }}
             />
             <Bar dataKey="quoted_value" fill="#cbd5e1" radius={[3, 3, 0, 0]} name="quoted_value" />
@@ -170,8 +163,8 @@ export default function StaffDetailPanel({
                 <StatCard label="Won" value={String(data.totals.won)} emphasis="won" />
                 <StatCard label="Lost" value={String(data.totals.lost)} emphasis="lost" />
                 <StatCard label="Active" value={String(data.totals.active)} />
-                <StatCard label="Quoted $" value={formatCurrency(data.totals.quoted_value)} />
-                <StatCard label="Won $" value={formatCurrency(data.totals.won_value)} emphasis="won" />
+                <StatCard label="Quoted $" value={formatCADWhole(data.totals.quoted_value)} />
+                <StatCard label="Won $" value={formatCADWhole(data.totals.won_value)} emphasis="won" />
               </div>
 
               {data.months.length === 0 ? (

@@ -1,9 +1,11 @@
 "use client";
 
 import { SWRConfig } from "swr";
+import { fetchWithRetry } from "@/lib/fetch-retry";
 
 async function fetcher<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  // Retries transient network/5xx failures with backoff; 4xx pass through.
+  const res = await fetchWithRetry(url);
   if (!res.ok) {
     let detail = "";
     try {

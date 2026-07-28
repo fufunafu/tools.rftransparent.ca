@@ -11,6 +11,7 @@ import {
   Tooltip,
 } from "recharts";
 import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
+import { formatCADWhole } from "@/lib/format";
 
 interface CampaignData {
   campaign: string;
@@ -20,14 +21,6 @@ interface CampaignData {
   conversions: number;
   revenue: number;
   roas: number;
-}
-
-function formatCurrency(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n);
 }
 
 function formatNumber(n: number) {
@@ -173,7 +166,7 @@ export default function CampaignsTab({
               <Tooltip
                 {...tooltipStyle}
                 formatter={(value: unknown, name: unknown) => [
-                  formatCurrency(Number(value)),
+                  formatCADWhole(Number(value)),
                   name === "revenue" ? "Revenue" : "Ad Spend",
                 ]}
               />
@@ -206,8 +199,8 @@ export default function CampaignsTab({
                 return (
                   <tr key={c.campaign} className="hover:bg-sand-50/50 transition-colors">
                     <td className="px-4 py-3 text-sm font-medium text-sand-900">{c.campaign}</td>
-                    <td className="px-4 py-3 text-sm text-sand-700">{formatCurrency(c.ad_spend)}</td>
-                    <td className="px-4 py-3 text-sm text-sand-700">{formatCurrency(c.revenue)}</td>
+                    <td className="px-4 py-3 text-sm text-sand-700">{formatCADWhole(c.ad_spend)}</td>
+                    <td className="px-4 py-3 text-sm text-sand-700">{formatCADWhole(c.revenue)}</td>
                     <td className="px-4 py-3 text-sm text-sand-700">{c.roas}x</td>
                     <td className="px-4 py-3 text-sm text-sand-700">
                       {formatNumber(c.clicks)}
@@ -225,8 +218,8 @@ export default function CampaignsTab({
             <tfoot className="bg-sand-50 border-t border-sand-200/60">
               <tr>
                 <td className="px-4 py-3 text-sm font-semibold text-sand-900">Total ({data.length} campaigns)</td>
-                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCurrency(totals.ad_spend)}</td>
-                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCurrency(totals.revenue)}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCADWhole(totals.ad_spend)}</td>
+                <td className="px-4 py-3 text-sm font-semibold text-sand-900">{formatCADWhole(totals.revenue)}</td>
                 <td className="px-4 py-3 text-sm font-semibold text-sand-900">{totalRoas}x</td>
                 <td className="px-4 py-3 text-sm font-semibold text-sand-900">
                   {formatNumber(totals.clicks)}

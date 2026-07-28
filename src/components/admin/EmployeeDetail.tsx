@@ -2,18 +2,19 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import {
-  ResponsiveContainer,
-  ComposedChart,
-  LineChart,
-  Bar,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-} from "recharts";
+import dynamic from "next/dynamic";
+import { formatCADWhole } from "@/lib/format";
+
+// Charts are split out so recharts loads on demand instead of in the
+// route's initial bundle (same pattern as ShopifyCharts).
+const QuotedSoldChart = dynamic(
+  () => import("./EmployeeDetailCharts").then((m) => ({ default: m.QuotedSoldChart })),
+  { ssr: false, loading: () => <div className="h-[260px] animate-pulse" /> }
+);
+const ConversionRateChart = dynamic(
+  () => import("./EmployeeDetailCharts").then((m) => ({ default: m.ConversionRateChart })),
+  { ssr: false, loading: () => <div className="h-[200px] animate-pulse" /> }
+);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -58,20 +59,10 @@ interface Target {
 
 // ─── Formatting helpers ──────────────────────────────────────────────────────
 
-function fmt$(n: number) {
-  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `$${(n / 1_000).toFixed(0)}k`;
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-}
-
-function fmtFull$(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
-}
-
 function formatMetricValue(metric: string, value: number): string {
   const currency = new Set(["quoted", "sold", "revenue", "aov"]);
   const percent = new Set(["conversion_rate"]);
-  if (currency.has(metric)) return fmtFull$(value);
+  if (currency.has(metric)) return formatCADWhole(value);
   if (percent.has(metric)) return `${value}%`;
   return new Intl.NumberFormat("en-US").format(Math.round(value));
 }
@@ -332,36 +323,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
             <h2 className="text-sm font-semibold text-sand-700 uppercase tracking-wider mb-4">
               Quoted vs Sold — last 12 months
             </h2>
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e1d8" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9c9589" }} />
-                <YAxis
-                  tickFormatter={(v) => fmt$(v as number)}
-                  tick={{ fontSize: 11, fill: "#9c9589" }}
-                  width={60}
-                />
-                <Tooltip
-                  formatter={(value, name) => [
-                    fmtFull$(Number(value ?? 0)),
-                    name === "quoted" ? "Quoted" : "Sold",
-                  ]}
-                  contentStyle={{ fontSize: 12, borderColor: "#e5e1d8" }}
-                />
-                <Legend
-                  formatter={(value) => value === "quoted" ? "Quoted" : "Sold"}
-                  wrapperStyle={{ fontSize: 12 }}
-                />
-                <Bar dataKey="quoted" fill="#d4cfc7" radius={[3, 3, 0, 0]} />
-                <Line
-                  type="monotone"
-                  dataKey="sold"
-                  stroke="#2d6a4f"
-                  strokeWidth={2}
-                  dot={{ r: 3, fill: "#2d6a4f" }}
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
+            <QuotedSoldChart chartData={chartData} />
           </div>
 
           {/* Conversion Rate */}
@@ -369,29 +331,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
             <h2 className="text-sm font-semibold text-sand-700 uppercase tracking-wider mb-4">
               Conversion Rate — last 12 months
             </h2>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e5e1d8" />
-                <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9c9589" }} />
-                <YAxis
-                  tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 11, fill: "#9c9589" }}
-                  width={45}
-                  domain={[0, "auto"]}
-                />
-                <Tooltip
-                  formatter={(value) => [`${Number(value ?? 0)}%`, "Conv. Rate"]}
-                  contentStyle={{ fontSize: 12, borderColor: "#e5e1d8" }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="conversion_rate"
-                  stroke="#b45309"
-                  strokeWidth={2}
-                  dot={{ r: 3, fill: "#b45309" }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <ConversionRateChart chartData={chartData} />
           </div>
 
         </div>

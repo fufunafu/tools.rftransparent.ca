@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { FOLLOWUP_CATEGORIES, type LeadStatus, type FollowUpLead } from "@/lib/followup";
+import { formatCADWhole } from "@/lib/format";
 
 const STATUS_COLORS: Record<string, string> = {
   new: "border-l-blue-400",
@@ -11,10 +12,6 @@ const STATUS_COLORS: Record<string, string> = {
   future_project: "border-l-purple-400",
   no_answer: "border-l-gray-400",
 };
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
 
 function getMonday(d: Date): Date {
   const date = new Date(d);
@@ -121,7 +118,7 @@ export default function CalendarView({ leads, onViewDetail }: Props) {
                 className="bg-white border border-red-200 rounded-lg px-3 py-1.5 text-xs text-left hover:bg-red-50 transition-colors"
               >
                 <span className="font-medium text-sand-900">{lead.customer_name || lead.draft_name}</span>
-                <span className="text-sand-400 ml-1.5">{formatAmount(Number(lead.quote_amount))}</span>
+                <span className="text-sand-400 ml-1.5">{formatCADWhole(Number(lead.quote_amount))}</span>
               </button>
             ))}
             {overdue.length > 10 && (
@@ -171,7 +168,7 @@ export default function CalendarView({ leads, onViewDetail }: Props) {
                           {lead.customer_name || lead.draft_name}
                         </div>
                         <div className="flex items-center justify-between mt-0.5">
-                          <span className="text-[10px] text-sand-500">{formatAmount(Number(lead.quote_amount))}</span>
+                          <span className="text-[10px] text-sand-500">{formatCADWhole(Number(lead.quote_amount))}</span>
                           <span className="text-[10px] text-sand-400">
                             {FOLLOWUP_CATEGORIES[lead.lead_status as LeadStatus]?.label ?? lead.lead_status}
                           </span>

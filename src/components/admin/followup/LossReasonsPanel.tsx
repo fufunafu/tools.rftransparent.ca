@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from "recharts";
 import type { FollowUpLead } from "@/lib/followup";
+import { formatCADWhole } from "@/lib/format";
 
 type LostLead = FollowUpLead & { closing_note: string | null };
 
@@ -24,10 +25,6 @@ function formatDate(iso: string | null): string {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
 }
 
 export default function LossReasonsPanel({ reasons, store, range }: Props) {
@@ -166,7 +163,7 @@ export default function LossReasonsPanel({ reasons, store, range }: Props) {
                       <span className="ml-2 text-xs text-sand-400">{l.draft_name}</span>
                     </div>
                     <div className="flex items-center gap-3 text-xs text-sand-500 whitespace-nowrap">
-                      <span className="tabular-nums">{formatAmount(Number(l.quote_amount))}</span>
+                      <span className="tabular-nums">{formatCADWhole(Number(l.quote_amount))}</span>
                       <span>{formatDate(l.closed_at)}</span>
                     </div>
                   </div>

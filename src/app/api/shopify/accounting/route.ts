@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { shopifyGraphQL, fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
 
 function dateStr(d: Date) {
   return d.toISOString().split("T")[0];
@@ -56,11 +56,9 @@ interface UnpaidResponse {
   orders: { edges: { node: UnpaidOrderNode }[] };
 }
 
-function makeAccountingQuery(dateFilter: string, cursor?: string) {
-  const after = cursor ? `, after: "${cursor}"` : "";
-  return `
-    query {
-      orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "${dateFilter}"${after}) {
+const ACCOUNTING_ORDERS_QUERY = `
+    query($after: String, $search: String) {
+      orders(first: 250, sortKey: CREATED_AT, reverse: true, query: $search, after: $after) {
         edges {
           cursor
           node {
@@ -96,32 +94,20 @@ function makeAccountingQuery(dateFilter: string, cursor?: string) {
         pageInfo { hasNextPage }
       }
     }
-  `;
-}
+`;
 
 async function fetchAllAccountingOrders(
   storeId: string,
   dateFilter: string,
 ): Promise<OrderNode[]> {
-  const allOrders: OrderNode[] = [];
-  let cursor: string | undefined;
-  let hasNext = true;
-  let pages = 0;
-  const maxPages = 40;
-
-  while (hasNext && pages < maxPages) {
-    const data = await shopifyGraphQL<OrdersResponse>(
-      storeId,
-      makeAccountingQuery(dateFilter, cursor),
-    );
-    const edges = data.orders.edges;
-    allOrders.push(...edges.map((e) => e.node));
-    hasNext = data.orders.pageInfo.hasNextPage;
-    cursor = edges[edges.length - 1]?.cursor;
-    pages++;
-  }
-
-  return allOrders;
+  const { nodes } = await fetchAllPages<OrderNode, OrdersResponse>({
+    storeId,
+    query: ACCOUNTING_ORDERS_QUERY,
+    getConnection: (data) => data.orders,
+    variables: { search: dateFilter },
+    maxPages: 40,
+  });
+  return nodes;
 }
 
 const UNPAID_QUERY = `

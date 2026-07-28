@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
+import { formatCAD } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -23,10 +24,6 @@ export interface ExpenseReimbursement {
   reviewed_by_email: string | null;
   submitted_at: string;
   updated_at: string;
-}
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD" }).format(n);
 }
 
 export async function GET(req: NextRequest) {
@@ -128,7 +125,7 @@ export async function POST(req: NextRequest) {
             <tr><td style="padding:4px 12px 4px 0;color:#64748b">Date</td><td>${row.expense_date}</td></tr>
             <tr><td style="padding:4px 12px 4px 0;color:#64748b">Vendor</td><td>${row.vendor}</td></tr>
             <tr><td style="padding:4px 12px 4px 0;color:#64748b">Category</td><td>${row.category}</td></tr>
-            <tr><td style="padding:4px 12px 4px 0;color:#64748b">Amount</td><td><strong>${formatAmount(Number(row.amount))}</strong></td></tr>
+            <tr><td style="padding:4px 12px 4px 0;color:#64748b">Amount</td><td><strong>${formatCAD(Number(row.amount))}</strong></td></tr>
             ${row.description ? `<tr><td style="padding:4px 12px 4px 0;color:#64748b;vertical-align:top">Description</td><td>${row.description.replace(/\n/g, "<br>")}</td></tr>` : ""}
           </tbody>
         </table>
@@ -141,7 +138,7 @@ export async function POST(req: NextRequest) {
       from: FROM,
       to: FINANCE_EMAIL,
       cc: submitterEmail,
-      subject: `Reimbursement #${row.id} — ${row.vendor} — ${formatAmount(Number(row.amount))}`,
+      subject: `Reimbursement #${row.id} — ${row.vendor} — ${formatCAD(Number(row.amount))}`,
       html,
     });
   } catch (err) {

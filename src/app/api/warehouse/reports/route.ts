@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
+import { isAuthenticated } from "@/lib/admin-auth";
 
 export async function GET(req: NextRequest) {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const { searchParams } = req.nextUrl;
   const from = searchParams.get("from");
   const to = searchParams.get("to");
@@ -24,6 +28,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const body = await req.json();
   const {
     employee_id,

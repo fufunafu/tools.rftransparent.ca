@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { STORES as SHOPIFY_STORES, shopifyGraphQL } from "@/lib/shopify";
 import { INBOXES } from "@/lib/gmail";
+import { isAuthenticated } from "@/lib/admin-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -214,6 +215,9 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
 }
 
 export async function GET(req: NextRequest) {
+  if (!(await isAuthenticated()))
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
   const checkName = req.nextUrl.searchParams.get("check");
 
   // Single check mode — returns one CheckResult

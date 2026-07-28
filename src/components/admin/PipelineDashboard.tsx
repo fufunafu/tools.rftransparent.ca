@@ -1,18 +1,39 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Line,
-  ComposedChart,
-  Area,
-} from "recharts";
+import dynamic from "next/dynamic";
+
+// Chart blocks are split out so recharts loads on demand instead of in the
+// route's initial bundle (same pattern as ShopifyCharts). Placeholder heights
+// match each chart's ResponsiveContainer height so the layout doesn't shift.
+function ChartLoading({ height }: { height: number }) {
+  return (
+    <div style={{ height }} className="flex items-center justify-center text-sand-400 text-sm animate-pulse">
+      Loading chart...
+    </div>
+  );
+}
+
+const ChannelTrendChart = dynamic(
+  () => import("./PipelineCharts").then((m) => m.ChannelTrendChart),
+  { ssr: false, loading: () => <ChartLoading height={220} /> },
+);
+const ForecastChart = dynamic(
+  () => import("./PipelineCharts").then((m) => m.ForecastChart),
+  { ssr: false, loading: () => <ChartLoading height={240} /> },
+);
+const SeasonalPatternChart = dynamic(
+  () => import("./PipelineCharts").then((m) => m.SeasonalPatternChart),
+  { ssr: false, loading: () => <ChartLoading height={220} /> },
+);
+const MonthlyTrendChart = dynamic(
+  () => import("./PipelineCharts").then((m) => m.MonthlyTrendChart),
+  { ssr: false, loading: () => <ChartLoading height={280} /> },
+);
+const StatusBreakdownChart = dynamic(
+  () => import("./PipelineCharts").then((m) => m.StatusBreakdownChart),
+  { ssr: false, loading: () => <ChartLoading height={60} /> },
+);
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -493,11 +514,6 @@ export default function PipelineDashboard() {
   const pred = data?.prediction;
   const ch = data?.channelMetrics;
 
-  const tooltipStyle = {
-    contentStyle: { backgroundColor: "#faf9f6", border: "1px solid #e5e0d8", borderRadius: 8, fontSize: 12 },
-    labelStyle: { color: "#78736a" },
-  };
-
   const SortIcon = ({ active, asc }: { active: boolean; asc: boolean }) => (
     <span className="ml-1 text-[10px]">{active ? (asc ? "\u25b2" : "\u25bc") : "\u25b4"}</span>
   );
@@ -713,35 +729,7 @@ export default function PipelineDashboard() {
                 {/* Monthly channel trend chart with quote share % line */}
                 {ch.monthlyTrend.length > 1 && (
                   <div className="pt-2">
-                    <ResponsiveContainer width="100%" height={220}>
-                      <ComposedChart data={ch.monthlyTrend}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
-                        <XAxis
-                          dataKey="month"
-                          tick={{ fontSize: 11, fill: "#a39e93" }}
-                          tickFormatter={(v: string) => {
-                            const [y, mo] = v.split("-");
-                            return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][parseInt(mo, 10) - 1]} '${y.slice(2)}`;
-                          }}
-                        />
-                        <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v: number) => fmt(v)} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v: number) => `${v}%`} domain={[0, 100]} />
-                        <Tooltip
-                          {...tooltipStyle}
-                          formatter={(value: unknown, name: unknown) => {
-                            const v = Number(value);
-                            const n = String(name);
-                            if (n === "draftRevenue") return [fmtFull(v), "Quote Revenue"];
-                            if (n === "directRevenue") return [fmtFull(v), "Direct Web Revenue"];
-                            if (n === "draftRevenueShare") return [`${v}%`, "Quote Share"];
-                            return [v, n];
-                          }}
-                        />
-                        <Bar yAxisId="left" dataKey="draftRevenue" stackId="rev" fill="#a855f7" radius={[0, 0, 0, 0]} />
-                        <Bar yAxisId="left" dataKey="directRevenue" stackId="rev" fill="#10b981" radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="right" type="monotone" dataKey="draftRevenueShare" stroke="#7c3aed" strokeWidth={2} dot={{ r: 3, fill: "#7c3aed" }} />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    <ChannelTrendChart data={ch.monthlyTrend} />
                     <div className="flex justify-center gap-5 mt-1 text-xs text-sand-500">
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-purple-500" /> Quotes</span>
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Direct Web</span>
@@ -879,25 +867,7 @@ export default function PipelineDashboard() {
                       </p>
                       <InfoTip text="Blue bars = projected revenue. Purple bars = pipeline (quoted/invoiced) portion already visible. Dashed outline = same month last year for comparison." />
                     </div>
-                    <ResponsiveContainer width="100%" height={240}>
-                      <ComposedChart data={pred.monthlyForecasts}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
-                        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#60a5fa" }} interval={0} angle={-45} textAnchor="end" height={50} />
-                        <YAxis tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => fmt(v)} />
-                        <Tooltip
-                          {...tooltipStyle}
-                          formatter={(value: unknown, name: unknown) => {
-                            const v = Number(value);
-                            const n = String(name);
-                            if (n === "forecast") return [fmtFull(v), "Forecast"];
-                            if (n === "fromPipeline") return [fmtFull(v), "From Pipeline"];
-                            return [v, n];
-                          }}
-                        />
-                        <Bar dataKey="forecast" fill="#2563eb" radius={[4, 4, 0, 0]} name="forecast" />
-                        <Bar dataKey="fromPipeline" fill="#7c3aed" radius={[4, 4, 0, 0]} name="fromPipeline" />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    <ForecastChart data={pred.monthlyForecasts} />
                     <div className="flex justify-center gap-5 text-xs text-blue-500">
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Forecast</span>
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-violet-600" /> From Pipeline</span>
@@ -921,26 +891,7 @@ export default function PipelineDashboard() {
                       </p>
                       <InfoTip text="Historical monthly revenue from all orders with month-over-month growth %. Positive = seasonal ramp-up, negative = seasonal slowdown. Growth % clamped to ±100% for readability." />
                     </div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <ComposedChart data={chartData}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
-                        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#60a5fa" }} interval={0} angle={-45} textAnchor="end" height={50} />
-                        <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => fmt(v)} />
-                        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => `${v}%`} domain={[-100, 100]} />
-                        <Tooltip
-                          {...tooltipStyle}
-                          formatter={(value: unknown, name: unknown) => {
-                            const v = Number(value);
-                            const n = String(name);
-                            if (n === "revenue") return [fmtFull(v), "Revenue"];
-                            if (n === "momGrowthClamped") return [v !== null ? `${v > 0 ? "+" : ""}${v}%` : "N/A", "MoM Change"];
-                            return [v, n];
-                          }}
-                        />
-                        <Bar yAxisId="left" dataKey="revenue" fill="#2563eb" radius={[4, 4, 0, 0]} />
-                        <Line yAxisId="right" type="monotone" dataKey="momGrowthClamped" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: "#f59e0b" }} connectNulls />
-                      </ComposedChart>
-                    </ResponsiveContainer>
+                    <SeasonalPatternChart data={chartData} />
                     <div className="flex justify-center gap-5 text-xs text-blue-500">
                       <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Monthly Revenue</span>
                       <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-amber-500 rounded" /> MoM Growth %</span>
@@ -1013,35 +964,7 @@ export default function PipelineDashboard() {
             {m.monthlyTrend.length > 1 && (
               <div className="bg-white rounded-xl border border-sand-200 p-5">
                 <h3 className="text-sm font-medium text-sand-700 mb-4">Monthly Trend</h3>
-                <ResponsiveContainer width="100%" height={280}>
-                  <ComposedChart data={m.monthlyTrend}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
-                    <XAxis
-                      dataKey="month"
-                      tick={{ fontSize: 11, fill: "#a39e93" }}
-                      tickFormatter={(v: string) => {
-                        const [y, mo] = v.split("-");
-                        return `${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][parseInt(mo, 10) - 1]} '${y.slice(2)}`;
-                      }}
-                    />
-                    <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v: number) => fmt(v)} />
-                    <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#a39e93" }} tickFormatter={(v: number) => `${v}%`} />
-                    <Tooltip
-                      {...tooltipStyle}
-                      formatter={(value: unknown, name: unknown) => {
-                        const v = Number(value);
-                        const n = String(name);
-                        if (n === "revenue") return [fmtFull(v), "Won Revenue"];
-                        if (n === "pipelineValue") return [fmtFull(v), "Pipeline Value"];
-                        if (n === "conversionRate") return [`${v}%`, "Conversion Rate"];
-                        return [v, n];
-                      }}
-                    />
-                    <Area yAxisId="left" type="monotone" dataKey="revenue" fill="#dbeafe" stroke="#2563eb" fillOpacity={0.3} />
-                    <Area yAxisId="left" type="monotone" dataKey="pipelineValue" fill="#dcfce7" stroke="#16a34a" fillOpacity={0.2} />
-                    <Line yAxisId="right" type="monotone" dataKey="conversionRate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
-                  </ComposedChart>
-                </ResponsiveContainer>
+                <MonthlyTrendChart data={m.monthlyTrend} />
               </div>
             )}
 
@@ -1099,26 +1022,7 @@ export default function PipelineDashboard() {
             {m.totalDrafts > 0 && (
               <div className="bg-white rounded-xl border border-sand-200 p-5">
                 <h3 className="text-sm font-medium text-sand-700 mb-4">Draft Status Breakdown</h3>
-                <ResponsiveContainer width="100%" height={60}>
-                  <BarChart
-                    layout="vertical"
-                    data={[{ open: m.openDrafts, invoiceSent: m.invoiceSentDrafts, completed: m.completedDrafts }]}
-                  >
-                    <XAxis type="number" hide />
-                    <YAxis type="category" dataKey={() => ""} hide />
-                    <Tooltip
-                      {...tooltipStyle}
-                      formatter={(value: unknown, name: unknown) => {
-                        const n = String(name);
-                        const label = n === "open" ? "Open" : n === "invoiceSent" ? "Invoice Sent" : "Completed";
-                        return [String(value), label];
-                      }}
-                    />
-                    <Bar dataKey="open" stackId="a" fill="#f59e0b" radius={[4, 0, 0, 4]} />
-                    <Bar dataKey="invoiceSent" stackId="a" fill="#3b82f6" />
-                    <Bar dataKey="completed" stackId="a" fill="#16a34a" radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <StatusBreakdownChart open={m.openDrafts} invoiceSent={m.invoiceSentDrafts} completed={m.completedDrafts} />
                 <div className="flex gap-4 mt-2 text-xs text-sand-500">
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Open ({m.openDrafts})</span>
                   <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Invoice Sent ({m.invoiceSentDrafts})</span>

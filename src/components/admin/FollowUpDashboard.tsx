@@ -1,20 +1,55 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import useSWR, { useSWRConfig } from "swr";
 import SummaryCards from "@/components/admin/followup/SummaryCards";
-import LeadTable from "@/components/admin/followup/LeadTable";
+import LeadTableImpl from "@/components/admin/followup/LeadTable";
 import { type DupGroup } from "@/components/admin/followup/DuplicatesPanel";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
-import AnalyticsChart from "@/components/admin/followup/AnalyticsChart";
-import CalendarView from "@/components/admin/followup/CalendarView";
-import StaffBreakdown from "@/components/admin/followup/StaffBreakdown";
-import StaffDetailPanel from "@/components/admin/followup/StaffDetailPanel";
-import RecentActivityPanel from "@/components/admin/followup/RecentActivityPanel";
-import LossReasonsPanel from "@/components/admin/followup/LossReasonsPanel";
-import LeadStatusPanel from "@/components/admin/followup/LeadStatusPanel";
+import CalendarViewImpl from "@/components/admin/followup/CalendarView";
+import StaffBreakdownImpl from "@/components/admin/followup/StaffBreakdown";
+import RecentActivityPanelImpl, { type ActivityDrillKind } from "@/components/admin/followup/RecentActivityPanel";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
+import { formatCADWhole } from "@/lib/format";
+
+// ── Chart panels: loaded via next/dynamic so recharts stays out of the
+// route's initial bundle (same pattern as ShopifyCharts). memo() on top so
+// the 15s SWR polls don't re-render the charts when their data is unchanged
+// (SWR keeps stable references while the payload is deep-equal).
+const AnalyticsChart = memo(dynamic(() => import("@/components/admin/followup/AnalyticsChart"), {
+  ssr: false,
+  loading: () => <div className="h-80 bg-white rounded-xl border border-sand-200/60 animate-pulse" />,
+}));
+const LeadStatusPanel = memo(dynamic(() => import("@/components/admin/followup/LeadStatusPanel"), {
+  ssr: false,
+  loading: () => <div className="h-72 bg-white rounded-xl border border-sand-200/60 animate-pulse" />,
+}));
+const LossReasonsPanel = memo(dynamic(() => import("@/components/admin/followup/LossReasonsPanel"), {
+  ssr: false,
+  loading: () => <div className="h-72 bg-white rounded-xl border border-sand-200/60 animate-pulse" />,
+}));
+// Fullscreen drawer — show just the backdrop while its chunk loads.
+const StaffDetailPanel = dynamic(() => import("@/components/admin/followup/StaffDetailPanel"), {
+  ssr: false,
+  loading: () => <div className="fixed inset-0 bg-black/40 z-50" />,
+});
+
+// ── Memoized heavy children. The dashboard holds ~6 polling SWR
+// subscriptions; any one of them updating re-renders the whole component.
+// With stable props (useMemo/useCallback below + SWR's referentially stable
+// data) these skip re-rendering every table row on each poll.
+const LeadTable = memo(LeadTableImpl);
+const CalendarView = memo(CalendarViewImpl);
+const StaffBreakdown = memo(StaffBreakdownImpl);
+const RecentActivityPanel = memo(RecentActivityPanelImpl);
+
+// Stable fallbacks so "no data yet" renders don't mint fresh array
+// references on every poll (which would defeat the memo()s above).
+const NO_LEADS: FollowUpLead[] = [];
+const NO_GROUPS: DupGroup[] = [];
+const NO_MONTHS: MonthData[] = [];
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -54,10 +89,6 @@ interface SummaryResponse {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatCurrency(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
@@ -147,7 +178,7 @@ function LeadDetailPanel({
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div>
                 <p className="text-sand-400">Amount</p>
-                <p className="font-medium text-sand-900">{formatCurrency(Number(lead.quote_amount))}</p>
+                <p className="font-medium text-sand-900">{formatCADWhole(Number(lead.quote_amount))}</p>
               </div>
               <div>
                 <p className="text-sand-400">Shopify Status</p>
@@ -526,11 +557,11 @@ export default function FollowUpDashboard({
 
   const stores = summary?.stores ?? [];
   const lastSyncedAt = summary?.last_synced_at ?? null;
-  const leads = leadsData?.leads ?? [];
-  const duplicateGroups = duplicatesData?.groups ?? [];
+  const leads = leadsData?.leads ?? NO_LEADS;
+  const duplicateGroups = duplicatesData?.groups ?? NO_GROUPS;
   const storeDays = configData?.config ?? {};
-  const analytics = analyticsData?.months ?? [];
-  const calendarLeads = calendarData?.leads ?? [];
+  const analytics = analyticsData?.months ?? NO_MONTHS;
+  const calendarLeads = calendarData?.leads ?? NO_LEADS;
   const loading = summaryLoading;
   const error = summaryError instanceof Error ? summaryError.message : "";
 
@@ -549,7 +580,9 @@ export default function FollowUpDashboard({
 
   // Invalidate just summary + leads + calendar — what changes after logging a
   // follow-up or bulk-closing leads. Analytics + config are unaffected.
-  const invalidateAfterLeadMutation = () => {
+  // useCallback: dependency of the useCallback'd handlers passed to the
+  // memoized LeadTable below.
+  const invalidateAfterLeadMutation = useCallback(() => {
     mutate(
       (key) =>
         typeof key === "string" &&
@@ -557,7 +590,7 @@ export default function FollowUpDashboard({
         key.includes(`store=${store}`) &&
         (key.includes("view=summary") || key.includes("view=leads"))
     );
-  };
+  }, [mutate, store]);
 
   // ── Live auto-refresh: incremental Shopify sync on a timer ──────────────────
   // While auto-refresh is on and the tab is visible, run the cheap "changed
@@ -700,7 +733,7 @@ export default function FollowUpDashboard({
     }
   };
 
-  const handleBulkClose = async (leadIds: string[], reason: string) => {
+  const handleBulkClose = useCallback(async (leadIds: string[], reason: string) => {
     const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=bulk_close`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -709,11 +742,11 @@ export default function FollowUpDashboard({
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
     invalidateAfterLeadMutation();
-  };
+  }, [store, invalidateAfterLeadMutation]);
 
   // Invalidate summary + leads + the duplicates group list. Used after
   // resolving/dismissing a duplicate group so the tab badge and list refresh.
-  const invalidateAfterDuplicateMutation = () => {
+  const invalidateAfterDuplicateMutation = useCallback(() => {
     mutate(
       (key) =>
         typeof key === "string" &&
@@ -721,10 +754,10 @@ export default function FollowUpDashboard({
         key.includes(`store=${store}`) &&
         (key.includes("view=summary") || key.includes("view=leads") || key.includes("view=duplicates")),
     );
-  };
+  }, [mutate, store]);
 
   // Duplicates tab: keep the newest quote, close the rest as duplicate.
-  const handleResolveDuplicates = async (group: DupGroup) => {
+  const handleResolveDuplicates = useCallback(async (group: DupGroup) => {
     const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=resolve_duplicates`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -733,10 +766,10 @@ export default function FollowUpDashboard({
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
     invalidateAfterDuplicateMutation();
-  };
+  }, [store, invalidateAfterDuplicateMutation]);
 
   // Duplicates tab: mark the group as genuinely-separate orders (not a dup).
-  const handleDismissDuplicates = async (group: DupGroup) => {
+  const handleDismissDuplicates = useCallback(async (group: DupGroup) => {
     const res = await fetch(`/api/customer-service/follow-up?store=${store}&action=dismiss_duplicates`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -745,7 +778,52 @@ export default function FollowUpDashboard({
     const json = await res.json();
     if (json.status !== "success") throw new Error(json.error);
     invalidateAfterDuplicateMutation();
-  };
+  }, [store, invalidateAfterDuplicateMutation]);
+
+  // ── Stable callbacks for the memoized children (LeadTable / CalendarView /
+  // StaffBreakdown / RecentActivityPanel). Only touch state setters, so the
+  // references never change.
+
+  const handleFilterChange = useCallback((f: string) => {
+    setFilter(f);
+    // Tab change clears the Recent Activity drill — the drill only makes
+    // sense within Addressed Today.
+    if (f !== "addressed_today") {
+      setAddressedLoggedBy(null);
+      setAddressedOutcome(null);
+    }
+  }, []);
+
+  const handleStaffClick = useCallback((s: string) => {
+    // Clicking "Unknown" maps to leads with no creator attribution.
+    const key = s === "Unknown" ? "__unknown__" : s;
+    setStaffFilter(key);
+    setDetailStaff(key);
+    // Scroll to the lead table so the user sees the filtered results.
+    requestAnimationFrame(() => {
+      document.getElementById("followup-lead-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
+
+  const handleActivityDrillDown = useCallback((loggedBy: string, kind: ActivityDrillKind, days: string) => {
+    setFilter("addressed_today");
+    setAddressedLoggedBy(loggedBy);
+    setAddressedOutcome(kind === "all" ? null : kind);
+    setAddressedDays(days);
+    // These supersede the existing creator / status drills.
+    setStaffFilter(null);
+    setLeadStatusFilter(null);
+    // Scroll the lead list into view so the user sees the result.
+    setTimeout(() => {
+      document.getElementById("followup-lead-list")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 50);
+  }, []);
+
+  const openLogModal = useCallback((lead: FollowUpLead) => setModalLead(lead), []);
+  const openDetail = useCallback((lead: FollowUpLead) => setDetailLead(lead), []);
 
   const handleStoreChange = (newStore: string) => {
     setStore(newStore);
@@ -756,7 +834,9 @@ export default function FollowUpDashboard({
   // "Due Today" tab now bundles today + overdue so the count matches what the
   // list actually shows. The Summary card metric stays today-only — it's a KPI,
   // not a workload tally.
-  const filterCounts: Record<string, number> = {
+  // useMemo: keeps the object reference stable across SWR polls so the
+  // memoized LeadTable doesn't re-render every row on each poll.
+  const filterCounts: Record<string, number> = useMemo(() => ({
     due_today: (summary?.metrics.due_today ?? 0) + (summary?.metrics.overdue ?? 0),
     overdue: summary?.metrics.overdue ?? 0,
     upcoming: Math.max(0, (summary?.metrics.total_active ?? 0) - (summary?.metrics.due_today ?? 0) - (summary?.metrics.overdue ?? 0)),
@@ -767,15 +847,19 @@ export default function FollowUpDashboard({
     everything: (summary?.metrics.total_active ?? 0) + (summary?.metrics.total_closed ?? 0),
     // Number of customers (email groups) with 2+ open quotes still to review.
     duplicates: duplicateGroups.length,
-  };
+  }), [summary, addressedTodayCountData, duplicateGroups]);
 
   const metrics = summary?.metrics;
-  const byStatus = summary?.by_status ?? {};
 
-  // Status pills for active statuses
-  const statusPills = Object.entries(byStatus)
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1]);
+  // Status pills for active statuses — derived once per summary change
+  // instead of re-filtering/sorting on every poll re-render.
+  const statusPills = useMemo(
+    () =>
+      Object.entries(summary?.by_status ?? {})
+        .filter(([, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1]),
+    [summary],
+  );
 
   const STATUS_PILL_COLORS: Record<string, string> = {
     new: "bg-blue-100 text-blue-700",
@@ -1009,7 +1093,7 @@ export default function FollowUpDashboard({
                 label: "Active Leads",
                 value: metrics.total_active,
                 color: "bg-blue-500",
-                subtitle: `${formatCurrency(metrics.pipeline_value)} pipeline`,
+                subtitle: `${formatCADWhole(metrics.pipeline_value)} pipeline`,
               },
               {
                 label: "Conversion Rate",
@@ -1044,7 +1128,7 @@ export default function FollowUpDashboard({
                 },
                 {
                   label: "Pipeline Value",
-                  value: formatCurrency(metrics.pipeline_value),
+                  value: formatCADWhole(metrics.pipeline_value),
                   color: "bg-emerald-500",
                   subtitle: `${metrics.total_active} open quotes`,
                 },
@@ -1088,37 +1172,13 @@ export default function FollowUpDashboard({
           <StaffBreakdown
             store={store}
             range={timeRange}
-            onStaffClick={(s) => {
-              // Clicking "Unknown" maps to leads with no creator attribution.
-              const key = s === "Unknown" ? "__unknown__" : s;
-              setStaffFilter(key);
-              setDetailStaff(key);
-              // Scroll to the lead table so the user sees the filtered results.
-              requestAnimationFrame(() => {
-                document.getElementById("followup-lead-list")?.scrollIntoView({ behavior: "smooth", block: "start" });
-              });
-            }}
+            onStaffClick={handleStaffClick}
           />
 
           {/* Recent follow-up activity by staff */}
           <RecentActivityPanel
             store={store}
-            onDrillDown={(loggedBy, kind, days) => {
-              setFilter("addressed_today");
-              setAddressedLoggedBy(loggedBy);
-              setAddressedOutcome(kind === "all" ? null : kind);
-              setAddressedDays(days);
-              // These supersede the existing creator / status drills.
-              setStaffFilter(null);
-              setLeadStatusFilter(null);
-              // Scroll the lead list into view so the user sees the result.
-              setTimeout(() => {
-                document.getElementById("followup-lead-list")?.scrollIntoView({
-                  behavior: "smooth",
-                  block: "start",
-                });
-              }, 50);
-            }}
+            onDrillDown={handleActivityDrillDown}
           />
 
           {/* Active staff filter chip */}
@@ -1202,23 +1262,15 @@ export default function FollowUpDashboard({
           {viewMode === "calendar" ? (
             <CalendarView
               leads={calendarLeads}
-              onViewDetail={(lead) => setDetailLead(lead)}
+              onViewDetail={openDetail}
             />
           ) : (
           <LeadTable
             leads={leads}
             filter={filter}
-            onFilterChange={(f) => {
-              setFilter(f);
-              // Tab change clears the Recent Activity drill — the drill only
-              // makes sense within Addressed Today.
-              if (f !== "addressed_today") {
-                setAddressedLoggedBy(null);
-                setAddressedOutcome(null);
-              }
-            }}
-            onLogFollowUp={(lead) => setModalLead(lead)}
-            onViewDetail={(lead) => setDetailLead(lead)}
+            onFilterChange={handleFilterChange}
+            onLogFollowUp={openLogModal}
+            onViewDetail={openDetail}
             onBulkClose={handleBulkClose}
             filterCounts={filterCounts}
             duplicateGroups={duplicateGroups}

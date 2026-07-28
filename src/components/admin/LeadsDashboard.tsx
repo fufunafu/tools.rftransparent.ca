@@ -4,12 +4,9 @@ import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { CallStatus, Lead, LeadCallAttempt, LeadSource, Outcome } from "@/lib/customer-service/leads";
 import { OUTCOME_LABELS, CALL_STATUS_LABELS } from "@/lib/customer-service/leads";
+import { formatCADWhole } from "@/lib/format";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatCurrency(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -286,7 +283,7 @@ function LeadDetailPanel({
               {lead.quote_amount != null && (
                 <div className="flex justify-between">
                   <span className="text-sand-500">Amount</span>
-                  <span className="font-medium text-sand-900">{formatCurrency(Number(lead.quote_amount))}</span>
+                  <span className="font-medium text-sand-900">{formatCADWhole(Number(lead.quote_amount))}</span>
                 </div>
               )}
               {lead.quote_sent_at && (
@@ -435,7 +432,7 @@ export default function LeadsDashboard() {
         />
         <SummaryCard
           label="Pipeline"
-          value={formatCurrency(metrics.pipelineValue)}
+          value={formatCADWhole(metrics.pipelineValue)}
           color="bg-indigo-500"
           subtitle={`${filterCounts.open_quote ?? 0} open quotes`}
         />
@@ -565,7 +562,7 @@ export default function LeadsDashboard() {
                         <>
                           <div className="font-medium text-sand-900">{lead.quote_number}</div>
                           {lead.quote_amount != null && (
-                            <div className="text-[11px] text-sand-400">{formatCurrency(Number(lead.quote_amount))}</div>
+                            <div className="text-[11px] text-sand-400">{formatCADWhole(Number(lead.quote_amount))}</div>
                           )}
                         </>
                       ) : (

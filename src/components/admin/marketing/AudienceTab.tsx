@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
+import { formatCADWhole } from "@/lib/format";
 import {
   ResponsiveContainer,
   PieChart,
@@ -92,13 +93,7 @@ interface LanguageData {
   roas: number;
 }
 
-function formatCurrency(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
+const formatCurrency = formatCADWhole;
 
 function formatNumber(n: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(n * 100) / 100);

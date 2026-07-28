@@ -11,7 +11,11 @@ import {
   type PurchasingSettings,
   type SopLabel,
 } from "@/lib/purchasing/types";
-import ForecastDrawer from "./ForecastDrawer";
+import dynamic from "next/dynamic";
+import { formatCADWhole } from "@/lib/format";
+
+// Loaded on demand so recharts stays out of the route's initial bundle.
+const ForecastDrawer = dynamic(() => import("./ForecastDrawer"), { ssr: false });
 
 const ACTIONABLE_STATUSES: SopLabel[] = [
   "reorder_plus_montreal",
@@ -37,10 +41,6 @@ function fmt(n: number | null, digits = 1): string {
   if (n === null || !Number.isFinite(n)) return "—";
   return n.toLocaleString("en-CA", { maximumFractionDigits: digits });
 }
-function fmtCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
-
 export default function ReorderTable({ initialProducts, initialForecasts, settings }: Props) {
   const router = useRouter();
   const [forecastId, setForecastId] = useState<string | null>(null);
@@ -275,7 +275,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
                       placeholder="0"
                       className="w-20 px-1.5 py-1 text-right rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none" />
                   </td>
-                  <td className="px-3 py-2 text-right text-sand-700">{lineValue > 0 ? fmtCAD(lineValue) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-sand-700">{lineValue > 0 ? formatCADWhole(lineValue) : "—"}</td>
                 </tr>
               );
             })}
@@ -291,7 +291,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
         <div className="text-sm">
           <span className="text-sand-500">Selected:</span> <span className="font-semibold text-sand-900">{selected.length} {selected.length === 1 ? "line" : "lines"}</span>
           {" · "}<span className="text-sand-500">Qty:</span> <span className="font-semibold tabular-nums">{fmt(totalQty, 0)}</span>
-          {" · "}<span className="text-sand-500">Value:</span> <span className="font-semibold tabular-nums">{fmtCAD(totalValue)}</span>
+          {" · "}<span className="text-sand-500">Value:</span> <span className="font-semibold tabular-nums">{formatCADWhole(totalValue)}</span>
         </div>
         <input type="text" placeholder="Notes (optional, saved on the PO)" value={notes} onChange={(e) => setNotes(e.target.value)}
           className="flex-1 min-w-[240px] px-3 py-1.5 text-sm rounded-lg border border-sand-300" />

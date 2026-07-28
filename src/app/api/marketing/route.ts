@@ -15,7 +15,7 @@ import {
   isGoogleAdsConfigured,
   type Market,
 } from "@/lib/google-ads";
-import { shopifyGraphQL, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchAllPages, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
 import { isGA4Configured, getDailySessions } from "@/lib/google-analytics";
 
 const ADS_STORE_ID = "store2"; // Glass Railing Store — the ad-driven store
@@ -57,31 +57,24 @@ interface OrdersPage {
   };
 }
 
-async function fetchAllOrders(startDate: string, endDate: string): Promise<OrderNode[]> {
-  const allNodes: OrderNode[] = [];
-  let cursor: string | null = null;
-
-  for (;;) {
-    const afterClause: string = cursor ? `, after: "${cursor}"` : "";
-    const data: OrdersPage = await shopifyGraphQL<OrdersPage>(
-      ADS_STORE_ID,
-      `query {
-        orders(first: 250${afterClause}, query: "created_at:>='${startDate}' AND created_at:<='${endDate}'") {
-          edges { cursor node { createdAt ${REVENUE_FIELDS} shippingAddress { countryCode province } } }
-          pageInfo { hasNextPage }
-        }
-      }`
-    );
-
-    for (const edge of data.orders.edges) {
-      allNodes.push(edge.node);
-      cursor = edge.cursor;
+const MARKETING_ORDERS_QUERY = `
+  query($after: String, $search: String) {
+    orders(first: 250, query: $search, after: $after) {
+      edges { cursor node { createdAt ${REVENUE_FIELDS} shippingAddress { countryCode province } } }
+      pageInfo { hasNextPage }
     }
-
-    if (!data.orders.pageInfo.hasNextPage || data.orders.edges.length === 0) break;
   }
+`;
 
-  return allNodes;
+async function fetchAllOrders(startDate: string, endDate: string): Promise<OrderNode[]> {
+  const { nodes } = await fetchAllPages<OrderNode, OrdersPage>({
+    storeId: ADS_STORE_ID,
+    query: MARKETING_ORDERS_QUERY,
+    getConnection: (data) => data.orders,
+    variables: { search: `created_at:>='${startDate}' AND created_at:<='${endDate}'` },
+    maxPages: 80, // 80 × 250 = 20,000 orders — previously unbounded
+  });
+  return nodes;
 }
 
 interface LocalOrderNode extends OrderNode {

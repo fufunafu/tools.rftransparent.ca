@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import { FOLLOWUP_CATEGORIES, MAX_ATTEMPTS, LOSS_REASONS, type LeadStatus } from "@/lib/followup";
 import type { FollowUpLead } from "@/lib/followup";
 import DuplicatesPanel, { type DupGroup } from "./DuplicatesPanel";
+import { formatCADWhole } from "@/lib/format";
 
 const STATUS_COLORS: Record<string, string> = {
   new: "bg-blue-100 text-blue-700",
@@ -31,10 +32,6 @@ function formatDueDate(iso: string | null): { text: string; className: string } 
   if (diffDays === 0) return { text: "Today", className: "text-amber-600 font-medium" };
   if (diffDays === 1) return { text: "Tomorrow", className: "text-green-600" };
   return { text: `In ${diffDays} days`, className: "text-sand-500" };
-}
-
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
 }
 
 function formatDate(iso: string): string {
@@ -356,7 +353,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right font-medium text-sand-900">
-                      {formatAmount(Number(lead.quote_amount))}
+                      {formatCADWhole(Number(lead.quote_amount))}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block text-xs font-medium px-2 py-1 rounded-full ${statusColor}`}>

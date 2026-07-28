@@ -12,11 +12,15 @@ import {
   type SopLabel,
 } from "@/lib/purchasing/types";
 import { rowsToCSV, parseCSV } from "@/lib/purchasing/csv";
-import ForecastDrawer from "./ForecastDrawer";
+import dynamic from "next/dynamic";
+
+// Loaded on demand so recharts stays out of the route's initial bundle.
+const ForecastDrawer = dynamic(() => import("./ForecastDrawer"), { ssr: false });
 import AddProductDialog from "./AddProductDialog";
 import RecentActivityPanel from "./RecentActivityPanel";
 import BulkUploadPreviewDialog, { type BulkChange } from "./BulkUploadPreviewDialog";
 import ColumnHint from "./ColumnHint";
+import { formatCADWhole } from "@/lib/format";
 
 type BulkResult = {
   applied: number;
@@ -48,9 +52,6 @@ const SOP_BADGE: Record<SopLabel, string> = {
 function fmtNum(n: number | null, digits = 1): string {
   if (n === null || !Number.isFinite(n)) return "—";
   return n.toLocaleString("en-CA", { minimumFractionDigits: 0, maximumFractionDigits: digits });
-}
-function fmtCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
 }
 function heightBucket(h: number | null): string {
   if (h === null) return "—";
@@ -385,7 +386,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 </td>
                 {showPricingDetail && (
                   <>
-                    <td className="px-3 py-2 text-right text-sand-700">{fmtCAD(p.inventory_value)}</td>
+                    <td className="px-3 py-2 text-right text-sand-700">{formatCADWhole(p.inventory_value)}</td>
                     <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.unit_cost_landed, 2)}</td>
                   </>
                 )}

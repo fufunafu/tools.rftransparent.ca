@@ -1,15 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
 import KPIEntryForm from "./KPIEntryForm";
-
-const MarketingDashboard = lazy(() => import("./MarketingDashboard"));
-const AccountingDashboard = lazy(() => import("./AccountingDashboard"));
-const CustomerServiceDashboard = lazy(() => import("./CustomerServiceDashboard"));
+import { formatCADWhole } from "@/lib/format";
 
 type Period = "daily" | "weekly" | "monthly" | "yearly";
-type Tab = "sales" | "marketing" | "warehouse" | "customer_service" | "accounting";
 
 interface Location {
   id: string;
@@ -51,28 +47,12 @@ interface MetricsResponse {
   draftsDiagnostic?: Record<string, { fetched: number; error?: string }>;
 }
 
-const TABS: { value: Tab; label: string }[] = [
-  { value: "sales", label: "Sales" },
-  { value: "marketing", label: "Marketing" },
-  { value: "warehouse", label: "Warehouse" },
-  { value: "customer_service", label: "Customer Service" },
-  { value: "accounting", label: "Accounting" },
-];
-
 const PERIOD_LABELS: Record<Period, string> = {
   daily: "Daily",
   weekly: "Weekly",
   monthly: "Monthly",
   yearly: "Yearly",
 };
-
-function formatCurrency(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
 
 function formatNumber(n: number) {
   return new Intl.NumberFormat("en-US").format(Math.round(n * 100) / 100);
@@ -84,7 +64,7 @@ const HOURS_METRICS = new Set(["avg_fulfillment_hours", "oldest_unfulfilled_hour
 const PERCENT_METRICS = new Set(["conversion_rate"]);
 
 function formatMetricValue(metric: string, value: number) {
-  if (CURRENCY_METRICS.has(metric)) return formatCurrency(value);
+  if (CURRENCY_METRICS.has(metric)) return formatCADWhole(value);
   if (HOURS_METRICS.has(metric)) return `${value}h`;
   if (PERCENT_METRICS.has(metric)) return `${value}%`;
   return formatNumber(value);
@@ -553,42 +533,3 @@ export function EmployeeTab({ department }: { department: string }) {
   );
 }
 
-
-// --- Main KPI Dashboard ---
-export default function KPIDashboard() {
-  const [tab, setTab] = useState<Tab>("sales");
-
-  return (
-    <div className="space-y-6">
-      {/* Tab bar */}
-      <div className="flex border-b border-sand-200">
-        {TABS.map((t) => (
-          <button
-            key={t.value}
-            onClick={() => setTab(t.value)}
-            className={`px-5 py-3 text-sm font-medium transition-colors relative ${
-              tab === t.value
-                ? "text-sand-900"
-                : "text-sand-400 hover:text-sand-600"
-            }`}
-          >
-            {t.label}
-            {tab === t.value && (
-              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-sand-900 rounded-full" />
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Tab content */}
-      <Suspense fallback={<div className="text-center py-12 text-sand-400">Loading...</div>}>
-        {tab === "marketing" && <MarketingDashboard />}
-        {tab === "accounting" && <AccountingDashboard />}
-        {(tab === "sales" || tab === "warehouse") && (
-          <EmployeeTab key={tab} department={tab} />
-        )}
-        {tab === "customer_service" && <CustomerServiceDashboard />}
-      </Suspense>
-    </div>
-  );
-}

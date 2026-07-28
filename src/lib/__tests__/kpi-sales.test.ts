@@ -1,19 +1,49 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// Mock shopify module to avoid real API calls
-vi.mock("@/lib/shopify", () => ({
-  getStores: vi.fn(() => [
-    { id: "store1", label: "Store 1", store: "test.myshopify.com", clientId: "id", clientSecret: "secret" },
-  ]),
-  shopifyGraphQL: vi.fn(),
-  REVENUE_FIELDS: "subtotalPriceSet { shopMoney { amount } }",
-  calcNetRevenue: vi.fn((order: { subtotalPriceSet: { shopMoney: { amount: string } }; shippingCostMeta: { value: string } | null; exportTariffMeta: { value: string } | null }) => {
-    const subtotal = parseFloat(order.subtotalPriceSet.shopMoney.amount);
-    const shipping = parseFloat(order.shippingCostMeta?.value ?? "0") || 0;
-    const tariff = parseFloat(order.exportTariffMeta?.value ?? "0") || 0;
-    return subtotal - shipping - tariff;
-  }),
-}));
+// Mock shopify module to avoid real API calls. fetchAllPages is a faithful
+// re-implementation of the real paginator driven by the mocked shopifyGraphQL,
+// so tests keep mocking at the GraphQL-transport level (one mock per page).
+vi.mock("@/lib/shopify", () => {
+  const shopifyGraphQL = vi.fn();
+  const fetchAllPages = async (opts: {
+    storeId: string;
+    query: string;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getConnection: (data: any) => { edges: { node: unknown; cursor: string }[]; pageInfo: { hasNextPage: boolean } };
+    variables?: Record<string, unknown>;
+    maxPages?: number;
+    app?: string;
+  }) => {
+    const maxPages = opts.maxPages ?? 40;
+    const nodes: unknown[] = [];
+    let after: string | null = null;
+    let truncated = false;
+    for (let page = 0; page < maxPages; page++) {
+      const data = await shopifyGraphQL(opts.storeId, opts.query, { ...opts.variables, after }, { app: opts.app });
+      const conn = opts.getConnection(data);
+      nodes.push(...conn.edges.map((e) => e.node));
+      if (!conn.pageInfo.hasNextPage) break;
+      after = conn.edges[conn.edges.length - 1]?.cursor ?? null;
+      if (!after) break;
+      if (page === maxPages - 1) truncated = true;
+    }
+    return { nodes, truncated };
+  };
+  return {
+    getStores: vi.fn(() => [
+      { id: "store1", label: "Store 1", store: "test.myshopify.com", clientId: "id", clientSecret: "secret" },
+    ]),
+    shopifyGraphQL,
+    fetchAllPages,
+    REVENUE_FIELDS: "subtotalPriceSet { shopMoney { amount } }",
+    calcNetRevenue: vi.fn((order: { subtotalPriceSet: { shopMoney: { amount: string } }; shippingCostMeta: { value: string } | null; exportTariffMeta: { value: string } | null }) => {
+      const subtotal = parseFloat(order.subtotalPriceSet.shopMoney.amount);
+      const shipping = parseFloat(order.shippingCostMeta?.value ?? "0") || 0;
+      const tariff = parseFloat(order.exportTariffMeta?.value ?? "0") || 0;
+      return subtotal - shipping - tariff;
+    }),
+  };
+});
 
 import { getEmployeeSalesMetrics, getEmployeeDraftMetrics, getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics } from "@/lib/kpi-sales";
 import { shopifyGraphQL } from "@/lib/shopify";

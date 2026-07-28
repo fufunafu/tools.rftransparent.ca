@@ -2,16 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 import { typeLabel, type ProblemTicket } from "@/lib/problem-tickets";
-
-// /api/cron/* is publicly reachable (allowlisted in proxy.ts), so the
-// Authorization header is the only gate. Fail closed: a missing CRON_SECRET
-// means nobody is authorized, not everybody. Vercel's cron scheduler sends
-// `Authorization: Bearer ${CRON_SECRET}` automatically when the env var is set.
-function isAuthorizedCronRequest(req: NextRequest): boolean {
-  const cronSecret = process.env.CRON_SECRET;
-  if (!cronSecret) return false;
-  return req.headers.get("authorization") === `Bearer ${cronSecret}`;
-}
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;

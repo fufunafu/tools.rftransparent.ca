@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 
 export async function GET(req: NextRequest) {
@@ -27,8 +27,10 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Employee emails control who can log in (authz allowlist), so creating
+  // employees is admin-only.
+  if (!(await isAdminUser()))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { name, email, email_alt, department, location_id, shopify_tags, active, phone, birthday } = body;

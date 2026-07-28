@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { mktCacheSave, mktCacheLoad } from "@/lib/marketing-cache";
+import { formatCAD } from "@/lib/format";
 
 interface SearchTermData {
   term: string;
@@ -11,14 +12,6 @@ interface SearchTermData {
   conversions: number;
   revenue: number;
   roas: number;
-}
-
-function formatCurrency(n: number) {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(n);
 }
 
 function formatNumber(n: number) {
@@ -214,11 +207,11 @@ export default function SearchTermsTab({
                       </td>
                       <td className="px-4 py-3 text-sm text-sand-700 text-right">{formatNumber(t.impressions)}</td>
                       <td className="px-4 py-3 text-sm text-sand-700 text-right">
-                        {formatCurrency(t.ad_spend)}
+                        {formatCAD(t.ad_spend)}
                         <span className="text-sand-400 text-xs ml-1">(${cpc})</span>
                       </td>
                       <td className="px-4 py-3 text-sm text-sand-700 text-right">{formatNumber(t.conversions)}</td>
-                      <td className="px-4 py-3 text-sm text-sand-700 text-right">{formatCurrency(t.revenue)}</td>
+                      <td className="px-4 py-3 text-sm text-sand-700 text-right">{formatCAD(t.revenue)}</td>
                       <td className="px-4 py-3 text-sm text-sand-700 text-right">{t.roas}x</td>
                     </tr>
                   );

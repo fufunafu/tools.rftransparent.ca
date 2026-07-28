@@ -3,19 +3,13 @@ import { notFound, redirect } from "next/navigation";
 import { isAuthenticated, isManagementUser } from "@/lib/admin-auth";
 import { getOrderDetail } from "@/lib/purchasing/queries";
 import PrintTrigger from "@/components/admin/purchasing/PrintTrigger";
+import { formatCAD } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: "Purchase order",
   robots: { index: false, follow: false },
 };
 
-function fmtCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 2,
-  }).format(n);
-}
 function fmtDate(s: string | null): string {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("en-CA", {
@@ -173,10 +167,10 @@ export default async function PrintPOPage({
                 {!isMontreal && (
                   <>
                     <td className="py-2 pr-3 text-right tabular-nums">
-                      {fmtCAD(it.unit_cost_snapshot)}
+                      {formatCAD(it.unit_cost_snapshot)}
                     </td>
                     <td className="py-2 text-right tabular-nums">
-                      {fmtCAD(it.qty_ordered * it.unit_cost_snapshot)}
+                      {formatCAD(it.qty_ordered * it.unit_cost_snapshot)}
                     </td>
                   </>
                 )}
@@ -207,7 +201,7 @@ export default async function PrintPOPage({
                   <>
                     <td className="py-3 pr-3"></td>
                     <td className="py-3 text-right tabular-nums">
-                      {fmtCAD(totalValue)}
+                      {formatCAD(totalValue)}
                     </td>
                   </>
                 )}

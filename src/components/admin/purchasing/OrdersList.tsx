@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { formatCADWhole } from "@/lib/format";
 import {
   STATUS_DISPLAY,
   STATUS_ORDER,
@@ -26,9 +27,6 @@ const TYPE_BADGE: Record<OrderType, string> = {
   montreal: "bg-orange-50 text-orange-700 border-orange-200",
 };
 
-function fmtCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
 function fmtDate(s: string | null): string {
   if (!s) return "—";
   return new Date(s).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" });
@@ -127,7 +125,7 @@ export default function OrdersList({ initialOrders }: Props) {
                 <td className="px-3 py-2 text-right tabular-nums">{o.line_count}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{o.total_qty_ordered.toLocaleString("en-CA")}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-sand-600">{o.percent_received}%</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtCAD(o.total_value)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCADWhole(o.total_value)}</td>
               </tr>
             ))}
             {visible.length === 0 && (
@@ -141,7 +139,7 @@ export default function OrdersList({ initialOrders }: Props) {
                 <td className="px-3 py-2 text-right">—</td>
                 <td className="px-3 py-2 text-right tabular-nums">{totals.qty.toLocaleString("en-CA")}</td>
                 <td className="px-3 py-2 text-right tabular-nums">{totals.percent}%</td>
-                <td className="px-3 py-2 text-right tabular-nums">{fmtCAD(totals.value)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{formatCADWhole(totals.value)}</td>
               </tr>
             </tfoot>
           )}

@@ -1,12 +1,5 @@
 import type { PurchasingSummary } from "@/lib/purchasing/types";
-
-function formatCAD(n: number): string {
-  return new Intl.NumberFormat("en-CA", {
-    style: "currency",
-    currency: "CAD",
-    maximumFractionDigits: 0,
-  }).format(n);
-}
+import { formatCADWhole } from "@/lib/format";
 
 function formatNumber(n: number): string {
   return new Intl.NumberFormat("en-CA").format(n);
@@ -18,10 +11,10 @@ interface Props {
 
 export default function PurchasingSummaryStrip({ summary }: Props) {
   const cards = [
-    { label: "Total inventory value", value: formatCAD(summary.total_inventory_value) },
+    { label: "Total inventory value", value: formatCADWhole(summary.total_inventory_value) },
     { label: "Units on hand", value: formatNumber(summary.units_on_hand) },
-    { label: "Open PO value", value: formatCAD(summary.open_po_value) },
-    { label: "Ordered this month", value: formatCAD(summary.month_order_value) },
+    { label: "Open PO value", value: formatCADWhole(summary.open_po_value) },
+    { label: "Ordered this month", value: formatCADWhole(summary.month_order_value) },
   ];
 
   return (

@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Employee emails control who can log in (authz allowlist), so editing
+  // employees is admin-only.
+  if (!(await isAdminUser()))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
   const body = await req.json();
@@ -41,8 +43,8 @@ export async function DELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAdminUser()))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const { id } = await params;
 

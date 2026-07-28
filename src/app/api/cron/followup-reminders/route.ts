@@ -3,6 +3,9 @@ import { getSupabase } from "@/lib/supabase";
 import { getResend } from "@/lib/resend";
 import { getStores } from "@/lib/shopify";
 import { FOLLOWUP_CATEGORIES, type FollowUpLead, type LeadStatus } from "@/lib/followup";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { startOfDayInTimeZone } from "@/lib/dates";
+import { formatCADWhole } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
@@ -14,10 +17,6 @@ const STORE_EMAILS: Record<string, string> = {
   store3: "anne@cloture-verre.com",
 };
 
-function formatAmount(n: number): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
-}
-
 function buildEmailHtml(storeName: string, dueToday: FollowUpLead[], overdue: FollowUpLead[]): string {
   const rows = [...overdue, ...dueToday].slice(0, 20);
 
@@ -27,7 +26,7 @@ function buildEmailHtml(storeName: string, dueToday: FollowUpLead[], overdue: Fo
     return `<tr style="border-bottom:1px solid #eee">
       <td style="padding:8px;font-weight:500">${l.draft_name}</td>
       <td style="padding:8px">${l.customer_name || "Unknown"}</td>
-      <td style="padding:8px;text-align:right">${formatAmount(Number(l.quote_amount))}</td>
+      <td style="padding:8px;text-align:right">${formatCADWhole(Number(l.quote_amount))}</td>
       <td style="padding:8px">${statusLabel}</td>
       <td style="padding:8px;color:${isOverdue ? "#dc2626" : "#d97706"};font-weight:500">${isOverdue ? "Overdue" : "Due Today"}</td>
     </tr>`;
@@ -61,9 +60,7 @@ function buildEmailHtml(storeName: string, dueToday: FollowUpLead[], overdue: Fo
 }
 
 export async function GET(req: NextRequest) {
-  const authHeader = req.headers.get("authorization");
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -73,8 +70,8 @@ export async function GET(req: NextRequest) {
   const results: { store: string; status: string; due?: number; overdue?: number; error?: string }[] = [];
 
   const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-  const tomorrowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString();
+  const todayStart = startOfDayInTimeZone(now).toISOString();
+  const tomorrowStart = startOfDayInTimeZone(now, undefined, 1).toISOString();
 
   for (const store of stores) {
     const email = STORE_EMAILS[store.id];

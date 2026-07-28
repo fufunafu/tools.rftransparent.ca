@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { FollowUpLead, FOLLOWUP_CATEGORIES, LeadStatus } from "@/lib/followup";
+import { formatCADWhole } from "@/lib/format";
 
 export interface DupGroup {
   email: string;
@@ -17,10 +18,6 @@ interface Props {
   onResolve: (group: DupGroup) => Promise<void>;
   onDismiss: (group: DupGroup) => Promise<void>;
   onViewDetail: (lead: FollowUpLead) => void;
-}
-
-function formatAmount(n: number) {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 }).format(n);
 }
 
 function formatDate(iso: string | null | undefined) {
@@ -80,7 +77,7 @@ export default function DuplicatesPanel({ groups, loading, onResolve, onDismiss,
                 <span className="px-2 py-1 rounded-full bg-amber-100 text-amber-700 font-medium">
                   {group.count} open quotes
                 </span>
-                <span className="text-sand-500">{formatAmount(group.total_amount)} total</span>
+                <span className="text-sand-500">{formatCADWhole(group.total_amount)} total</span>
               </div>
             </div>
 
@@ -96,7 +93,7 @@ export default function DuplicatesPanel({ groups, loading, onResolve, onDismiss,
                     className="flex flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2.5 hover:bg-sand-50/60 cursor-pointer"
                   >
                     <span className="font-medium text-sand-900 w-20">{lead.draft_name}</span>
-                    <span className="text-sand-700 w-24 text-right">{formatAmount(Number(lead.quote_amount))}</span>
+                    <span className="text-sand-700 w-24 text-right">{formatCADWhole(Number(lead.quote_amount))}</span>
                     <span className="text-xs text-sand-500 w-28">Quoted {formatDate(lead.shopify_created_at || lead.created_at)}</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-sand-100 text-sand-600">{statusLabel}</span>
                     <span className="text-xs text-sand-400">{lead.followup_count} follow-up{lead.followup_count === 1 ? "" : "s"}</span>

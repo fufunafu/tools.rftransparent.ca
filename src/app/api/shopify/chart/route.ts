@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { shopifyGraphQL, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
 
 const VALID_RANGES = [7, 30, 90, 365] as const;
 
@@ -15,20 +15,17 @@ interface OrdersResponse {
   };
 }
 
-function makeQuery(dateFilter: string, cursor?: string) {
-  const after = cursor ? `, after: "${cursor}"` : "";
-  return `
-    query {
-      orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "created_at:>='${dateFilter}'"${after}) {
-        edges {
-          node { createdAt ${REVENUE_FIELDS} }
-          cursor
-        }
-        pageInfo { hasNextPage }
+const CHART_ORDERS_QUERY = `
+  query($after: String, $search: String) {
+    orders(first: 250, sortKey: CREATED_AT, reverse: true, query: $search, after: $after) {
+      edges {
+        node { createdAt ${REVENUE_FIELDS} }
+        cursor
       }
+      pageInfo { hasNextPage }
     }
-  `;
-}
+  }
+`;
 
 export async function GET(req: NextRequest) {
   const authenticated = await isAuthenticated();
@@ -55,20 +52,13 @@ export async function GET(req: NextRequest) {
 
   try {
     // Paginated fetch of all orders in range
-    const allOrders: OrderNode[] = [];
-    let cursor: string | undefined;
-    let hasNext = true;
-    let pages = 0;
-    const maxPages = days <= 30 ? 10 : 40; // 250 * 40 = 10,000 orders max for longer ranges
-
-    while (hasNext && pages < maxPages) {
-      const data = await shopifyGraphQL<OrdersResponse>(storeId, makeQuery(dateFilter, cursor));
-      const edges = data.orders.edges;
-      allOrders.push(...edges.map((e) => e.node));
-      hasNext = data.orders.pageInfo.hasNextPage;
-      cursor = edges[edges.length - 1]?.cursor;
-      pages++;
-    }
+    const { nodes: allOrders } = await fetchAllPages<OrderNode, OrdersResponse>({
+      storeId,
+      query: CHART_ORDERS_QUERY,
+      getConnection: (data) => data.orders,
+      variables: { search: `created_at:>='${dateFilter}'` },
+      maxPages: days <= 30 ? 10 : 40, // 250 * 40 = 10,000 orders max for longer ranges
+    });
 
     // Group by date
     const dailyMap = new Map<string, { revenue: number; orders: number }>();

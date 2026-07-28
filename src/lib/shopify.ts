@@ -151,6 +151,55 @@ export async function shopifyGraphQL<T = unknown>(
   return json.data as T;
 }
 
+// ─── Cursor Pagination ────────────────────────────────────────────────────────
+
+export interface ShopifyConnection<TNode> {
+  edges: { node: TNode; cursor: string }[];
+  pageInfo: { hasNextPage: boolean };
+}
+
+// Fetches every page of a cursor-paginated connection and returns the nodes.
+// The query must declare `$after: String`, pass it to the connection's `after`
+// argument, and select `cursor` on edges plus `pageInfo { hasNextPage }`:
+//
+//   query($after: String) {
+//     orders(first: 250, after: $after, ...) {
+//       edges { node { ... } cursor }
+//       pageInfo { hasNextPage }
+//     }
+//   }
+export async function fetchAllPages<TNode, TData = unknown>(opts: {
+  storeId: string;
+  query: string;
+  // Extracts the connection from the response; response validation (e.g. zod)
+  // belongs here too.
+  getConnection: (data: TData) => ShopifyConnection<TNode>;
+  variables?: Record<string, unknown>;
+  maxPages?: number;
+  app?: ShopifyApp;
+}): Promise<{ nodes: TNode[]; truncated: boolean }> {
+  const maxPages = opts.maxPages ?? 40;
+  const nodes: TNode[] = [];
+  let after: string | null = null;
+  let truncated = false;
+
+  for (let page = 0; page < maxPages; page++) {
+    const data = await shopifyGraphQL<TData>(
+      opts.storeId,
+      opts.query,
+      { ...opts.variables, after },
+      { app: opts.app }
+    );
+    const conn = opts.getConnection(data);
+    nodes.push(...conn.edges.map((e) => e.node));
+    if (!conn.pageInfo.hasNextPage) break;
+    after = conn.edges[conn.edges.length - 1]?.cursor ?? null;
+    if (!after) break;
+    if (page === maxPages - 1) truncated = true;
+  }
+  return { nodes, truncated };
+}
+
 // ─── Net Revenue Helpers ──────────────────────────────────────────────────────
 // Revenue = subtotal (after discounts, before tax/shipping)
 //         - custom.shipping_cost metafield
