@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import WarehouseReportForm from "@/components/warehouse/WarehouseReportForm";
 
 export const metadata: Metadata = {
-  title: "Daily Report | Warehouse | RF Tools",
+  title: "Daily Report | Logistics | RF Tools",
   robots: { index: false, follow: false },
 };
 

@@ -59,7 +59,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   {
     href: "/warehouse",
-    label: "Warehouse",
+    label: "Logistics",
     status: "done" as Status,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
@@ -70,6 +70,18 @@ const NAV_ITEMS: NavItem[] = [
       { href: "/warehouse", label: "Dashboard", status: "done" as Status },
       { href: "/warehouse/report", label: "Daily Report", status: "done" as Status },
       { href: "/warehouse/purchasing", label: "Purchasing", status: "wip" as Status },
+      {
+        href: "https://orderstream-checker.vercel.app/",
+        label: "Order Stream",
+        status: "done" as Status,
+        external: true,
+      },
+      {
+        href: "https://orderstream-checker.vercel.app/customs",
+        label: "Customs Invoice",
+        status: "done" as Status,
+        external: true,
+      },
     ],
   },
   {
@@ -146,17 +158,6 @@ const NAV_ITEMS: NavItem[] = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "https://orderstream-checker.vercel.app/",
-    label: "Tax Check",
-    status: "done" as Status,
-    external: true,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 14.25l6-6m4.5-3.493V21.75l-3.75-1.5-3.75 1.5-3.75-1.5-3.75 1.5V4.757c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0c1.1.128 1.907 1.077 1.907 2.185ZM9.75 9h.008v.008H9.75V9Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm4.125 4.5h.008v.008h-.008V13.5Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
       </svg>
     ),
   },

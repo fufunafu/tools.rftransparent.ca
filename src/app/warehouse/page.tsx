@@ -4,7 +4,7 @@ import { isAuthenticated } from "@/lib/admin-auth";
 import WarehouseDashboard from "@/components/warehouse/WarehouseDashboard";
 
 export const metadata: Metadata = {
-  title: "Warehouse | RF Tools",
+  title: "Logistics | RF Tools",
   robots: { index: false, follow: false },
 };
 

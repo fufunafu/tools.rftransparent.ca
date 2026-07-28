@@ -48,7 +48,7 @@ const sections = [
     items: [
       {
         href: "/warehouse",
-        label: "Warehouse",
+        label: "Logistics",
         description: "Warehouse employee KPIs and metrics.",
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-6 h-6">
