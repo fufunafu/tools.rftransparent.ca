@@ -96,7 +96,7 @@ function buildEmailHtml(opts: {
       ${open.length > shown.length ? `<p style="color:#94a3b8;font-size:12px;margin-top:8px">Showing oldest ${shown.length} of ${open.length} open tickets</p>` : ""}
       <p style="color:#94a3b8;font-size:12px;margin-top:24px;border-top:1px solid #e2e8f0;padding-top:12px">
         Rows in red have had no activity for ${STALE_DAYS}+ days.
-        Manage tickets at <a href="https://tools.rftransparent.ca/problems" style="color:#3b82f6">tools.rftransparent.ca/problems</a>
+        Manage tickets at <a href="https://tools.rftransparent.ca/customer-service/problems" style="color:#3b82f6">tools.rftransparent.ca/customer-service/problems</a>
       </p>
     </div>
   `;

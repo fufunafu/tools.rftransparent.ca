@@ -7,6 +7,14 @@ import { useSidebarResize } from "@/hooks/useSidebarResize";
 
 type Status = "done" | "wip" | "todo";
 
+interface NavChild {
+  href: string;
+  label: string;
+  status: Status;
+  // Same meaning as on NavItem — an absolute URL to a separate site.
+  external?: boolean;
+}
+
 interface NavItem {
   href: string;
   label: string;
@@ -15,7 +23,7 @@ interface NavItem {
   // When true, `href` is an absolute URL to a separate site — rendered as a
   // plain <a target="_blank"> instead of a Next.js <Link>.
   external?: boolean;
-  children?: { href: string; label: string; status: Status }[];
+  children?: NavChild[];
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -78,17 +86,8 @@ const NAV_ITEMS: NavItem[] = [
       { href: "/customer-service/emails", label: "Emails", status: "done" as Status },
       { href: "/customer-service/follow-up", label: "Follow-up", status: "done" as Status },
       { href: "/customer-service/leads", label: "Leads", status: "wip" as Status },
+      { href: "/customer-service/problems", label: "Problem Tickets", status: "done" as Status },
     ],
-  },
-  {
-    href: "/problems",
-    label: "Problem Tickets",
-    status: "done" as Status,
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-      </svg>
-    ),
   },
   {
     href: "/accounting",
@@ -102,6 +101,12 @@ const NAV_ITEMS: NavItem[] = [
     children: [
       { href: "/accounting/analysis", label: "Analysis", status: "done" as Status },
       { href: "/accounting/reimbursement", label: "Reimbursement", status: "done" as Status },
+      {
+        href: "https://invoicebox-delta.vercel.app/",
+        label: "InvoiceBox",
+        status: "done" as Status,
+        external: true,
+      },
     ],
   },
   {
@@ -308,6 +313,18 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                 : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
             }`;
 
+            // Open problem tickets live under Customer Service — the count
+            // badge sits on that parent so it stays visible on every page.
+            const problemsBadge =
+              item.href === "/customer-service" && openProblems > 0 ? (
+                <span
+                  className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
+                  title={`${openProblems} open problem ticket${openProblems === 1 ? "" : "s"}`}
+                >
+                  {openProblems}
+                </span>
+              ) : null;
+
             return (
               <div key={item.href}>
                 {hasChildren && !collapsed ? (
@@ -321,7 +338,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                       {item.icon}
                     </span>
                     <span className="flex-1">{item.label}</span>
-                    {statusDot}
+                    {problemsBadge ?? statusDot}
                     <svg
                       viewBox="0 0 24 24"
                       fill="none"
@@ -363,23 +380,14 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                       {item.icon}
                       {/* Collapsed sidebar has no room for the count pill — a
                           corner dot still signals open problem tickets. */}
-                      {collapsed && item.href === "/problems" && openProblems > 0 && (
+                      {collapsed && item.href === "/customer-service" && openProblems > 0 && (
                         <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500" />
                       )}
                     </span>
                     {!collapsed && (
                       <>
                         <span className="flex-1">{item.label}</span>
-                        {item.href === "/problems" && openProblems > 0 ? (
-                          <span
-                            className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[11px] font-semibold flex items-center justify-center"
-                            title={`${openProblems} open problem ticket${openProblems === 1 ? "" : "s"}`}
-                          >
-                            {openProblems}
-                          </span>
-                        ) : (
-                          statusDot
-                        )}
+                        {problemsBadge ?? statusDot}
                       </>
                     )}
                   </Link>
@@ -387,28 +395,55 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                 {hasChildren && !collapsed && (
                   <div
                     className={`overflow-hidden transition-all duration-200 ${
-                      expanded ? "max-h-40" : "max-h-0"
+                      expanded ? "max-h-60" : "max-h-0"
                     }`}
                   >
                     {item.children!.map((child) => {
-                      const childActive = pathname === child.href || pathname.startsWith(child.href + "/");
-                      return (
-                        <Link
+                      const childActive =
+                        !child.external &&
+                        (pathname === child.href || pathname.startsWith(child.href + "/"));
+                      const childBadge =
+                        child.href === "/customer-service/problems" && openProblems > 0;
+                      const childClass = `flex items-center gap-3 pl-11 pr-3 py-1.5 text-[13px] font-medium rounded-lg transition-colors ${
+                        childActive ? "text-blue-600" : "text-slate-400 hover:text-slate-700"
+                      }`;
+                      const childContent = (
+                        <>
+                          <span className="flex-1">{child.label}</span>
+                          {childBadge ? (
+                            <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-semibold flex items-center justify-center">
+                              {openProblems}
+                            </span>
+                          ) : child.external ? (
+                            /* External-link arrow — signals this opens a new tab */
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-3 h-3 text-slate-300">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                            </svg>
+                          ) : (
+                            <>
+                              {child.status === "done" && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                              )}
+                              {child.status === "wip" && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                              )}
+                            </>
+                          )}
+                        </>
+                      );
+                      return child.external ? (
+                        <a
                           key={child.href}
                           href={child.href}
-                          className={`flex items-center gap-3 pl-11 pr-3 py-1.5 text-[13px] font-medium rounded-lg transition-colors ${
-                            childActive
-                              ? "text-blue-600"
-                              : "text-slate-400 hover:text-slate-700"
-                          }`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={childClass}
                         >
-                          <span className="flex-1">{child.label}</span>
-                          {child.status === "done" && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                          )}
-                          {child.status === "wip" && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                          )}
+                          {childContent}
+                        </a>
+                      ) : (
+                        <Link key={child.href} href={child.href} className={childClass}>
+                          {childContent}
                         </Link>
                       );
                     })}

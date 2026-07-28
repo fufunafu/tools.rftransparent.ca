@@ -67,7 +67,7 @@ const sections = [
         ),
       },
       {
-        href: "/problems",
+        href: "/customer-service/problems",
         label: "Problem Tickets",
         description: "Client issues and delivery errors, charted year over year.",
         icon: (
