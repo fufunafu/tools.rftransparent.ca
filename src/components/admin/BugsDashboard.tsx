@@ -124,6 +124,17 @@ export default function BugsDashboard({
   );
 
   const metrics = useMemo(() => getBugMetrics(bugs), [bugs]);
+  const systemBreakdown = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const bug of bugs) {
+      counts.set(bug.system_id, (counts.get(bug.system_id) ?? 0) + 1);
+    }
+    return Array.from(counts, ([id, count]) => ({
+      id,
+      name: systems.find((system) => system.id === id)?.name ?? "Unknown system",
+      count,
+    })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [bugs, systems]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -261,7 +272,7 @@ export default function BugsDashboard({
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">Bug Reports</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Problems with our own systems. {metrics.needsAttention} open of {metrics.total}.
+            Track, prioritize, and close issues across our internal systems.
           </p>
         </div>
         <button
@@ -290,64 +301,82 @@ export default function BugsDashboard({
         </div>
       )}
 
-      {!tableMissing && bugs.length > 0 && <BugOverview metrics={metrics} />}
-
-      {/* Filters */}
       {!tableMissing && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 bg-white"
-          >
-            <option value="open_only">Still open</option>
-            <option value="all">All statuses</option>
-            {BUG_STATUSES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-          <select
-            value={systemFilter}
-            onChange={(e) => setSystemFilter(e.target.value)}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 bg-white"
-          >
-            <option value="all">Every system</option>
-            {systems.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+        <>
+          {bugs.length > 0 && <BugSummary metrics={metrics} />}
 
-      {/* List */}
-      {!tableMissing && filtered.length === 0 ? (
-        <div className="p-8 rounded-xl border border-slate-200 bg-white text-center">
-          <p className="text-sm text-slate-500">
-            {bugs.length === 0
-              ? "No bugs reported yet. That, or nobody's told us."
-              : "Nothing matches those filters."}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filtered.map((bug) => (
-            <BugRow
-              key={bug.id}
-              bug={bug}
-              systemName={systemName(bug.system_id)}
-              expanded={openBug === bug.id}
-              onToggle={() => setOpenBug(openBug === bug.id ? null : bug.id)}
-              isAdmin={isAdmin}
-              currentUser={currentUser}
-              onStatus={(s) => setStatus(bug, s)}
-              onDelete={() => removeBug(bug)}
-            />
-          ))}
-        </div>
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_280px] xl:items-start">
+            <div className="min-w-0 space-y-3">
+              <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="font-semibold text-slate-900">Reports</h3>
+                  <p className="mt-0.5 text-xs text-slate-400">
+                    Showing {filtered.length} of {metrics.total}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+                    aria-label="Filter by status"
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 bg-slate-50"
+                  >
+                    <option value="all">All statuses</option>
+                    <option value="open_only">Still open</option>
+                    {BUG_STATUSES.map((s) => (
+                      <option key={s.value} value={s.value}>
+                        {s.label}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={systemFilter}
+                    onChange={(e) => setSystemFilter(e.target.value)}
+                    aria-label="Filter by system"
+                    className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 bg-slate-50"
+                  >
+                    <option value="all">Every system</option>
+                    {systems.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {filtered.length === 0 ? (
+                <div className="p-8 rounded-xl border border-slate-200 bg-white text-center">
+                  <p className="text-sm text-slate-500">
+                    {bugs.length === 0
+                      ? "No bugs reported yet. That, or nobody's told us."
+                      : "Nothing matches those filters."}
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filtered.map((bug) => (
+                    <BugRow
+                      key={bug.id}
+                      bug={bug}
+                      systemName={systemName(bug.system_id)}
+                      expanded={openBug === bug.id}
+                      onToggle={() => setOpenBug(openBug === bug.id ? null : bug.id)}
+                      isAdmin={isAdmin}
+                      currentUser={currentUser}
+                      onStatus={(s) => setStatus(bug, s)}
+                      onDelete={() => removeBug(bug)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {bugs.length > 0 && (
+              <BugInsights metrics={metrics} systemBreakdown={systemBreakdown} />
+            )}
+          </div>
+        </>
       )}
 
       {/* Report form */}
@@ -381,7 +410,7 @@ function formatRepairTime(days: number | null): string {
   return `${rounded} ${rounded === "1" ? "day" : "days"}`;
 }
 
-function BugOverview({ metrics }: { metrics: ReturnType<typeof getBugMetrics> }) {
+function BugSummary({ metrics }: { metrics: ReturnType<typeof getBugMetrics> }) {
   const cards = [
     {
       label: "Total reports",
@@ -414,6 +443,36 @@ function BugOverview({ metrics }: { metrics: ReturnType<typeof getBugMetrics> })
     },
   ];
 
+  return (
+    <section aria-labelledby="bug-summary-heading">
+      <h3 id="bug-summary-heading" className="sr-only">
+        Bug report summary
+      </h3>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map((card) => (
+          <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${card.dot}`} aria-hidden="true" />
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                {card.label}
+              </p>
+            </div>
+            <p className="mt-1 text-xl font-semibold text-slate-900">{card.value}</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">{card.detail}</p>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function BugInsights({
+  metrics,
+  systemBreakdown,
+}: {
+  metrics: ReturnType<typeof getBugMetrics>;
+  systemBreakdown: Array<{ id: string; name: string; count: number }>;
+}) {
   const statusSegments = [
     {
       value: "open",
@@ -440,34 +499,19 @@ function BugOverview({ metrics }: { metrics: ReturnType<typeof getBugMetrics> })
       color: "bg-slate-400",
     },
   ];
+  const largestSystemCount = systemBreakdown[0]?.count ?? 1;
 
   return (
-    <section aria-labelledby="bug-overview-heading" className="space-y-3">
-      <h3 id="bug-overview-heading" className="sr-only">
-        Bug report overview
-      </h3>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {cards.map((card) => (
-          <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4">
-            <div className="flex items-center gap-2">
-              <span className={`h-2 w-2 rounded-full ${card.dot}`} aria-hidden="true" />
-              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-                {card.label}
-              </p>
-            </div>
-            <p className="mt-1 text-xl font-semibold text-slate-900">{card.value}</p>
-            <p className="mt-0.5 text-[11px] text-slate-400">{card.detail}</p>
-          </div>
-        ))}
+    <aside className="rounded-xl border border-slate-200 bg-white p-4 xl:sticky xl:top-6">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="font-semibold text-slate-900">Insights</h3>
+        <span className="text-xs text-slate-400">{metrics.total} reports</span>
       </div>
 
-      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
-            Status mix
-          </p>
-          <p className="text-xs text-slate-400">{metrics.total} reports</p>
-        </div>
+      <div className="mt-5">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+          By status
+        </p>
         <div
           className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100"
           aria-label={statusSegments
@@ -484,18 +528,44 @@ function BugOverview({ metrics }: { metrics: ReturnType<typeof getBugMetrics> })
               />
             ))}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+        <div className="mt-3 space-y-2">
           {statusSegments.map((segment) => (
-            <div key={segment.value} className="flex items-center gap-1.5 text-xs text-slate-500">
-              <span className={`h-2 w-2 rounded-full ${segment.color}`} aria-hidden="true" />
-              <span>
-                {segment.label} {segment.count}
+            <div
+              key={segment.value}
+              className="flex items-center justify-between gap-3 text-xs text-slate-500"
+            >
+              <span className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${segment.color}`} aria-hidden="true" />
+                {segment.label}
               </span>
+              <span className="font-medium tabular-nums text-slate-700">{segment.count}</span>
             </div>
           ))}
         </div>
       </div>
-    </section>
+
+      <div className="mt-5 border-t border-slate-100 pt-5">
+        <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+          By system
+        </p>
+        <div className="mt-3 space-y-3">
+          {systemBreakdown.slice(0, 5).map((system) => (
+            <div key={system.id}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                <span className="truncate text-slate-600">{system.name}</span>
+                <span className="font-medium tabular-nums text-slate-700">{system.count}</span>
+              </div>
+              <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full rounded-full bg-blue-400"
+                  style={{ width: `${(system.count / largestSystemCount) * 100}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </aside>
   );
 }
 

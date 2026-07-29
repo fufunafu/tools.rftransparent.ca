@@ -14,7 +14,7 @@ export default async function BugsPage() {
   const isAdmin = await isAdminUser();
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-6xl mx-auto">
       <BugsDashboard isAdmin={isAdmin} currentUser={user.email} />
     </div>
   );
