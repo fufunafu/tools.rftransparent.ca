@@ -21,9 +21,15 @@ const SearchIcon = ({ className }: { className: string }) => (
   </svg>
 );
 
+const COLLAPSIBLE_ITEMS = [...NAV_ITEMS, SETTINGS_ITEM].filter((item) => item.children?.length);
+
+function sectionForPathname(pathname: string) {
+  return COLLAPSIBLE_ITEMS.find((item) => matchesItem(item, pathname))?.href ?? null;
+}
+
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize();
+  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize(256);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -65,16 +71,16 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     };
   }, [mobileOpen]);
 
-  // Click-to-expand state for parent items with children. A parent is open if
-  // the user explicitly toggled it open OR the current route lives inside it.
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
-  const isSectionOpen = (item: NavItem) =>
-    openSections[item.href] ?? matchesItem(item, pathname);
+  // One shared value gives the navigation true accordion behavior: opening a
+  // section always closes the previous one. Route changes open the section
+  // containing the destination so the current page remains easy to locate.
+  const [openSection, setOpenSection] = useState<string | null>(() => sectionForPathname(pathname));
+  useEffect(() => {
+    setOpenSection(sectionForPathname(pathname));
+  }, [pathname]);
+  const isSectionOpen = (item: NavItem) => openSection === item.href;
   const toggleSection = (item: NavItem) =>
-    setOpenSections((prev) => ({
-      ...prev,
-      [item.href]: !(prev[item.href] ?? matchesItem(item, pathname)),
-    }));
+    setOpenSection((current) => (current === item.href ? null : item.href));
 
   // Open problem-ticket count for the sidebar badge. Refetched on every
   // client-side navigation so resolving a ticket updates the badge promptly.
@@ -119,23 +125,29 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className={`bg-white border-r border-slate-200 flex flex-col z-40 relative
+        className={`bg-slate-50 border-r border-slate-200/80 flex flex-col z-40 relative
           max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:!w-72 max-md:shadow-xl
           max-md:transition-transform max-md:duration-200
           ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
           md:shrink-0 md:transition-[width] md:duration-200`}
       >
         {/* Logo + collapse toggle */}
-        <div className="px-3 py-5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
-            <span className="text-white text-xs font-bold">RF</span>
+        <div className="px-3 py-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-sm shadow-blue-200 flex items-center justify-center shrink-0">
+            <span className="text-white text-xs font-bold tracking-wide">RF</span>
           </div>
-          {!collapsed && <span className="text-sm font-semibold text-slate-900 flex-1">RF Transparent</span>}
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-slate-900">RF Transparent</span>
+              <span className="block text-[10px] font-medium text-slate-400">Internal tools</span>
+            </div>
+          )}
           {/* Desktop: collapse/expand toggle */}
           <button
             onClick={toggleCollapsed}
-            className="max-md:hidden w-6 h-6 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
+            className="max-md:hidden w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-white hover:shadow-sm transition-all shrink-0"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
@@ -154,7 +166,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         </div>
 
         {/* Page search — opens the same palette as ⌘K */}
-        <div className="px-2 pb-2">
+        <div className="px-3 pb-3">
           <button
             type="button"
             onClick={() => {
@@ -162,15 +174,19 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               setSearchOpen(true);
             }}
             title={collapsed ? "Search pages" : undefined}
-            className={`w-full flex items-center gap-2 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 transition-colors ${
-              collapsed ? "justify-center py-2" : "px-3 py-2"
+            className={`w-full h-10 flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm shadow-slate-200/40 hover:text-slate-700 hover:border-slate-300 transition-all ${
+              collapsed ? "justify-center" : "px-3"
             }`}
           >
-            <SearchIcon className="w-4 h-4 shrink-0" />
+            <SearchIcon className="w-[18px] h-[18px] shrink-0" />
             {!collapsed && (
               <>
                 <span className="flex-1 text-left text-sm">Search</span>
-                {modKey ? <kbd className="text-[11px] font-sans text-slate-300">{modKey}K</kbd> : null}
+                {modKey ? (
+                  <kbd className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-sans text-slate-400">
+                    {modKey}K
+                  </kbd>
+                ) : null}
               </>
             )}
           </button>
@@ -180,28 +196,36 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             toggle button) closes the drawer — delegated so we don't thread an
             onClick through every link. */}
         <nav
-          className="flex-1 px-2 py-2 space-y-0.5 overflow-y-auto"
+          className="flex-1 px-3 py-2 overflow-y-auto"
+          aria-label="Main navigation"
           onClick={(e) => {
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
         >
-          {NAV_ITEMS.map((item) => (
-            <SidebarNavRow
-              key={item.href}
-              item={item}
-              pathname={pathname}
-              collapsed={collapsed}
-              expanded={Boolean(item.children?.length) && !collapsed && isSectionOpen(item)}
-              onToggle={() => toggleSection(item)}
-              openProblems={openProblems}
-            />
-          ))}
+          {!collapsed && (
+            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+              Workspace
+            </p>
+          )}
+          <div className="space-y-1">
+            {NAV_ITEMS.map((item) => (
+              <SidebarNavRow
+                key={item.href}
+                item={item}
+                pathname={pathname}
+                collapsed={collapsed}
+                expanded={Boolean(item.children?.length) && !collapsed && isSectionOpen(item)}
+                onToggle={() => toggleSection(item)}
+                openProblems={openProblems}
+              />
+            ))}
+          </div>
         </nav>
 
         {/* Settings — pinned above Sign out so admin pages stay out of the
             day-to-day list but never scroll out of reach. */}
         <div
-          className="px-2 py-2 border-t border-slate-200"
+          className="px-3 pt-2 border-t border-slate-200/80"
           onClick={(e) => {
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
@@ -219,16 +243,16 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         {/* Report a bug — deliberately not a nav section. It's a thing you do
             from wherever you hit the bug, so it sits small and out of the way
             rather than competing with the day-to-day pages. */}
-        <div className="px-2 pb-2">
+        <div className="px-3 py-2">
           <Link
             href="/bugs"
             onClick={() => setMobileOpen(false)}
             title={collapsed ? "Report a bug" : undefined}
-            className={`flex items-center gap-2 rounded-lg text-xs transition-colors ${
+            className={`flex min-h-9 items-center gap-2.5 rounded-xl text-xs font-medium transition-colors ${
               pathname === "/bugs"
-                ? "text-blue-600 bg-blue-50"
-                : "text-slate-400 hover:text-slate-600 hover:bg-slate-50"
-            } ${collapsed ? "justify-center py-2" : "px-3 py-1.5"}`}
+                ? "text-blue-700 bg-blue-50"
+                : "text-slate-500 hover:text-slate-800 hover:bg-white"
+            } ${collapsed ? "justify-center" : "px-3"}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4 shrink-0">
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.047.829-1.867 1.866-2.013A24.204 24.204 0 0 1 12 12.75Zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 0 1-1.152 6.06M12 12.75c-2.883 0-5.647.508-8.207 1.44a23.91 23.91 0 0 0 1.152 6.06M12 12.75a2.25 2.25 0 0 0 2.248-2.354M12 12.75a2.25 2.25 0 0 1-2.248-2.354M12 8.25c.995 0 1.971-.08 2.922-.236.403-.066.74-.358.795-.762a3.778 3.778 0 0 0-.399-2.25M12 8.25c-.995 0-1.97-.08-2.922-.236-.402-.066-.74-.358-.795-.762a3.734 3.734 0 0 1 .4-2.253M12 8.25a2.25 2.25 0 0 0-2.248 2.146M12 8.25a2.25 2.25 0 0 1 2.248 2.146M8.683 5a6.032 6.032 0 0 1-1.155-1.002c.07-.63.27-1.222.574-1.747m.581 2.749A3.75 3.75 0 0 1 15.318 5m0 0c.427-.283.815-.62 1.155-.999a4.471 4.471 0 0 0-.575-1.752M4.921 6a24.048 24.048 0 0 0-.392 3.314c1.668.546 3.416.914 5.223 1.082M19.08 6c.205 1.08.337 2.187.392 3.314a23.882 23.882 0 0 1-5.223 1.082" />
@@ -238,10 +262,12 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         </div>
 
         {/* Sign out */}
-        <div className="px-2 py-4 border-t border-slate-200">
+        <div className="px-3 py-3 border-t border-slate-200/80">
           <a
             href="/api/logout"
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-900 hover:bg-slate-50 transition-colors"
+            className={`flex h-10 items-center gap-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white transition-colors ${
+              collapsed ? "justify-center" : "px-3"
+            }`}
             title={collapsed ? "Sign out" : undefined}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5 shrink-0">
