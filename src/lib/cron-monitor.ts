@@ -89,6 +89,57 @@ export async function recordCronRun(
   } catch (e) {
     console.error(`[cron:${job}] could not record run:`, e);
   }
+
+  // Retention is separate bookkeeping — it runs after the insert and swallows
+  // its own errors, so a failing cleanup can never cost us the record itself.
+  try {
+    await pruneOldRuns();
+  } catch (e) {
+    console.error(`[cron:${job}] could not prune old runs:`, e);
+  }
+}
+
+const RETENTION_DAYS = 90;
+
+/**
+ * Drop runs older than the retention window. Called on each insert — at five
+ * jobs a day that's a handful of cheap deletes, and it means retention can't
+ * silently stop working the way a separate scheduled cleanup could.
+ */
+async function pruneOldRuns(): Promise<void> {
+  const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
+  await getSupabase().from("cron_runs").delete().lt("started_at", cutoff);
+}
+
+/**
+ * Recent runs per job, newest first — what /settings/automations expands to
+ * show. Same missing-table contract as getLatestCronRuns.
+ */
+export async function getCronRunHistory(
+  jobs: string[],
+  perJob = 10
+): Promise<{ history: Record<string, CronRun[]>; tableMissing: boolean }> {
+  try {
+    const { data, error } = await getSupabase()
+      .from("cron_runs")
+      .select("job, status, detail, triggered_by, duration_ms, started_at")
+      .in("job", jobs)
+      .order("started_at", { ascending: false })
+      // Enough rows that every job reaches its per-job cap even when one job
+      // runs far more often than the rest.
+      .limit(jobs.length * perJob * 4);
+
+    if (error) return { history: {}, tableMissing: true };
+
+    const history: Record<string, CronRun[]> = {};
+    for (const row of (data ?? []) as CronRun[]) {
+      const list = (history[row.job] ??= []);
+      if (list.length < perJob) list.push(row);
+    }
+    return { history, tableMissing: false };
+  } catch {
+    return { history: {}, tableMissing: true };
+  }
 }
 
 /**

@@ -318,11 +318,15 @@ function FallbackRatesEditor({ rates, storeId, onSaved }: { rates: Record<number
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rates: ratesObj, storeId }),
       });
-      if (!res.ok) throw new Error("Failed to save");
+      if (!res.ok) throw new Error(res.status === 403 ? "forbidden" : "Failed to save");
       setEditing(false);
       onSaved();
-    } catch {
-      alert("Failed to save rates");
+    } catch (err) {
+      alert(
+        err instanceof Error && err.message === "forbidden"
+          ? "Only admins can change the forecast rates."
+          : "Failed to save rates"
+      );
     } finally {
       setSaving(false);
     }

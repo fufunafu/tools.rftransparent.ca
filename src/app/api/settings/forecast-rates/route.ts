@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isAdminUser, isAuthenticated } from "@/lib/admin-auth";
+import { recordSettingChange } from "@/lib/settings-audit";
 import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +26,11 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // These numbers feed the sales forecast, so editing them is admin-only
+  // even though any signed-in user may read them.
+  const user = await getAuthenticatedUser();
+  if (!user || !(await isAdminUser()))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const { rates, storeId } = body as { rates: Record<string, number>; storeId: string };
@@ -49,6 +53,12 @@ export async function PUT(req: NextRequest) {
 
   if (error)
     return NextResponse.json({ error: error.message }, { status: 500 });
+
+  await recordSettingChange({
+    area: "rates",
+    actor: user.email ?? "unknown",
+    summary: `Updated the seasonal fallback rates for ${storeId}`,
+  });
 
   return NextResponse.json({ success: true });
 }

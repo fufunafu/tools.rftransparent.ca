@@ -544,12 +544,29 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   }, []);
 
   const saveSyncSchedule = async (updated: { enabled: boolean; hours: number[]; timezone: string }) => {
+    // Optimistic, but the schedule is admin-only to change — roll the toggle
+    // back if the server says no, rather than showing a setting that didn't
+    // actually save.
+    const previous = syncSchedule;
     setSyncSchedule(updated);
-    await fetch("/api/settings/sync-schedule", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(updated),
-    });
+    try {
+      const res = await fetch("/api/settings/sync-schedule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updated),
+      });
+      if (!res.ok) {
+        setSyncSchedule(previous);
+        setError(
+          res.status === 403
+            ? "Only admins can change the sync schedule."
+            : "Couldn't save the sync schedule."
+        );
+      }
+    } catch {
+      setSyncSchedule(previous);
+      setError("Couldn't save the sync schedule.");
+    }
   };
 
   const toggleScheduleHour = (hour: number) => {

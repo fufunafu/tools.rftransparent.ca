@@ -158,6 +158,7 @@ export const SETTINGS_ITEM: NavItem = {
     </svg>
   ),
   children: [
+    { href: "/settings/access", label: "Who Can Sign In", status: "done" },
     { href: "/employees", label: "Employees", status: "done" },
     { href: "/settings/notifications", label: "Notifications", status: "done" },
     { href: "/settings/rates", label: "Rates & Thresholds", status: "done" },

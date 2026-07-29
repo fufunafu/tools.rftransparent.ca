@@ -13,6 +13,9 @@ export interface AutomationJob {
   // Vercel runs crons on UTC, so the Toronto time these land at shifts by an
   // hour when daylight saving does.
   schedule: string;
+  // Set when a manual run sends real mail to real people. Those get a
+  // confirmation step — a mis-click shouldn't email every employee.
+  sendsEmail?: string;
 }
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
@@ -36,6 +39,7 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     description: "Emails each store the leads due or overdue for a follow-up that day.",
     cron: "0 13 * * 1-5",
     schedule: "Weekdays, 13:00 UTC (about 9am Toronto)",
+    sendsEmail: "each store's inbox",
   },
   {
     slug: "problems-digest",
@@ -43,6 +47,7 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     description: "Weekly summary of open problem tickets, so stale ones can't quietly rot.",
     cron: "0 13 * * 1",
     schedule: "Mondays, 13:00 UTC (about 9am Toronto)",
+    sendsEmail: "the problem-ticket digest recipients",
   },
   {
     slug: "send-employee-surveys",
@@ -50,6 +55,7 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     description: "Sends each active employee their weekly survey link.",
     cron: "0 14 * * 5",
     schedule: "Fridays, 14:00 UTC (about 10am Toronto)",
+    sendsEmail: "every active employee",
   },
 ];
 

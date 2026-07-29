@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const sendMock = vi.fn();
 const notificationsMock = vi.fn();
 const insertMock = vi.fn();
+const deleteLtMock = vi.fn();
 const supabaseMock = vi.fn();
 
 vi.mock("@/lib/resend", () => ({
@@ -29,8 +30,12 @@ beforeEach(() => {
   });
   insertMock.mockReset();
   insertMock.mockResolvedValue({ error: null });
+  deleteLtMock.mockReset();
+  deleteLtMock.mockResolvedValue({ error: null });
   supabaseMock.mockReset();
-  supabaseMock.mockReturnValue({ from: () => ({ insert: insertMock }) });
+  supabaseMock.mockReturnValue({
+    from: () => ({ insert: insertMock, delete: () => ({ lt: deleteLtMock }) }),
+  });
 });
 
 describe("reportCronFailure", () => {
@@ -105,6 +110,22 @@ describe("recordCronRun", () => {
   it("truncates very long details", async () => {
     await recordCronRun("job", "error", "x".repeat(5000));
     expect(insertMock.mock.calls[0][0].detail).toHaveLength(2000);
+  });
+
+  it("prunes runs past the retention window", async () => {
+    await recordCronRun("job", "success", "ok");
+    expect(deleteLtMock).toHaveBeenCalledTimes(1);
+    const [column, cutoff] = deleteLtMock.mock.calls[0];
+    expect(column).toBe("started_at");
+    // Roughly 90 days back — exact to the day, not the millisecond.
+    const daysBack = (Date.now() - new Date(cutoff as string).getTime()) / 86400000;
+    expect(Math.round(daysBack)).toBe(90);
+  });
+
+  it("still records the run when pruning fails", async () => {
+    deleteLtMock.mockRejectedValueOnce(new Error("delete blew up"));
+    await expect(recordCronRun("job", "success", "ok")).resolves.toBeUndefined();
+    expect(insertMock).toHaveBeenCalledTimes(1);
   });
 
   it("never throws when the table is missing", async () => {

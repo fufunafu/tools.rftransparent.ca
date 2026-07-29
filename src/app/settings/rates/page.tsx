@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminUser, isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getStores } from "@/lib/shopify";
 import { getPurchasingSettings } from "@/lib/purchasing/queries";
 import RatesForm from "@/components/admin/settings/RatesForm";
+import ChangeLog from "@/components/admin/settings/ChangeLog";
+import { getSettingChanges } from "@/lib/settings-audit";
 
 export const metadata: Metadata = {
   title: "Rates & Thresholds | Settings | RF Tools",
@@ -36,14 +38,19 @@ export default async function RatesPage() {
     byStore = {};
   }
 
-  const purchasing = await getPurchasingSettings();
+  const [purchasing, canEdit, log] = await Promise.all([
+    getPurchasingSettings(),
+    isAdminUser(),
+    getSettingChanges("rates"),
+  ]);
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto space-y-5">
       <RatesForm
         stores={stores}
         initial={byStore}
         defaults={HARDCODED_FALLBACK}
+        canEdit={canEdit}
         purchasing={{
           lead_time_days: purchasing.lead_time_days,
           expected_fill: purchasing.expected_fill,
@@ -52,6 +59,7 @@ export default async function RatesPage() {
           restock_cover_pct: purchasing.restock_cover_pct,
         }}
       />
+      <ChangeLog changes={log.changes} unavailable={log.tableMissing} />
     </div>
   );
 }

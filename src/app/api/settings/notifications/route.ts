@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAdminUser, isAuthenticated } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isAdminUser, isAuthenticated } from "@/lib/admin-auth";
+import { recordSettingChange, describeListChange } from "@/lib/settings-audit";
 import {
   getNotificationSettings,
   putNotificationSettings,
@@ -19,7 +20,8 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   // Changing where alerts land is an admin-level action — an employee who
   // can read the page shouldn't be able to redirect the owner's alerts.
-  if (!(await isAdminUser()))
+  const user = await getAuthenticatedUser();
+  if (!user || !(await isAdminUser()))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = (await req.json().catch(() => null)) as Partial<NotificationSettings> | null;
@@ -48,6 +50,8 @@ export async function PUT(req: NextRequest) {
       { status: 400 }
     );
 
+  const before = await getNotificationSettings();
+
   try {
     await putNotificationSettings({ cron_alerts, problems_digest, followup_by_store });
   } catch (err) {
@@ -57,7 +61,40 @@ export async function PUT(req: NextRequest) {
     );
   }
 
+  const summary = describeChange(before, { cron_alerts, problems_digest, followup_by_store });
+  if (summary) {
+    await recordSettingChange({
+      area: "notifications",
+      actor: user.email ?? "unknown",
+      summary,
+    });
+  }
+
   return NextResponse.json(await getNotificationSettings());
+}
+
+// One sentence covering whichever of the three groups actually moved.
+function describeChange(before: NotificationSettings, after: NotificationSettings): string {
+  const parts: string[] = [];
+
+  const alerts = describeListChange(before.cron_alerts, after.cron_alerts);
+  if (alerts) parts.push(`Failure alerts: ${alerts}`);
+
+  const digest = describeListChange(before.problems_digest, after.problems_digest);
+  if (digest) parts.push(`Problem digest: ${digest}`);
+
+  for (const storeId of new Set([
+    ...Object.keys(before.followup_by_store),
+    ...Object.keys(after.followup_by_store),
+  ])) {
+    const from = before.followup_by_store[storeId] ?? "";
+    const to = after.followup_by_store[storeId] ?? "";
+    if (from !== to) {
+      parts.push(`Follow-up reminders for ${storeId}: ${from || "nobody"} → ${to || "nobody"}`);
+    }
+  }
+
+  return parts.join(". ");
 }
 
 function cleanList(value: unknown): string[] {

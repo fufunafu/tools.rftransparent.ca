@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminUser, isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +21,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  // Read by anyone signed in, changed only by admins.
+  if (!(await isAdminUser()))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   const body = await req.json();
   const schedule = {

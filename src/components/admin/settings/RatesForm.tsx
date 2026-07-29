@@ -46,11 +46,13 @@ export default function RatesForm({
   initial,
   defaults,
   purchasing,
+  canEdit,
 }: {
   stores: Store[];
   initial: Record<string, Record<number, number>>;
   defaults: Record<number, number>;
   purchasing: PurchasingSummary;
+  canEdit: boolean;
 }) {
   const router = useRouter();
   // Lazy init — building the grid is cheap but pointless to redo every render.
@@ -117,6 +119,11 @@ export default function RatesForm({
         </p>
       </div>
 
+      {!canEdit && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-sm rounded-lg px-3 py-2">
+          You can see these numbers but not change them. Ask an admin to edit them.
+        </div>
+      )}
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
           {error}
@@ -161,9 +168,10 @@ export default function RatesForm({
                           type="number"
                           step="1"
                           value={draft[store.id][i]}
+                          disabled={!canEdit}
                           onChange={(e) => setCell(store.id, i, e.target.value)}
                           aria-label={`${store.label} ${label}`}
-                          className="w-20 px-2 py-1 text-sm text-right rounded-lg border border-sand-200 focus:border-accent focus:outline-none"
+                          className="w-20 px-2 py-1 text-sm text-right rounded-lg border border-sand-200 focus:border-accent focus:outline-none disabled:bg-sand-50 disabled:text-sand-500"
                         />
                         <span className="text-xs text-sand-400">%</span>
                       </div>
@@ -202,7 +210,7 @@ export default function RatesForm({
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={saving || changedStores.length === 0}
+          disabled={!canEdit || saving || changedStores.length === 0}
           className="px-4 py-2 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent/90 disabled:bg-sand-300 disabled:cursor-not-allowed"
         >
           {saving ? "Saving…" : "Save changes"}
