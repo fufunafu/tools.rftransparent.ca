@@ -274,8 +274,16 @@ export interface AutomationHealth {
   /** True when migration 061 hasn't been applied — no history to report yet. */
   tableMissing: boolean;
   failing: { slug: string; label: string; run: CronRun }[];
-  /** Jobs whose most recent run is older than their schedule allows, or absent. */
-  silent: { slug: string; label: string; lastRun: string | null }[];
+  /** Jobs that ran before but haven't since their schedule says they should have. */
+  silent: { slug: string; label: string; lastRun: string }[];
+  /**
+   * Jobs with no recorded run at all. NOT an alert: the history table only
+   * started filling when 061 was applied, so every job looks like this until
+   * its next scheduled firing — and a weekly job would raise a false alarm
+   * for six days. "Never ran" and "stopped running" are different claims and
+   * only the second one is evidence of a problem.
+   */
+  neverRun: { slug: string; label: string }[];
   lastRunAt: string | null;
   total: number;
 }
@@ -293,18 +301,26 @@ export async function getAutomationHealth(): Promise<Result<AutomationHealth>> {
   try {
     const { runs, tableMissing } = await getLatestCronRuns(AUTOMATION_JOBS.map((j) => j.slug));
     if (tableMissing) {
-      return ok({ tableMissing: true, failing: [], silent: [], lastRunAt: null, total: AUTOMATION_JOBS.length });
+      return ok({
+        tableMissing: true,
+        failing: [],
+        silent: [],
+        neverRun: [],
+        lastRunAt: null,
+        total: AUTOMATION_JOBS.length,
+      });
     }
 
     const now = Date.now();
     const failing: AutomationHealth["failing"] = [];
     const silent: AutomationHealth["silent"] = [];
+    const neverRun: AutomationHealth["neverRun"] = [];
     let lastRunAt: string | null = null;
 
     for (const job of AUTOMATION_JOBS) {
       const run = runs[job.slug];
       if (!run) {
-        silent.push({ slug: job.slug, label: job.label, lastRun: null });
+        neverRun.push({ slug: job.slug, label: job.label });
         continue;
       }
       if (!lastRunAt || run.started_at > lastRunAt) lastRunAt = run.started_at;
@@ -315,7 +331,7 @@ export async function getAutomationHealth(): Promise<Result<AutomationHealth>> {
       }
     }
 
-    return ok({ tableMissing: false, failing, silent, lastRunAt, total: AUTOMATION_JOBS.length });
+    return ok({ tableMissing: false, failing, silent, neverRun, lastRunAt, total: AUTOMATION_JOBS.length });
   } catch (err) {
     return fail(err, "Could not read automation history.");
   }

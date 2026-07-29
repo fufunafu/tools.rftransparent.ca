@@ -108,11 +108,11 @@ export default async function HomePage() {
     for (const job of automations.value.failing) {
       attention.push({ text: `${job.label} failed ${relativeTime(job.run.started_at)}`, href: "/settings/automations" });
     }
+    // Only jobs that ran before and then stopped — see AutomationHealth.neverRun
+    // for why a job with no history at all isn't evidence of anything.
     for (const job of automations.value.silent) {
       attention.push({
-        text: job.lastRun
-          ? `${job.label} hasn't run since ${relativeTime(job.lastRun)}`
-          : `${job.label} has no recorded runs`,
+        text: `${job.label} hasn't run since ${relativeTime(job.lastRun)}`,
         href: "/settings/automations",
       });
     }
@@ -251,7 +251,7 @@ function FollowupsTile({ followups }: { followups: Dash["followups"] }) {
 
 function AutomationsTile({ automations }: { automations: Dash["automations"] }) {
   if (!automations.ok) return <TileError label="Automations" error={automations.error} />;
-  const { tableMissing, failing, silent, lastRunAt, total } = automations.value;
+  const { tableMissing, failing, silent, neverRun, lastRunAt, total } = automations.value;
 
   if (tableMissing) {
     return (
@@ -260,6 +260,19 @@ function AutomationsTile({ automations }: { automations: Dash["automations"] }) 
         href="/settings/automations"
         value={<span className="text-slate-400">—</span>}
         sub="Run history not set up yet"
+      />
+    );
+  }
+
+  // Nothing has reported in yet — the history only starts at its first firing.
+  // Claiming "All green" here would be asserting something we can't see.
+  if (neverRun.length === total) {
+    return (
+      <Tile
+        label="Automations"
+        href="/settings/automations"
+        value={<span className="text-slate-400">—</span>}
+        sub={`${total} jobs · waiting for the first runs`}
       />
     );
   }
@@ -273,9 +286,12 @@ function AutomationsTile({ automations }: { automations: Dash["automations"] }) 
       tone={failing.length > 0 ? "bad" : silent.length > 0 ? "warn" : "good"}
       sub={
         problems === 0
-          ? lastRunAt
-            ? `${total} jobs · last ran ${relativeTime(lastRunAt)}`
-            : `${total} jobs`
+          ? [
+              lastRunAt ? `last ran ${relativeTime(lastRunAt)}` : null,
+              neverRun.length ? `${neverRun.length} yet to report` : null,
+            ]
+              .filter(Boolean)
+              .join(" · ") || `${total} jobs`
           : `of ${total} jobs need a look`
       }
     />
