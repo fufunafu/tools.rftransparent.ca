@@ -90,6 +90,54 @@ export function isOpenStatus(value: string): boolean {
   return value === "open" || value === "in_progress";
 }
 
+export interface BugMetrics {
+  total: number;
+  needsAttention: number;
+  reportedLastSevenDays: number;
+  averageRepairDays: number | null;
+  statusCounts: Record<BugStatusValue, number>;
+}
+
+/** Live summary values derived from the same reports shown in the list. */
+export function getBugMetrics(bugs: BugReport[], now = Date.now()): BugMetrics {
+  const statusCounts: Record<BugStatusValue, number> = {
+    open: 0,
+    in_progress: 0,
+    repaired: 0,
+    wont_fix: 0,
+  };
+  const sevenDaysAgo = now - 7 * 86400000;
+  let reportedLastSevenDays = 0;
+  const repairDurations: number[] = [];
+
+  for (const bug of bugs) {
+    statusCounts[bug.status] += 1;
+
+    const createdAt = new Date(bug.created_at).getTime();
+    if (Number.isFinite(createdAt) && createdAt >= sevenDaysAgo && createdAt <= now) {
+      reportedLastSevenDays += 1;
+    }
+
+    if (bug.status === "repaired" && bug.repaired_at && Number.isFinite(createdAt)) {
+      const repairedAt = new Date(bug.repaired_at).getTime();
+      if (Number.isFinite(repairedAt) && repairedAt >= createdAt) {
+        repairDurations.push((repairedAt - createdAt) / 86400000);
+      }
+    }
+  }
+
+  return {
+    total: bugs.length,
+    needsAttention: statusCounts.open + statusCounts.in_progress,
+    reportedLastSevenDays,
+    averageRepairDays:
+      repairDurations.length > 0
+        ? repairDurations.reduce((sum, days) => sum + days, 0) / repairDurations.length
+        : null,
+    statusCounts,
+  };
+}
+
 // Screenshots only, and small enough that a phone photo still fits.
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ALLOWED_ATTACHMENT_TYPES = [

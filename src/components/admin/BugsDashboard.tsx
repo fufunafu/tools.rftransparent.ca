@@ -12,6 +12,7 @@ import {
   bugTypeColor,
   bugStatusLabel,
   isOpenStatus,
+  getBugMetrics,
   MAX_ATTACHMENT_BYTES,
   ALLOWED_ATTACHMENT_TYPES,
 } from "@/lib/bug-reports";
@@ -73,7 +74,7 @@ export default function BugsDashboard({
   const [error, setError] = useState<string | null>(null);
 
   const [systemFilter, setSystemFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("open_only");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm(""));
@@ -122,10 +123,7 @@ export default function BugsDashboard({
     [bugs, systemFilter, statusFilter]
   );
 
-  const counts = useMemo(() => {
-    const open = bugs.filter((b) => isOpenStatus(b.status)).length;
-    return { open, total: bugs.length };
-  }, [bugs]);
+  const metrics = useMemo(() => getBugMetrics(bugs), [bugs]);
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -263,7 +261,7 @@ export default function BugsDashboard({
         <div>
           <h2 className="text-2xl font-semibold text-slate-900">Bug Reports</h2>
           <p className="text-sm text-slate-500 mt-1">
-            Problems with our own systems. {counts.open} open of {counts.total}.
+            Problems with our own systems. {metrics.needsAttention} open of {metrics.total}.
           </p>
         </div>
         <button
@@ -291,6 +289,8 @@ export default function BugsDashboard({
           </button>
         </div>
       )}
+
+      {!tableMissing && bugs.length > 0 && <BugOverview metrics={metrics} />}
 
       {/* Filters */}
       {!tableMissing && (
@@ -369,6 +369,133 @@ export default function BugsDashboard({
         />
       )}
     </div>
+  );
+}
+
+// ─── Overview ───────────────────────────────────────────────────────────────
+
+function formatRepairTime(days: number | null): string {
+  if (days === null) return "Not yet";
+  if (days < 1) return "<1 day";
+  const rounded = days >= 10 ? Math.round(days).toString() : days.toFixed(1).replace(/\.0$/, "");
+  return `${rounded} ${rounded === "1" ? "day" : "days"}`;
+}
+
+function BugOverview({ metrics }: { metrics: ReturnType<typeof getBugMetrics> }) {
+  const cards = [
+    {
+      label: "Total reports",
+      value: metrics.total,
+      detail: "All time",
+      dot: "bg-blue-500",
+    },
+    {
+      label: "Needs attention",
+      value: metrics.needsAttention,
+      detail: `${metrics.statusCounts.open} open · ${metrics.statusCounts.in_progress} being fixed`,
+      dot: "bg-red-500",
+    },
+    {
+      label: "Last 7 days",
+      value: metrics.reportedLastSevenDays,
+      detail: "New reports",
+      dot: "bg-violet-500",
+    },
+    {
+      label: "Average repair time",
+      value: formatRepairTime(metrics.averageRepairDays),
+      detail:
+        metrics.statusCounts.repaired > 0
+          ? `Across ${metrics.statusCounts.repaired} repaired report${
+              metrics.statusCounts.repaired === 1 ? "" : "s"
+            }`
+          : "No repaired reports yet",
+      dot: "bg-emerald-500",
+    },
+  ];
+
+  const statusSegments = [
+    {
+      value: "open",
+      label: "Open",
+      count: metrics.statusCounts.open,
+      color: "bg-red-400",
+    },
+    {
+      value: "in_progress",
+      label: "Being fixed",
+      count: metrics.statusCounts.in_progress,
+      color: "bg-amber-400",
+    },
+    {
+      value: "repaired",
+      label: "Repaired",
+      count: metrics.statusCounts.repaired,
+      color: "bg-emerald-400",
+    },
+    {
+      value: "wont_fix",
+      label: "Won't fix",
+      count: metrics.statusCounts.wont_fix,
+      color: "bg-slate-400",
+    },
+  ];
+
+  return (
+    <section aria-labelledby="bug-overview-heading" className="space-y-3">
+      <h3 id="bug-overview-heading" className="sr-only">
+        Bug report overview
+      </h3>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {cards.map((card) => (
+          <div key={card.label} className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="flex items-center gap-2">
+              <span className={`h-2 w-2 rounded-full ${card.dot}`} aria-hidden="true" />
+              <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+                {card.label}
+              </p>
+            </div>
+            <p className="mt-1 text-xl font-semibold text-slate-900">{card.value}</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">{card.detail}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <p className="text-[11px] font-medium uppercase tracking-wider text-slate-400">
+            Status mix
+          </p>
+          <p className="text-xs text-slate-400">{metrics.total} reports</p>
+        </div>
+        <div
+          className="mt-2 flex h-2 overflow-hidden rounded-full bg-slate-100"
+          aria-label={statusSegments
+            .map((segment) => `${segment.label}: ${segment.count}`)
+            .join(", ")}
+        >
+          {statusSegments
+            .filter((segment) => segment.count > 0)
+            .map((segment) => (
+              <span
+                key={segment.value}
+                className={`${segment.color} first:rounded-l-full last:rounded-r-full`}
+                style={{ width: `${(segment.count / metrics.total) * 100}%` }}
+              />
+            ))}
+        </div>
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+          {statusSegments.map((segment) => (
+            <div key={segment.value} className="flex items-center gap-1.5 text-xs text-slate-500">
+              <span className={`h-2 w-2 rounded-full ${segment.color}`} aria-hidden="true" />
+              <span>
+                {segment.label} {segment.count}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
