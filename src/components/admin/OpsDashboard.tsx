@@ -524,7 +524,7 @@ function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").Custome
   return (
     <CardShell
       label="Customer service"
-      note="weekdays only · 48h window"
+      note="all stores · weekdays · 48h window"
       footer={
         <>
           <span className="text-slate-500">
@@ -551,8 +551,8 @@ function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").Custome
           href="/customer-service/phones"
           tone={w.missRate === null ? "text-slate-400" : toneAgainstTarget(w.missRate, 10, true)}
           dataLabel={`Miss rate — ${label}`}
-          calc="Unanswered weekday inbound calls ÷ weekday inbound calls. Weekends excluded. Shown as — when the window has no inbound calls, since that is not a 0% miss rate."
-          src="Supabase · call_records (CIK + Grasshopper, deduplicated)"
+          calc="Unanswered weekday inbound calls ÷ weekday inbound calls, across ALL stores combined — the Phones page shows one store at a time, so its numbers differ. Weekends excluded; — means no inbound calls, which is not a 0% miss rate."
+          src="Supabase · call_records (per-store deduplicated, then merged)"
         />
       ))}
       {windows.map(({ key, label, w }) => (
@@ -564,8 +564,8 @@ function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").Custome
           href="/customer-service/phones"
           tone={w.callbackRate === null ? "text-slate-400" : toneAgainstTarget(w.callbackRate, 85, false)}
           dataLabel={`Callback — ${label}`}
-          calc="Share of unanswered calls that got an outbound callback inside the 48-hour window. Average response is the mean time to that callback."
-          src="Supabase · call_records (CIK + Grasshopper, deduplicated)"
+          calc="Share of unanswered calls that got an outbound callback inside the 48-hour window, across ALL stores combined. Average response is the mean time to that callback."
+          src="Supabase · call_records (per-store deduplicated, then merged)"
         />
       ))}
       {[

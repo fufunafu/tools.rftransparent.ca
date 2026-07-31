@@ -561,10 +561,13 @@ function finiteOrNull(n: number | null | undefined): number | null {
   return typeof n === "number" && Number.isFinite(n) ? n : null;
 }
 
-function windowFrom(records: CallRecord[]): CallWindow {
-  // Grasshopper forwards land twice; dedupe before any rate is computed or
-  // the miss rate is measured against an inflated denominator.
-  const deduped = deduplicateRecords(records);
+/**
+ * Records must already be deduplicated PER STORE before they reach here.
+ * Deduping the cross-store union isn't the same operation — the CIK/
+ * Grasshopper matching is only meaningful within one store's phone system,
+ * and it's how the Phones page runs, so the two must agree.
+ */
+function windowFrom(deduped: CallRecord[]): CallWindow {
   const inbound = deduped.filter((r) => r.direction === "inbound").length;
 
   // A window with no inbound calls has no miss rate. Reporting 0% there
@@ -628,10 +631,10 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
 
   const quotes = await getQuoteWindows(now);
 
-  const all = await fetchAllRows<CallRecord>((from, to) =>
+  const raw = await fetchAllRows<CallRecord & { store_id: string | null }>((from, to) =>
     getSupabase()
       .from("call_records")
-      .select("id, call_start, call_end, from_number, to_number, direction, duration_min, charge, endpoint, source")
+      .select("id, store_id, call_start, call_end, from_number, to_number, direction, duration_min, charge, endpoint, source")
       .gte("call_start", since)
       // id as tie-break: same-second calls at a page boundary would otherwise
       // have no deterministic order and could be skipped or doubled.
@@ -639,6 +642,18 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
       .order("id", { ascending: true })
       .range(from, to)
   );
+
+  // Dedupe per store and only then merge — exactly the Phones page's
+  // pipeline, so this card is that page's per-store numbers summed rather
+  // than a third, slightly different truth. Deduping the union instead let
+  // one store's Grasshopper rows eat another store's CIK rows.
+  const byStore = new Map<string, CallRecord[]>();
+  for (const r of raw) {
+    const list = byStore.get(r.store_id ?? "unknown") ?? [];
+    list.push(r);
+    byStore.set(r.store_id ?? "unknown", list);
+  }
+  const all = [...byStore.values()].flatMap((records) => deduplicateRecords(records));
 
   return {
     yesterday: windowFrom(
