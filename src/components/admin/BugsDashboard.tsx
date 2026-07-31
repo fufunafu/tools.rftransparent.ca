@@ -289,9 +289,11 @@ export default function BugsDashboard({
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-2xl font-semibold text-slate-900">Bug Reports</h2>
+          <h2 className="text-2xl font-semibold text-slate-900">
+            Bug Reports and Improvement Recommendations
+          </h2>
           <p className="text-sm text-slate-500 mt-1">
-            Track, prioritize, and close issues across our internal systems.
+            What&apos;s broken, and what would be better, across our internal systems.
           </p>
         </div>
         <button
@@ -368,7 +370,7 @@ export default function BugsDashboard({
                 <div className="p-8 rounded-xl border border-slate-200 bg-white text-center">
                   <p className="text-sm text-slate-500">
                     {bugs.length === 0
-                      ? "No bugs reported yet. That, or nobody's told us."
+                      ? "Nothing logged yet — bugs and improvement ideas both belong here."
                       : "Nothing matches those filters."}
                   </p>
                 </div>
@@ -1085,7 +1087,7 @@ function ReportModal({
     >
       <div className="bg-white rounded-xl w-full max-w-lg shadow-xl">
         <div className="px-6 py-4 border-b border-slate-200">
-          <h3 className="font-semibold text-slate-900">Report a bug</h3>
+          <h3 className="font-semibold text-slate-900">Report a bug or suggest an improvement</h3>
           <p className="text-xs text-slate-500 mt-0.5">
             The more specific, the faster it gets fixed.
           </p>

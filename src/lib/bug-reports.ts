@@ -53,6 +53,10 @@ export const BUG_TYPES = [
   { value: "ui", label: "Layout or display", color: "#eda100" },
   { value: "slow", label: "Slow or times out", color: "#e87ba4" },
   { value: "access", label: "Can't sign in / permission", color: "#008300" },
+  // Not a defect — "this works, but it would be better if…". Its own category
+  // so improvements don't hide inside Other, and so the Insights breakdown can
+  // separate what's broken from what's merely wanted.
+  { value: "improvement", label: "Improvement or idea", color: "#8c6d31" },
   { value: "other", label: "Other", color: "#4a3aa7" },
 ] as const;
 

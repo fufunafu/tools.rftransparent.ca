@@ -4,7 +4,8 @@ import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import BugsDashboard from "@/components/admin/BugsDashboard";
 
 export const metadata: Metadata = {
-  title: "Bug Reports | RF Tools",
+  // Kept short — this is the browser tab label, not the page heading.
+  title: "Bugs & Improvements | RF Tools",
   robots: { index: false, follow: false },
 };
 
