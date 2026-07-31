@@ -157,6 +157,12 @@ async function computeSalesByStore(): Promise<SalesByStore> {
   );
 
   const last7Keys = new Set(recentDayKeys(now, 7));
+  // The 7 complete days BEFORE today (-7..-1) — the baseline for "vs 7d".
+  // last7Keys includes today, so using it here left only 6 accumulating days
+  // divided by 7, understating the prior average ~14% and flattering today.
+  const prior7Keys = new Set(
+    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1), 7)
+  );
   const prev7Keys = new Set(
     recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7), 7)
   );
@@ -198,7 +204,7 @@ async function computeSalesByStore(): Promise<SalesByStore> {
       if (key === todayKey) {
         todayRevenue += revenue;
         todayOrders += 1;
-      } else if (minutesIntoDay(new Date(order.createdAt)) <= cutoffMinutes && last7Keys.has(key)) {
+      } else if (minutesIntoDay(new Date(order.createdAt)) <= cutoffMinutes && prior7Keys.has(key)) {
         // Prior days clipped to the current hour, so a half-finished day is
         // never compared against full ones.
         priorToHourTotal += revenue;
@@ -388,8 +394,26 @@ async function getFulfillmentPicture(since: Date) {
   };
 }
 
+// Everything below sales is also served through cached(): the wall board
+// polls every 90 seconds all day, and without a cache every poll re-pulled
+// Shopify (~15 paginated queries). Day-keyed like sales so the first request
+// after midnight can't serve yesterday's numbers as today's; only successful
+// computes are cached, so a failing source keeps degrading rather than
+// pinning a stale success.
+const OPS_TTL_MS = 5 * 60 * 1000;
+
 export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
   try {
+    const dayKey = businessDayKey(new Date().toISOString());
+    const { data } = await cached(`ops:warehouse:${dayKey}`, OPS_TTL_MS, computeWarehouseOps);
+    return ok(data);
+  } catch (err) {
+    return fail(err, "Could not read warehouse data.");
+  }
+}
+
+async function computeWarehouseOps(): Promise<WarehouseOps> {
+  {
     const now = new Date();
     const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30).toISOString().slice(0, 10);
 
@@ -432,7 +456,7 @@ export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
         (p.sop_label === "reorder" || p.sop_label === "reorder_plus_montreal")
     );
 
-    return ok({
+    return {
       today: sumOutput(rows, todayKeys),
       last7: sumOutput(rows, last7Keys),
       last30: sumOutput(rows, last30Keys),
@@ -453,9 +477,7 @@ export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
       montrealTransfers: products.filter(
         (p) => p.sop_label === "montreal_transfer" || p.sop_label === "reorder_plus_montreal"
       ).length,
-    });
-  } catch (err) {
-    return fail(err, "Could not read warehouse data.");
+    };
   }
 }
 
@@ -589,34 +611,43 @@ async function fetchAllRows<T>(
 
 export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps>> {
   try {
-    const now = new Date();
-    const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30).toISOString();
-    const yesterdayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
-    const todayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
-    const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
-
-    const quotes = await getQuoteWindows(now);
-
-    const all = await fetchAllRows<CallRecord>((from, to) =>
-      getSupabase()
-        .from("call_records")
-        .select("id, call_start, call_end, from_number, to_number, direction, duration_min, charge, endpoint, source")
-        .gte("call_start", since)
-        .order("call_start", { ascending: true })
-        .range(from, to)
-    );
-
-    return ok({
-      yesterday: windowFrom(
-        all.filter((r) => r.call_start >= yesterdayStart && r.call_start < todayStart)
-      ),
-      last7: windowFrom(all.filter((r) => r.call_start >= sevenStart)),
-      last30: windowFrom(all),
-      quotes,
-    });
+    const dayKey = businessDayKey(new Date().toISOString());
+    const { data } = await cached(`ops:cs:${dayKey}`, OPS_TTL_MS, computeCustomerServiceOps);
+    return ok(data);
   } catch (err) {
     return fail(err, "Could not read call records.");
   }
+}
+
+async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
+  const now = new Date();
+  const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30).toISOString();
+  const yesterdayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
+  const todayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
+  const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
+
+  const quotes = await getQuoteWindows(now);
+
+  const all = await fetchAllRows<CallRecord>((from, to) =>
+    getSupabase()
+      .from("call_records")
+      .select("id, call_start, call_end, from_number, to_number, direction, duration_min, charge, endpoint, source")
+      .gte("call_start", since)
+      // id as tie-break: same-second calls at a page boundary would otherwise
+      // have no deterministic order and could be skipped or doubled.
+      .order("call_start", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to)
+  );
+
+  return {
+    yesterday: windowFrom(
+      all.filter((r) => r.call_start >= yesterdayStart && r.call_start < todayStart)
+    ),
+    last7: windowFrom(all.filter((r) => r.call_start >= sevenStart)),
+    last30: windowFrom(all),
+    quotes,
+  };
 }
 
 // ─── Top performers ──────────────────────────────────────────────────────────
@@ -698,6 +729,16 @@ interface TaggedDraft extends RevenueFields {
 
 export async function getTopPerformers(): Promise<Result<TopPerformers>> {
   try {
+    const dayKey = businessDayKey(new Date().toISOString());
+    const { data } = await cached(`ops:performers:${dayKey}`, OPS_TTL_MS, computeTopPerformers);
+    return ok(data);
+  } catch (err) {
+    return fail(err, "Could not read performer data.");
+  }
+}
+
+async function computeTopPerformers(): Promise<TopPerformers> {
+  {
     const now = new Date();
     const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30);
     const start60 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -60);
@@ -859,9 +900,7 @@ export async function getTopPerformers(): Promise<Result<TopPerformers>> {
       .filter((p) => p.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    return ok({ sales, warehouse, customerService });
-  } catch (err) {
-    return fail(err, "Could not read performer data.");
+    return { sales, warehouse, customerService };
   }
 }
 
@@ -916,6 +955,23 @@ export async function getOpsDashboard(baseUrl: string, cookie: string): Promise<
 
 export async function getCollectionOps(baseUrl: string, cookie: string): Promise<Result<CollectionOps>> {
   try {
+    // Cached shared, not per session — the figures are company-wide, and the
+    // token-authed wall board (which has no cookie) then shows collection too
+    // whenever any signed-in load has warmed the cache. A cold cache with no
+    // cookie throws and is NOT cached, so the wall degrades instead of
+    // pinning a failure.
+    const dayKey = businessDayKey(new Date().toISOString());
+    const { data } = await cached(`ops:collection:${dayKey}`, OPS_TTL_MS, () =>
+      computeCollectionOps(baseUrl, cookie)
+    );
+    return ok(data);
+  } catch (err) {
+    return fail(err, "Could not read unpaid orders.");
+  }
+}
+
+async function computeCollectionOps(baseUrl: string, cookie: string): Promise<CollectionOps> {
+  {
     const res = await fetch(`${baseUrl}/api/shopify/accounting?storeId=store1`, {
       headers: { cookie },
       cache: "no-store",
@@ -931,7 +987,7 @@ export async function getCollectionOps(baseUrl: string, cookie: string): Promise
     const over90 = orders.filter((o) => (o.daysPending ?? 0) >= 90);
     const oldest = [...orders].sort((a, b) => (b.daysPending ?? 0) - (a.daysPending ?? 0))[0];
 
-    return ok({
+    return {
       over30Count: over30.length,
       over30Amount: over30.reduce((s, o) => s + amountOf(o), 0),
       over60Count: over60.length,
@@ -954,8 +1010,6 @@ export async function getCollectionOps(baseUrl: string, cookie: string): Promise
             order: oldest.orderNumber ?? oldest.name ?? "",
           }
         : null,
-    });
-  } catch (err) {
-    return fail(err, "Could not read unpaid orders.");
+    };
   }
 }

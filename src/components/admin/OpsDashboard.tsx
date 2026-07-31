@@ -651,7 +651,11 @@ function PerformerList({
         <p className="px-4 py-3 text-[12px] text-slate-400">No activity in the last 30 days.</p>
       ) : (
         ranked.map((p, i) => {
-          const d = delta(p.metrics[chosen.key] ?? 0, p.previous);
+          // `previous` is the prior-30-day value of the DEFAULT metric only,
+          // so a delta is honest only when that's what's being ranked —
+          // comparing quoted-$ against last month's sold-$ isn't a trend.
+          const d =
+            chosen.key === options[0].key ? delta(p.metrics[chosen.key] ?? 0, p.previous) : null;
           return (
             <Link
               key={p.id}
