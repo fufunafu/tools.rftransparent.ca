@@ -1,18 +1,20 @@
 "use client";
 
-import { useState, useEffect, useSyncExternalStore } from "react";
+import { Fragment, useState, useEffect, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
 import CommandPalette from "@/components/CommandPalette";
 import SidebarNavRow from "@/components/SidebarNavRow";
 import {
+  NAV_GROUPS,
   NAV_ITEMS,
   SETTINGS_ITEM,
   filterNavItem,
   getSearchTargets,
   matchesItem,
   type NavItem,
+  type NavSection,
   type ViewerAccess,
 } from "@/components/nav-items";
 
@@ -29,21 +31,42 @@ const SearchIcon = ({ className }: { className: string }) => (
   </svg>
 );
 
-const COLLAPSIBLE_ITEMS = [...NAV_ITEMS, SETTINGS_ITEM].filter((item) => item.children?.length);
+const COLLAPSIBLE_ITEMS: NavItem[] = [...NAV_ITEMS, SETTINGS_ITEM].filter(
+  (item) => item.children?.length,
+);
 
 function sectionForPathname(pathname: string) {
   return COLLAPSIBLE_ITEMS.find((item) => matchesItem(item, pathname))?.href ?? null;
 }
 
+const SignOutIcon = ({ className }: { className: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
+  </svg>
+);
+
+/** "Anne Gao" -> "AG"; falls back to the email when there's no name. */
+function initialsFor(name: string | null, email: string): string {
+  const source = name?.trim() || email.split("@")[0] || "";
+  const words = source.split(/[\s._-]+/).filter(Boolean);
+  if (words.length === 0) return "?";
+  const letters = words.length === 1 ? words[0].slice(0, 2) : words[0][0] + words[1][0];
+  return letters.toUpperCase();
+}
+
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize(256);
+  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize(240);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [viewerAccess, setViewerAccess] = useState<ViewerAccess>({
     isAdmin: false,
     isManagement: false,
+  });
+  const [viewer, setViewer] = useState<{ name: string | null; email: string }>({
+    name: null,
+    email: "",
   });
   const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
@@ -52,7 +75,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   const collapsed = !isMobile && rawCollapsed;
   const visibleNavItems = NAV_ITEMS
     .map((item) => filterNavItem(item, viewerAccess))
-    .filter((item): item is NavItem => item !== null);
+    .filter((item): item is NavSection => item !== null);
   const visibleSettings = filterNavItem(SETTINGS_ITEM, viewerAccess);
   const searchTargets = getSearchTargets(
     visibleSettings ? [...visibleNavItems, visibleSettings] : visibleNavItems,
@@ -109,11 +132,15 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     const ctrl = new AbortController();
     fetch("/api/admin/me", { signal: ctrl.signal })
       .then((res) => (res.ok ? res.json() : null))
-      .then((viewer) => {
-        if (!viewer) return;
+      .then((me) => {
+        if (!me) return;
         setViewerAccess({
-          isAdmin: viewer.isAdmin === true,
-          isManagement: viewer.isManagement === true,
+          isAdmin: me.isAdmin === true,
+          isManagement: me.isManagement === true,
+        });
+        setViewer({
+          name: typeof me.name === "string" ? me.name : null,
+          email: typeof me.email === "string" ? me.email : "",
         });
       })
       .catch(() => {});
@@ -179,36 +206,28 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className={`bg-slate-50 border-r border-slate-200/80 flex flex-col z-40 relative
+        className={`bg-white border-r border-slate-200 flex flex-col z-40 relative
           max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:!w-72 max-md:shadow-xl
           max-md:transition-transform max-md:duration-200
           ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
           md:shrink-0 md:transition-[width] md:duration-200`}
       >
-        {/* Logo + collapse toggle */}
-        <div className="px-3 py-4 flex items-center gap-3">
-          {/* The mark and wordmark are one link home, the way a logo behaves
-              everywhere else. */}
-          <Link
-            href="/"
-            onClick={() => setMobileOpen(false)}
-            title="Operations dashboard"
-            className="flex items-center gap-3 min-w-0 flex-1 rounded-lg hover:opacity-80 transition-opacity"
-          >
-            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-sm shadow-blue-200 flex items-center justify-center shrink-0">
-              <span className="text-white text-xs font-bold tracking-wide">RF</span>
+        {/* Logo + collapse toggle. Not a link — Today is the home row now, and
+            two ways to reach the same page just raises the question of whether
+            they differ. */}
+        <div className="px-3 pt-3 pb-2.5 flex items-center gap-2.5">
+          <div className="w-[26px] h-[26px] rounded-[7px] bg-blue-600 flex items-center justify-center shrink-0">
+            <span className="text-white text-[10.5px] font-bold tracking-[0.02em]">RF</span>
+          </div>
+          {!collapsed && (
+            <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-slate-900">
+              RF Transparent
             </span>
-            {!collapsed && (
-              <span className="min-w-0 flex-1 block">
-                <span className="block truncate text-sm font-semibold text-slate-900">RF Transparent</span>
-                <span className="block text-[10px] font-medium text-slate-400">Internal tools</span>
-              </span>
-            )}
-          </Link>
+          )}
           {/* Desktop: collapse/expand toggle */}
           <button
             onClick={toggleCollapsed}
-            className="max-md:hidden w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-white hover:shadow-sm transition-all shrink-0"
+            className="max-md:hidden w-[22px] h-[22px] rounded-md flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
@@ -229,7 +248,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         </div>
 
         {/* Page search — opens the same palette as ⌘K */}
-        <div className="px-3 pb-3">
+        <div className="px-3 pb-1.5">
           <button
             type="button"
             onClick={() => {
@@ -237,18 +256,16 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               setSearchOpen(true);
             }}
             title={collapsed ? "Search pages" : undefined}
-            className={`w-full h-10 flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white text-slate-400 shadow-sm shadow-slate-200/40 hover:text-slate-700 hover:border-slate-300 transition-all ${
-              collapsed ? "justify-center" : "px-3"
+            className={`w-full h-[30px] flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600 transition-colors ${
+              collapsed ? "justify-center" : "px-[9px]"
             }`}
           >
-            <SearchIcon className="w-[18px] h-[18px] shrink-0" />
+            <SearchIcon className="w-3.5 h-3.5 shrink-0" />
             {!collapsed && (
               <>
-                <span className="flex-1 text-left text-sm">Search</span>
+                <span className="flex-1 text-left text-[12.5px]">Search</span>
                 {modKey ? (
-                  <kbd className="rounded-md border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-sans text-slate-400">
-                    {modKey}K
-                  </kbd>
+                  <kbd className="font-sans text-[10px] text-slate-300">{modKey}K</kbd>
                 ) : null}
               </>
             )}
@@ -259,85 +276,101 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             toggle button) closes the drawer — delegated so we don't thread an
             onClick through every link. */}
         <nav
-          className="flex-1 px-3 py-2 overflow-y-auto"
+          className="flex-1 px-3 pt-1 pb-2 overflow-y-auto flex flex-col gap-0.5"
           aria-label="Main navigation"
           onClick={(e) => {
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
         >
-          {!collapsed && (
-            <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-              Workspace
-            </p>
-          )}
-          <div className="space-y-1">
-            {visibleNavItems.map((item) => (
-              <SidebarNavRow
-                key={item.href}
-                item={item}
-                pathname={pathname}
-                collapsed={collapsed}
-                expanded={Boolean(item.children?.length) && !collapsed && isSectionOpen(item)}
-                onToggle={() => toggleSection(item)}
-                openProblems={openProblems}
-              />
-            ))}
-          </div>
+          {NAV_GROUPS.map((group, groupIndex) => {
+            const items = visibleNavItems.filter((item) => item.group === group.id);
+            if (items.length === 0) return null;
+            return (
+              <Fragment key={group.id}>
+                {collapsed
+                  ? // No room for a label — a hairline keeps the grouping
+                    // legible in the rail.
+                    groupIndex > 0 && <span className="my-1.5 h-px w-6 mx-auto bg-slate-100" />
+                  : (
+                    <p
+                      className={`${groupIndex === 0 ? "mt-2" : "mt-3"} mb-[3px] px-[9px] text-[9.5px] font-semibold uppercase tracking-[0.13em] text-slate-300`}
+                    >
+                      {group.label}
+                    </p>
+                  )}
+                {items.map((item) => (
+                  <SidebarNavRow
+                    key={item.href}
+                    item={item}
+                    pathname={pathname}
+                    collapsed={collapsed}
+                    expanded={Boolean(item.children?.length) && !collapsed && isSectionOpen(item)}
+                    onToggle={() => toggleSection(item)}
+                    openProblems={openProblems}
+                  />
+                ))}
+              </Fragment>
+            );
+          })}
         </nav>
 
-        {/* Settings — pinned above Sign out so admin pages stay out of the
-            day-to-day list but never scroll out of reach. */}
-        {visibleSettings && <div
-          className="px-3 pt-2 border-t border-slate-200/80"
+        {/* One footer block: Settings, then who you're signed in as. Reporting
+            a bug and signing out hang off the identity row rather than taking
+            a full-width strip each. */}
+        <div
+          className="px-3 pt-2 pb-2.5 border-t border-slate-100 flex flex-col gap-0.5"
           onClick={(e) => {
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
         >
-          <SidebarNavRow
-            item={visibleSettings}
-            pathname={pathname}
-            collapsed={collapsed}
-            expanded={!collapsed && isSectionOpen(visibleSettings)}
-            onToggle={() => toggleSection(visibleSettings)}
-            openProblems={openProblems}
-          />
-        </div>}
+          {visibleSettings && (
+            <SidebarNavRow
+              item={visibleSettings}
+              pathname={pathname}
+              collapsed={collapsed}
+              expanded={!collapsed && isSectionOpen(visibleSettings)}
+              onToggle={() => toggleSection(visibleSettings)}
+              openProblems={openProblems}
+            />
+          )}
 
-        {/* Report a bug — deliberately not a nav section. It's a thing you do
-            from wherever you hit the bug, so it sits small and out of the way
-            rather than competing with the day-to-day pages. */}
-        <div className="px-3 py-2">
-          <Link
-            href="/bugs"
-            onClick={() => setMobileOpen(false)}
-            title={collapsed ? "Report a bug" : undefined}
-            className={`flex min-h-9 items-center gap-2.5 rounded-xl text-xs font-medium transition-colors ${
-              pathname === "/bugs"
-                ? "text-blue-700 bg-blue-50"
-                : "text-slate-500 hover:text-slate-800 hover:bg-white"
-            } ${collapsed ? "justify-center" : "px-3"}`}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-4 h-4 shrink-0">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.047.829-1.867 1.866-2.013A24.204 24.204 0 0 1 12 12.75Zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 0 1-1.152 6.06M12 12.75c-2.883 0-5.647.508-8.207 1.44a23.91 23.91 0 0 0 1.152 6.06M12 12.75a2.25 2.25 0 0 0 2.248-2.354M12 12.75a2.25 2.25 0 0 1-2.248-2.354M12 8.25c.995 0 1.971-.08 2.922-.236.403-.066.74-.358.795-.762a3.778 3.778 0 0 0-.399-2.25M12 8.25c-.995 0-1.97-.08-2.922-.236-.402-.066-.74-.358-.795-.762a3.734 3.734 0 0 1 .4-2.253M12 8.25a2.25 2.25 0 0 0-2.248 2.146M12 8.25a2.25 2.25 0 0 1 2.248 2.146M8.683 5a6.032 6.032 0 0 1-1.155-1.002c.07-.63.27-1.222.574-1.747m.581 2.749A3.75 3.75 0 0 1 15.318 5m0 0c.427-.283.815-.62 1.155-.999a4.471 4.471 0 0 0-.575-1.752M4.921 6a24.048 24.048 0 0 0-.392 3.314c1.668.546 3.416.914 5.223 1.082M19.08 6c.205 1.08.337 2.187.392 3.314a23.882 23.882 0 0 1-5.223 1.082" />
-            </svg>
-            {!collapsed && <span className="flex-1">Report a bug</span>}
-          </Link>
-        </div>
-
-        {/* Sign out */}
-        <div className="px-3 py-3 border-t border-slate-200/80">
-          <a
-            href="/api/logout"
-            className={`flex h-10 items-center gap-2.5 rounded-xl text-sm font-medium text-slate-500 hover:text-slate-900 hover:bg-white transition-colors ${
-              collapsed ? "justify-center" : "px-3"
-            }`}
-            title={collapsed ? "Sign out" : undefined}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5 shrink-0">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
-            </svg>
-            {!collapsed && "Sign out"}
-          </a>
+          {collapsed ? (
+            <span
+              className="mt-1.5 w-6 h-6 mx-auto rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
+              title={viewer.name ?? viewer.email}
+            >
+              {initialsFor(viewer.name, viewer.email)}
+            </span>
+          ) : (
+            <div className="flex items-center gap-2.5 h-[38px] pl-[9px] pr-[5px]">
+              <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center shrink-0">
+                {initialsFor(viewer.name, viewer.email)}
+              </span>
+              <span className="flex-1 min-w-0 flex flex-col leading-[1.25]">
+                <span className="truncate text-xs font-semibold text-slate-900">
+                  {viewer.name ?? viewer.email ?? ""}
+                </span>
+                <Link
+                  href="/bugs"
+                  className={`text-[10px] w-fit transition-colors ${
+                    pathname === "/bugs"
+                      ? "text-slate-600 font-medium"
+                      : "text-slate-300 hover:text-slate-500"
+                  }`}
+                >
+                  Report a bug
+                </Link>
+              </span>
+              <a
+                href="/api/logout"
+                title="Sign out"
+                aria-label="Sign out"
+                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors shrink-0"
+              >
+                <SignOutIcon className="w-[15px] h-[15px]" />
+              </a>
+            </div>
+          )}
         </div>
         {/* Resize handle — desktop only (drag is mouse-driven) */}
         {!collapsed && (

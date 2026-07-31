@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 400;
-const COLLAPSED_WIDTH = 64;
+const COLLAPSED_WIDTH = 56;
 
 export function useSidebarResize(initialWidth = 240) {
   const [collapsed, setCollapsed] = useState(false);
