@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
-import { isMissingColumn } from "@/lib/bug-reports";
+import { isMissingColumn, BUG_BUCKET } from "@/lib/bug-reports";
 
 // The back-and-forth on one bug. Anyone signed in can read and add; only an
 // admin can remove a comment (and only ever their own mistakes — deleting
@@ -85,7 +85,30 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  const { error } = await getSupabase().from("bug_comments").delete().eq("id", id);
+  const supabase = getSupabase();
+
+  // The attachment ROWS cascade with the comment, but the stored objects
+  // don't — drop them first or the bucket keeps paying for images nothing
+  // points at. Same reasoning as deleting a whole report.
+  const { data: attachments, error: lookupError } = await supabase
+    .from("bug_attachments")
+    .select("path")
+    .eq("comment_id", id);
+
+  // Before migration 064 there's no comment_id column and so no objects to
+  // clean up; that isn't a reason to refuse the delete.
+  if (lookupError && !isMissingColumn(lookupError)) {
+    return NextResponse.json({ error: lookupError.message }, { status: 500 });
+  }
+  const paths = (attachments ?? []).map((a) => a.path);
+  if (paths.length) {
+    const { error: storageError } = await supabase.storage.from(BUG_BUCKET).remove(paths);
+    // Orphaned bytes aren't worth failing the delete over — the comment is
+    // what the user asked to remove.
+    if (storageError) console.warn(`[bugs] could not remove objects: ${storageError.message}`);
+  }
+
+  const { error } = await supabase.from("bug_comments").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ ok: true });
 }
