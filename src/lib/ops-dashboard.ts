@@ -276,10 +276,18 @@ export interface WarehouseOps {
   inventoryValue: number;
   unitsOnHand: number;
   openPoValue: number;
+  /** Open purchase orders and how far off the soonest arrival is. */
+  openPoCount: number;
+  daysUntilNextArrival: number | null;
   /** Glass SKUs flagged reorder / reorder_plus_montreal. */
   reorderSkus: number;
   reorderUnits: number;
   montrealTransfers: number;
+  /** Unfulfilled Shopify orders across every store. */
+  unfulfilled: number;
+  oldestUnfulfilledDays: number | null;
+  /** Mean hours from order to first fulfillment over the last 30 days. */
+  avgFulfillmentHours: number | null;
 }
 
 const EMPTY_OUTPUT: WarehouseOutput = { boxesBuilt: 0, ordersPacked: 0, walkinPickup: 0 };
@@ -301,6 +309,85 @@ function sumOutput(
   );
 }
 
+const UNFULFILLED_QUERY = `
+  query($after: String) {
+    orders(first: 250, after: $after, sortKey: CREATED_AT, query: "fulfillment_status:unfulfilled") {
+      edges { node { createdAt } cursor }
+      pageInfo { hasNextPage }
+    }
+  }
+`;
+
+const FULFILLED_QUERY = `
+  query($after: String, $filter: String!) {
+    orders(first: 250, after: $after, query: $filter) {
+      edges { node { createdAt fulfillments(first: 1) { createdAt } } cursor }
+      pageInfo { hasNextPage }
+    }
+  }
+`;
+
+interface FulfilledOrder {
+  createdAt: string;
+  fulfillments: { createdAt: string }[];
+}
+
+/** Backlog across every store, plus how long shipping currently takes. */
+async function getFulfillmentPicture(since: Date) {
+  const stores = getStores();
+  const [unfulfilledResults, fulfilledResults] = await Promise.all([
+    Promise.allSettled(
+      stores.map((s) =>
+        fetchAllPages<{ createdAt: string }, { orders: { edges: { node: { createdAt: string }; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+          { storeId: s.id, query: UNFULFILLED_QUERY, getConnection: (d) => d.orders, maxPages: 20 }
+        )
+      )
+    ),
+    Promise.allSettled(
+      stores.map((s) =>
+        fetchAllPages<FulfilledOrder, { orders: { edges: { node: FulfilledOrder; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+          {
+            storeId: s.id,
+            query: FULFILLED_QUERY,
+            variables: { filter: `created_at:>='${since.toISOString()}' AND fulfillment_status:fulfilled` },
+            getConnection: (d) => d.orders,
+            maxPages: 20,
+          }
+        )
+      )
+    ),
+  ]);
+
+  const openOrders = unfulfilledResults.flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []));
+  const oldest = openOrders.reduce<string | null>(
+    (min, o) => (min === null || o.createdAt < min ? o.createdAt : min),
+    null
+  );
+
+  let hoursTotal = 0;
+  let hoursCount = 0;
+  for (const r of fulfilledResults) {
+    if (r.status !== "fulfilled") continue;
+    for (const o of r.value.nodes) {
+      const first = o.fulfillments?.[0]?.createdAt;
+      if (!first) continue;
+      const hours = (new Date(first).getTime() - new Date(o.createdAt).getTime()) / 3_600_000;
+      if (hours >= 0) {
+        hoursTotal += hours;
+        hoursCount += 1;
+      }
+    }
+  }
+
+  return {
+    unfulfilled: openOrders.length,
+    oldestUnfulfilledDays: oldest
+      ? Math.floor((Date.now() - new Date(oldest).getTime()) / 86_400_000)
+      : null,
+    avgFulfillmentHours: hoursCount > 0 ? Math.round((hoursTotal / hoursCount) * 10) / 10 : null,
+  };
+}
+
 export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
   try {
     const now = new Date();
@@ -313,7 +400,7 @@ export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
       walkin_pickup: number;
     };
 
-    const [rows, summary, products] = await Promise.all([
+    const [rows, summary, products, openPos, fulfillment] = await Promise.all([
       // Paged for the same reason the call query is — one row per employee
       // per day stays well under 1000 today, but a silent truncation here
       // would quietly under-report the team's output rather than error.
@@ -327,6 +414,11 @@ export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
       ),
       getPurchasingSummary(),
       listProductsWithMetrics(),
+      getSupabase()
+        .from("purchasing_orders")
+        .select("id")
+        .in("status", ["ordered", "in_transit"]),
+      getFulfillmentPicture(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30)),
     ]);
 
     // A day with no report contributes nothing — never estimate a missing day.
@@ -347,6 +439,15 @@ export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
       inventoryValue: summary.total_inventory_value,
       unitsOnHand: summary.units_on_hand,
       openPoValue: summary.open_po_value,
+      openPoCount: openPos.data?.length ?? 0,
+      // Soonest arrival across everything on order. Products with no inbound
+      // PO report null and are ignored rather than counted as "arriving today".
+      daysUntilNextArrival:
+        products
+          .map((p) => p.days_until_next_arrival)
+          .filter((d): d is number => typeof d === "number" && d >= 0)
+          .sort((a, b) => a - b)[0] ?? null,
+      ...fulfillment,
       reorderSkus: glassReorder.length,
       reorderUnits: glassReorder.reduce((sum, p) => sum + (p.suggested_qty ?? 0), 0),
       montrealTransfers: products.filter(
@@ -371,6 +472,66 @@ export interface CustomerServiceOps {
   yesterday: CallWindow;
   last7: CallWindow;
   last30: CallWindow;
+  quotes: QuoteWindows;
+}
+
+export interface QuoteWindows {
+  yesterday: number;
+  last7: number;
+  last30: number;
+  /** Net value of the last 30 days' quotes. */
+  quotedValue30: number;
+  /** COMPLETED ÷ total over the last 30 days, as a percentage. */
+  conversion30: number | null;
+}
+
+const DRAFTS_QUERY = `
+  query($after: String, $filter: String!) {
+    draftOrders(first: 250, after: $after, query: $filter) {
+      edges { node { createdAt status ${REVENUE_FIELDS} } cursor }
+      pageInfo { hasNextPage }
+    }
+  }
+`;
+
+interface DraftRow extends RevenueFields {
+  createdAt: string;
+  status: string;
+}
+
+/**
+ * Quotes = draft orders, excluding status OPEN. An OPEN draft is a work in
+ * progress rather than a quote that went out, and /api/kpi/metrics applies the
+ * same exclusion — the two pages must not disagree about what counts.
+ */
+async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
+  const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30);
+  const startYesterday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
+  const startToday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
+  const start7 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
+  const filter = `created_at:>='${start30.toISOString()}'`;
+
+  const results = await Promise.allSettled(
+    getStores().map((s) =>
+      fetchAllPages<DraftRow, { draftOrders: { edges: { node: DraftRow; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+        { storeId: s.id, query: DRAFTS_QUERY, variables: { filter }, getConnection: (d) => d.draftOrders, maxPages: 40 }
+      )
+    )
+  );
+
+  const drafts = results
+    .flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []))
+    .filter((d) => d.status !== "OPEN");
+
+  const completed = drafts.filter((d) => d.status === "COMPLETED").length;
+
+  return {
+    yesterday: drafts.filter((d) => d.createdAt >= startYesterday && d.createdAt < startToday).length,
+    last7: drafts.filter((d) => d.createdAt >= start7).length,
+    last30: drafts.length,
+    quotedValue30: drafts.reduce((sum, d) => sum + calcNetRevenue(d), 0),
+    conversion30: drafts.length > 0 ? (completed / drafts.length) * 100 : null,
+  };
 }
 
 /** NaN and Infinity reach the page as "—", never as a number. */
@@ -434,6 +595,8 @@ export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps
     const todayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
     const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
 
+    const quotes = await getQuoteWindows(now);
+
     const all = await fetchAllRows<CallRecord>((from, to) =>
       getSupabase()
         .from("call_records")
@@ -449,6 +612,7 @@ export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps
       ),
       last7: windowFrom(all.filter((r) => r.call_start >= sevenStart)),
       last30: windowFrom(all),
+      quotes,
     });
   } catch (err) {
     return fail(err, "Could not read call records.");
@@ -711,6 +875,8 @@ export interface CollectionOps {
   over90Count: number;
   totalUnpaid: number;
   unpaidCount: number;
+  /** Days sales outstanding, for the card's header note. */
+  dsoDays: number | null;
   oldest: { name: string; days: number; amount: number; order: string } | null;
 }
 
@@ -773,6 +939,13 @@ export async function getCollectionOps(baseUrl: string, cookie: string): Promise
       over90Count: over90.length,
       totalUnpaid: unpaid.totalUnpaid ?? orders.reduce((s, o) => s + amountOf(o), 0),
       unpaidCount: unpaid.count ?? orders.length,
+      // Keep a decimal: most Shopify orders are paid at checkout, so the mean
+      // is well under a day and rounding to an integer renders a true "0.4"
+      // as a "0" that reads like a broken tile.
+      dsoDays:
+        typeof json?.dso?.avgDays === "number"
+          ? Math.round(json.dso.avgDays * 10) / 10
+          : null,
       oldest: oldest
         ? {
             name: oldest.customer ?? oldest.name ?? "Unknown",

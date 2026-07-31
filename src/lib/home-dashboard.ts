@@ -185,6 +185,8 @@ export async function getSalesToday(): Promise<Result<SalesToday & { cachedAt: s
 
 export interface TicketStats {
   open: number;
+  /** Open tickets already past the alert age — the "9 over 30d" figure. */
+  overAlertAge: number;
   /** The longest-open ticket, with its age in days. Null when none are open. */
   oldest: { client_name: string; ticket_date: string; ageDays: number } | null;
   /** Age at which the oldest ticket is worth calling out on the page. */
@@ -195,7 +197,11 @@ export async function getTicketStats(): Promise<Result<TicketStats>> {
   try {
     const supabase = getSupabase();
 
-    const [openRes, oldestRes] = await Promise.all([
+    const alertCutoff = startOfDayInTimeZone(new Date(), BUSINESS_TIMEZONE, -STALE_TICKET_ALERT_DAYS)
+      .toISOString()
+      .slice(0, 10);
+
+    const [openRes, oldestRes, staleRes] = await Promise.all([
       supabase.from("problem_tickets").select("id", { count: "exact", head: true }).eq("status", "in_progress"),
       // Oldest-first so the first row is the one to name on the page.
       supabase
@@ -204,16 +210,23 @@ export async function getTicketStats(): Promise<Result<TicketStats>> {
         .eq("status", "in_progress")
         .order("ticket_date", { ascending: true })
         .limit(1),
+      supabase
+        .from("problem_tickets")
+        .select("id", { count: "exact", head: true })
+        .eq("status", "in_progress")
+        .lt("ticket_date", alertCutoff),
     ]);
 
     if (openRes.error) throw new Error(openRes.error.message);
     if (oldestRes.error) throw new Error(oldestRes.error.message);
+    if (staleRes.error) throw new Error(staleRes.error.message);
 
     const row = oldestRes.data?.[0] ?? null;
     const todayStart = startOfDayInTimeZone(new Date(), BUSINESS_TIMEZONE, 0).getTime();
 
     return ok({
       open: openRes.count ?? 0,
+      overAlertAge: staleRes.count ?? 0,
       oldest: row
         ? {
             client_name: row.client_name,

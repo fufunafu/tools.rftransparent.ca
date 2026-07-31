@@ -130,11 +130,14 @@ export default function OpsDashboard({
   today,
   attention,
   ticketStats,
+  wallHref,
 }: {
   data: OpsData;
   today: string;
   attention: string[];
   ticketStats: TicketStats | null;
+  /** /wall/[token], or null when no token has been issued. */
+  wallHref: string | null;
 }) {
   const paneRef = useRef<HTMLDivElement>(null);
   const [popover, setPopover] = useState<Popover | null>(null);
@@ -198,11 +201,18 @@ export default function OpsDashboard({
               ))}
             </div>
           )}
+          {/* Only shown once a token exists — the board lives at /wall/[token]
+              and bare /wall is a 404 by design. */}
           <a
-            href="/wall"
-            target="_blank"
+            href={wallHref ?? "/settings/rates"}
+            target={wallHref ? "_blank" : undefined}
             rel="noopener noreferrer"
-            className="h-7 inline-flex items-center gap-1.5 px-2.5 border border-slate-200 rounded-lg bg-white text-slate-600 text-xs hover:border-blue-300 hover:text-blue-700 transition-colors"
+            title={wallHref ? "Open the office wall board" : "No wall token issued yet"}
+            className={`h-7 inline-flex items-center gap-1.5 px-2.5 border rounded-lg bg-white text-xs transition-colors ${
+              wallHref
+                ? "border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700"
+                : "border-slate-200 text-slate-300 pointer-events-none"
+            }`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-[15px] h-[15px]">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 17.25v1.007a3 3 0 0 1-.879 2.122L7.5 21h9l-.621-.621A3 3 0 0 1 15 18.257V17.25m6-12V15a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 15V5.25m18 0A2.25 2.25 0 0 0 18.75 3H5.25A2.25 2.25 0 0 0 3 5.25m18 0V12a2.25 2.25 0 0 1-2.25 2.25H5.25A2.25 2.25 0 0 1 3 12V5.25" />
@@ -395,10 +405,12 @@ function SalesSection({ sales }: { sales: StoreSales[] }) {
 function CardShell({
   label,
   note,
+  footer,
   children,
 }: {
   label: string;
   note?: string;
+  footer?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -408,6 +420,11 @@ function CardShell({
         {note && <span className="text-[11px] text-slate-400">{note}</span>}
       </div>
       <div className="grid grid-cols-3 gap-px bg-slate-100">{children}</div>
+      {footer && (
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-slate-100 text-[12px]">
+          {footer}
+        </div>
+      )}
     </section>
   );
 }
@@ -444,11 +461,31 @@ function WarehouseCard({
       />
       <Stat
         label="Problem tickets" value={tickets ? num(tickets.open) : "—"}
-        sub={tickets?.oldest ? `oldest ${tickets.oldest.ageDays}d` : "none open"}
+        sub={tickets ? `open · ${tickets.overAlertAge} over ${tickets.alertDays}d` : "—"}
         href="/customer-service/problems"
-        tone={tickets?.oldest && tickets.oldest.ageDays >= tickets.alertDays ? "text-amber-600" : "text-slate-900"}
-        dataLabel="Problem tickets" calc="Tickets with status in_progress. Age measured from ticket_date, anchored at Toronto midnight."
+        tone={tickets && tickets.overAlertAge > 0 ? "text-amber-600" : "text-slate-900"}
+        dataLabel="Problem tickets" calc="Tickets with status in_progress, and how many are already past the 30-day alert age. Age measured from ticket_date, anchored at Toronto midnight."
         src="Supabase · problem_tickets"
+      />
+      <Stat
+        label="Oldest ticket"
+        value={tickets?.oldest ? `${tickets.oldest.ageDays} d` : "—"}
+        sub={tickets?.oldest?.client_name ?? "none open"}
+        href="/customer-service/problems"
+        tone={tickets?.oldest && tickets.oldest.ageDays >= tickets.alertDays ? "text-red-600" : "text-slate-900"}
+        dataLabel="Oldest ticket" calc="The longest-open in_progress ticket, measured from its ticket_date at Toronto midnight."
+        src="Supabase · problem_tickets"
+      />
+      <Stat
+        label="Unfulfilled" value={num(w.unfulfilled)}
+        sub={
+          w.oldestUnfulfilledDays !== null
+            ? `oldest ${w.oldestUnfulfilledDays}d · ${w.avgFulfillmentHours ?? "—"}h avg`
+            : "nothing waiting"
+        }
+        href="/warehouse"
+        dataLabel="Unfulfilled" calc="Shopify orders with fulfillment_status:unfulfilled across every store, the age of the oldest, and the mean hours from order to first fulfillment over the last 30 days."
+        src="Shopify Admin API · orders"
       />
       <Stat
         label="Inventory on hand" value={formatCADShort(w.inventoryValue)}
@@ -459,9 +496,12 @@ function WarehouseCard({
       />
       <Stat
         label="Inbound" value={formatCADShort(w.openPoValue)}
-        sub="open purchase orders"
+        sub={
+          `${w.openPoCount} PO${w.openPoCount === 1 ? "" : "s"}` +
+          (w.daysUntilNextArrival !== null ? ` · next lands ${w.daysUntilNextArrival}d` : "")
+        }
         href="/warehouse/purchasing/orders"
-        dataLabel="Inbound" calc="Value of purchase orders that are open — ordered and not yet received."
+        dataLabel="Inbound" calc="Value and count of purchase orders that are ordered or in transit, plus the soonest expected arrival across everything on order."
         src="Supabase · purchasing_orders"
       />
       <Stat
@@ -482,7 +522,26 @@ function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").Custome
     { key: "last30", label: "30 days", w: cs.last30 },
   ];
   return (
-    <CardShell label="Customer service" note="yesterday · 7d · 30d">
+    <CardShell
+      label="Customer service"
+      note="weekdays only · 48h window"
+      footer={
+        <>
+          <span className="text-slate-500">
+            Quoted value 30d{" "}
+            <span className="font-semibold text-slate-900 tabular-nums">
+              {formatCADShort(cs.quotes.quotedValue30)}
+            </span>
+          </span>
+          <span className="text-slate-500">
+            Conversion{" "}
+            <span className="font-semibold text-slate-900 tabular-nums">
+              {pct(cs.quotes.conversion30)}
+            </span>
+          </span>
+        </>
+      }
+    >
       {windows.map(({ key, label, w }) => (
         <Stat
           key={`miss-${key}`}
@@ -501,12 +560,27 @@ function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").Custome
           key={`cb-${key}`}
           label={`Callback ${label}`}
           value={pct(w.callbackRate)}
-          sub={w.avgResponseTime !== null ? `${num(w.avgResponseTime)}m avg` : "—"}
+          sub={w.avgResponseTime !== null ? `avg response ${num(w.avgResponseTime)} min` : "—"}
           href="/customer-service/phones"
           tone={w.callbackRate === null ? "text-slate-400" : toneAgainstTarget(w.callbackRate, 85, false)}
           dataLabel={`Callback — ${label}`}
           calc="Share of unanswered calls that got an outbound callback inside the 48-hour window. Average response is the mean time to that callback."
           src="Supabase · call_records (CIK + Grasshopper, deduplicated)"
+        />
+      ))}
+      {[
+        ["yesterday", cs.quotes.yesterday],
+        ["7 days", cs.quotes.last7],
+        ["30 days", cs.quotes.last30],
+      ].map(([label, value]) => (
+        <Stat
+          key={`q-${label}`}
+          label={`Quotes ${label as string}`}
+          value={num(value as number)}
+          href="/pipeline"
+          dataLabel={`Quotes — ${label as string}`}
+          calc="Draft orders created in the period, excluding status OPEN — an open draft is a work in progress, not a quote that went out. Same exclusion /api/kpi/metrics applies."
+          src="Shopify Admin API · draftOrders"
         />
       ))}
     </CardShell>
@@ -648,18 +722,20 @@ function CollectionCard({ c }: { c: import("@/lib/ops-dashboard").CollectionOps 
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">Collection</span>
           <span className="text-[10px] font-bold text-blue-600 bg-blue-50 rounded-[5px] px-[5px] py-[2px]">RF only</span>
         </span>
-        <span className="text-[11px] text-slate-400">unpaid Shopify orders</span>
+        <span className="text-[11px] text-slate-400">
+          unpaid Shopify orders{c.dsoDays !== null ? ` · DSO ${c.dsoDays} days` : ""}
+        </span>
       </div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-slate-100">
         <Stat
-          label="Over 30 days" value={formatCADShort(c.over30Amount)} sub={`${c.over30Count} orders`}
+          label="Over 30 days" value={num(c.over30Count)} sub={`orders · ${formatCADShort(c.over30Amount)}`}
           href="/accounting/analysis" tone={c.over30Count > 0 ? "text-amber-600" : "text-slate-900"}
           dataLabel="Over 30 days" calc="Unpaid orders whose days pending is 30 or more, counted and summed."
           src="Shopify Admin API · unpaid orders (RF)"
         />
         <Stat
-          label="Over 60 days" value={formatCADShort(c.over60Amount)}
-          sub={`${c.over60Count} orders · ${c.over90Count} over 90d`}
+          label="Over 60 days" value={num(c.over60Count)}
+          sub={`orders · ${formatCADShort(c.over60Amount)} · ${c.over90Count} over 90d`}
           href="/accounting/analysis" tone={c.over60Count > 0 ? "text-red-600" : "text-slate-900"}
           dataLabel="Over 60 days" calc="Unpaid orders at 60+ days, with the 90+ subset called out separately."
           src="Shopify Admin API · unpaid orders (RF)"

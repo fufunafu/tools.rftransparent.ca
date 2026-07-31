@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getOpsDashboard } from "@/lib/ops-dashboard";
 import { getTicketStats, getAutomationHealth } from "@/lib/home-dashboard";
+import { getWallToken } from "@/lib/settings";
 import { BUSINESS_TIMEZONE } from "@/lib/dates";
 import OpsDashboard from "@/components/admin/OpsDashboard";
 
@@ -26,10 +27,12 @@ export default async function HomePage() {
   const protocol = host.startsWith("localhost") ? "http" : "https";
   const cookie = headerList.get("cookie") ?? "";
 
-  const [data, tickets, automations] = await Promise.all([
+  const [data, tickets, automations, wallToken] = await Promise.all([
     getOpsDashboard(`${protocol}://${host}`, cookie),
     getTicketStats(),
     getAutomationHealth(),
+    // The board lives at /wall/[token]; linking to bare /wall 404s.
+    getWallToken(),
   ]);
 
   const today = new Intl.DateTimeFormat("en-CA", {
@@ -61,6 +64,7 @@ export default async function HomePage() {
       today={today}
       attention={attention}
       ticketStats={tickets.ok ? tickets.value : null}
+      wallHref={wallToken ? `/wall/${wallToken}` : null}
     />
   );
 }
