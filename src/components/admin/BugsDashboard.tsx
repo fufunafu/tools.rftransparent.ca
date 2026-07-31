@@ -6,6 +6,7 @@ import {
   type BugSystem,
   type BugComment,
   type BugAttachment,
+  type BugActivityEvent,
   BUG_TYPES,
   BUG_STATUSES,
   bugTypeLabel,
@@ -250,6 +251,24 @@ export default function BugsDashboard({
     );
   };
 
+  /**
+   * Open a report from the activity feed. Clears the filters first when the
+   * target isn't in the current list — otherwise clicking an activity line
+   * for, say, a repaired bug while filtered to "Still open" silently does
+   * nothing, which reads as the feed being broken.
+   */
+  const openFromActivity = (id: string) => {
+    if (!filtered.some((b) => b.id === id)) {
+      setStatusFilter("all");
+      setSystemFilter("all");
+    }
+    setOpenBug(id);
+    // Let the list re-render with the cleared filters before scrolling.
+    requestAnimationFrame(() => {
+      document.getElementById(`bug-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  };
+
   const removeBug = async (bug: BugReport) => {
     const res = await fetch(`/api/bugs?id=${bug.id}`, { method: "DELETE" });
     if (!res.ok) {
@@ -373,7 +392,13 @@ export default function BugsDashboard({
             </div>
 
             {bugs.length > 0 && (
-              <BugInsights metrics={metrics} systemBreakdown={systemBreakdown} />
+              // Sticky moved to the wrapper so Insights and Activity travel
+              // together rather than the second one scrolling out from under
+              // a pinned first.
+              <div className="space-y-4 xl:sticky xl:top-6">
+                <BugInsights metrics={metrics} systemBreakdown={systemBreakdown} />
+                <BugActivity currentUser={currentUser} onOpenBug={openFromActivity} />
+              </div>
             )}
           </div>
         </>
@@ -466,6 +491,102 @@ function BugSummary({ metrics }: { metrics: ReturnType<typeof getBugMetrics> }) 
   );
 }
 
+// ─── Activity ────────────────────────────────────────────────────────────────
+
+function activityVerb(e: BugActivityEvent, currentUser: string): React.ReactNode {
+  const who =
+    e.actor === null ? null : e.actor === currentUser ? "You" : shortName(e.actor);
+  const suffix =
+    e.images > 0 ? ` · ${e.images} image${e.images === 1 ? "" : "s"}` : "";
+
+  if (e.kind === "repaired") {
+    // No actor: repaired_at records when, nothing records who. Saying
+    // "someone" would be inventing a fact the data doesn't have.
+    return (
+      <>
+        Marked <span className="text-slate-500">repaired</span>
+      </>
+    );
+  }
+  return (
+    <>
+      <span className="font-medium text-slate-600">{who ?? "Someone"}</span>{" "}
+      {e.kind === "reported" ? "reported" : "commented"}
+      {suffix}
+    </>
+  );
+}
+
+const ACTIVITY_DOT: Record<BugActivityEvent["kind"], string> = {
+  reported: "bg-blue-400",
+  commented: "bg-slate-300",
+  repaired: "bg-emerald-400",
+};
+
+function BugActivity({
+  currentUser,
+  onOpenBug,
+}: {
+  currentUser: string;
+  onOpenBug: (id: string) => void;
+}) {
+  const [events, setEvents] = useState<BugActivityEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/bugs/activity", { cache: "no-store" });
+        if (!cancelled && res.ok) {
+          const json = await res.json();
+          setEvents(json.events ?? []);
+        }
+      } catch {
+        // A missing feed shouldn't take the page with it.
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (loading || events.length === 0) return null;
+
+  return (
+    <aside className="rounded-xl border border-slate-200 bg-white p-4">
+      <h3 className="font-semibold text-slate-900">Activity</h3>
+      <ul className="mt-3 space-y-2.5 max-h-80 overflow-y-auto">
+        {events.map((e) => (
+          <li key={e.id}>
+            <button
+              onClick={() => onOpenBug(e.bug_id)}
+              className="w-full text-left group"
+              title={new Date(e.at).toLocaleString()}
+            >
+              <span className="flex items-start gap-2">
+                <span
+                  className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${ACTIVITY_DOT[e.kind]}`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs text-slate-400">
+                    {activityVerb(e, currentUser)} · {relativeDay(e.at)}
+                  </span>
+                  <span className="block text-[13px] text-slate-700 truncate group-hover:text-blue-600 transition-colors">
+                    {e.bug_title}
+                  </span>
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  );
+}
+
 function BugInsights({
   metrics,
   systemBreakdown,
@@ -502,7 +623,7 @@ function BugInsights({
   const largestSystemCount = systemBreakdown[0]?.count ?? 1;
 
   return (
-    <aside className="rounded-xl border border-slate-200 bg-white p-4 xl:sticky xl:top-6">
+    <aside className="rounded-xl border border-slate-200 bg-white p-4">
       <div className="flex items-center justify-between gap-3">
         <h3 className="font-semibold text-slate-900">Insights</h3>
         <span className="text-xs text-slate-400">{metrics.total} reports</span>
@@ -663,7 +784,7 @@ function BugRow({
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+    <div id={`bug-${bug.id}`} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
       <button
         onClick={onToggle}
         className="w-full flex items-start gap-3 p-4 text-left hover:bg-slate-50 transition-colors"

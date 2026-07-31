@@ -152,6 +152,22 @@ export const ALLOWED_ATTACHMENT_TYPES = [
 /** Private Supabase Storage bucket holding the screenshot objects. */
 export const BUG_BUCKET = "bug-attachments";
 
+/**
+ * One line in the activity feed. Derived from existing rows rather than an
+ * events table, which is why `actor` is null on "repaired": repaired_at
+ * records when, but nothing records who.
+ */
+export interface BugActivityEvent {
+  id: string;
+  kind: "reported" | "commented" | "repaired";
+  at: string;
+  actor: string | null;
+  bug_id: string;
+  bug_title: string;
+  /** Images that arrived with this event, for a "· 2 images" suffix. */
+  images: number;
+}
+
 // ─── Migration guards ────────────────────────────────────────────────────────
 // Migrations here are applied by hand, so every query that depends on a new
 // table or column has to survive it not being there yet.
