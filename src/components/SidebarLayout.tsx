@@ -187,15 +187,24 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       >
         {/* Logo + collapse toggle */}
         <div className="px-3 py-4 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-sm shadow-blue-200 flex items-center justify-center shrink-0">
-            <span className="text-white text-xs font-bold tracking-wide">RF</span>
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-slate-900">RF Transparent</span>
-              <span className="block text-[10px] font-medium text-slate-400">Internal tools</span>
-            </div>
-          )}
+          {/* The mark and wordmark are one link home, the way a logo behaves
+              everywhere else. */}
+          <Link
+            href="/"
+            onClick={() => setMobileOpen(false)}
+            title="Operations dashboard"
+            className="flex items-center gap-3 min-w-0 flex-1 rounded-lg hover:opacity-80 transition-opacity"
+          >
+            <span className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-sm shadow-blue-200 flex items-center justify-center shrink-0">
+              <span className="text-white text-xs font-bold tracking-wide">RF</span>
+            </span>
+            {!collapsed && (
+              <span className="min-w-0 flex-1 block">
+                <span className="block truncate text-sm font-semibold text-slate-900">RF Transparent</span>
+                <span className="block text-[10px] font-medium text-slate-400">Internal tools</span>
+              </span>
+            )}
+          </Link>
           {/* Desktop: collapse/expand toggle */}
           <button
             onClick={toggleCollapsed}
@@ -352,10 +361,12 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
             </svg>
           </button>
-          <div className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
-            <span className="text-white text-[10px] font-bold">RF</span>
-          </div>
-          <span className="flex-1 text-sm font-semibold text-slate-900">RF Transparent</span>
+          <Link href="/" className="flex items-center gap-3 flex-1 min-w-0">
+            <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+              <span className="text-white text-[10px] font-bold">RF</span>
+            </span>
+            <span className="truncate text-sm font-semibold text-slate-900">RF Transparent</span>
+          </Link>
           {/* Phones have no keyboard shortcut, so search gets its own button */}
           <button
             onClick={() => setSearchOpen(true)}

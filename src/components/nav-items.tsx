@@ -1,6 +1,12 @@
 import type { NavTarget } from "@/components/CommandPalette";
 
 export type Status = "done" | "wip" | "todo";
+export type AccessLevel = "authenticated" | "admin" | "management";
+
+export interface ViewerAccess {
+  isAdmin: boolean;
+  isManagement: boolean;
+}
 
 export interface NavChild {
   href: string;
@@ -8,6 +14,7 @@ export interface NavChild {
   status: Status;
   // Same meaning as on NavItem — an absolute URL to a separate site.
   external?: boolean;
+  access?: AccessLevel;
 }
 
 export interface NavItem {
@@ -18,6 +25,7 @@ export interface NavItem {
   // When true, `href` is an absolute URL to a separate site — rendered as a
   // plain <a target="_blank"> instead of a Next.js <Link>.
   external?: boolean;
+  access?: AccessLevel;
   // Path prefixes that count as "inside" this section for highlighting and
   // auto-expanding. Defaults to `href`. Settings needs this because two of
   // its children (/employees, /health-check) predate the section and kept
@@ -69,7 +77,7 @@ export const NAV_ITEMS: NavItem[] = [
     children: [
       { href: "/warehouse", label: "Dashboard", status: "done" },
       { href: "/warehouse/report", label: "Daily Report", status: "done" },
-      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip" },
+      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip", access: "management" },
       {
         href: "https://orderstream-checker.vercel.app/",
         label: "Order Stream",
@@ -158,7 +166,7 @@ export const SETTINGS_ITEM: NavItem = {
     </svg>
   ),
   children: [
-    { href: "/settings/access", label: "Who Can Sign In", status: "done" },
+    { href: "/settings/access", label: "Who Can Sign In", status: "done", access: "admin" },
     { href: "/employees", label: "Employees", status: "done" },
     { href: "/settings/notifications", label: "Notifications", status: "done" },
     { href: "/settings/rates", label: "Rates & Thresholds", status: "done" },
@@ -175,10 +183,25 @@ export function matchesItem(item: NavItem, pathname: string): boolean {
   );
 }
 
-// Flat list of every destination the ⌘K palette can jump to. Sections with
-// children contribute their children (tagged with the section name) rather
-// than themselves, so nothing shows up twice.
-export const SEARCH_TARGETS: NavTarget[] = [...NAV_ITEMS, SETTINGS_ITEM].flatMap((item) =>
+export function canAccess(required: AccessLevel | undefined, viewer: ViewerAccess): boolean {
+  if (!required || required === "authenticated") return true;
+  if (required === "admin") return viewer.isAdmin;
+  return viewer.isManagement;
+}
+
+export function filterNavItem(item: NavItem, viewer: ViewerAccess): NavItem | null {
+  if (!canAccess(item.access, viewer)) return null;
+  if (!item.children) return item;
+
+  const children = item.children.filter((child) => canAccess(child.access, viewer));
+  if (children.length === 0) return null;
+  return { ...item, children };
+}
+
+// Flat list of destinations the current viewer can jump to. Sections with
+// children contribute their children rather than themselves.
+export function getSearchTargets(items: NavItem[]): NavTarget[] {
+  return items.flatMap((item) =>
   item.children
     ? item.children.map((child) => ({
         href: child.href,
@@ -187,4 +210,5 @@ export const SEARCH_TARGETS: NavTarget[] = [...NAV_ITEMS, SETTINGS_ITEM].flatMap
         external: child.external,
       }))
     : [{ href: item.href, label: item.label, external: item.external }]
-);
+  );
+}
