@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
+import { isMissingColumn } from "@/lib/bug-reports";
 
 // The back-and-forth on one bug. Anyone signed in can read and add; only an
 // admin can remove a comment (and only ever their own mistakes — deleting
@@ -21,7 +22,39 @@ export async function GET(req: NextRequest) {
 
   if (error?.code === "PGRST205") return NextResponse.json({ comments: [] });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ comments: data ?? [] });
+
+  const comments = data ?? [];
+  const ids = comments.map((c) => c.id);
+
+  // Images posted with a comment. Before migration 064 there's no comment_id
+  // column, so every comment simply has none.
+  const byComment = new Map<string, unknown[]>();
+  if (ids.length) {
+    const { data: attachments, error: attachError } = await getSupabase()
+      .from("bug_attachments")
+      .select("id, comment_id, filename, content_type, size_bytes, created_at")
+      .in("comment_id", ids)
+      .order("created_at", { ascending: true });
+
+    if (attachError && !isMissingColumn(attachError)) {
+      return NextResponse.json({ error: attachError.message }, { status: 500 });
+    }
+    for (const a of attachments ?? []) {
+      const list = byComment.get(a.comment_id) ?? [];
+      list.push({
+        id: a.id,
+        filename: a.filename,
+        content_type: a.content_type,
+        size_bytes: a.size_bytes,
+        created_at: a.created_at,
+      });
+      byComment.set(a.comment_id, list);
+    }
+  }
+
+  return NextResponse.json({
+    comments: comments.map((c) => ({ ...c, attachments: byComment.get(c.id) ?? [] })),
+  });
 }
 
 export async function POST(req: NextRequest) {

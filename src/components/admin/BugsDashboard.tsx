@@ -592,9 +592,12 @@ function BugRow({
 }) {
   const [comments, setComments] = useState<BugComment[]>([]);
   const [draft, setDraft] = useState("");
+  const [draftFiles, setDraftFiles] = useState<File[]>([]);
+  const [commentError, setCommentError] = useState<string | null>(null);
   const [posting, setPosting] = useState(false);
   const [loadedComments, setLoadedComments] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const commentFileInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!expanded || loadedComments) return;
@@ -608,21 +611,52 @@ function BugRow({
     })();
   }, [expanded, loadedComments, bug.id]);
 
+  const addDraftFiles = (incoming: FileList | File[] | null) => {
+    if (!incoming) return;
+    const next: File[] = [];
+    for (const file of Array.from(incoming)) {
+      if (!ALLOWED_ATTACHMENT_TYPES.includes(file.type)) continue;
+      if (file.size > MAX_ATTACHMENT_BYTES) continue;
+      next.push(file);
+    }
+    if (next.length) setDraftFiles((prev) => [...prev, ...next]);
+  };
+
   const post = async () => {
     const body = draft.trim();
-    if (!body) return;
+    // An image on its own is a legitimate comment — "here's the screen".
+    if (!body && draftFiles.length === 0) return;
     setPosting(true);
+    setCommentError(null);
     try {
       const res = await fetch("/api/bugs/comments", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bug_id: bug.id, body }),
+        body: JSON.stringify({ bug_id: bug.id, body: body || "(screenshot)" }),
       });
-      if (res.ok) {
-        const json = await res.json();
-        setComments((prev) => [...prev, json.comment]);
-        setDraft("");
+      if (!res.ok) {
+        setCommentError("Could not post that comment");
+        return;
       }
+      const json = await res.json();
+
+      // Same order as the report form: the comment exists first, so each
+      // image is filed against it and nothing is orphaned if a upload fails.
+      const uploaded: BugAttachment[] = [];
+      for (const file of draftFiles) {
+        const form = new FormData();
+        form.append("bug_id", bug.id);
+        form.append("comment_id", json.comment.id);
+        form.append("file", file);
+        const up = await fetch("/api/bugs/attachments", { method: "POST", body: form });
+        const upJson = await up.json();
+        if (up.ok) uploaded.push(upJson.attachment);
+        else setCommentError(upJson.error ?? `Could not upload ${file.name}`);
+      }
+
+      setComments((prev) => [...prev, { ...json.comment, attachments: uploaded }]);
+      setDraft("");
+      setDraftFiles([]);
     } finally {
       setPosting(false);
     }
@@ -747,25 +781,103 @@ function BugRow({
                       · {timestamp(c.created_at)}
                     </p>
                     <p className="text-slate-700 whitespace-pre-wrap mt-0.5">{c.body}</p>
+                    {c.attachments && c.attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-1.5">
+                        {c.attachments.map((a) => (
+                          <a
+                            key={a.id}
+                            href={`/api/bugs/attachments/${a.id}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={`/api/bugs/attachments/${a.id}`}
+                              alt={a.filename ?? "screenshot"}
+                              className="h-20 w-auto rounded-lg border border-slate-200 object-cover hover:border-blue-300 transition-colors"
+                            />
+                          </a>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
-            <div className="flex items-start gap-2">
-              <textarea
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={isAdmin ? "What was wrong, or what fixed it…" : "Add anything that helps…"}
-                rows={2}
-                className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-200"
+
+            {/* Composer. Paste is bound to the textarea because that's where
+                the cursor already is after ⌘⇧4 — no need to aim at a drop
+                zone to attach the screenshot you just took. */}
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                e.preventDefault();
+                addDraftFiles(e.dataTransfer.files);
+              }}
+            >
+              <div className="flex items-start gap-2">
+                <textarea
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onPaste={(e) => addDraftFiles(Array.from(e.clipboardData.files))}
+                  placeholder={isAdmin ? "What was wrong, or what fixed it…" : "Add anything that helps…"}
+                  rows={2}
+                  className="flex-1 px-3 py-2 rounded-lg border border-slate-200 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-200"
+                />
+                <button
+                  onClick={post}
+                  disabled={posting || (!draft.trim() && draftFiles.length === 0)}
+                  className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-40 transition-colors"
+                >
+                  {posting ? "…" : "Post"}
+                </button>
+              </div>
+
+              <div className="flex items-center gap-2 flex-wrap mt-1.5">
+                <button
+                  type="button"
+                  onClick={() => commentFileInput.current?.click()}
+                  className="inline-flex items-center gap-1 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-3.5 h-3.5">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m18.375 12.739-7.693 7.693a4.5 4.5 0 0 1-6.364-6.364l10.94-10.94A3 3 0 1 1 19.5 7.372L8.552 18.32m.009-.01-.01.01m5.699-9.941-7.81 7.81a1.5 1.5 0 0 0 2.112 2.13" />
+                  </svg>
+                  Attach an image
+                </button>
+                <span className="text-xs text-slate-300">or paste / drop one</span>
+                {draftFiles.map((f, i) => (
+                  <span
+                    key={`${f.name}-${i}`}
+                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-slate-100 text-xs text-slate-600"
+                  >
+                    {f.name}
+                    <button
+                      type="button"
+                      onClick={() => setDraftFiles((prev) => prev.filter((_, n) => n !== i))}
+                      className="text-slate-400 hover:text-red-600"
+                      aria-label={`Remove ${f.name}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+
+              <input
+                ref={commentFileInput}
+                type="file"
+                accept={ALLOWED_ATTACHMENT_TYPES.join(",")}
+                multiple
+                onChange={(e) => {
+                  addDraftFiles(e.target.files);
+                  e.target.value = "";
+                }}
+                className="hidden"
               />
-              <button
-                onClick={post}
-                disabled={posting || !draft.trim()}
-                className="px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-40 transition-colors"
-              >
-                {posting ? "…" : "Post"}
-              </button>
+
+              {commentError && (
+                <p className="text-xs text-red-600 mt-1.5">{commentError}</p>
+              )}
             </div>
           </div>
 

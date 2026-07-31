@@ -5,6 +5,7 @@ import {
   BUG_BUCKET,
   MAX_ATTACHMENT_BYTES,
   ALLOWED_ATTACHMENT_TYPES,
+  isMissingColumn,
 } from "@/lib/bug-reports";
 
 // Screenshot upload. The browser posts the file here rather than straight to
@@ -29,6 +30,10 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const bugId = form.get("bug_id");
   const file = form.get("file");
+  // Optional: set when the image is posted with a comment rather than filed
+  // with the report itself.
+  const commentIdRaw = form.get("comment_id");
+  const commentId = typeof commentIdRaw === "string" && commentIdRaw ? commentIdRaw : null;
 
   if (typeof bugId !== "string" || !bugId)
     return NextResponse.json({ error: "bug_id is required" }, { status: 400 });
@@ -70,22 +75,34 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const row = {
+    bug_id: bugId,
+    path,
+    filename: file.name.slice(-120),
+    content_type: file.type,
+    size_bytes: file.size,
+    uploaded_by: user.email,
+    ...(commentId ? { comment_id: commentId } : {}),
+  };
+
   const { data, error } = await supabase
     .from("bug_attachments")
-    .insert({
-      bug_id: bugId,
-      path,
-      filename: file.name.slice(-120),
-      content_type: file.type,
-      size_bytes: file.size,
-      uploaded_by: user.email,
-    })
+    .insert(row)
     .select("id, filename, content_type, size_bytes, created_at")
     .single();
 
   if (error) {
     // Don't leave bytes behind that no row points at.
     await supabase.storage.from(BUG_BUCKET).remove([path]);
+    if (commentId && isMissingColumn(error)) {
+      return NextResponse.json(
+        {
+          error:
+            "Images on comments aren't set up yet — apply migration 064_bug_comment_attachments.sql.",
+        },
+        { status: 503 }
+      );
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 

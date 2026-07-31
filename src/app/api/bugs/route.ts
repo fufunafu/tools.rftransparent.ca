@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
-import { isBugType, isBugStatus, BUG_BUCKET } from "@/lib/bug-reports";
+import {
+  isBugType,
+  isBugStatus,
+  BUG_BUCKET,
+  isMissingTable,
+  isMissingColumn,
+} from "@/lib/bug-reports";
 
 const COLUMNS =
   "id, system_id, title, type, status, description, steps, reported_by, created_at, updated_at, repaired_at";
@@ -12,10 +18,6 @@ function optionalText(value: unknown): string | null {
   return trimmed ? trimmed : null;
 }
 
-/** A missing table means migration 063 hasn't been applied by hand yet. */
-function isMissingTable(error: { code?: string } | null): boolean {
-  return error?.code === "PGRST205";
-}
 
 export async function GET() {
   if (!(await getAuthenticatedUser()))
@@ -36,15 +38,31 @@ export async function GET() {
   const bugs = data ?? [];
   const ids = bugs.map((b) => b.id);
 
+  const ATTACHMENT_COLUMNS = "id, bug_id, filename, content_type, size_bytes, created_at";
+
+  // Only the images filed with the report itself — ones tied to a comment
+  // render inside that comment. Falls back to the unfiltered query when
+  // migration 064 hasn't been applied, where every attachment is report-level
+  // anyway.
+  const reportAttachments = async () => {
+    if (!ids.length) return { data: [], error: null };
+    const filtered = await supabase
+      .from("bug_attachments")
+      .select(ATTACHMENT_COLUMNS)
+      .in("bug_id", ids)
+      .is("comment_id", null)
+      .order("created_at", { ascending: true });
+    if (!isMissingColumn(filtered.error)) return filtered;
+    return supabase
+      .from("bug_attachments")
+      .select(ATTACHMENT_COLUMNS)
+      .in("bug_id", ids)
+      .order("created_at", { ascending: true });
+  };
+
   // Attachments and comment counts in two queries rather than one per bug.
   const [attachmentsRes, commentsRes, systemsRes] = await Promise.all([
-    ids.length
-      ? supabase
-          .from("bug_attachments")
-          .select("id, bug_id, filename, content_type, size_bytes, created_at")
-          .in("bug_id", ids)
-          .order("created_at", { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
+    reportAttachments(),
     ids.length
       ? supabase.from("bug_comments").select("bug_id").in("bug_id", ids)
       : Promise.resolve({ data: [], error: null }),

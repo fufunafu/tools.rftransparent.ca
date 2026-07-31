@@ -22,6 +22,8 @@ export interface BugComment {
   author: string;
   body: string;
   created_at: string;
+  /** Images posted with this comment. Empty before migration 064. */
+  attachments?: BugAttachment[];
 }
 
 export interface BugReport {
@@ -149,3 +151,21 @@ export const ALLOWED_ATTACHMENT_TYPES = [
 
 /** Private Supabase Storage bucket holding the screenshot objects. */
 export const BUG_BUCKET = "bug-attachments";
+
+// ─── Migration guards ────────────────────────────────────────────────────────
+// Migrations here are applied by hand, so every query that depends on a new
+// table or column has to survive it not being there yet.
+
+/** The table doesn't exist — migration 063 hasn't been applied. */
+export function isMissingTable(error: { code?: string } | null): boolean {
+  return error?.code === "PGRST205";
+}
+
+/**
+ * The column doesn't exist — migration 064 (bug_attachments.comment_id)
+ * hasn't been applied. 42703 is Postgres on a filter; PGRST204 is PostgREST's
+ * schema cache on a write.
+ */
+export function isMissingColumn(error: { code?: string } | null): boolean {
+  return error?.code === "42703" || error?.code === "PGRST204";
+}
