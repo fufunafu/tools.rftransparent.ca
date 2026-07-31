@@ -56,7 +56,7 @@ export type NavSection = NavItem & { group: NavGroup };
 export const NAV_ITEMS: NavSection[] = [
   {
     href: "/",
-    label: "Today",
+    label: "Dashboard",
     status: "done",
     group: "overview",
     icon: (
