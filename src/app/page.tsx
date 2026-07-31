@@ -9,7 +9,7 @@ import { BUSINESS_TIMEZONE } from "@/lib/dates";
 import OpsDashboard from "@/components/admin/OpsDashboard";
 
 export const metadata: Metadata = {
-  title: "Operations | RF Tools",
+  title: "Dashboard | RF Tools",
   robots: { index: false, follow: false },
 };
 
