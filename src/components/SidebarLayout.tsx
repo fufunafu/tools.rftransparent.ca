@@ -6,7 +6,15 @@ import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
 import CommandPalette from "@/components/CommandPalette";
 import SidebarNavRow from "@/components/SidebarNavRow";
-import { NAV_ITEMS, SEARCH_TARGETS, SETTINGS_ITEM, matchesItem, type NavItem } from "@/components/nav-items";
+import {
+  NAV_ITEMS,
+  SETTINGS_ITEM,
+  filterNavItem,
+  getSearchTargets,
+  matchesItem,
+  type NavItem,
+  type ViewerAccess,
+} from "@/components/nav-items";
 
 // Shortcut hint for the search box. The platform is only knowable on the
 // client, so the server renders nothing and hydration fills it in — no
@@ -33,11 +41,22 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [viewerAccess, setViewerAccess] = useState<ViewerAccess>({
+    isAdmin: false,
+    isManagement: false,
+  });
   const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
   // the desktop collapse state. Shadowing `collapsed` here means the existing
   // nav markup below is unchanged.
   const collapsed = !isMobile && rawCollapsed;
+  const visibleNavItems = NAV_ITEMS
+    .map((item) => filterNavItem(item, viewerAccess))
+    .filter((item): item is NavItem => item !== null);
+  const visibleSettings = filterNavItem(SETTINGS_ITEM, viewerAccess);
+  const searchTargets = getSearchTargets(
+    visibleSettings ? [...visibleNavItems, visibleSettings] : visibleNavItems,
+  );
 
   // Track viewport (below Tailwind's md breakpoint = phone/small tablet).
   useEffect(() => {
@@ -78,6 +97,28 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   useEffect(() => {
     setOpenSection(sectionForPathname(pathname));
   }, [pathname]);
+
+  useEffect(() => {
+    if (
+      pathname === "/login" ||
+      pathname.startsWith("/print/") ||
+      pathname.startsWith("/survey/") ||
+      // The wall board is a chrome-less TV display — no sidebar, no top bar.
+      pathname.startsWith("/wall/")
+    ) return;
+    const ctrl = new AbortController();
+    fetch("/api/admin/me", { signal: ctrl.signal })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((viewer) => {
+        if (!viewer) return;
+        setViewerAccess({
+          isAdmin: viewer.isAdmin === true,
+          isManagement: viewer.isManagement === true,
+        });
+      })
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [pathname]);
   const isSectionOpen = (item: NavItem) => openSection === item.href;
   const toggleSection = (item: NavItem) =>
     setOpenSection((current) => (current === item.href ? null : item.href));
@@ -86,7 +127,13 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   // client-side navigation so resolving a ticket updates the badge promptly.
   const [openProblems, setOpenProblems] = useState(0);
   useEffect(() => {
-    if (pathname === "/login" || pathname.startsWith("/print/")) return;
+    if (
+      pathname === "/login" ||
+      pathname.startsWith("/print/") ||
+      pathname.startsWith("/survey/") ||
+      // The wall board is a chrome-less TV display — no sidebar, no top bar.
+      pathname.startsWith("/wall/")
+    ) return;
     let cancelled = false;
     fetch("/api/problems/count", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
@@ -101,14 +148,21 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
   // No sidebar on the login page, or on print-friendly routes (PO printouts
   // open in a new tab and shouldn't carry the app chrome).
-  if (pathname === "/login" || pathname.startsWith("/print/")) {
+  if (
+    pathname === "/login" ||
+    pathname.startsWith("/print/") ||
+    pathname.startsWith("/survey/") ||
+    // The wall board is a chrome-less TV display — it must fill 1920×1080
+    // edge to edge with no sidebar and no top bar.
+    pathname.startsWith("/wall/")
+  ) {
     return <>{children}</>;
   }
 
   return (
     <div className="flex h-screen">
       {searchOpen && (
-        <CommandPalette targets={SEARCH_TARGETS} onClose={() => setSearchOpen(false)} />
+        <CommandPalette targets={searchTargets} onClose={() => setSearchOpen(false)} />
       )}
 
       {/* Mobile backdrop — dims content and closes the drawer on tap */}
@@ -208,7 +262,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             </p>
           )}
           <div className="space-y-1">
-            {NAV_ITEMS.map((item) => (
+            {visibleNavItems.map((item) => (
               <SidebarNavRow
                 key={item.href}
                 item={item}
@@ -224,21 +278,21 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
         {/* Settings — pinned above Sign out so admin pages stay out of the
             day-to-day list but never scroll out of reach. */}
-        <div
+        {visibleSettings && <div
           className="px-3 pt-2 border-t border-slate-200/80"
           onClick={(e) => {
             if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
           }}
         >
           <SidebarNavRow
-            item={SETTINGS_ITEM}
+            item={visibleSettings}
             pathname={pathname}
             collapsed={collapsed}
-            expanded={!collapsed && isSectionOpen(SETTINGS_ITEM)}
-            onToggle={() => toggleSection(SETTINGS_ITEM)}
+            expanded={!collapsed && isSectionOpen(visibleSettings)}
+            onToggle={() => toggleSection(visibleSettings)}
             openProblems={openProblems}
           />
-        </div>
+        </div>}
 
         {/* Report a bug — deliberately not a nav section. It's a thing you do
             from wherever you hit the bug, so it sits small and out of the way

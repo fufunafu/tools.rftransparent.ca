@@ -29,6 +29,55 @@ export const NOTIFICATION_DEFAULTS: NotificationSettings = {
   },
 };
 
+const SALES_TARGETS_KEY = "sales_targets";
+
+/**
+ * Monthly net-revenue target per store, keyed by store id (store1/2/3).
+ * A store with no target set simply has no target column — the dashboard
+ * renders it neutral rather than inventing a number to measure against.
+ */
+export type SalesTargets = Record<string, number>;
+
+export async function getSalesTargets(): Promise<SalesTargets> {
+  const stored = await getSetting<SalesTargets>(SALES_TARGETS_KEY, {});
+  // Drop anything non-numeric or non-positive so a bad row can't produce a
+  // divide-by-zero or a nonsense percentage on the dashboard.
+  const clean: SalesTargets = {};
+  for (const [store, value] of Object.entries(stored ?? {})) {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) clean[store] = value;
+  }
+  return clean;
+}
+
+export async function putSalesTargets(targets: SalesTargets): Promise<void> {
+  await putSetting(SALES_TARGETS_KEY, targets);
+}
+
+const WALL_TOKEN_KEY = "wall_token";
+
+/**
+ * The unguessable token in /wall/[token]. The office TV opens one URL and
+ * needs no session, so no machine on a shared floor is left permanently
+ * signed into the tools. Rotating the value here revokes the old link.
+ *
+ * Returns null when no token has been issued — /wall then 404s rather than
+ * falling open.
+ */
+export async function getWallToken(): Promise<string | null> {
+  const token = await getSetting<string | null>(WALL_TOKEN_KEY, null);
+  return typeof token === "string" && token.length >= 16 ? token : null;
+}
+
+export async function issueWallToken(): Promise<string> {
+  const token = crypto.randomUUID().replace(/-/g, "");
+  await putSetting(WALL_TOKEN_KEY, token);
+  return token;
+}
+
+export async function revokeWallToken(): Promise<void> {
+  await putSetting(WALL_TOKEN_KEY, null);
+}
+
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   try {
     const { data, error } = await getSupabase()

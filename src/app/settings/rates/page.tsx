@@ -5,8 +5,10 @@ import { getSupabase } from "@/lib/supabase";
 import { getStores } from "@/lib/shopify";
 import { getPurchasingSettings } from "@/lib/purchasing/queries";
 import RatesForm from "@/components/admin/settings/RatesForm";
+import SalesTargetsForm from "@/components/admin/settings/SalesTargetsForm";
 import ChangeLog from "@/components/admin/settings/ChangeLog";
 import { getSettingChanges } from "@/lib/settings-audit";
+import { getSalesTargets } from "@/lib/settings";
 
 export const metadata: Metadata = {
   title: "Rates & Thresholds | Settings | RF Tools",
@@ -38,14 +40,16 @@ export default async function RatesPage() {
     byStore = {};
   }
 
-  const [purchasing, canEdit, log] = await Promise.all([
+  const [purchasing, canEdit, log, targets] = await Promise.all([
     getPurchasingSettings(),
     isAdminUser(),
     getSettingChanges("rates"),
+    getSalesTargets(),
   ]);
 
   return (
     <div className="max-w-4xl mx-auto space-y-5">
+      <SalesTargetsForm stores={stores} initial={targets} canEdit={canEdit} />
       <RatesForm
         stores={stores}
         initial={byStore}

@@ -294,9 +294,13 @@ export async function GET(req: NextRequest) {
       name: e.node.name,
       createdAt: e.node.createdAt,
       financialStatus: e.node.displayFinancialStatus,
-      customer: e.node.customer
-        ? `${e.node.customer.firstName} ${e.node.customer.lastName}`
-        : "Guest",
+      // Company customers often have no first name, and template-literalling a
+      // null produced customers literally called "null Skyline Glass and
+      // Mirror". Drop the empty halves and join what's left.
+      customer:
+        [e.node.customer?.firstName, e.node.customer?.lastName]
+          .filter((part): part is string => Boolean(part && part.trim()))
+          .join(" ") || "Guest",
       amount: calcNetRevenue(e.node),
       currency: e.node.totalPriceSet.shopMoney.currencyCode,
       daysPending: Math.floor(

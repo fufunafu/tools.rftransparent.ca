@@ -28,7 +28,9 @@ export async function GET() {
     .from("bug_reports")
     .select(COLUMNS)
     .order("created_at", { ascending: false })
-    .limit(2000);
+    // PostgREST caps a response at 1000 rows silently, so asking for more just
+    // hides the truncation. Page with .range() if this table ever grows past it.
+    .limit(1000);
 
   // The page renders a "run the migration" note instead of an error screen.
   if (isMissingTable(error))

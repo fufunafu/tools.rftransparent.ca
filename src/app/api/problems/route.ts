@@ -29,7 +29,9 @@ export async function GET() {
     .select(COLUMNS)
     .order("ticket_date", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(3000);
+    // PostgREST caps a response at 1000 rows silently, so asking for more just
+    // hides the truncation. Page with .range() if this table ever grows past it.
+    .limit(1000);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ tickets: data ?? [] });

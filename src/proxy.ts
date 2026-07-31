@@ -39,6 +39,12 @@ export async function proxy(request: NextRequest) {
     pathname === "/login" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/survey/") ||
+    pathname.startsWith("/api/survey/") ||
+    // The office TV board. Session-less by design so no shared machine stays
+    // signed in; the route itself checks the token and 404s without a valid
+    // one, so "public" here means "authenticated by token instead".
+    pathname.startsWith("/wall/") ||
     pathname.startsWith("/api/customer-service/leads/webhook") ||
     pathname.startsWith("/api/customer-service/leads/meta-webhook");
 
