@@ -335,12 +335,25 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           )}
 
           {collapsed ? (
-            <span
-              className="mt-1.5 w-6 h-6 mx-auto rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
-              title={viewer.name ?? viewer.email}
-            >
-              {initialsFor(viewer.name, viewer.email)}
-            </span>
+            // Stacked rather than avatar-only: there's no avatar menu to hide
+            // sign-out behind, and needing to expand the rail to sign out is a
+            // worse trade than one more 26px row.
+            <div className="mt-1.5 flex flex-col items-center gap-1">
+              <span
+                className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
+                title={viewer.name ?? viewer.email}
+              >
+                {initialsFor(viewer.name, viewer.email)}
+              </span>
+              <a
+                href="/api/logout"
+                title="Sign out"
+                aria-label="Sign out"
+                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+              >
+                <SignOutIcon className="w-[15px] h-[15px]" />
+              </a>
+            </div>
           ) : (
             <div className="flex items-center gap-2.5 h-[38px] pl-[9px] pr-[5px]">
               <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center shrink-0">
