@@ -7,7 +7,6 @@ import {
   type RevenueFields,
 } from "@/lib/shopify";
 import { cached } from "@/lib/api-cache";
-import { fetchUnpaidOrders } from "@/lib/collection";
 import { BUSINESS_TIMEZONE, startOfDayInTimeZone } from "@/lib/dates";
 import { computeMetrics, deduplicateRecords, type CallRecord } from "@/lib/call-metrics";
 import { getPurchasingSummary, listProductsWithMetrics } from "@/lib/purchasing/queries";
@@ -541,6 +540,8 @@ export interface CustomerServiceOps {
   last7: CallWindow;
   last30: CallWindow;
   quotes: QuoteWindows;
+  warnings: string[];
+  cachedAt: string | null;
 }
 
 export interface QuoteWindows {
@@ -551,6 +552,7 @@ export interface QuoteWindows {
   quotedValue30: number;
   /** COMPLETED ÷ total over the last 30 days, as a percentage. */
   conversion30: number | null;
+  warnings: string[];
 }
 
 const DRAFTS_QUERY = `
@@ -573,10 +575,10 @@ interface DraftRow extends RevenueFields {
  * same exclusion — the two pages must not disagree about what counts.
  */
 async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
-  const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30);
+  const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29);
   const startYesterday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
   const startToday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
-  const start7 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
+  const start7 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -6).toISOString();
   const filter = `created_at:>='${start30.toISOString()}'`;
 
   const results = await Promise.allSettled(
@@ -590,6 +592,13 @@ async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
   const drafts = results
     .flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []))
     .filter((d) => d.status !== "OPEN");
+  const warnings = getStores().flatMap((store, index) => {
+    const result = results[index];
+    if (result.status === "rejected") return [`${store.label} quotes are unavailable`];
+    return result.value.truncated
+      ? [`${store.label} quotes reached the pagination limit`]
+      : [];
+  });
 
   const completed = drafts.filter((d) => d.status === "COMPLETED").length;
 
@@ -599,6 +608,7 @@ async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
     last30: drafts.length,
     quotedValue30: drafts.reduce((sum, d) => sum + calcNetRevenue(d), 0),
     conversion30: drafts.length > 0 ? (completed / drafts.length) * 100 : null,
+    warnings,
   };
 }
 
@@ -667,8 +677,12 @@ async function fetchAllRows<T>(
 export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
-    const { data } = await cached(`ops:cs:${dayKey}`, OPS_TTL_MS, computeCustomerServiceOps);
-    return ok(data);
+    const { data, cachedAt } = await cached(
+      `ops:cs:v2:${dayKey}`,
+      OPS_TTL_MS,
+      computeCustomerServiceOps
+    );
+    return ok({ ...data, cachedAt });
   } catch (err) {
     return fail(err, "Could not read call records.");
   }
@@ -676,10 +690,10 @@ export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps
 
 async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
   const now = new Date();
-  const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30).toISOString();
+  const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29).toISOString();
   const yesterdayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
   const todayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
-  const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7).toISOString();
+  const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -6).toISOString();
 
   const quotes = await getQuoteWindows(now);
 
@@ -714,6 +728,8 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
     last7: windowFrom(all.filter((r) => r.call_start >= sevenStart)),
     last30: windowFrom(all),
     quotes,
+    warnings: quotes.warnings,
+    cachedAt: null,
   };
 }
 
@@ -735,6 +751,8 @@ export interface TopPerformers {
   sales: Performer[];
   warehouse: Performer[];
   customerService: Performer[];
+  warnings: string[];
+  cachedAt: string | null;
 }
 
 interface EmployeeRow {
@@ -743,19 +761,6 @@ interface EmployeeRow {
   department: string | null;
   shopify_tags: string[] | null;
   locations: { shopify_store_ids: string[] | null } | null;
-}
-
-/**
- * Tags used to match an order to an employee: configured `shopify_tags` when
- * set, else name-derived. Mirrors getMatchTags in /api/kpi/metrics — attribution
- * must agree with the KPI page or the same person ranks differently in two
- * places.
- */
-function matchTags(emp: { name: string; shopify_tags?: string[] | null }): string[] {
-  const configured = (emp.shopify_tags ?? []).map((t) => t.toLowerCase()).filter(Boolean);
-  if (configured.length > 0) return configured;
-  const name = emp.name.trim().toLowerCase();
-  return [...new Set([name, ...name.split(/\s+/)])];
 }
 
 const PERFORMER_ORDERS_QUERY = `
@@ -797,8 +802,12 @@ interface TaggedDraft extends RevenueFields {
 export async function getTopPerformers(): Promise<Result<TopPerformers>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
-    const { data } = await cached(`ops:performers:${dayKey}`, OPS_TTL_MS, computeTopPerformers);
-    return ok(data);
+    const { data, cachedAt } = await cached(
+      `ops:performers:v2:${dayKey}`,
+      OPS_TTL_MS,
+      computeTopPerformers
+    );
+    return ok({ ...data, cachedAt });
   } catch (err) {
     return fail(err, "Could not read performer data.");
   }
@@ -807,8 +816,8 @@ export async function getTopPerformers(): Promise<Result<TopPerformers>> {
 async function computeTopPerformers(): Promise<TopPerformers> {
   {
     const now = new Date();
-    const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30);
-    const start60 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -60);
+    const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29);
+    const start60 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -59);
     const start30Iso = start30.toISOString();
 
     const { data: employeeData, error: employeeError } = await getSupabase()
@@ -862,43 +871,91 @@ async function computeTopPerformers(): Promise<TopPerformers> {
     const orders = orderResults.flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []));
     const drafts = draftResults.flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []));
 
+    const warnings = [
+      ...stores.flatMap((store, index) => {
+        const result = orderResults[index];
+        if (result.status === "rejected") return [`${store.label} performer orders are unavailable`];
+        return result.value.truncated
+          ? [`${store.label} performer orders reached the pagination limit`]
+          : [];
+      }),
+      ...stores.flatMap((store, index) => {
+        const result = draftResults[index];
+        if (result.status === "rejected") return [`${store.label} performer quotes are unavailable`];
+        return result.value.truncated
+          ? [`${store.label} performer quotes reached the pagination limit`]
+          : [];
+      }),
+    ];
+
     const inCurrent = (iso: string) => iso >= start30Iso;
 
-    // ── Sales: sold $, quoted $, conversion, by order/draft tag ──
-    const salesPeople = employees.filter(
-      (e) => (e.department ?? "").toLowerCase().includes("sales") || matchTags(e).length > 0
+    // Sales records are counted once only when configured employee tags point
+    // to exactly one sales rep. Location tags such as "laval", unassigned
+    // records, and records carrying tags for multiple reps are excluded.
+    const reps = configuredSalesReps(employees);
+    const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+    const salesTotals = new Map<
+      string,
+      { sold: number; soldPrev: number; orderCount: number; quoted: number; total: number; won: number }
+    >(
+      reps.map((rep) => [
+        rep.id,
+        { sold: 0, soldPrev: 0, orderCount: 0, quoted: 0, total: 0, won: 0 },
+      ])
     );
+    let ambiguousRecords = 0;
 
-    const sales: Performer[] = salesPeople
-      .map((emp) => {
-        const tags = matchTags(emp);
-        const hit = (t: string[]) => t.some((x) => tags.includes(x.toLowerCase()));
+    for (const order of orders) {
+      if (order.cancelledAt) continue;
+      const attribution = resolveSalesAttribution(order.tags, reps);
+      if (attribution.status === "ambiguous") {
+        ambiguousRecords += 1;
+        continue;
+      }
+      if (attribution.status !== "unique") continue;
+      const total = salesTotals.get(attribution.employeeId);
+      if (!total) continue;
+      const revenue = calcNetRevenue(order);
+      if (inCurrent(order.createdAt)) {
+        total.sold += revenue;
+        total.orderCount += 1;
+      } else {
+        total.soldPrev += revenue;
+      }
+    }
 
-        let sold = 0, soldPrev = 0, orderCount = 0;
-        for (const o of orders) {
-          if (o.cancelledAt || !hit(o.tags)) continue;
-          const rev = calcNetRevenue(o);
-          if (inCurrent(o.createdAt)) { sold += rev; orderCount++; } else soldPrev += rev;
-        }
+    for (const draft of drafts) {
+      if (draft.status === "OPEN") continue;
+      const attribution = resolveSalesAttribution(draft.tags, reps);
+      if (attribution.status === "ambiguous") {
+        ambiguousRecords += 1;
+        continue;
+      }
+      if (attribution.status !== "unique" || !inCurrent(draft.createdAt)) continue;
+      const total = salesTotals.get(attribution.employeeId);
+      if (!total) continue;
+      total.quoted += calcNetRevenue(draft);
+      total.total += 1;
+      if (draft.status === "COMPLETED") total.won += 1;
+    }
 
-        let quoted = 0, total = 0, won = 0;
-        for (const d of drafts) {
-          // OPEN drafts are works in progress, excluded here exactly as
-          // /api/kpi/metrics excludes them.
-          if (d.status === "OPEN" || !hit(d.tags) || !inCurrent(d.createdAt)) continue;
-          quoted += calcNetRevenue(d);
-          total++;
-          if (d.status === "COMPLETED") won++;
-        }
+    if (ambiguousRecords > 0) {
+      warnings.push(
+        `${ambiguousRecords} sales record${ambiguousRecords === 1 ? "" : "s"} matched multiple reps and were excluded`
+      );
+    }
 
-        const conversion = total > 0 ? (won / total) * 100 : 0;
+    const sales: Performer[] = [...salesTotals.entries()]
+      .map(([id, total]) => {
+        const conversion = total.total > 0 ? (total.won / total.total) * 100 : 0;
         return {
-          id: emp.id,
-          name: emp.name,
-          value: sold,
-          previous: soldPrev,
-          metrics: { sold, quoted, conversion },
-          meta: `${orderCount} order${orderCount === 1 ? "" : "s"} · ${conversion.toFixed(1)}% conv`,
+          id,
+          name: employeeById.get(id)?.name ?? "Unknown employee",
+          value: total.sold,
+          previous: total.soldPrev,
+          metrics: { sold: total.sold, quoted: total.quoted, conversion },
+          meta: `${total.orderCount} order${total.orderCount === 1 ? "" : "s"} · ${conversion.toFixed(1)}% conv`,
         };
       })
       .filter((p) => p.metrics.sold > 0 || p.metrics.quoted > 0)
@@ -967,7 +1024,7 @@ async function computeTopPerformers(): Promise<TopPerformers> {
       .filter((p) => p.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    return { sales, warehouse, customerService };
+    return { sales, warehouse, customerService, warnings, cachedAt: null };
   }
 }
 
