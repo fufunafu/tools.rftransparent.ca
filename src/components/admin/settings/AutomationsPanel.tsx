@@ -97,7 +97,7 @@ function HealthBadge({ health, latest }: { health: AutomationHealth; latest: Cro
 function JobIcon({ kind }: { kind: AutomationJob["kind"] }) {
   return (
     <span
-      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+      className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
         kind === "sync" ? "bg-blue-50 text-blue-600" : "bg-violet-50 text-violet-600"
       }`}
     >
@@ -117,12 +117,12 @@ function JobIcon({ kind }: { kind: AutomationJob["kind"] }) {
 
 function InfoItem({ icon, label, value, detail }: { icon: ReactNode; label: string; value: string; detail?: string }) {
   return (
-    <div className="flex items-start gap-2.5">
+    <div className="flex items-start gap-2">
       <span className="mt-0.5 text-slate-400">{icon}</span>
       <div className="min-w-0">
         <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</dt>
-        <dd className="mt-0.5 text-xs font-medium leading-5 text-slate-700">{value}</dd>
-        {detail && <p className="text-[11px] leading-4 text-slate-400">{detail}</p>}
+        <dd className="mt-0.5 text-xs font-medium leading-4 text-slate-700">{value}</dd>
+        {detail && <p className="text-[10px] leading-4 text-slate-400">{detail}</p>}
       </div>
     </div>
   );
@@ -176,8 +176,8 @@ function JobCard({
   const recentFailures = runs.filter((run) => run.status === "error").length;
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-      <div className="p-5">
+    <article className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <div className="p-4">
         <div className="flex items-start gap-3">
           <JobIcon kind={job.kind} />
           <div className="min-w-0 flex-1">
@@ -185,11 +185,11 @@ function JobCard({
               <h3 className="text-sm font-semibold text-slate-900">{job.label}</h3>
               <HealthBadge health={health} latest={latest} />
             </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500">{job.description}</p>
+            <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{job.description}</p>
           </div>
         </div>
 
-        <dl className="mt-5 grid gap-4 border-y border-slate-100 py-4 sm:grid-cols-2">
+        <dl className="mt-3 grid gap-3 border-y border-slate-100 py-3 sm:grid-cols-2">
           <InfoItem
             icon={<ScheduleIcon />}
             label="Schedule"
@@ -198,16 +198,16 @@ function JobCard({
           />
           <InfoItem
             icon={<ResultIcon />}
-            label={job.kind === "email" ? "Destination" : "Result"}
+            label={job.kind === "email" ? "Destination" : "Stored in RF Tools"}
             value={job.result}
           />
         </dl>
 
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Last activity</p>
             {latest ? (
-              <div className="mt-1 flex flex-wrap items-center gap-2">
+              <div className="mt-0.5 flex flex-wrap items-center gap-2">
                 <span className="text-xs font-medium text-slate-700" title={exactTime(latest.started_at)}>
                   {timeAgo(latest.started_at)}
                 </span>
@@ -228,7 +228,7 @@ function JobCard({
               type="button"
               onClick={() => onRun(job)}
               disabled={running !== null}
-              className={`inline-flex h-9 shrink-0 items-center justify-center rounded-lg px-3.5 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`inline-flex h-8 shrink-0 items-center justify-center rounded-lg px-3 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-40 ${
                 job.kind === "email"
                   ? "border border-violet-200 bg-violet-50 text-violet-700 hover:bg-violet-100"
                   : "border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"
@@ -240,7 +240,7 @@ function JobCard({
         </div>
 
         {latest?.status === "error" && latest.detail && (
-          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-3">
+          <div className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-red-500">Latest error</p>
             <pre className="mt-1 max-h-24 overflow-y-auto whitespace-pre-wrap break-words font-sans text-xs leading-5 text-red-700">
               {latest.detail}
@@ -249,7 +249,7 @@ function JobCard({
         )}
 
         {isConfirming && (
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3.5">
+          <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs font-semibold text-amber-900">Send this automation now?</p>
             <p className="mt-1 text-xs leading-5 text-amber-800">
               This is not a test. It will send real email to <strong>{job.sendsEmail}</strong>.
@@ -275,7 +275,7 @@ function JobCard({
       </div>
 
       {runs.length > 0 && (
-        <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-3">
+        <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-2.5">
           <button
             type="button"
             onClick={() => onToggleHistory(job.slug)}
@@ -300,7 +300,7 @@ function JobCard({
       )}
 
       {isExpanded && runs.length > 0 && (
-        <div className="divide-y divide-slate-100 border-t border-slate-100 px-5">
+        <div className="divide-y divide-slate-100 border-t border-slate-100 px-4">
           {runs.map((run) => (
             <div key={run.started_at} className="grid gap-2 py-3 text-xs sm:grid-cols-[minmax(140px,1fr)_auto_auto] sm:items-center">
               <div>
@@ -332,12 +332,44 @@ function AutomationGroup({
 }) {
   return (
     <section>
-      <div className="mb-3">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">{eyebrow}</p>
-        <h2 className="mt-1 text-base font-semibold text-slate-900">{title}</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">{description}</p>
+      <div className="mb-2 sm:flex sm:items-baseline sm:gap-3">
+        <div className="flex shrink-0 items-baseline gap-2">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">{eyebrow}</p>
+          <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+        </div>
+        <p className="mt-1 text-[11px] leading-4 text-slate-500 sm:mt-0">{description}</p>
       </div>
-      <div className="grid items-start gap-4 lg:grid-cols-2">{children}</div>
+      <div className="grid items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">{children}</div>
+    </section>
+  );
+}
+
+function DataSourcesSummary() {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="grid gap-3 text-xs sm:grid-cols-3 sm:divide-x sm:divide-slate-100">
+        <div className="sm:pr-3">
+          <p className="font-semibold text-slate-800">Scheduled imports</p>
+          <p className="mt-0.5 leading-4 text-slate-500">Calls, Gmail activity, and open quotes are saved in RF Tools.</p>
+        </div>
+        <div className="sm:px-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-semibold text-slate-800">Google Ads</p>
+            <Link href="/marketing" className="font-semibold text-blue-600 hover:text-blue-700">Open</Link>
+          </div>
+          <p className="mt-0.5 leading-4 text-slate-500">Read live when opened or refreshed, with a 30-minute browser cache.</p>
+        </div>
+        <div className="sm:pl-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="font-semibold text-slate-800">Shopify dashboard</p>
+            <Link href="/shopify" className="font-semibold text-blue-600 hover:text-blue-700">Open</Link>
+          </div>
+          <p className="mt-0.5 leading-4 text-slate-500">Read live when opened or refreshed. Charts use a 15-minute cache.</p>
+        </div>
+      </div>
+      <p className="mt-2 border-t border-slate-100 pt-2 text-[10px] leading-4 text-slate-400">
+        Follow Up CRM stores open Shopify quotes as leads. The Shopify dashboard only displays store data.
+      </p>
     </section>
   );
 }
@@ -441,13 +473,13 @@ export default function AutomationsPanel({
       : "Scheduled jobs are running within their expected windows.";
 
   return (
-    <div className="space-y-7">
+    <div className="space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-600">Settings</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950">Automations</h1>
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
-            See what runs in the background, when it runs, and what changes when it finishes.
+          <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-500">
+            Data imports, live sources, and scheduled email in one place.
           </p>
         </div>
         <Link
@@ -458,11 +490,13 @@ export default function AutomationsPanel({
         </Link>
       </div>
 
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+      <DataSourcesSummary />
+
+      <section className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-3">
             <span
-              className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                 attentionCount > 0
                   ? "bg-amber-50 text-amber-600"
                   : tableMissing || unknownCount > 0
@@ -470,29 +504,29 @@ export default function AutomationsPanel({
                     : "bg-emerald-50 text-emerald-600"
               }`}
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4.5 w-4.5" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m5.25 2.25a8.25 8.25 0 1 1-16.5 0 8.25 8.25 0 0 1 16.5 0Z" />
               </svg>
             </span>
             <div>
-              <h2 className="text-base font-semibold text-slate-900">{summaryTitle}</h2>
-              <p className="mt-1 max-w-xl text-xs leading-5 text-slate-500">{summaryDescription}</p>
+              <h2 className="text-sm font-semibold text-slate-900">{summaryTitle}</h2>
+              <p className="mt-0.5 max-w-xl text-[11px] leading-4 text-slate-500">{summaryDescription}</p>
             </div>
           </div>
-          <dl className="grid grid-cols-3 gap-5 lg:min-w-[360px]">
-            <div>
+          <dl className="grid grid-cols-3 divide-x divide-slate-100 lg:min-w-[330px]">
+            <div className="pr-3">
               <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Healthy</dt>
-              <dd className="mt-1 text-xl font-semibold text-slate-900">{healthyCount}</dd>
+              <dd className="mt-0.5 text-base font-semibold text-slate-900">{healthyCount}</dd>
             </div>
-            <div>
+            <div className="px-3">
               <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Attention</dt>
-              <dd className={`mt-1 text-xl font-semibold ${attentionCount > 0 ? "text-amber-600" : "text-slate-900"}`}>
+              <dd className={`mt-0.5 text-base font-semibold ${attentionCount > 0 ? "text-amber-600" : "text-slate-900"}`}>
                 {attentionCount}
               </dd>
             </div>
-            <div>
+            <div className="pl-3">
               <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Last activity</dt>
-              <dd className="mt-1 text-xs font-semibold leading-5 text-slate-700">
+              <dd className="mt-0.5 text-xs font-semibold leading-5 text-slate-700">
                 {latestActivity ? timeAgo(latestActivity.started_at) : "Not recorded"}
               </dd>
             </div>
@@ -523,9 +557,9 @@ export default function AutomationsPanel({
       )}
 
       <AutomationGroup
-        eyebrow="Data refreshes"
-        title="Keep dashboards current"
-        description="These jobs import operational data. Running one manually refreshes data but does not send email."
+        eyebrow="Automatic imports"
+        title="Stored on a schedule"
+        description="Manual runs import data without sending email."
       >
         {syncJobs.map(renderJob)}
       </AutomationGroup>
@@ -533,7 +567,7 @@ export default function AutomationsPanel({
       <AutomationGroup
         eyebrow="Email deliveries"
         title="Send scheduled messages"
-        description="These jobs send real messages to employees or store inboxes. Manual sends always ask for confirmation."
+        description="Manual sends require confirmation."
       >
         {emailJobs.map(renderJob)}
       </AutomationGroup>

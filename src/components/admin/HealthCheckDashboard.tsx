@@ -177,7 +177,7 @@ function storeLabel(id: string): string {
 function StatusBadge({ status }: { status: CheckResult["status"] }) {
   const config = STATUS[status];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${config.badge}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${config.badge}`}>
       <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
       {config.label}
     </span>
@@ -192,7 +192,7 @@ function GroupStatusBadge({
   if (summary.checking > 0) return <StatusBadge status="checking" />;
   if (summary.errors > 0) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
         <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
         {summary.errors} problem{summary.errors === 1 ? "" : "s"}
       </span>
@@ -200,7 +200,7 @@ function GroupStatusBadge({
   }
   if (summary.attention > 0) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
         <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
         Needs review
       </span>
@@ -211,12 +211,12 @@ function GroupStatusBadge({
 
 function FreshnessBadge({ stale }: { stale: boolean }) {
   return stale ? (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-700">
       <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
       Needs sync
     </span>
   ) : (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-700">
       <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
       Fresh
     </span>
@@ -262,21 +262,20 @@ function GroupIcon({ group }: { group: GroupKey }) {
     ),
   };
   return (
-    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-600">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
         {paths[group]}
       </svg>
     </span>
   );
 }
 
-function MetricCard({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: "neutral" | "good" | "attention" }) {
+function MetricStat({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "good" | "attention" }) {
   const valueClass = tone === "good" ? "text-emerald-600" : tone === "attention" ? "text-amber-600" : "text-slate-950";
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
-      <p className={`mt-2 text-2xl font-semibold tracking-tight ${valueClass}`}>{value}</p>
-      <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+    <div className="min-w-0 px-3 first:pl-0 last:pr-0">
+      <dt className="text-[9px] font-semibold uppercase tracking-[0.1em] text-slate-400">{label}</dt>
+      <dd className={`mt-0.5 truncate text-sm font-semibold tracking-tight ${valueClass}`}>{value}</dd>
     </div>
   );
 }
@@ -284,15 +283,15 @@ function MetricCard({ label, value, detail, tone = "neutral" }: { label: string;
 function ServiceRow({ check }: { check: CheckResult }) {
   const config = STATUS[check.status];
   return (
-    <div className={`flex items-start gap-3 px-5 py-3.5 ${check.status === "error" ? "bg-rose-50/50" : ""}`}>
-      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${config.dot}`} />
+    <div className={`flex items-start gap-2 px-3 py-2 ${check.status === "error" ? "bg-rose-50/50" : ""}`}>
+      <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${config.dot}`} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-          <p className="text-sm font-semibold text-slate-800">{check.name}</p>
-          {check.latency_ms > 0 && <span className="text-[11px] tabular-nums text-slate-400">{check.latency_ms} ms</span>}
+          <p className="text-xs font-semibold text-slate-800">{check.name}</p>
+          {check.latency_ms > 0 && <span className="text-[10px] tabular-nums text-slate-400">{check.latency_ms} ms</span>}
         </div>
         {check.detail && (
-          <p className={`mt-0.5 break-words text-xs leading-5 ${check.status === "error" ? "text-rose-600" : "text-slate-500"}`}>
+          <p className={`mt-0.5 text-[10px] leading-4 ${check.status === "error" ? "break-words text-rose-600" : "break-words text-slate-500 sm:truncate"}`} title={check.detail}>
             {check.detail}
           </p>
         )}
@@ -305,11 +304,11 @@ function ServiceRow({ check }: { check: CheckResult }) {
 function EnvironmentRows({ checks }: { checks: CheckResult[] }) {
   if (checks.length === 0) return null;
   return (
-    <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-3">
-      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Configuration</p>
-      <div className="space-y-2">
+    <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-2">
+      <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Configuration</p>
+      <div className="space-y-1">
         {checks.map((check) => (
-          <div key={check.name} className="flex items-start gap-2 text-xs">
+          <div key={check.name} className="flex items-start gap-2 text-[10px]">
             <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${STATUS[check.status].dot}`} />
             <span className="font-medium text-slate-600">{check.name}</span>
             <span className={`ml-auto max-w-[65%] text-right leading-4 ${check.status === "ok" ? "text-slate-400" : "font-medium text-rose-600"}`}>
@@ -428,20 +427,20 @@ export default function HealthCheckDashboard() {
   const overallTone = !initData || !allDone ? "checking" : issueCount === 0 ? "healthy" : "attention";
 
   return (
-    <div className="space-y-6 pb-10">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-4 pb-6">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Operations</p>
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">System health</h1>
-          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
-            Live connectivity, data freshness, configuration, and scheduled-job monitoring in one place.
+          <h1 className="mt-0.5 text-2xl font-semibold tracking-tight text-slate-950">System health</h1>
+          <p className="mt-0.5 max-w-2xl text-xs leading-5 text-slate-500">
+            Connections, data freshness, configuration, and scheduled jobs.
           </p>
         </div>
         <button
           type="button"
           onClick={() => void runChecks()}
           disabled={loading}
-          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="inline-flex h-9 items-center justify-center gap-2 rounded-lg bg-slate-950 px-3.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" d="M20 7v5h-5M4 17v-5h5M6.1 8.2A7 7 0 0 1 18.7 7M5.3 17A7 7 0 0 0 17.9 15.8" />
@@ -452,30 +451,29 @@ export default function HealthCheckDashboard() {
 
       <section
         aria-live="polite"
-        className={`relative overflow-hidden rounded-3xl border p-6 shadow-sm sm:p-7 ${
+        className={`rounded-xl border bg-white p-4 shadow-sm ${
           overallTone === "healthy"
-            ? "border-emerald-800 bg-emerald-950 text-white"
+            ? "border-emerald-200"
             : overallTone === "attention"
-              ? "border-amber-800 bg-slate-950 text-white"
-              : "border-blue-900 bg-slate-950 text-white"
+              ? "border-amber-200"
+              : "border-blue-200"
         }`}
       >
-        <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
-        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)] lg:items-center">
+          <div className="flex items-start gap-3">
             <span
-              className={`mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${
                 overallTone === "healthy"
-                  ? "border-emerald-500/30 bg-emerald-400/15 text-emerald-300"
+                  ? "bg-emerald-50 text-emerald-600"
                   : overallTone === "attention"
-                    ? "border-amber-500/30 bg-amber-400/15 text-amber-300"
-                    : "border-blue-500/30 bg-blue-400/15 text-blue-300"
+                    ? "bg-amber-50 text-amber-600"
+                    : "bg-blue-50 text-blue-600"
               }`}
             >
               {overallTone === "checking" ? (
                 <span className="h-4 w-4 animate-pulse rounded-full bg-current" />
               ) : (
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-6 w-6" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-5 w-5" aria-hidden="true">
                   {overallTone === "healthy" ? (
                     <path strokeLinecap="round" strokeLinejoin="round" d="m5 12.5 4 4L19 7" />
                   ) : (
@@ -484,27 +482,37 @@ export default function HealthCheckDashboard() {
                 </svg>
               )}
             </span>
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/50">Current status</p>
-              <h2 className="mt-1.5 text-2xl font-semibold tracking-tight">{overallTitle}</h2>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-white/65">{overallDetail}</p>
-              {initData && <p className="mt-3 text-xs text-white/40">Last started {formatDate(initData.checked_at)}</p>}
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold tracking-tight text-slate-900">{overallTitle}</h2>
+              <p className="mt-0.5 max-w-xl text-[11px] leading-4 text-slate-500">{overallDetail}</p>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-slate-400">
+                {initData && <span>Started {formatDate(initData.checked_at)}</span>}
+                {serviceEntries.length > 0 && !allDone && <span>{completed.length}/{serviceEntries.length} probes complete</span>}
+              </div>
             </div>
           </div>
-          {serviceEntries.length > 0 && (
-            <div className="min-w-[240px] rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-medium text-white/60">Live probes completed</span>
-                <span className="font-semibold tabular-nums text-white">{completed.length}/{serviceEntries.length}</span>
-              </div>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                <div
-                  className={`h-full rounded-full transition-all duration-500 ${issueCount > 0 && allDone ? "bg-amber-400" : "bg-emerald-400"}`}
-                  style={{ width: `${Math.round((completed.length / serviceEntries.length) * 100)}%` }}
-                />
-              </div>
-            </div>
-          )}
+          <dl className="grid grid-cols-4 divide-x divide-slate-100 border-t border-slate-100 pt-3 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+            <MetricStat
+              label="Live"
+              value={serviceEntries.length > 0 ? `${healthyServices}/${serviceEntries.length}` : "..."}
+              tone={allDone && healthyServices === serviceEntries.length ? "good" : "neutral"}
+            />
+            <MetricStat
+              label="Review"
+              value={initData ? String(issueCount) : "..."}
+              tone={issueCount > 0 ? "attention" : initData ? "good" : "neutral"}
+            />
+            <MetricStat
+              label="Data"
+              value={initData ? (staleDataCount === 0 ? "Fresh" : `${staleDataCount} stale`) : "..."}
+              tone={staleDataCount > 0 ? "attention" : initData ? "good" : "neutral"}
+            />
+            <MetricStat
+              label="Response"
+              value={averageLatency > 0 ? `${averageLatency} ms` : "..."}
+              tone={averageLatency > 3_000 ? "attention" : averageLatency > 0 ? "good" : "neutral"}
+            />
+          </dl>
         </div>
       </section>
 
@@ -515,78 +523,45 @@ export default function HealthCheckDashboard() {
         </div>
       )}
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard
-          label="Live services"
-          value={serviceEntries.length > 0 ? `${healthyServices}/${serviceEntries.length}` : "..."}
-          detail={
-            !allDone
-              ? "Checks in progress"
-              : healthyServices === serviceEntries.length
-                ? "All responding normally"
-                : `${serviceEntries.length - healthyServices} need review`
-          }
-          tone={allDone && healthyServices === serviceEntries.length ? "good" : "neutral"}
-        />
-        <MetricCard
-          label="Items to review"
-          value={initData ? String(issueCount) : "..."}
-          detail={issueCount === 0 ? "No active findings" : "Across services, setup, and jobs"}
-          tone={issueCount > 0 ? "attention" : initData ? "good" : "neutral"}
-        />
-        <MetricCard
-          label="Data freshness"
-          value={initData ? (staleDataCount === 0 ? "Fresh" : `${staleDataCount} stale`) : "..."}
-          detail="Phone and email data feeds"
-          tone={staleDataCount > 0 ? "attention" : initData ? "good" : "neutral"}
-        />
-        <MetricCard
-          label="Average response"
-          value={averageLatency > 0 ? `${averageLatency} ms` : "..."}
-          detail="Across completed live probes"
-          tone={averageLatency > 3_000 ? "attention" : averageLatency > 0 ? "good" : "neutral"}
-        />
-      </section>
-
       {allDone && issueCount > 0 && (
-        <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
-          <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-5 py-4">
-            <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5" aria-hidden="true">
+        <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
+          <div className="flex items-start gap-2 border-b border-amber-100 bg-amber-50 px-4 py-3">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4" aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 11.5 11 13.5 15.5 9M4 5h16v14H4z" />
               </svg>
             </span>
             <div>
               <h2 className="text-sm font-semibold text-amber-950">Action list</h2>
-              <p className="mt-0.5 text-xs leading-5 text-amber-800">Resolve these findings in order, then run the health check again.</p>
+              <p className="mt-0.5 text-[11px] leading-4 text-amber-800">Resolve these findings, then run the check again.</p>
             </div>
           </div>
           <div className="divide-y divide-slate-100">
             {[...serviceIssues, ...envIssues].map((check, index) => (
-              <div key={`${check.name}-${index}`} className="flex gap-3 px-5 py-4">
+              <div key={`${check.name}-${index}`} className="flex gap-2 px-4 py-2.5">
                 <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${check.status === "error" ? "bg-rose-500" : "bg-amber-500"}`} />
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-slate-800">{check.name}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-slate-500">{check.detail ?? STATUS[check.status].label}</p>
-                  {fixHint(check) && <p className="mt-1 text-xs font-medium leading-5 text-blue-700">{fixHint(check)}</p>}
+                  <p className="text-xs font-semibold text-slate-800">{check.name}</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-slate-500">{check.detail ?? STATUS[check.status].label}</p>
+                  {fixHint(check) && <p className="mt-0.5 text-[11px] font-medium leading-4 text-blue-700">{fixHint(check)}</p>}
                 </div>
               </div>
             ))}
             {failingJobs.map((job) => (
-              <div key={job.slug} className="flex gap-3 px-5 py-4">
+              <div key={job.slug} className="flex gap-2 px-4 py-2.5">
                 <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{job.label}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-slate-500">The latest scheduled run failed. Open Automations to review the error.</p>
+                  <p className="text-xs font-semibold text-slate-800">{job.label}</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-slate-500">Latest run failed. Open Automations for the error.</p>
                 </div>
               </div>
             ))}
             {silentJobs.map((job) => (
-              <div key={job.slug} className="flex gap-3 px-5 py-4">
+              <div key={job.slug} className="flex gap-2 px-4 py-2.5">
                 <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
                 <div>
-                  <p className="text-sm font-semibold text-slate-800">{job.label}</p>
-                  <p className="mt-0.5 text-xs leading-5 text-slate-500">No run since {timeAgo(job.lastRun)}. The scheduler may not be firing.</p>
+                  <p className="text-xs font-semibold text-slate-800">{job.label}</p>
+                  <p className="mt-0.5 text-[11px] leading-4 text-slate-500">No run since {timeAgo(job.lastRun)}. The scheduler may not be firing.</p>
                 </div>
               </div>
             ))}
@@ -596,11 +571,11 @@ export default function HealthCheckDashboard() {
 
       {initData && (
         <section>
-          <div className="mb-3">
+          <div className="mb-2 flex items-baseline gap-2">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">System map</p>
-            <h2 className="mt-1 text-lg font-semibold text-slate-950">Connections and data feeds</h2>
+            <h2 className="text-sm font-semibold text-slate-950">Connections and data feeds</h2>
           </div>
-          <div className="grid items-start gap-4 lg:grid-cols-2">
+          <div className="grid items-start gap-3 lg:grid-cols-2 xl:grid-cols-3">
             {orderedGroups.map((group) => {
               const groupServices = serviceEntries.filter(([id]) => groupOfService(id) === group.key);
               const groupEnv = initData.env_vars.filter((check) => groupOfEnv(check.name) === group.key);
@@ -608,15 +583,15 @@ export default function HealthCheckDashboard() {
               const summary = groupSummary.get(group.key)!;
 
               return (
-                <article key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div className="flex items-start gap-3 border-b border-slate-100 p-5">
+                <article key={group.key} className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex items-start gap-2 border-b border-slate-100 p-3">
                     <GroupIcon group={group.key} />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <h3 className="text-sm font-semibold text-slate-900">{group.title}</h3>
                         <GroupStatusBadge summary={summary} />
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-slate-500">{group.blurb}</p>
+                      <p className="mt-0.5 text-[10px] leading-4 text-slate-500">{group.blurb}</p>
                     </div>
                   </div>
 
@@ -625,19 +600,16 @@ export default function HealthCheckDashboard() {
                   </div>
 
                   {group.key === "email" && initData.email_freshness.length > 0 && (
-                    <div className="border-t border-slate-100 px-5 py-4">
-                      <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Inbox freshness</p>
-                      <div className="space-y-2.5">
+                    <div className="border-t border-slate-100 px-3 py-2">
+                      <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Inbox freshness</p>
+                      <div className="divide-y divide-slate-100">
                         {initData.email_freshness.map((row) => (
-                          <div key={row.inbox} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                          <div key={row.inbox} className="flex items-center gap-2 py-1.5">
                             <div className="min-w-0 flex-1">
-                              <p className="truncate text-xs font-semibold text-slate-700">{row.label}</p>
-                              <p className="mt-0.5 truncate text-[11px] text-slate-400" title={row.inbox}>{row.inbox}</p>
+                              <p className="truncate text-[11px] font-semibold text-slate-700" title={row.inbox}>{row.label}</p>
                             </div>
-                            <div className="text-right">
-                              <p className="text-[11px] font-medium text-slate-600" title={formatDate(row.last_sync)}>{row.last_sync ? timeAgo(row.last_sync) : "Never"}</p>
-                              <div className="mt-1"><FreshnessBadge stale={row.stale} /></div>
-                            </div>
+                            <p className="text-[10px] font-medium text-slate-500" title={formatDate(row.last_sync)}>{row.last_sync ? timeAgo(row.last_sync) : "Never"}</p>
+                            <FreshnessBadge stale={row.stale} />
                           </div>
                         ))}
                       </div>
@@ -645,26 +617,26 @@ export default function HealthCheckDashboard() {
                   )}
 
                   {group.key === "phones" && initData.data_freshness.length > 0 && (
-                    <div className="border-t border-slate-100 px-5 py-4">
-                      <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Call data freshness</p>
-                      <div className="grid gap-2.5 sm:grid-cols-2">
+                    <div className="border-t border-slate-100 px-3 py-2">
+                      <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-400">Call data freshness</p>
+                      <div className="grid gap-1.5 sm:grid-cols-2">
                         {initData.data_freshness.map((row) => (
-                          <div key={`${row.store_id}-${row.source}`} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                          <div key={`${row.store_id}-${row.source}`} className="rounded-lg border border-slate-100 bg-slate-50/60 p-2">
                             <div className="flex items-start justify-between gap-2">
                               <div>
-                                <p className="text-xs font-semibold text-slate-700">{storeLabel(row.store_id)}</p>
-                                <p className="mt-0.5 text-[11px] text-slate-400">{row.source === "grasshopper" ? "Grasshopper" : "CIK"}</p>
+                                <p className="text-[10px] font-semibold text-slate-700">{storeLabel(row.store_id)}</p>
+                                <p className="text-[9px] text-slate-400">{row.source === "grasshopper" ? "Grasshopper" : "CIK"}</p>
                               </div>
                               <FreshnessBadge stale={row.stale} />
                             </div>
-                            <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                            <dl className="mt-1.5 grid grid-cols-2 gap-1 text-[9px]">
                               <div>
                                 <dt className="text-slate-400">Latest call</dt>
-                                <dd className="mt-0.5 font-medium text-slate-600" title={formatDate(row.latest_call)}>{row.latest_call ? timeAgo(row.latest_call) : "No data"}</dd>
+                                <dd className="font-medium text-slate-600" title={formatDate(row.latest_call)}>{row.latest_call ? timeAgo(row.latest_call) : "No data"}</dd>
                               </div>
                               <div>
                                 <dt className="text-slate-400">Last scrape</dt>
-                                <dd className={`mt-0.5 font-medium ${row.scrape_status && row.scrape_status !== "success" ? "text-rose-600" : "text-slate-600"}`} title={formatDate(row.last_scrape)}>
+                                <dd className={`font-medium ${row.scrape_status && row.scrape_status !== "success" ? "text-rose-600" : "text-slate-600"}`} title={formatDate(row.last_scrape)}>
                                   {row.last_scrape ? timeAgo(row.last_scrape) : "Never"}
                                 </dd>
                               </div>
@@ -684,32 +656,34 @@ export default function HealthCheckDashboard() {
       )}
 
       {automations && !automations.tableMissing && (
-        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">Scheduled work</p>
-              <h2 className="mt-1 text-base font-semibold text-slate-900">Automation health</h2>
-              <p className="mt-1 text-xs text-slate-500">
+              <div className="flex items-baseline gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">Scheduled work</p>
+                <h2 className="text-sm font-semibold text-slate-900">Automation health</h2>
+              </div>
+              <p className="mt-0.5 text-[11px] text-slate-500">
                 {automations.lastRunAt ? `Most recent activity ${timeAgo(automations.lastRunAt)}` : "No activity has been recorded yet."}
               </p>
             </div>
-            <Link href="/settings/automations" className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900">
+            <Link href="/settings/automations" className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900">
               Open automations
             </Link>
           </div>
-          <div className="flex flex-wrap gap-2 p-5">
+          <div className="flex flex-wrap gap-1.5 p-3">
             {automations.failing.map((job) => (
-              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-medium text-rose-700">
                 <span className="h-2 w-2 rounded-full bg-rose-500" />{job.label}: failed
               </span>
             ))}
             {automations.silent.map((job) => (
-              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700" title={formatDate(job.lastRun)}>
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700" title={formatDate(job.lastRun)}>
                 <span className="h-2 w-2 rounded-full bg-amber-500" />{job.label}: overdue
               </span>
             ))}
             {automations.neverRun.map((job) => (
-              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500">
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500">
                 <span className="h-2 w-2 rounded-full bg-slate-400" />{job.label}: no run recorded
               </span>
             ))}
