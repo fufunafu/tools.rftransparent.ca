@@ -33,11 +33,11 @@ const DEPT_LABELS: Record<string, string> = {
 };
 
 const DEPT_COLORS: Record<string, string> = {
-  sales: "bg-blue-50 text-blue-700",
-  marketing: "bg-purple-50 text-purple-700",
-  customer_service: "bg-amber-50 text-amber-700",
-  warehouse: "bg-emerald-50 text-emerald-700",
-  management: "bg-slate-100 text-slate-700",
+  sales: "border-blue-200 bg-blue-50 text-blue-700",
+  marketing: "border-violet-200 bg-violet-50 text-violet-700",
+  customer_service: "border-amber-200 bg-amber-50 text-amber-700",
+  warehouse: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  management: "border-slate-200 bg-slate-100 text-slate-700",
 };
 
 const NEW_ID = "__new__";
@@ -80,17 +80,24 @@ function birthdayKey(b: string | null): number {
 }
 
 function formatBirthday(b: string | null): string {
-  if (!b) return "—";
+  if (!b) return "Not set";
   return new Date(b + "T12:00:00Z").toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
   });
 }
 
+function employeeInitials(name: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  return (words[0]?.slice(0, 2) || "?").toUpperCase();
+}
+
 export default function EmployeeList() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   const [search, setSearch] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("");
@@ -109,13 +116,14 @@ export default function EmployeeList() {
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError("");
     try {
       // Always fetch all; we filter client-side so "All" segment works.
       const res = await fetch(`/api/kpi/employees?active=false`);
       const data = await res.json();
       setEmployees(Array.isArray(data) ? data : []);
     } catch {
-      // ignore
+      setLoadError("The employee directory could not be loaded.");
     } finally {
       setLoading(false);
     }
@@ -147,6 +155,18 @@ export default function EmployeeList() {
 
   const activeCount = useMemo(() => employees.filter((e) => e.active).length, [employees]);
   const inactiveCount = employees.length - activeCount;
+  const activeDepartments = useMemo(
+    () => new Set(employees.filter((employee) => employee.active).map((employee) => employee.department)).size,
+    [employees],
+  );
+  const activeLocations = useMemo(
+    () => new Set(employees.filter((employee) => employee.active && employee.location_id).map((employee) => employee.location_id)).size,
+    [employees],
+  );
+  const birthdaysOnFile = useMemo(
+    () => employees.filter((employee) => employee.active && employee.birthday).length,
+    [employees],
+  );
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -282,20 +302,32 @@ export default function EmployeeList() {
   const drawerMode: "create" | "edit" = editingId === NEW_ID ? "create" : "edit";
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-baseline gap-3">
-        <h2 className="text-xl font-semibold text-sand-900">Employees</h2>
-        <div className="flex items-center gap-1.5 text-xs text-sand-500">
-          <span className="px-2 py-0.5 rounded-full bg-sand-100">{employees.length} total</span>
-          <span className="px-2 py-0.5 rounded-full bg-green-50 text-green-700">
-            {activeCount} active
-          </span>
-          {inactiveCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full bg-sand-100 text-sand-500">
-              {inactiveCount} inactive
-            </span>
-          )}
-        </div>
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <RosterMetric
+          label="Active team"
+          value={loading ? "..." : activeCount}
+          note={inactiveCount > 0 ? `${inactiveCount} inactive profile${inactiveCount === 1 ? "" : "s"}` : "Everyone is active"}
+          tone="blue"
+        />
+        <RosterMetric
+          label="Departments"
+          value={loading ? "..." : activeDepartments}
+          note="Across the active team"
+          tone="violet"
+        />
+        <RosterMetric
+          label="Locations"
+          value={loading ? "..." : activeLocations}
+          note="With active employees"
+          tone="emerald"
+        />
+        <RosterMetric
+          label="Birthdays on file"
+          value={loading ? "..." : birthdaysOnFile}
+          note={activeCount > 0 ? `${Math.round((birthdaysOnFile / activeCount) * 100)}% profile coverage` : "No active profiles"}
+          tone="amber"
+        />
       </div>
 
       <EmployeeFilters
@@ -313,11 +345,40 @@ export default function EmployeeList() {
         addDisabled={drawerOpen}
       />
 
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-        <div className="overflow-auto max-h-[calc(100vh-260px)]">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-20 bg-white">
-              <tr className="border-b border-sand-100">
+      {loadError && (
+        <div role="alert" className="flex flex-col gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 sm:flex-row sm:items-center sm:justify-between">
+          <span>{loadError}</span>
+          <button type="button" onClick={load} className="w-fit text-xs font-semibold text-red-700 hover:text-red-900">
+            Try again
+          </button>
+        </div>
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" aria-label="Employee directory">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-900">
+              {loading ? "Loading directory" : `${filtered.length} employee${filtered.length === 1 ? "" : "s"}`}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {hasActiveFilters ? "Results match your current filters" : "Select a profile to view or update it"}
+            </p>
+          </div>
+          {hasActiveFilters && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="w-fit rounded-lg px-2.5 py-1.5 text-xs font-semibold text-blue-600 transition hover:bg-blue-50 hover:text-blue-700"
+            >
+              Clear all filters
+            </button>
+          )}
+        </div>
+
+        <div className="hidden max-h-[calc(100vh-280px)] overflow-auto md:block">
+          <table className="w-full min-w-[760px] text-sm">
+            <thead className="sticky top-0 z-20 bg-slate-50/95 backdrop-blur">
+              <tr className="border-b border-slate-100">
                 <SortHeader label="Name" active={sortKey === "name"} dir={sortDir} onClick={() => toggleSort("name")} />
                 <SortHeader label="Department" active={sortKey === "department"} dir={sortDir} onClick={() => toggleSort("department")} />
                 <PlainHeader label="Location" />
@@ -345,37 +406,47 @@ export default function EmployeeList() {
                   <tr
                     key={emp.id}
                     onClick={() => startEdit(emp)}
-                    className="border-b border-sand-50 last:border-0 hover:bg-sand-50/50 cursor-pointer transition-colors"
+                    className="group cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50/70"
                   >
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-sand-900">{emp.name}</div>
-                      {emp.email && (
-                        <div className="text-xs text-sand-400 mt-0.5">{emp.email}</div>
-                      )}
+                    <td className="px-5 py-3.5">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-[11px] font-semibold text-slate-600 transition group-hover:bg-blue-100 group-hover:text-blue-700" aria-hidden="true">
+                          {employeeInitials(emp.name)}
+                        </span>
+                        <div className="min-w-0">
+                          <button type="button" onClick={(event) => { event.stopPropagation(); startEdit(emp); }} className="block max-w-[250px] truncate text-left font-semibold text-slate-900 hover:text-blue-700">
+                            {emp.name}
+                          </button>
+                          <div className="mt-0.5 max-w-[250px] truncate text-xs text-slate-400">
+                            {emp.email ?? emp.email_alt ?? "No email on file"}
+                          </div>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                          DEPT_COLORS[emp.department] ?? "bg-sand-100 text-sand-600"
+                        className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                          DEPT_COLORS[emp.department] ?? "border-slate-200 bg-slate-100 text-slate-600"
                         }`}
                       >
                         {DEPT_LABELS[emp.department] ?? emp.department}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-sand-500">{emp.locations?.name ?? "—"}</td>
-                    <td className="px-4 py-3 text-sand-500 text-xs">
+                    <td className="px-4 py-3 text-xs font-medium text-slate-500">{emp.locations?.name ?? "Not assigned"}</td>
+                    <td className={`px-4 py-3 text-xs ${emp.birthday ? "font-medium text-slate-500" : "text-slate-300"}`}>
                       {formatBirthday(emp.birthday)}
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex items-center gap-1.5 text-xs ${
-                          emp.active ? "text-green-700" : "text-sand-400"
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          emp.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"
                         }`}
                       >
                         <span
                           className={`h-1.5 w-1.5 rounded-full ${
-                            emp.active ? "bg-green-500" : "bg-sand-300"
+                            emp.active ? "bg-emerald-500" : "bg-slate-400"
                           }`}
+                          aria-hidden="true"
                         />
                         {emp.active ? "Active" : "Inactive"}
                       </span>
@@ -385,7 +456,46 @@ export default function EmployeeList() {
             </tbody>
           </table>
         </div>
-      </div>
+
+        <div className="divide-y divide-slate-100 md:hidden">
+          {loading && <MobileSkeletonCards count={5} />}
+          {!loading && filtered.length === 0 && (
+            <div className="px-4 py-12">
+              <EmptyState hasFilters={hasActiveFilters} onAdd={startAdd} onClearFilters={clearFilters} />
+            </div>
+          )}
+          {!loading && filtered.map((emp) => (
+            <button
+              key={emp.id}
+              type="button"
+              onClick={() => startEdit(emp)}
+              className="flex w-full items-center gap-3 px-4 py-4 text-left transition hover:bg-slate-50"
+            >
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-xs font-semibold text-slate-600" aria-hidden="true">
+                {employeeInitials(emp.name)}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-semibold text-slate-900">{emp.name}</span>
+                <span className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold ${DEPT_COLORS[emp.department] ?? "border-slate-200 bg-slate-100 text-slate-600"}`}>
+                    {DEPT_LABELS[emp.department] ?? emp.department}
+                  </span>
+                  <span className="text-[11px] text-slate-400">{emp.locations?.name ?? "No location"}</span>
+                </span>
+              </span>
+              <span className="flex shrink-0 flex-col items-end gap-1.5">
+                <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${emp.active ? "text-emerald-700" : "text-slate-400"}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${emp.active ? "bg-emerald-500" : "bg-slate-300"}`} aria-hidden="true" />
+                  {emp.active ? "Active" : "Inactive"}
+                </span>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4 text-slate-300" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
+                </svg>
+              </span>
+            </button>
+          ))}
+        </div>
+      </section>
 
       <EmployeeDrawer
         open={drawerOpen}
@@ -408,7 +518,7 @@ export default function EmployeeList() {
 
 function PlainHeader({ label }: { label: string }) {
   return (
-    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">
       {label}
     </th>
   );
@@ -426,18 +536,18 @@ function SortHeader({
   onClick: () => void;
 }) {
   return (
-    <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wider text-sand-400">
+    <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400 first:pl-5">
       <button
         type="button"
         onClick={onClick}
-        className={`inline-flex items-center gap-1 hover:text-sand-700 transition-colors ${
-          active ? "text-sand-700" : ""
+        className={`inline-flex items-center gap-1 transition-colors hover:text-slate-700 ${
+          active ? "text-slate-700" : ""
         }`}
       >
         {label}
-        <span className="text-[10px]">
-          {active ? (dir === "asc" ? "▲" : "▼") : "↕"}
-        </span>
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} className={`h-3 w-3 ${active && dir === "desc" ? "rotate-180" : ""}`} aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" d="m5 9 3-3 3 3" />
+        </svg>
       </button>
     </th>
   );
@@ -447,26 +557,77 @@ function SkeletonRows({ count }: { count: number }) {
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <tr key={i} className="border-b border-sand-50 last:border-0">
-          <td className="px-4 py-3">
-            <div className="h-4 w-32 bg-sand-100 rounded animate-pulse" />
-            <div className="h-3 w-40 bg-sand-50 rounded animate-pulse mt-1.5" />
+        <tr key={i} className="border-b border-slate-100 last:border-0">
+          <td className="px-5 py-3.5">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-slate-100 animate-pulse" />
+              <div>
+                <div className="h-4 w-32 rounded bg-slate-100 animate-pulse" />
+                <div className="mt-1.5 h-3 w-40 rounded bg-slate-50 animate-pulse" />
+              </div>
+            </div>
           </td>
           <td className="px-4 py-3">
-            <div className="h-5 w-20 bg-sand-100 rounded-full animate-pulse" />
+            <div className="h-6 w-20 rounded-full bg-slate-100 animate-pulse" />
           </td>
           <td className="px-4 py-3">
-            <div className="h-4 w-24 bg-sand-100 rounded animate-pulse" />
+            <div className="h-4 w-24 rounded bg-slate-100 animate-pulse" />
           </td>
           <td className="px-4 py-3">
-            <div className="h-4 w-12 bg-sand-100 rounded animate-pulse" />
+            <div className="h-4 w-12 rounded bg-slate-100 animate-pulse" />
           </td>
           <td className="px-4 py-3">
-            <div className="h-4 w-16 bg-sand-100 rounded animate-pulse" />
+            <div className="h-6 w-16 rounded-full bg-slate-100 animate-pulse" />
           </td>
         </tr>
       ))}
     </>
+  );
+}
+
+function MobileSkeletonCards({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 px-4 py-4">
+          <div className="h-10 w-10 rounded-xl bg-slate-100 animate-pulse" />
+          <div className="flex-1">
+            <div className="h-4 w-32 rounded bg-slate-100 animate-pulse" />
+            <div className="mt-2 h-3 w-40 rounded bg-slate-50 animate-pulse" />
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+function RosterMetric({
+  label,
+  value,
+  note,
+  tone,
+}: {
+  label: string;
+  value: number | string;
+  note: string;
+  tone: "blue" | "violet" | "emerald" | "amber";
+}) {
+  const dotColor = {
+    blue: "bg-blue-500",
+    violet: "bg-violet-500",
+    emerald: "bg-emerald-500",
+    amber: "bg-amber-500",
+  }[tone];
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+      <div className="flex items-center gap-2 text-xs font-medium text-slate-500">
+        <span className={`h-2 w-2 rounded-full ${dotColor}`} aria-hidden="true" />
+        {label}
+      </div>
+      <p className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+      <p className="mt-1 truncate text-[11px] text-slate-400" title={note}>{note}</p>
+    </div>
   );
 }
 
@@ -481,12 +642,18 @@ function EmptyState({
 }) {
   if (hasFilters) {
     return (
-      <div className="text-center space-y-3">
-        <p className="text-sand-500 text-sm">No employees match your filters.</p>
+      <div className="space-y-3 text-center">
+        <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-5 w-5" aria-hidden="true">
+            <circle cx="10.5" cy="10.5" r="6" />
+            <path strokeLinecap="round" d="m15 15 4 4" />
+          </svg>
+        </div>
+        <p className="text-sm font-medium text-slate-600">No employees match these filters</p>
         <button
           type="button"
           onClick={onClearFilters}
-          className="text-sm font-medium text-accent hover:text-accent-dark"
+          className="text-xs font-semibold text-blue-600 hover:text-blue-700"
         >
           Clear filters
         </button>
@@ -494,14 +661,15 @@ function EmptyState({
     );
   }
   return (
-    <div className="text-center space-y-3">
-      <p className="text-sand-500 text-sm">No employees yet.</p>
+    <div className="space-y-3 text-center">
+      <p className="text-sm font-medium text-slate-600">Build your employee directory</p>
+      <p className="text-xs text-slate-400">Add the first profile to get started.</p>
       <button
         type="button"
         onClick={onAdd}
-        className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors"
+        className="rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-700"
       >
-        + Add your first employee
+        Add your first employee
       </button>
     </div>
   );

@@ -13,7 +13,7 @@ export default async function EmployeesPage() {
   if (!authenticated) redirect("/login");
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="mx-auto max-w-7xl">
       <EmployeesHub />
     </div>
   );

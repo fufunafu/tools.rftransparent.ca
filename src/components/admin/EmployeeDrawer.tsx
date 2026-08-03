@@ -45,9 +45,9 @@ const DEPARTMENTS = [
 ];
 
 const FIELD_CLS =
-  "w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 bg-white focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none";
+  "h-11 w-full rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 shadow-sm outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10";
 
-const LABEL_CLS = "block text-sm font-medium text-sand-700 mb-1";
+const LABEL_CLS = "mb-1.5 block text-xs font-semibold text-slate-700";
 
 export default function EmployeeDrawer({
   open,
@@ -148,7 +148,7 @@ export default function EmployeeDrawer({
   return (
     <>
       <div
-        className={`fixed inset-0 z-40 bg-black/30 transition-opacity ${
+        className={`fixed inset-0 z-40 bg-slate-950/45 backdrop-blur-[2px] transition-opacity ${
           open ? "opacity-100" : "opacity-0 pointer-events-none"
         }`}
         onClick={() => !saving && !deleting && onCancel()}
@@ -158,27 +158,41 @@ export default function EmployeeDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={mode === "create" ? "New employee" : "Edit employee"}
-        className={`fixed right-0 top-0 h-full w-full max-w-md bg-white shadow-2xl z-50 flex flex-col transition-transform duration-200 ${
+        className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
       >
-        <header className="flex items-center justify-between px-5 py-4 border-b border-sand-200">
-          <h2 className="text-lg font-semibold text-sand-900">
-            {mode === "create" ? "New employee" : "Edit employee"}
-          </h2>
+        <header className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-5 w-5" aria-hidden="true">
+                <circle cx="12" cy="8.25" r="3.25" />
+                <path strokeLinecap="round" d="M5.5 19.5a6.5 6.5 0 0 1 13 0" />
+                {mode === "create" && <path strokeLinecap="round" d="M18.5 4v5M16 6.5h5" />}
+              </svg>
+            </span>
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">
+                {mode === "create" ? "Add employee" : "Edit employee"}
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-400">
+                {mode === "create" ? "Create a new team profile" : "Update profile and access details"}
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             onClick={onCancel}
             disabled={saving || deleting}
             aria-label="Close"
-            className="text-sand-400 hover:text-sand-700 transition-colors disabled:opacity-50 text-xl leading-none"
+            className="flex h-9 w-9 items-center justify-center rounded-xl text-xl leading-none text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50"
           >
             ×
           </button>
         </header>
 
-        <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto px-5 py-5 space-y-4">
+        <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
+          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6 sm:py-6">
             <div>
               <label className={LABEL_CLS}>Name</label>
               <input
@@ -195,7 +209,7 @@ export default function EmployeeDrawer({
             <div>
               <label className={LABEL_CLS}>
                 Work Email
-                <span className="text-sand-400 font-normal ml-1">(grants access)</span>
+                <span className="ml-1 font-normal text-slate-400">(grants access)</span>
               </label>
               <input
                 type="email"
@@ -209,7 +223,7 @@ export default function EmployeeDrawer({
             <div>
               <label className={LABEL_CLS}>
                 Personal Email
-                <span className="text-sand-400 font-normal ml-1">(optional, also grants access)</span>
+                <span className="ml-1 font-normal text-slate-400">(optional, also grants access)</span>
               </label>
               <input
                 type="email"
@@ -220,7 +234,7 @@ export default function EmployeeDrawer({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className={LABEL_CLS}>Department</label>
                 <select
@@ -252,7 +266,7 @@ export default function EmployeeDrawer({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-4 sm:grid-cols-2">
               <div>
                 <label className={LABEL_CLS}>Phone (WhatsApp)</label>
                 <input
@@ -277,8 +291,8 @@ export default function EmployeeDrawer({
             <div>
               <label className={LABEL_CLS}>
                 Shopify Tags
-                <span className="text-sand-400 font-normal ml-1">
-                  (comma-separated — all aliases that match order tags)
+                <span className="ml-1 font-normal text-slate-400">
+                  (comma-separated, all aliases that match order tags)
                 </span>
               </label>
               <input
@@ -288,62 +302,65 @@ export default function EmployeeDrawer({
                 placeholder="e.g. Rob, rob, Robert, Robert Glas"
                 className={FIELD_CLS}
               />
-              <p className="text-xs text-sand-400 mt-1">
+              <p className="mt-1.5 text-xs leading-5 text-slate-400">
                 Matching is case-insensitive. Add all variations used in Shopify.
               </p>
             </div>
 
             {isAdmin && mode === "edit" && (
-              <div className="border-t border-sand-100 pt-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                 <label className={LABEL_CLS}>
                   Sign-in & Password
-                  <span className="text-sand-400 font-normal ml-1">(for employees without Google)</span>
+                  <span className="ml-1 font-normal text-slate-400">(for employees without Google)</span>
                 </label>
-                <p className="text-xs text-sand-500 mb-2">
+                <p className="mb-3 text-xs leading-5 text-slate-500">
                   {draft.email
                     ? `They'll sign in at the login page with ${draft.email} and the password you set.`
-                    : "Set a work email above first — it becomes their login username."}
+                    : "Set a work email above first. It becomes their login username."}
                 </p>
                 <button
                   type="button"
                   onClick={() => setPasswordOpen(true)}
                   disabled={!draft.email || saving || deleting}
-                  className="px-3 py-1.5 text-sm font-medium rounded-lg border border-sand-300 bg-white text-sand-700 hover:bg-sand-50 transition-colors disabled:opacity-50"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
                 >
                   Set / reset password
                 </button>
                 {pwSuccess && (
-                  <p className="text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2 mt-2">
+                  <p className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-700">
                     {pwSuccess}
                   </p>
                 )}
               </div>
             )}
 
-            <label className="flex items-center gap-2 cursor-pointer pt-1">
+            <label className="flex cursor-pointer items-center justify-between rounded-xl border border-slate-200 bg-white px-4 py-3">
+              <span>
+                <span className="block text-sm font-semibold text-slate-800">Active employee</span>
+                <span className="mt-0.5 block text-xs text-slate-400">Active profiles can sign in and appear in reporting.</span>
+              </span>
               <input
                 type="checkbox"
                 checked={draft.active}
                 onChange={(e) => setField("active", e.target.checked)}
-                className="rounded border-sand-300 text-accent focus:ring-accent"
+                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
               />
-              <span className="text-sm text-sand-700">Active</span>
             </label>
 
             {error && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700">
                 {error}
               </p>
             )}
           </div>
 
-          <footer className="flex items-center gap-2 px-5 py-3 border-t border-sand-200 bg-sand-50/50">
+          <footer className="flex items-center gap-2 border-t border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
             {mode === "edit" && onDelete && (
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
                 disabled={saving || deleting}
-                className="text-sm text-red-500 hover:text-red-700 transition-colors disabled:opacity-50"
+                className="rounded-lg px-2 py-2 text-xs font-semibold text-red-500 transition hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
               >
                 Delete
               </button>
@@ -353,14 +370,14 @@ export default function EmployeeDrawer({
                 type="button"
                 onClick={onCancel}
                 disabled={saving || deleting}
-                className="px-4 py-2 text-sm text-sand-600 hover:text-sand-900 transition-colors disabled:opacity-50"
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-white hover:text-slate-900 disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 disabled={saving || deleting || !draft.name.trim()}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
+                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {saving ? "Saving…" : mode === "create" ? "Add employee" : "Save changes"}
               </button>
@@ -385,17 +402,17 @@ export default function EmployeeDrawer({
 
       {passwordOpen && (
         <div
-          className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-[2px]"
           onClick={() => !pwSaving && setPasswordOpen(false)}
         >
           <div
-            className="bg-white rounded-xl border border-sand-200 shadow-xl w-full max-w-sm p-6 space-y-3"
+            className="w-full max-w-sm space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-base font-semibold text-sand-900">Set password</h3>
-            <p className="text-sm text-sand-600">
+            <h3 className="text-base font-semibold text-slate-950">Set password</h3>
+            <p className="text-sm leading-6 text-slate-500">
               They&apos;ll sign in with <span className="font-medium">{draft.email}</span> and the password you set
-              here. Tell them in person — we don&apos;t send it by email.
+              here. Tell them in person. We don&apos;t send it by email.
             </p>
             <div>
               <label className={LABEL_CLS}>New password</label>
@@ -410,7 +427,7 @@ export default function EmployeeDrawer({
               />
             </div>
             {pwError && (
-              <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
                 {pwError}
               </p>
             )}
@@ -419,7 +436,7 @@ export default function EmployeeDrawer({
                 type="button"
                 onClick={() => setPasswordOpen(false)}
                 disabled={pwSaving}
-                className="px-4 py-2 text-sm text-sand-600 hover:text-sand-900 transition-colors disabled:opacity-50"
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -427,7 +444,7 @@ export default function EmployeeDrawer({
                 type="button"
                 onClick={handleSetPassword}
                 disabled={pwSaving || newPassword.length < 8}
-                className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
+                className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:bg-slate-300"
               >
                 {pwSaving ? "Saving…" : "Save password"}
               </button>
