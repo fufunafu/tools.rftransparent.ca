@@ -1,12 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-
-// The health page groups everything by system rather than by kind of check:
-// one card per system (Email, Stores, Marketing…) holding its live probes,
-// its env status, its data freshness, and its cron — so "is email OK?" is one
-// glance, not three sections. Groups with problems sort to the top, and the
-// banner names each issue with the fix instead of just counting them.
+import Link from "next/link";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
 interface CheckResult {
   name: string;
@@ -50,28 +45,48 @@ interface InitialData {
   checked_at: string;
 }
 
-const statusConfig = {
-  ok: { dot: "bg-green-500", text: "text-green-700", label: "OK" },
-  slow: { dot: "bg-yellow-500", text: "text-yellow-700", label: "Slow" },
-  error: { dot: "bg-red-500", text: "text-red-700", label: "Error" },
-  unconfigured: { dot: "bg-sand-300", text: "text-sand-500", label: "Not configured" },
-  checking: { dot: "bg-sand-300 animate-pulse", text: "text-sand-400", label: "Checking..." },
-};
-
-// ─── Groups ──────────────────────────────────────────────────────────────────
-// Service check ids and env-check names are assigned to a system; anything
-// unrecognized (a future check) falls through to Platform rather than
-// disappearing.
-
 type GroupKey = "email" | "stores" | "marketing" | "phones" | "surveys" | "platform";
 
-const GROUPS: { key: GroupKey; title: string; blurb: string }[] = [
-  { key: "email", title: "Email", blurb: "Inbox syncing and outgoing mail" },
-  { key: "stores", title: "Shopify Stores", blurb: "Store APIs and the quotes apps" },
-  { key: "marketing", title: "Marketing", blurb: "Ads, analytics, and Meta lead forms" },
-  { key: "phones", title: "Phones & Call Data", blurb: "Call scraping across both phone systems" },
-  { key: "surveys", title: "Surveys & Messaging", blurb: "WhatsApp employee surveys" },
-  { key: "platform", title: "Platform", blurb: "Database, storage, tokens, and secrets" },
+const STATUS = {
+  ok: {
+    label: "Operational",
+    dot: "bg-emerald-500",
+    badge: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    text: "text-emerald-700",
+  },
+  slow: {
+    label: "Slow",
+    dot: "bg-amber-500",
+    badge: "border-amber-200 bg-amber-50 text-amber-700",
+    text: "text-amber-700",
+  },
+  error: {
+    label: "Error",
+    dot: "bg-rose-500",
+    badge: "border-rose-200 bg-rose-50 text-rose-700",
+    text: "text-rose-700",
+  },
+  unconfigured: {
+    label: "Not configured",
+    dot: "bg-slate-400",
+    badge: "border-slate-200 bg-slate-50 text-slate-600",
+    text: "text-slate-600",
+  },
+  checking: {
+    label: "Checking",
+    dot: "animate-pulse bg-blue-500",
+    badge: "border-blue-200 bg-blue-50 text-blue-700",
+    text: "text-blue-700",
+  },
+} as const;
+
+const GROUPS: Array<{ key: GroupKey; title: string; blurb: string }> = [
+  { key: "platform", title: "Core platform", blurb: "Database, storage, tokens, and application configuration" },
+  { key: "stores", title: "Shopify stores", blurb: "Store APIs and quotation applications" },
+  { key: "email", title: "Email", blurb: "Inbox synchronization and outgoing mail" },
+  { key: "phones", title: "Phones and call data", blurb: "Call collection across both phone systems" },
+  { key: "marketing", title: "Marketing", blurb: "Advertising, analytics, and Meta lead forms" },
+  { key: "surveys", title: "Surveys and messaging", blurb: "WhatsApp surveys and public application URLs" },
 ];
 
 function groupOfService(id: string): GroupKey {
@@ -92,51 +107,53 @@ function groupOfEnv(name: string): GroupKey {
   return "platform";
 }
 
-// Shown while a probe is still in flight, before its result carries a name.
 function pendingLabel(id: string): string {
   if (id.startsWith("gmail-")) return "Gmail inbox";
   if (id.startsWith("shopify-quotation-")) return "Shopify quotes app";
   if (id.startsWith("shopify-")) return "Shopify store";
   const names: Record<string, string> = {
     supabase: "Supabase",
-    tables: "Core Tables",
-    storage: "Supabase Storage",
-    scraper: "Scraper (Render)",
+    tables: "Core tables",
+    storage: "Supabase storage",
+    scraper: "Scraper",
     "google-ads": "Google Ads",
     "google-analytics": "Google Analytics",
     resend: "Resend",
-    meta: "Meta Lead Forms",
+    meta: "Meta lead forms",
     twilio: "Twilio WhatsApp",
-    wall: "Wall Board Token",
+    wall: "Wall board token",
   };
   return names[id] ?? id;
 }
 
-// What to actually do about a failure, for the failures we know the shape of.
-function fixHint(c: CheckResult): string | null {
-  if (c.name.startsWith("Gmail:") && c.detail?.includes("Token refresh failed"))
-    return "Re-authorize this inbox and replace its GMAIL_REFRESH_TOKEN in Vercel.";
-  if (c.name === "Resend" && (c.detail?.includes("401") || c.detail?.includes("verified")))
-    return "Replace RESEND_API_KEY in Vercel — reminder emails and cron alerts depend on it.";
-  if (c.name === "Twilio WhatsApp" && c.status === "unconfigured")
-    return "Set the TWILIO_* vars in Vercel to actually send WhatsApp surveys.";
-  if (c.name === "Scraper (Render)" && c.status === "slow")
-    return "Cold start on Render's free tier — working, just waking up.";
-  if (c.name === "Meta Lead Forms" && c.detail?.includes("token"))
+function fixHint(check: CheckResult): string | null {
+  if (check.name.startsWith("Gmail:") && check.detail?.includes("Token refresh failed")) {
+    return "Re-authorize this inbox and replace its Gmail refresh token in Vercel.";
+  }
+  if (check.name === "Resend" && (check.detail?.includes("401") || check.detail?.includes("verified"))) {
+    return "Replace RESEND_API_KEY in Vercel. Reminder emails and cron alerts depend on it.";
+  }
+  if (check.name === "Twilio WhatsApp" && check.status === "unconfigured") {
+    return "Set the Twilio variables in Vercel to enable WhatsApp surveys.";
+  }
+  if (check.name === "Scraper (Render)" && check.status === "slow") {
+    return "The Render service is responding, but its cold start is taking longer than expected.";
+  }
+  if (check.name === "Meta Lead Forms" && check.detail?.toLowerCase().includes("token")) {
     return "Replace META_PAGE_ACCESS_TOKEN in Vercel.";
-  if (c.detail?.startsWith("Missing: ")) return `Set in Vercel: ${c.detail.slice(9)}`;
+  }
+  if (check.detail?.startsWith("Missing: ")) return `Set these values in Vercel: ${check.detail.slice(9)}`;
   return null;
 }
 
 function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
+  const elapsed = Math.max(0, Date.now() - new Date(iso).getTime());
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function formatDate(iso: string | null): string {
@@ -144,6 +161,7 @@ function formatDate(iso: string | null): string {
   return new Date(iso).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
+    year: "numeric",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
@@ -156,15 +174,151 @@ function storeLabel(id: string): string {
   return id;
 }
 
-function StalePill({ stale }: { stale: boolean }) {
+function StatusBadge({ status }: { status: CheckResult["status"] }) {
+  const config = STATUS[status];
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${config.badge}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
+      {config.label}
+    </span>
+  );
+}
+
+function GroupStatusBadge({
+  summary,
+}: {
+  summary: { errors: number; attention: number; checking: number };
+}) {
+  if (summary.checking > 0) return <StatusBadge status="checking" />;
+  if (summary.errors > 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+        {summary.errors} problem{summary.errors === 1 ? "" : "s"}
+      </span>
+    );
+  }
+  if (summary.attention > 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+        Needs review
+      </span>
+    );
+  }
+  return <StatusBadge status="ok" />;
+}
+
+function FreshnessBadge({ stale }: { stale: boolean }) {
   return stale ? (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-600">
-      Stale
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+      Needs sync
     </span>
   ) : (
-    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-600">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-700">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
       Fresh
     </span>
+  );
+}
+
+function GroupIcon({ group }: { group: GroupKey }) {
+  const paths: Record<GroupKey, ReactNode> = {
+    platform: (
+      <>
+        <rect x="4" y="4" width="16" height="6" rx="2" />
+        <rect x="4" y="14" width="16" height="6" rx="2" />
+        <path d="M8 7h.01M8 17h.01" />
+      </>
+    ),
+    stores: (
+      <>
+        <path d="M4 9.5 6 4h12l2 5.5" />
+        <path d="M5 10v9h14v-9M9 19v-5h6v5" />
+        <path d="M4 9.5a2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0 2.5 2.5 0 0 0 5 0" />
+      </>
+    ),
+    email: (
+      <>
+        <rect x="3.5" y="5" width="17" height="14" rx="2" />
+        <path d="m4.5 7 6.1 4.2a2.5 2.5 0 0 0 2.8 0L19.5 7" />
+      </>
+    ),
+    phones: (
+      <path d="M7.2 3.5 10 8l-2 2a15 15 0 0 0 6 6l2-2 4.5 2.8-.8 3a2 2 0 0 1-2 1.5C9.5 20.5 3.5 14.5 2.7 6.3a2 2 0 0 1 1.5-2l3-.8Z" />
+    ),
+    marketing: (
+      <>
+        <path d="M4 13h3l9 5V6l-9 5H4v2Z" />
+        <path d="M7 13v5M19 9a4 4 0 0 1 0 6" />
+      </>
+    ),
+    surveys: (
+      <>
+        <path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1Z" />
+        <path d="M7 9h10M7 13h6" />
+      </>
+    ),
+  };
+  return (
+    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5" aria-hidden="true">
+        {paths[group]}
+      </svg>
+    </span>
+  );
+}
+
+function MetricCard({ label, value, detail, tone = "neutral" }: { label: string; value: string; detail: string; tone?: "neutral" | "good" | "attention" }) {
+  const valueClass = tone === "good" ? "text-emerald-600" : tone === "attention" ? "text-amber-600" : "text-slate-950";
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</p>
+      <p className={`mt-2 text-2xl font-semibold tracking-tight ${valueClass}`}>{value}</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">{detail}</p>
+    </div>
+  );
+}
+
+function ServiceRow({ check }: { check: CheckResult }) {
+  const config = STATUS[check.status];
+  return (
+    <div className={`flex items-start gap-3 px-5 py-3.5 ${check.status === "error" ? "bg-rose-50/50" : ""}`}>
+      <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${config.dot}`} />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="text-sm font-semibold text-slate-800">{check.name}</p>
+          {check.latency_ms > 0 && <span className="text-[11px] tabular-nums text-slate-400">{check.latency_ms} ms</span>}
+        </div>
+        {check.detail && (
+          <p className={`mt-0.5 break-words text-xs leading-5 ${check.status === "error" ? "text-rose-600" : "text-slate-500"}`}>
+            {check.detail}
+          </p>
+        )}
+      </div>
+      <StatusBadge status={check.status} />
+    </div>
+  );
+}
+
+function EnvironmentRows({ checks }: { checks: CheckResult[] }) {
+  if (checks.length === 0) return null;
+  return (
+    <div className="border-t border-slate-100 bg-slate-50/70 px-5 py-3">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Configuration</p>
+      <div className="space-y-2">
+        {checks.map((check) => (
+          <div key={check.name} className="flex items-start gap-2 text-xs">
+            <span className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${STATUS[check.status].dot}`} />
+            <span className="font-medium text-slate-600">{check.name}</span>
+            <span className={`ml-auto max-w-[65%] text-right leading-4 ${check.status === "ok" ? "text-slate-400" : "font-medium text-rose-600"}`}>
+              {check.detail ?? STATUS[check.status].label}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -180,427 +334,397 @@ export default function HealthCheckDashboard() {
     setServices(new Map());
 
     try {
-      // Step 1: env vars, freshness, jobs, and the list of live probes
-      const res = await fetch("/api/health-check");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data: InitialData = await res.json();
+      const response = await fetch("/api/health-check");
+      if (!response.ok) throw new Error(`Health check returned HTTP ${response.status}`);
+      const data: InitialData = await response.json();
       setInitData(data);
 
-      // Step 2: mark every probe as in flight
-      const initial = new Map<string, CheckResult>();
-      for (const name of data.service_checks) {
-        initial.set(name, { name: pendingLabel(name), status: "checking", latency_ms: 0 });
+      const pending = new Map<string, CheckResult>();
+      for (const id of data.service_checks) {
+        pending.set(id, { name: pendingLabel(id), status: "checking", latency_ms: 0 });
       }
-      setServices(new Map(initial));
+      setServices(new Map(pending));
 
-      // Step 3: fire each probe in parallel, painting results as they land
-      const promises = data.service_checks.map(async (checkName) => {
-        try {
-          const checkRes = await fetch(`/api/health-check?check=${checkName}`);
-          const result: CheckResult = await checkRes.json();
-          setServices((prev) => new Map(prev).set(checkName, result));
-        } catch {
-          setServices((prev) =>
-            new Map(prev).set(checkName, {
-              name: pendingLabel(checkName),
-              status: "error",
-              latency_ms: 0,
-              detail: "Request failed",
-            })
-          );
-        }
-      });
-
-      await Promise.allSettled(promises);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run health check");
+      await Promise.allSettled(
+        data.service_checks.map(async (id) => {
+          try {
+            const checkResponse = await fetch(`/api/health-check?check=${id}`);
+            if (!checkResponse.ok) throw new Error(`HTTP ${checkResponse.status}`);
+            const result: CheckResult = await checkResponse.json();
+            setServices((current) => new Map(current).set(id, result));
+          } catch {
+            setServices((current) =>
+              new Map(current).set(id, {
+                name: pendingLabel(id),
+                status: "error",
+                latency_ms: 0,
+                detail: "The probe request failed.",
+              }),
+            );
+          }
+        }),
+      );
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : "The health check could not run.");
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    runChecks();
+    void runChecks();
   }, [runChecks]);
 
   const automations = initData?.automations ?? null;
   const serviceEntries = Array.from(services.entries());
-  const completed = serviceEntries.filter(([, s]) => s.status !== "checking");
-  const allDone = completed.length === serviceEntries.length && serviceEntries.length > 0;
+  const completed = serviceEntries.filter(([, check]) => check.status !== "checking");
+  const healthyServices = completed.filter(([, check]) => check.status === "ok").length;
+  const allDone = serviceEntries.length > 0 && completed.length === serviceEntries.length;
+  const serviceIssues = completed.map(([, check]) => check).filter((check) => check.status !== "ok");
+  const envIssues = initData?.env_vars.filter((check) => check.status !== "ok") ?? [];
+  const failingJobs = automations && !automations.tableMissing ? automations.failing : [];
+  const silentJobs = automations && !automations.tableMissing ? automations.silent : [];
+  const issueCount = serviceIssues.length + envIssues.length + failingJobs.length + silentJobs.length;
+  const staleDataCount = [
+    ...(initData?.email_freshness ?? []).map((row) => row.stale),
+    ...(initData?.data_freshness ?? []).map((row) => row.stale),
+  ].filter(Boolean).length;
+  const latencies = completed.map(([, check]) => check.latency_ms).filter((value) => value > 0);
+  const averageLatency = latencies.length > 0 ? Math.round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : 0;
 
-  // "Slow" counts: a service limping at 50s is not operational. "Never run"
-  // jobs don't — matching the home page, a job awaiting its first scheduled
-  // firing isn't an incident.
-  const serviceIssues = completed
-    .map(([, s]) => s)
-    .filter((s) => s.status === "error" || s.status === "slow" || s.status === "unconfigured");
-  const envIssues = initData?.env_vars.filter((c) => c.status !== "ok") ?? [];
-  const jobIssues =
-    automations && !automations.tableMissing
-      ? [
-          ...automations.failing.map((j) => ({ label: `${j.label} (job)`, hint: "Last run failed — see Settings → Automations for the error." })),
-          ...automations.silent.map((j) => ({ label: `${j.label} (job)`, hint: `Hasn't run since ${timeAgo(j.lastRun)} — the scheduler may not be firing it.` })),
-        ]
-      : [];
-  const issueCount = serviceIssues.length + envIssues.length + jobIssues.length;
+  const groupSummary = new Map<GroupKey, { errors: number; attention: number; checking: number }>();
+  for (const group of GROUPS) groupSummary.set(group.key, { errors: 0, attention: 0, checking: 0 });
+  for (const [id, check] of serviceEntries) {
+    const summary = groupSummary.get(groupOfService(id))!;
+    if (check.status === "checking") summary.checking += 1;
+    else if (check.status === "error") summary.errors += 1;
+    else if (check.status !== "ok") summary.attention += 1;
+  }
+  for (const check of initData?.env_vars ?? []) {
+    if (check.status === "error") groupSummary.get(groupOfEnv(check.name))!.errors += 1;
+    else if (check.status !== "ok") groupSummary.get(groupOfEnv(check.name))!.attention += 1;
+  }
 
-  // Groups with problems first; original order otherwise.
-  const groupStatus = new Map<GroupKey, { errors: number; slow: number; checking: number }>();
-  for (const g of GROUPS) groupStatus.set(g.key, { errors: 0, slow: 0, checking: 0 });
-  for (const [id, s] of serviceEntries) {
-    const st = groupStatus.get(groupOfService(id))!;
-    if (s.status === "checking") st.checking++;
-    else if (s.status === "error") st.errors++;
-    else if (s.status === "slow" || s.status === "unconfigured") st.slow++;
-  }
-  for (const env of initData?.env_vars ?? []) {
-    if (env.status !== "ok") groupStatus.get(groupOfEnv(env.name))!.errors++;
-  }
-  const orderedGroups = [...GROUPS].sort((a, b) => {
-    const sa = groupStatus.get(a.key)!;
-    const sb = groupStatus.get(b.key)!;
-    return sb.errors + sb.slow - (sa.errors + sa.slow);
+  const orderedGroups = [...GROUPS].sort((left, right) => {
+    const leftSummary = groupSummary.get(left.key)!;
+    const rightSummary = groupSummary.get(right.key)!;
+    return rightSummary.errors * 2 + rightSummary.attention - (leftSummary.errors * 2 + leftSummary.attention);
   });
 
+  const overallTitle = !initData
+    ? "Preparing system checks"
+    : !allDone
+      ? "Checking every connection"
+      : issueCount === 0
+        ? "All systems operational"
+        : `${issueCount} item${issueCount === 1 ? " needs" : "s need"} attention`;
+  const overallDetail = !initData
+    ? "Loading configuration, data freshness, and scheduled-job history."
+    : !allDone
+      ? `${completed.length} of ${serviceEntries.length} live probes have responded.`
+      : issueCount === 0
+        ? "Services, configuration, data feeds, and scheduled jobs are responding normally."
+        : "Review the action list below, then rerun the check after making changes.";
+  const overallTone = !initData || !allDone ? "checking" : issueCount === 0 ? "healthy" : "attention";
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6 pb-10">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h2 className="text-xl font-semibold text-sand-900">System Health</h2>
-          {initData && (
-            <p className="text-sm text-sand-400 mt-0.5">
-              Last checked: {formatDate(initData.checked_at)}
-            </p>
-          )}
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-600">Operations</p>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-950">System health</h1>
+          <p className="mt-1.5 max-w-2xl text-sm leading-6 text-slate-500">
+            Live connectivity, data freshness, configuration, and scheduled-job monitoring in one place.
+          </p>
         </div>
         <button
-          onClick={runChecks}
+          type="button"
+          onClick={() => void runChecks()}
           disabled={loading}
-          className="px-4 py-2 text-sm font-medium bg-sand-900 text-sand-50 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+          className="inline-flex h-10 items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {loading ? "Checking..." : "Run Health Check"}
+          <svg className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M20 7v5h-5M4 17v-5h5M6.1 8.2A7 7 0 0 1 18.7 7M5.3 17A7 7 0 0 0 17.9 15.8" />
+          </svg>
+          {loading ? "Running checks" : "Run health check"}
         </button>
-      </div>
+      </header>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-4 text-sm">
-          {error}
-        </div>
-      )}
-
-      {/* Overall status + named issues */}
-      {serviceEntries.length > 0 && (
-        <div
-          className={`rounded-xl border ${
-            !allDone
-              ? "bg-sand-50 border-sand-200"
-              : issueCount === 0
-                ? "bg-green-50 border-green-200"
-                : "bg-amber-50 border-amber-200"
-          }`}
-        >
-          <div className="flex items-center gap-3 p-4">
-            {!allDone ? (
-              <>
-                <span className="w-3 h-3 rounded-full bg-sand-400 animate-pulse" />
-                <span className="text-sm font-medium text-sand-600">
-                  Checking services... ({completed.length}/{serviceEntries.length})
-                </span>
-              </>
-            ) : issueCount === 0 ? (
-              <>
-                <span className="w-3 h-3 rounded-full bg-green-500" />
-                <span className="text-sm font-medium text-green-800">All systems operational</span>
-              </>
-            ) : (
-              <>
-                <span className="w-3 h-3 rounded-full bg-amber-500" />
-                <span className="text-sm font-medium text-amber-800">
-                  {issueCount} issue{issueCount !== 1 ? "s" : ""} — what to do about each:
-                </span>
-              </>
-            )}
+      <section
+        aria-live="polite"
+        className={`relative overflow-hidden rounded-3xl border p-6 shadow-sm sm:p-7 ${
+          overallTone === "healthy"
+            ? "border-emerald-800 bg-emerald-950 text-white"
+            : overallTone === "attention"
+              ? "border-amber-800 bg-slate-950 text-white"
+              : "border-blue-900 bg-slate-950 text-white"
+        }`}
+      >
+        <div className="absolute -right-20 -top-24 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <span
+              className={`mt-0.5 flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border ${
+                overallTone === "healthy"
+                  ? "border-emerald-500/30 bg-emerald-400/15 text-emerald-300"
+                  : overallTone === "attention"
+                    ? "border-amber-500/30 bg-amber-400/15 text-amber-300"
+                    : "border-blue-500/30 bg-blue-400/15 text-blue-300"
+              }`}
+            >
+              {overallTone === "checking" ? (
+                <span className="h-4 w-4 animate-pulse rounded-full bg-current" />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-6 w-6" aria-hidden="true">
+                  {overallTone === "healthy" ? (
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m5 12.5 4 4L19 7" />
+                  ) : (
+                    <><path strokeLinecap="round" strokeLinejoin="round" d="M12 8v5" /><path strokeLinecap="round" d="M12 17h.01" /><path strokeLinecap="round" strokeLinejoin="round" d="M10.3 4.9 2.8 18a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.9a2 2 0 0 0-3.4 0Z" /></>
+                  )}
+                </svg>
+              )}
+            </span>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.15em] text-white/50">Current status</p>
+              <h2 className="mt-1.5 text-2xl font-semibold tracking-tight">{overallTitle}</h2>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-white/65">{overallDetail}</p>
+              {initData && <p className="mt-3 text-xs text-white/40">Last started {formatDate(initData.checked_at)}</p>}
+            </div>
           </div>
-          {allDone && issueCount > 0 && (
-            <ul className="px-4 pb-4 space-y-1.5">
-              {[...serviceIssues, ...envIssues].map((c) => (
-                <li key={c.name} className="flex gap-2 text-[13px] leading-snug">
-                  <span
-                    className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${
-                      c.status === "error" ? "bg-red-500" : "bg-yellow-500"
-                    }`}
-                  />
-                  <span>
-                    <span className="font-medium text-sand-800">{c.name}</span>
-                    <span className="text-sand-600"> — {c.detail ?? statusConfig[c.status].label}</span>
-                    {fixHint(c) && <span className="text-sand-500"> {fixHint(c)}</span>}
-                  </span>
-                </li>
-              ))}
-              {jobIssues.map((j) => (
-                <li key={j.label} className="flex gap-2 text-[13px] leading-snug">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 bg-red-500" />
-                  <span>
-                    <span className="font-medium text-sand-800">{j.label}</span>
-                    <span className="text-sand-500"> — {j.hint}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+          {serviceEntries.length > 0 && (
+            <div className="min-w-[240px] rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-medium text-white/60">Live probes completed</span>
+                <span className="font-semibold tabular-nums text-white">{completed.length}/{serviceEntries.length}</span>
+              </div>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-all duration-500 ${issueCount > 0 && allDone ? "bg-amber-400" : "bg-emerald-400"}`}
+                  style={{ width: `${Math.round((completed.length / serviceEntries.length) * 100)}%` }}
+                />
+              </div>
+            </div>
           )}
         </div>
+      </section>
+
+      {error && (
+        <div role="alert" className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          <p className="font-semibold">The health check could not finish</p>
+          <p className="mt-1">{error}</p>
+        </div>
       )}
 
-      {/* System groups */}
-      {initData &&
-        orderedGroups.map((group) => {
-          const groupServices = serviceEntries.filter(([id]) => groupOfService(id) === group.key);
-          const groupEnv = initData.env_vars.filter((e) => groupOfEnv(e.name) === group.key);
-          const st = groupStatus.get(group.key)!;
-          if (groupServices.length === 0 && groupEnv.length === 0) return null;
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Live services"
+          value={serviceEntries.length > 0 ? `${healthyServices}/${serviceEntries.length}` : "..."}
+          detail={
+            !allDone
+              ? "Checks in progress"
+              : healthyServices === serviceEntries.length
+                ? "All responding normally"
+                : `${serviceEntries.length - healthyServices} need review`
+          }
+          tone={allDone && healthyServices === serviceEntries.length ? "good" : "neutral"}
+        />
+        <MetricCard
+          label="Items to review"
+          value={initData ? String(issueCount) : "..."}
+          detail={issueCount === 0 ? "No active findings" : "Across services, setup, and jobs"}
+          tone={issueCount > 0 ? "attention" : initData ? "good" : "neutral"}
+        />
+        <MetricCard
+          label="Data freshness"
+          value={initData ? (staleDataCount === 0 ? "Fresh" : `${staleDataCount} stale`) : "..."}
+          detail="Phone and email data feeds"
+          tone={staleDataCount > 0 ? "attention" : initData ? "good" : "neutral"}
+        />
+        <MetricCard
+          label="Average response"
+          value={averageLatency > 0 ? `${averageLatency} ms` : "..."}
+          detail="Across completed live probes"
+          tone={averageLatency > 3_000 ? "attention" : averageLatency > 0 ? "good" : "neutral"}
+        />
+      </section>
 
-          return (
-            <div key={group.key} className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-              {/* Group header */}
-              <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-widest text-sand-500">
-                    {group.title}
-                  </p>
-                  <p className="text-[11px] text-sand-400 mt-0.5">{group.blurb}</p>
-                </div>
-                {st.checking > 0 ? (
-                  <span className="text-xs font-medium text-sand-400">Checking...</span>
-                ) : st.errors > 0 ? (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                    {st.errors} problem{st.errors !== 1 ? "s" : ""}
-                  </span>
-                ) : st.slow > 0 ? (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-yellow-50 text-yellow-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
-                    Attention
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-700">
-                    <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                    All OK
-                  </span>
-                )}
-              </div>
-
-              {/* Probe rows */}
-              <div className="divide-y divide-sand-50">
-                {groupServices.map(([id, check]) => {
-                  const cfg = statusConfig[check.status];
-                  return (
-                    <div
-                      key={id}
-                      className={`px-4 py-2.5 flex items-center gap-3 ${
-                        check.status === "error" ? "bg-red-50/50" : ""
-                      }`}
-                    >
-                      <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${cfg.dot}`} />
-                      <span className="text-sm font-medium text-sand-900 shrink-0">{check.name}</span>
-                      {check.detail && (
-                        <span
-                          className={`text-xs truncate ${
-                            check.status === "error" ? "text-red-600" : "text-sand-500"
-                          }`}
-                          title={check.detail}
-                        >
-                          {check.detail}
-                        </span>
-                      )}
-                      <span className="ml-auto flex items-center gap-3 shrink-0">
-                        {check.latency_ms > 0 && (
-                          <span className="text-[11px] text-sand-400">{check.latency_ms}ms</span>
-                        )}
-                        <span className={`text-xs font-medium ${cfg.text}`}>{cfg.label}</span>
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Email: per-inbox sync freshness */}
-              {group.key === "email" && initData.email_freshness?.length > 0 && (
-                <div className="border-t border-sand-100">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left">
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Inbox</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Last Sync</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Data</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {initData.email_freshness.map((row) => (
-                        <tr key={row.inbox} className="border-t border-sand-50">
-                          <td className="px-4 py-2">
-                            <span className="font-medium text-sand-700">{row.label}</span>
-                            <span className="ml-2 text-[11px] text-sand-400">{row.inbox}</span>
-                          </td>
-                          <td className="px-4 py-2 text-sand-600">
-                            {row.last_sync ? (
-                              <span title={formatDate(row.last_sync)}>{timeAgo(row.last_sync)}</span>
-                            ) : (
-                              <span className="text-sand-300">Never</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            <StalePill stale={row.stale} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Phones: call freshness per store × source */}
-              {group.key === "phones" && initData.data_freshness?.length > 0 && (
-                <div className="border-t border-sand-100">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-left">
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Store</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Source</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Latest Call</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Last Scrape</th>
-                        <th className="px-4 py-2 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Data</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {initData.data_freshness.map((row) => (
-                        <tr key={`${row.store_id}-${row.source}`} className="border-t border-sand-50">
-                          <td className="px-4 py-2 font-medium text-sand-700">{storeLabel(row.store_id)}</td>
-                          <td className="px-4 py-2">
-                            <span
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                                row.source === "grasshopper"
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-blue-100 text-blue-700"
-                              }`}
-                            >
-                              {row.source === "grasshopper" ? "Grasshopper" : "CIK"}
-                            </span>
-                          </td>
-                          <td className="px-4 py-2 text-sand-600">
-                            {row.latest_call ? (
-                              <span title={formatDate(row.latest_call)}>{timeAgo(row.latest_call)}</span>
-                            ) : (
-                              <span className="text-sand-300">No data</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2 text-sand-600">
-                            {row.last_scrape ? (
-                              <span title={formatDate(row.last_scrape)}>
-                                {timeAgo(row.last_scrape)}
-                                {row.scrape_status && row.scrape_status !== "success" && (
-                                  <span className="ml-1.5 text-red-600 font-medium">· {row.scrape_status}</span>
-                                )}
-                              </span>
-                            ) : (
-                              <span className="text-sand-300">Never</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-2">
-                            <StalePill stale={row.stale} />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Env summary line */}
-              {groupEnv.length > 0 && (
-                <div className="px-4 py-2 border-t border-sand-100 bg-sand-50/50 flex flex-wrap gap-x-4 gap-y-1">
-                  {groupEnv.map((env) => (
-                    <span key={env.name} className="text-[11px] text-sand-500">
-                      <span
-                        className={`inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle ${
-                          statusConfig[env.status].dot
-                        }`}
-                      />
-                      {env.name}:{" "}
-                      <span className={env.status === "ok" ? "" : "text-red-600 font-medium"}>
-                        {env.status === "ok" ? env.detail ?? "OK" : env.detail}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-      {/* Scheduled jobs */}
-      {automations && !automations.tableMissing && (
-        <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-          <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
+      {allDone && issueCount > 0 && (
+        <section className="overflow-hidden rounded-2xl border border-amber-200 bg-white shadow-sm">
+          <div className="flex items-start gap-3 border-b border-amber-100 bg-amber-50 px-5 py-4">
+            <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 11.5 11 13.5 15.5 9M4 5h16v14H4z" />
+              </svg>
+            </span>
             <div>
-              <p className="text-xs font-semibold uppercase tracking-widest text-sand-500">
-                Scheduled Jobs
-              </p>
-              <p className="text-[11px] text-sand-400 mt-0.5">
-                Manage and run jobs on Settings → Automations
-                {automations.lastRunAt && ` · most recent run ${timeAgo(automations.lastRunAt)}`}
+              <h2 className="text-sm font-semibold text-amber-950">Action list</h2>
+              <p className="mt-0.5 text-xs leading-5 text-amber-800">Resolve these findings in order, then run the health check again.</p>
+            </div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {[...serviceIssues, ...envIssues].map((check, index) => (
+              <div key={`${check.name}-${index}`} className="flex gap-3 px-5 py-4">
+                <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${check.status === "error" ? "bg-rose-500" : "bg-amber-500"}`} />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800">{check.name}</p>
+                  <p className="mt-0.5 text-xs leading-5 text-slate-500">{check.detail ?? STATUS[check.status].label}</p>
+                  {fixHint(check) && <p className="mt-1 text-xs font-medium leading-5 text-blue-700">{fixHint(check)}</p>}
+                </div>
+              </div>
+            ))}
+            {failingJobs.map((job) => (
+              <div key={job.slug} className="flex gap-3 px-5 py-4">
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-rose-500" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{job.label}</p>
+                  <p className="mt-0.5 text-xs leading-5 text-slate-500">The latest scheduled run failed. Open Automations to review the error.</p>
+                </div>
+              </div>
+            ))}
+            {silentJobs.map((job) => (
+              <div key={job.slug} className="flex gap-3 px-5 py-4">
+                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">{job.label}</p>
+                  <p className="mt-0.5 text-xs leading-5 text-slate-500">No run since {timeAgo(job.lastRun)}. The scheduler may not be firing.</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {initData && (
+        <section>
+          <div className="mb-3">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">System map</p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950">Connections and data feeds</h2>
+          </div>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            {orderedGroups.map((group) => {
+              const groupServices = serviceEntries.filter(([id]) => groupOfService(id) === group.key);
+              const groupEnv = initData.env_vars.filter((check) => groupOfEnv(check.name) === group.key);
+              if (groupServices.length === 0 && groupEnv.length === 0) return null;
+              const summary = groupSummary.get(group.key)!;
+
+              return (
+                <article key={group.key} className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+                  <div className="flex items-start gap-3 border-b border-slate-100 p-5">
+                    <GroupIcon group={group.key} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-slate-900">{group.title}</h3>
+                        <GroupStatusBadge summary={summary} />
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-slate-500">{group.blurb}</p>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-slate-100">
+                    {groupServices.map(([id, check]) => <ServiceRow key={id} check={check} />)}
+                  </div>
+
+                  {group.key === "email" && initData.email_freshness.length > 0 && (
+                    <div className="border-t border-slate-100 px-5 py-4">
+                      <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Inbox freshness</p>
+                      <div className="space-y-2.5">
+                        {initData.email_freshness.map((row) => (
+                          <div key={row.inbox} className="flex items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2.5">
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-xs font-semibold text-slate-700">{row.label}</p>
+                              <p className="mt-0.5 truncate text-[11px] text-slate-400" title={row.inbox}>{row.inbox}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[11px] font-medium text-slate-600" title={formatDate(row.last_sync)}>{row.last_sync ? timeAgo(row.last_sync) : "Never"}</p>
+                              <div className="mt-1"><FreshnessBadge stale={row.stale} /></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {group.key === "phones" && initData.data_freshness.length > 0 && (
+                    <div className="border-t border-slate-100 px-5 py-4">
+                      <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400">Call data freshness</p>
+                      <div className="grid gap-2.5 sm:grid-cols-2">
+                        {initData.data_freshness.map((row) => (
+                          <div key={`${row.store_id}-${row.source}`} className="rounded-xl border border-slate-100 bg-slate-50/60 p-3">
+                            <div className="flex items-start justify-between gap-2">
+                              <div>
+                                <p className="text-xs font-semibold text-slate-700">{storeLabel(row.store_id)}</p>
+                                <p className="mt-0.5 text-[11px] text-slate-400">{row.source === "grasshopper" ? "Grasshopper" : "CIK"}</p>
+                              </div>
+                              <FreshnessBadge stale={row.stale} />
+                            </div>
+                            <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                              <div>
+                                <dt className="text-slate-400">Latest call</dt>
+                                <dd className="mt-0.5 font-medium text-slate-600" title={formatDate(row.latest_call)}>{row.latest_call ? timeAgo(row.latest_call) : "No data"}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-slate-400">Last scrape</dt>
+                                <dd className={`mt-0.5 font-medium ${row.scrape_status && row.scrape_status !== "success" ? "text-rose-600" : "text-slate-600"}`} title={formatDate(row.last_scrape)}>
+                                  {row.last_scrape ? timeAgo(row.last_scrape) : "Never"}
+                                </dd>
+                              </div>
+                            </dl>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <EnvironmentRows checks={groupEnv} />
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {automations && !automations.tableMissing && (
+        <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-blue-600">Scheduled work</p>
+              <h2 className="mt-1 text-base font-semibold text-slate-900">Automation health</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {automations.lastRunAt ? `Most recent activity ${timeAgo(automations.lastRunAt)}` : "No activity has been recorded yet."}
               </p>
             </div>
-            {automations.failing.length + automations.silent.length > 0 ? (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-50 text-red-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-                {automations.failing.length + automations.silent.length} problem
-                {automations.failing.length + automations.silent.length !== 1 ? "s" : ""}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-50 text-green-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-                {automations.total - automations.neverRun.length} of {automations.total} healthy
-              </span>
-            )}
+            <Link href="/settings/automations" className="inline-flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900">
+              Open automations
+            </Link>
           </div>
-          <div className="p-4 flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap gap-2 p-5">
             {automations.failing.map((job) => (
-              <span
-                key={job.slug}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200"
-              >
-                <span className="w-2 h-2 rounded-full bg-red-500" />
-                {job.label} — last run failed
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700">
+                <span className="h-2 w-2 rounded-full bg-rose-500" />{job.label}: failed
               </span>
             ))}
             {automations.silent.map((job) => (
-              <span
-                key={job.slug}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"
-                title={`Last run ${formatDate(job.lastRun)}`}
-              >
-                <span className="w-2 h-2 rounded-full bg-amber-500" />
-                {job.label} — silent since {timeAgo(job.lastRun)}
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-700" title={formatDate(job.lastRun)}>
+                <span className="h-2 w-2 rounded-full bg-amber-500" />{job.label}: overdue
               </span>
             ))}
             {automations.neverRun.map((job) => (
-              <span
-                key={job.slug}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sand-50 text-sand-500 border border-sand-200"
-              >
-                <span className="w-2 h-2 rounded-full bg-sand-300" />
-                {job.label} — never run
+              <span key={job.slug} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-500">
+                <span className="h-2 w-2 rounded-full bg-slate-400" />{job.label}: no run recorded
               </span>
             ))}
-            {automations.failing.length + automations.silent.length + automations.neverRun.length ===
-              0 && <span className="text-sm text-sand-500">Every job ran on schedule.</span>}
+            {automations.failing.length + automations.silent.length + automations.neverRun.length === 0 && (
+              <div className="flex items-center gap-2 text-sm text-emerald-700">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />Every scheduled job is running within its expected window.
+              </div>
+            )}
           </div>
-        </div>
+        </section>
       )}
+
       {initData?.automations_error && (
-        <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-4 text-sm">
-          Scheduled jobs unavailable: {initData.automations_error}
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+          Automation history is unavailable: {initData.automations_error}
         </div>
       )}
     </div>
