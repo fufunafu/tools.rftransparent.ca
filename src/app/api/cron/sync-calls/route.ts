@@ -3,6 +3,7 @@ import { withCronRun } from "@/lib/automations";
 import { getSupabase } from "@/lib/supabase";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { alertOnSoftFailures } from "@/lib/cron-monitor";
+import { syncLeadCallStatuses, type LeadCallSyncSummary } from "@/lib/lead-call-sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -12,6 +13,17 @@ const STORES = ["bc_transparent", "rf_transparent"];
 async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Protected maintenance path for the initial backfill or a manual repair.
+  // Normal scheduled runs reach the same sync after importing phone records.
+  if (req.nextUrl.searchParams.get("mode") === "lead-status") {
+    const summary = await syncLeadCallStatuses();
+    return NextResponse.json({
+      status: "success",
+      lead_call_sync: summary,
+      synced_at: new Date().toISOString(),
+    });
   }
 
   // Check if sync is enabled and current hour matches the schedule
@@ -85,9 +97,25 @@ async function handler(req: NextRequest) {
     });
   }
 
+  let leadCallSync: LeadCallSyncSummary | null = null;
+  try {
+    leadCallSync = await syncLeadCallStatuses();
+    results.push({
+      scraper: "lead-call-matching",
+      status: "ok",
+      detail: `${leadCallSync.called} called, ${leadCallSync.noAnswer} no answer`,
+    });
+  } catch (err) {
+    results.push({
+      scraper: "lead-call-matching",
+      status: "error",
+      detail: err instanceof Error ? err.message : "lead call matching failed",
+    });
+  }
+
   console.log("[Cron sync-calls]", JSON.stringify(results));
   await alertOnSoftFailures("sync-calls", results);
-  return NextResponse.json({ results, synced_at: new Date().toISOString() });
+  return NextResponse.json({ results, lead_call_sync: leadCallSync, synced_at: new Date().toISOString() });
 }
 
 // Every run — scheduled or manual — is recorded for /settings/automations.
