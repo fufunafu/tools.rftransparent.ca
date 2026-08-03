@@ -84,7 +84,7 @@ The app can integrate with:
 - Google Ads and Google Analytics
 - Meta lead webhooks
 - Resend
-- Twilio WhatsApp
+- Meta WhatsApp Cloud API
 - The customer-service scraper
 - Vercel Cron
 

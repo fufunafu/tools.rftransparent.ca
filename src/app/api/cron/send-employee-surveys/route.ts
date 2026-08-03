@@ -14,6 +14,14 @@ async function handler(req: NextRequest) {
 
   try {
     const result = await sendSurveys();
+    if (result.errors.length > 0) {
+      const detail = `${result.errors.length} survey message(s) failed:\n${result.errors.join("\n")}`;
+      await reportCronFailure("send-employee-surveys", detail);
+      return NextResponse.json(
+        { ...result, error: `${result.errors.length} survey message(s) failed` },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(result);
   } catch (err) {
     const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);

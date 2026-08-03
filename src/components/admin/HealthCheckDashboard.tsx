@@ -94,7 +94,7 @@ function groupOfService(id: string): GroupKey {
   if (id.startsWith("shopify-")) return "stores";
   if (id === "google-ads" || id === "google-analytics" || id === "meta") return "marketing";
   if (id === "scraper") return "phones";
-  if (id === "twilio") return "surveys";
+  if (id === "whatsapp") return "surveys";
   return "platform";
 }
 
@@ -103,7 +103,7 @@ function groupOfEnv(name: string): GroupKey {
   if (name === "Shopify Env") return "stores";
   if (name === "Google Ads Env" || name === "GA4 Env" || name === "Meta Env") return "marketing";
   if (name === "Scraper Env") return "phones";
-  if (name === "Twilio Env" || name === "App URLs") return "surveys";
+  if (name === "WhatsApp Env" || name === "App URLs") return "surveys";
   return "platform";
 }
 
@@ -120,7 +120,7 @@ function pendingLabel(id: string): string {
     "google-analytics": "Google Analytics",
     resend: "Resend",
     meta: "Meta lead forms",
-    twilio: "Twilio WhatsApp",
+    whatsapp: "WhatsApp Cloud API",
     wall: "Wall board token",
   };
   return names[id] ?? id;
@@ -133,8 +133,8 @@ function fixHint(check: CheckResult): string | null {
   if (check.name === "Resend" && (check.detail?.includes("401") || check.detail?.includes("verified"))) {
     return "Replace RESEND_API_KEY in Vercel. Reminder emails and cron alerts depend on it.";
   }
-  if (check.name === "Twilio WhatsApp" && check.status === "unconfigured") {
-    return "Set the Twilio variables in Vercel to enable WhatsApp surveys.";
+  if (check.name === "WhatsApp Cloud API" && check.status === "unconfigured") {
+    return "Set the WhatsApp Cloud API variables in Vercel to enable surveys.";
   }
   if (check.name === "Scraper (Render)" && check.status === "slow") {
     return "The Render service is responding, but its cold start is taking longer than expected.";

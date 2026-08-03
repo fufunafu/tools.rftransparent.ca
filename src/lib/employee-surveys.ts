@@ -1,5 +1,5 @@
 import { getSupabase } from "@/lib/supabase";
-import twilio from "twilio";
+import { assertWhatsAppConfigured, sendWhatsAppSurvey } from "@/lib/whatsapp";
 
 function getMondayOfWeek(date: Date): string {
   const d = new Date(date);
@@ -12,7 +12,9 @@ function getMondayOfWeek(date: Date): string {
 export async function sendSurveys(): Promise<{ sent: number; skipped: number; errors: string[] }> {
   const supabase = getSupabase();
   const weekOf = getMondayOfWeek(new Date());
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not configured");
+  assertWhatsAppConfigured();
 
   const { data: employees, error: empError } = await supabase
     .from("employees")
@@ -28,15 +30,6 @@ export async function sendSurveys(): Promise<{ sent: number; skipped: number; er
     .eq("week_of", weekOf);
 
   const alreadySent = new Set((existing ?? []).map((r: { employee_id: string }) => r.employee_id));
-
-  const twilioEnabled =
-    process.env.TWILIO_ACCOUNT_SID &&
-    process.env.TWILIO_AUTH_TOKEN &&
-    process.env.TWILIO_WHATSAPP_FROM;
-
-  const twilioClient = twilioEnabled
-    ? twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!)
-    : null;
 
   let sent = 0;
   let skipped = 0;
@@ -61,16 +54,21 @@ export async function sendSurveys(): Promise<{ sent: number; skipped: number; er
       continue;
     }
 
-    if (twilioClient) {
-      try {
-        await twilioClient.messages.create({
-          from: process.env.TWILIO_WHATSAPP_FROM!,
-          to: `whatsapp:${emp.phone}`,
-          body: `Hi ${emp.name} 👋 It's your weekly check-in! Please take 2 minutes: ${appUrl}/survey/${token}`,
-        });
-      } catch (err) {
-        errors.push(`${emp.name} (WhatsApp send failed): ${err instanceof Error ? err.message : String(err)}`);
-      }
+    try {
+      await sendWhatsAppSurvey({
+        to: emp.phone,
+        employeeName: emp.name,
+        surveyUrl: `${appUrl}/survey/${token}`,
+      });
+    } catch (err) {
+      const { error: rollbackError } = await supabase
+        .from("employee_surveys")
+        .delete()
+        .eq("token", token);
+      const sendError = err instanceof Error ? err.message : String(err);
+      const rollbackDetail = rollbackError ? `; cleanup failed: ${rollbackError.message}` : "";
+      errors.push(`${emp.name} (WhatsApp send failed): ${sendError}${rollbackDetail}`);
+      continue;
     }
 
     sent++;

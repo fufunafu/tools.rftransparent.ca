@@ -8,6 +8,7 @@ import { getAdMetrics } from "@/lib/google-ads";
 import { getAutomationHealth, type AutomationHealth } from "@/lib/home-dashboard";
 import { getWallToken } from "@/lib/settings";
 import { BUG_BUCKET } from "@/lib/bug-reports";
+import { checkWhatsAppConnection } from "@/lib/whatsapp";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -224,20 +225,8 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
         return `${status.page_name ?? "Page"} connected, leadgen subscribed`;
       });
 
-    case "twilio":
-      return () => timedCheck("Twilio WhatsApp", async () => {
-        const sid = process.env.TWILIO_ACCOUNT_SID;
-        const auth = process.env.TWILIO_AUTH_TOKEN;
-        if (!sid || !auth || !process.env.TWILIO_WHATSAPP_FROM) throw new Error("Not configured");
-        const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}.json`, {
-          headers: { Authorization: `Basic ${Buffer.from(`${sid}:${auth}`).toString("base64")}` },
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = await res.json();
-        if (json.status !== "active") throw new Error(`Account status: ${json.status}`);
-        return `${json.friendly_name ?? "Account"} active`;
-      });
+    case "whatsapp":
+      return () => timedCheck("WhatsApp Cloud API", checkWhatsAppConnection);
 
     case "wall":
       return () => timedCheck("Wall Board Token", async () => {
@@ -387,7 +376,11 @@ export async function GET(req: NextRequest) {
     envCheck("Scraper Env", ["SCRAPER_URL", "SCRAPER_API_KEY"]),
     envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN_RF", "GMAIL_REFRESH_TOKEN_GRS", "GMAIL_REFRESH_TOKEN_BC"]),
     envCheck("Meta Env", ["META_PAGE_ACCESS_TOKEN", "META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN"]),
-    envCheck("Twilio Env", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"]),
+    envCheck("WhatsApp Env", [
+      "WHATSAPP_ACCESS_TOKEN",
+      "WHATSAPP_PHONE_NUMBER_ID",
+      "WHATSAPP_SURVEY_TEMPLATE_NAME",
+    ]),
     // CRON_SECRET missing means every scheduled job 401s — and those 401s are
     // deliberately not recorded, so cron_runs just goes quiet.
     envCheck("Cron & Webhook Secrets", ["CRON_SECRET", "LEADS_WEBHOOK_SECRET"]),
@@ -483,7 +476,7 @@ export async function GET(req: NextRequest) {
     ...INBOXES.map((_, i) => `gmail-${i}`),
     "resend",
     "meta",
-    "twilio",
+    "whatsapp",
     "wall",
   ];
 
