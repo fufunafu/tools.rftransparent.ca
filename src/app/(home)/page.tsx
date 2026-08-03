@@ -6,6 +6,7 @@ import { getTicketStats, getAutomationHealth } from "@/lib/home-dashboard";
 import { getWallToken } from "@/lib/settings";
 import { BUSINESS_TIMEZONE } from "@/lib/dates";
 import OpsDashboard from "@/components/admin/OpsDashboard";
+import AutoRefresh from "@/components/admin/AutoRefresh";
 
 export const metadata: Metadata = {
   title: "Dashboard | RF Tools",
@@ -50,12 +51,17 @@ export default async function HomePage() {
   }
 
   return (
-    <OpsDashboard
-      data={data}
-      today={today}
-      attention={attention}
-      ticketStats={tickets.ok ? tickets.value : null}
-      wallHref={wallToken ? `/wall/${wallToken}` : null}
-    />
+    <>
+      {/* The cached() layer (5 min TTLs) absorbs most of the cost; each tick
+          mainly re-reads Supabase, so 90s keeps home and wall in step. */}
+      <AutoRefresh intervalMs={90_000} />
+      <OpsDashboard
+        data={data}
+        today={today}
+        attention={attention}
+        ticketStats={tickets.ok ? tickets.value : null}
+        wallHref={wallToken ? `/wall/${wallToken}` : null}
+      />
+    </>
   );
 }

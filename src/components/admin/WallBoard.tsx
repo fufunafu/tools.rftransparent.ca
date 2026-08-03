@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { formatCADWhole, formatCADShort } from "@/lib/format";
 import type { OpsDashboard as OpsData } from "@/lib/ops-dashboard";
 import type { TicketStats } from "@/lib/home-dashboard";
@@ -91,18 +92,17 @@ export default function WallBoard({
   const [scale, setScale] = useState(1);
 
   // Refresh on an interval and say how stale the numbers are, so a frozen
-  // board is obvious rather than quietly wrong.
+  // board is obvious rather than quietly wrong. The TV is always visible so
+  // the hook's visibility pause never fires there; it only spares a
+  // backgrounded browser tab from re-rendering the board all day.
+  useAutoRefresh(() => router.refresh(), { intervalMs: REFRESH_MS });
   useEffect(() => {
-    const refresh = setInterval(() => router.refresh(), REFRESH_MS);
     const tick = setInterval(() => {
       const mins = Math.floor((Date.now() - new Date(generatedAt).getTime()) / 60000);
       setAge(mins < 1 ? "just now" : `${mins}m ago`);
     }, 15_000);
-    return () => {
-      clearInterval(refresh);
-      clearInterval(tick);
-    };
-  }, [router, generatedAt]);
+    return () => clearInterval(tick);
+  }, [generatedAt]);
 
   // The board is laid out on a fixed 1920×1080 canvas and scaled to fit
   // whatever it's shown on. Letting it reflow instead meant a browser window

@@ -34,6 +34,13 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     schedule: "Every day, 12:00 UTC (about 8am Toronto)",
   },
   {
+    slug: "sync-emails",
+    label: "Email sync",
+    description: "Pulls the last two weeks of inbox activity from Gmail so email response metrics stay current.",
+    cron: "0 12 * * *",
+    schedule: "Every day, 12:00 UTC (about 8am Toronto)",
+  },
+  {
     slug: "followup-reminders",
     label: "Follow-up reminders",
     description: "Emails each store the leads due or overdue for a follow-up that day.",

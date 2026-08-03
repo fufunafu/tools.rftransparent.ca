@@ -12,7 +12,9 @@ import { AUTOMATION_JOBS } from "@/lib/automations";
 
 // How stale a tile may be. Shopify is the slow one and its numbers move by
 // the minute at most; the Supabase counts are cheap enough to read live.
-const SALES_TTL_MS = 10 * 60 * 1000;
+// Matches OPS_TTL_MS in ops-dashboard.ts so home and the wall board tell the
+// same sales story instead of disagreeing for up to five minutes.
+const SALES_TTL_MS = 5 * 60 * 1000;
 
 // Age at which the longest-open ticket gets called out. Deliberately well past
 // a week: most open tickets are older than that, so a 7-day bar would flag the

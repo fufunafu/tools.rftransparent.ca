@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
+import { useAutoRefresh } from "@/lib/use-auto-refresh";
 
 // Charts are split out so recharts loads on demand instead of in the
 // route's initial bundle (same pattern as ShopifyCharts).
@@ -111,6 +112,23 @@ interface CallbacksResponse {
   totalMissed: number;
   uniqueCallers: number;
   highPriority: number;
+}
+
+interface GrasshopperDiagnostics {
+  csv_lines: number;
+  csv_bytes: number;
+  csv_data_rows: number;
+  total_parsed: number;
+  total_skipped: number;
+  csv_date_range?: {
+    earliest: string;
+    latest: string;
+  };
+  per_store?: Record<string, {
+    count: number;
+    earliest: string;
+    latest: string;
+  }>;
 }
 
 // Dates are Montreal (Eastern) calendar days, not UTC — otherwise after ~8 PM
@@ -446,9 +464,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   const [hourly, setHourly] = useState<HourlyPoint[]>([]);
   const [daily, setDaily] = useState<DailyPoint[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [refreshElapsed, setRefreshElapsed] = useState(0);
-  const [refreshStatus, setRefreshStatus] = useState("");
   const [error, setError] = useState("");
   const [selectedNumber, setSelectedNumber] = useState<string | null>(null);
   const [ghScraping, setGhScraping] = useState(false);
@@ -458,8 +473,7 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   const [gh2faCode, setGh2faCode] = useState("");
   const [ghError, setGhError] = useState("");
   const [ghLogs, setGhLogs] = useState<string[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [ghDiagnostics, setGhDiagnostics] = useState<any>(null);
+  const [ghDiagnostics, setGhDiagnostics] = useState<GrasshopperDiagnostics | null>(null);
   const [syncKey, setSyncKey] = useState(0);
   const [syncSchedule, setSyncSchedule] = useState<{ enabled: boolean; hours: number[]; timezone: string } | null>(null);
   const [showSchedule, setShowSchedule] = useState(false);
@@ -536,6 +550,14 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
     );
   }, [loadSummary, loadHistory, loadCallbacks, loadPatterns]);
 
+  // Background refresh: the loaders never touch `loading`, so ticks repaint
+  // the numbers without flashing the skeleton.
+  useAutoRefresh(
+    () =>
+      Promise.all([loadSummary(), loadHistory(), loadCallbacks(), loadPatterns()]).then(() => {}),
+    { intervalMs: 60_000 }
+  );
+
   // Load sync schedule
   useEffect(() => {
     fetch("/api/settings/sync-schedule").then((r) => r.ok ? r.json() : null).then((s) => {
@@ -577,36 +599,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
     saveSyncSchedule({ ...syncSchedule, hours });
   };
 
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    setRefreshElapsed(0);
-    setRefreshStatus("");
-    const timer = setInterval(() => {
-      setRefreshElapsed((prev) => prev + 1);
-    }, 1000);
-    try {
-      const res = await fetch(`/api/customer-service?store=${store}`, {
-        method: "POST",
-      });
-      const json = await res.json();
-      if (json.status === "success") {
-        setRefreshStatus(`Done — ${json.records_inserted ?? 0} records synced`);
-        setSyncKey((k) => k + 1);
-        await Promise.all([loadSummary(), loadHistory(), loadCallbacks(), loadPatterns()]);
-      } else if (json.status === "already_running") {
-        setRefreshStatus("A refresh is already in progress, please wait...");
-      } else if (json.status === "error") {
-        setRefreshStatus(`Error: ${json.error || "Scrape failed"}`);
-      }
-    } catch {
-      setRefreshStatus("Failed to reach scraper service");
-    } finally {
-      clearInterval(timer);
-      setRefreshing(false);
-      setRefreshElapsed(0);
-    }
-  };
-
   const handleGhScrape = async (code?: string) => {
     setGhScraping(true);
     setGhElapsed(0);
@@ -618,7 +610,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
     const timer = setInterval(() => {
       setGhElapsed((prev) => prev + 1);
     }, 1000);
-    let needs2fa = false;
     try {
       const codeParam = code ? `&code=${encodeURIComponent(code)}` : "";
       const res = await fetch(
@@ -629,7 +620,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
       if (json.logs) setGhLogs(json.logs);
       if (json.diagnostics) setGhDiagnostics(json.diagnostics);
       if (json.status === "2fa_required") {
-        needs2fa = true;
         setGh2faNeeded(true);
         setGhStatus("Verification code needed — check your email");
       } else if (json.status === "success" || json.status === "partial_error") {
@@ -673,7 +663,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
     setSyncAllRunning(true);
     setSyncAllElapsed(0);
     setSyncAllStatus("");
-    setRefreshStatus("");
     setGhStatus("");
     setGhError("");
     setGhLogs([]);
@@ -887,7 +876,7 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
             <div className="text-center">
               <button
                 onClick={handleSyncAll}
-                disabled={syncAllRunning || refreshing || ghScraping}
+                disabled={syncAllRunning || ghScraping}
                 className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
               >
                 {syncAllRunning ? "Syncing..." : "Sync All"}
@@ -1021,43 +1010,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
         </div>
       )}
 
-      {/* CIK refresh progress / result (admin only) */}
-      {mounted && mode === "admin" && refreshing && <SyncInProgress label="Syncing CIK" elapsed={refreshElapsed} color="sand" />}
-      {mounted && mode === "admin" && !refreshing && refreshStatus && (
-        <div className={`rounded-xl border p-4 text-sm ${
-          refreshStatus.startsWith("Done")
-            ? "bg-emerald-50 border-emerald-200"
-            : refreshStatus.startsWith("Error") || refreshStatus.startsWith("Failed")
-              ? "bg-red-50 border-red-200"
-              : "bg-sand-50 border-sand-200"
-        }`}>
-          <div className="flex items-start justify-between">
-            <div>
-              <p className={`font-semibold ${
-                refreshStatus.startsWith("Done") ? "text-emerald-700"
-                  : refreshStatus.startsWith("Error") || refreshStatus.startsWith("Failed") ? "text-red-700"
-                    : "text-sand-700"
-              }`}>
-                {refreshStatus.startsWith("Done") ? "CIK Sync Complete" : refreshStatus.startsWith("Error") || refreshStatus.startsWith("Failed") ? "CIK Sync Failed" : "CIK Sync"}
-              </p>
-              <p className={`text-xs mt-0.5 ${
-                refreshStatus.startsWith("Done") ? "text-emerald-600"
-                  : refreshStatus.startsWith("Error") || refreshStatus.startsWith("Failed") ? "text-red-500"
-                    : "text-sand-500"
-              }`}>
-                {refreshStatus}
-              </p>
-            </div>
-            <button
-              onClick={() => setRefreshStatus("")}
-              className="text-xs text-sand-400 hover:text-sand-600 transition-colors"
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
       {/* Grasshopper progress (admin only) */}
       {mounted && mode === "admin" && ghScraping && (
         <SyncInProgress label="Syncing Grasshopper" elapsed={ghElapsed} color="emerald" />
@@ -1183,7 +1135,7 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
               )}
               {ghDiagnostics.per_store && Object.keys(ghDiagnostics.per_store).length > 0 && (
                 <div className="space-y-0.5">
-                  {Object.entries(ghDiagnostics.per_store).map(([storeId, info]: [string, any]) => (
+                  {Object.entries(ghDiagnostics.per_store).map(([storeId, info]) => (
                     <div key={storeId}>
                       <span className="text-sand-400">{storeId}:</span>{" "}
                       <span className="text-sand-700">
@@ -1234,14 +1186,13 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
           from={from}
           to={to}
           loadCallbacks={loadCallbacks}
-          selectedNumber={selectedNumber}
           setSelectedNumber={setSelectedNumber}
           syncKey={syncKey}
         />
       ) : tab === "overview" ? (
         <OverviewTab data={data} history={history} hourly={hourly} daily={daily} />
       ) : tab === "callbacks" ? (
-        <CallbacksTab data={callbackData} store={store} loadCallbacks={loadCallbacks} selectedNumber={selectedNumber} setSelectedNumber={setSelectedNumber} />
+        <CallbacksTab data={callbackData} store={store} loadCallbacks={loadCallbacks} setSelectedNumber={setSelectedNumber} />
       ) : (
         <CallLogTab store={store} source={source} from={from} to={to} onNumberClick={setSelectedNumber} syncKey={syncKey} />
       )}
@@ -1527,7 +1478,6 @@ function StaffView({
   from,
   to,
   loadCallbacks,
-  selectedNumber,
   setSelectedNumber,
   syncKey,
 }: {
@@ -1538,7 +1488,6 @@ function StaffView({
   from: string;
   to: string;
   loadCallbacks: () => Promise<void>;
-  selectedNumber: string | null;
   setSelectedNumber: (n: string | null) => void;
   syncKey: number;
 }) {
@@ -1654,7 +1603,6 @@ function StaffView({
           data={callbackData}
           store={store}
           loadCallbacks={loadCallbacks}
-          selectedNumber={selectedNumber}
           setSelectedNumber={setSelectedNumber}
         />
       </div>
@@ -1804,27 +1752,23 @@ function CallbacksTab({
   data,
   store,
   loadCallbacks,
-  selectedNumber,
   setSelectedNumber,
 }: {
   data: CallbacksResponse | null;
   store: string;
   loadCallbacks: () => Promise<void>;
-  selectedNumber: string | null;
   setSelectedNumber: (n: string | null) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [callbackSort, setCallbackSort] = useState<"priority" | "recent">("recent");
 
-  const rawCallbacks = data?.callbacks ?? [];
-
   const callbacks = useMemo(() => {
-    const sorted = [...rawCallbacks];
+    const sorted = [...(data?.callbacks ?? [])];
     if (callbackSort === "recent") {
       sorted.sort((a, b) => new Date(b.last_call).getTime() - new Date(a.last_call).getTime());
     }
     return sorted;
-  }, [rawCallbacks, callbackSort]);
+  }, [data?.callbacks, callbackSort]);
 
   if (callbacks.length === 0) {
     return (
@@ -2467,10 +2411,11 @@ function CustomerLookupPanel({
   >([]);
   const [note, setNote] = useState("");
   const [noteStatus, setNoteStatus] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
+  const queryKey = `${store}:${source}:${number}`;
+  const loading = resolvedKey !== queryKey;
 
   useEffect(() => {
-    setLoading(true);
     fetch(`/api/customer-service?view=customer&store=${store}&source=${source}&number=${encodeURIComponent(number)}`)
       .then((r) => r.json())
       .then((data) => {
@@ -2478,8 +2423,8 @@ function CustomerLookupPanel({
         setNote(data.note ?? "");
         setNoteStatus(data.note_status ?? "");
       })
-      .finally(() => setLoading(false));
-  }, [number, store, source]);
+      .finally(() => setResolvedKey(queryKey));
+  }, [number, store, source, queryKey]);
 
   const digits = number.replace(/\D/g, "");
   const telHref = `tel:${digits.length === 10 ? "+1" + digits : "+" + digits}`;

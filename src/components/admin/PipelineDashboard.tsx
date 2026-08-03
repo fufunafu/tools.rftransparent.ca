@@ -2,6 +2,11 @@
 
 import { useState, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
+import {
+  pipelineCacheSave,
+  pipelineCacheLoad,
+  PIPELINE_CACHE_TTL_MS,
+} from "@/lib/pipeline-cache";
 
 // Chart blocks are split out so recharts loads on demand instead of in the
 // route's initial bundle (same pattern as ShopifyCharts). Placeholder heights
@@ -286,7 +291,6 @@ const METRIC_TOOLTIPS: Record<string, string> = {
 
 // ─── Fallback Rates Editor ──────────────────────────────────────────────────
 
-const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 const TRANSITION_LABELS = [
   "Dec→Jan", "Jan→Feb", "Feb→Mar", "Mar→Apr", "Apr→May", "May→Jun",
   "Jun→Jul", "Jul→Aug", "Aug→Sep", "Sep→Oct", "Oct→Nov", "Nov→Dec",
@@ -376,26 +380,10 @@ function FallbackRatesEditor({ rates, storeId, onSaved }: { rates: Record<number
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-// Session-level cache: survives tab navigation, clears on reload
+// Session-level cache: survives tab navigation, clears on reload. Entries past
+// the shared TTL are treated as misses — same expiry as the localStorage tier,
+// so a long-lived session can't keep serving stale predictions.
 const pipelineCache = new Map<string, { data: PipelineData; ts: number }>();
-
-// Persistent cache: survives page reloads — only updated on explicit Recalculate
-const LS_PREFIX = "pipeline_cache_v1:";
-function lsSave(key: string, data: PipelineData): void {
-  try {
-    localStorage.setItem(LS_PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
-  } catch {
-    // Ignore quota errors — in-memory cache still works
-  }
-}
-function lsLoad(key: string): { data: PipelineData; ts: number } | null {
-  try {
-    const raw = localStorage.getItem(LS_PREFIX + key);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
 
 export default function PipelineDashboard() {
   const [days, setDays] = useState(90);
@@ -429,14 +417,14 @@ export default function PipelineDashboard() {
 
     // 1. In-memory cache hit — show immediately, no fetch
     const cached = pipelineCache.get(cacheKey);
-    if (cached) {
+    if (cached && Date.now() - cached.ts <= PIPELINE_CACHE_TTL_MS) {
       setData(cached.data);
       setLoading(false);
       return;
     }
 
     // 2. localStorage hit — show immediately, populate in-memory cache, no fetch
-    const persisted = lsLoad(cacheKey);
+    const persisted = pipelineCacheLoad<PipelineData>(cacheKey);
     if (persisted) {
       pipelineCache.set(cacheKey, persisted);
       setData(persisted.data);
@@ -459,7 +447,7 @@ export default function PipelineDashboard() {
         if (json.error) throw new Error(json.error);
         setData(json);
         pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
-        lsSave(cacheKey, json);
+        pipelineCacheSave(cacheKey, json);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message ?? "Failed to load pipeline data");
@@ -490,7 +478,7 @@ export default function PipelineDashboard() {
       if (json.error) throw new Error(json.error);
       setData(json);
       pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
-      lsSave(cacheKey, json);
+      pipelineCacheSave(cacheKey, json);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Recalculation failed");
     } finally {

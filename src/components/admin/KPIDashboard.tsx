@@ -2,8 +2,10 @@
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import KPIEntryForm from "./KPIEntryForm";
 import { formatCADWhole } from "@/lib/format";
+import { useAutoRefresh } from "@/lib/use-auto-refresh";
 
 type Period = "daily" | "weekly" | "monthly" | "yearly";
 
@@ -173,26 +175,36 @@ export function EmployeeTab({ department }: { department: string }) {
       .catch(() => {});
   }, []);
 
-  const loadMetrics = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const params = new URLSearchParams({ period, date, department });
-      if (locationId) params.set("locationId", locationId);
-      const res = await fetch(`/api/kpi/metrics?${params}`);
-      if (!res.ok) throw new Error("Failed to load metrics");
-      const json: MetricsResponse = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
-    }
-  }, [period, date, department, locationId]);
+  const loadMetrics = useCallback(
+    async ({ silent = false }: { silent?: boolean } = {}) => {
+      // Silent mode skips the loading state so background refreshes repaint
+      // the table without flashing the spinner.
+      if (!silent) {
+        setLoading(true);
+        setError("");
+      }
+      try {
+        const params = new URLSearchParams({ period, date, department });
+        if (locationId) params.set("locationId", locationId);
+        const res = await fetch(`/api/kpi/metrics?${params}`);
+        if (!res.ok) throw new Error("Failed to load metrics");
+        const json: MetricsResponse = await res.json();
+        setData(json);
+        setError("");
+      } catch (err) {
+        if (!silent) setError(err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [period, date, department, locationId]
+  );
 
   useEffect(() => {
     loadMetrics();
   }, [loadMetrics]);
+
+  useAutoRefresh(() => loadMetrics({ silent: true }), { intervalMs: 90_000 });
 
   const allMetricKeys = data
     ? [...new Set(data.employees.flatMap((e) => Object.keys(e.metrics.current)))]
@@ -280,7 +292,7 @@ export function EmployeeTab({ department }: { department: string }) {
             </button>
           )}
           <button
-            onClick={loadMetrics}
+            onClick={() => loadMetrics()}
             disabled={loading}
             className="px-4 py-2 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
           >
@@ -412,12 +424,12 @@ export function EmployeeTab({ department }: { department: string }) {
                       className="px-4 py-8 text-center text-sand-400"
                     >
                       No employees found for this department.{" "}
-                      <a
+                      <Link
                         href="/employees"
                         className="text-accent underline"
                       >
                         Manage employees
-                      </a>
+                      </Link>
                     </td>
                   </tr>
                 )}
@@ -532,4 +544,3 @@ export function EmployeeTab({ department }: { department: string }) {
     </div>
   );
 }
-
