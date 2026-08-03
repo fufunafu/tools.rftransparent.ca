@@ -14,7 +14,7 @@ export default async function TodosPage() {
   const canSeeAll = await isManagementUser();
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="mx-auto max-w-5xl">
       <TodoList canSeeAll={canSeeAll} />
     </div>
   );
