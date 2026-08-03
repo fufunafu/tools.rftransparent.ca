@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withCronRun } from "@/lib/automations";
+import { TRIGGERED_BY_HEADER, withCronRun } from "@/lib/automations";
 import { getSupabase } from "@/lib/supabase";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { alertOnSoftFailures } from "@/lib/cron-monitor";
@@ -26,24 +26,28 @@ async function handler(req: NextRequest) {
     });
   }
 
-  // Check if sync is enabled and current hour matches the schedule
-  const { data: settingsRow } = await getSupabase()
-    .from("app_settings")
-    .select("value")
-    .eq("key", "sync_schedule")
-    .limit(1);
+  // Scheduled runs obey the saved time window. A person pressing "Run sync"
+  // expects an immediate refresh, so manual runs intentionally bypass it.
+  const isManualRun = Boolean(req.headers.get(TRIGGERED_BY_HEADER));
+  if (!isManualRun) {
+    const { data: settingsRow } = await getSupabase()
+      .from("app_settings")
+      .select("value")
+      .eq("key", "sync_schedule")
+      .limit(1);
 
-  const schedule = settingsRow?.[0]?.value ?? { enabled: true, hours: [8, 17], timezone: "America/New_York" };
-  if (!schedule.enabled) {
-    return NextResponse.json({ skipped: true, reason: "Auto-sync is disabled" });
-  }
+    const schedule = settingsRow?.[0]?.value ?? { enabled: true, hours: [8, 17], timezone: "America/New_York" };
+    if (!schedule.enabled) {
+      return NextResponse.json({ skipped: true, reason: "Auto-sync is disabled" });
+    }
 
-  const tz = schedule.timezone || "America/New_York";
-  const currentHour = new Date().toLocaleString("en-US", { timeZone: tz, hour: "numeric", hour12: false });
-  const hour = parseInt(currentHour, 10);
+    const tz = schedule.timezone || "America/New_York";
+    const currentHour = new Date().toLocaleString("en-US", { timeZone: tz, hour: "numeric", hour12: false });
+    const hour = parseInt(currentHour, 10);
 
-  if (!schedule.hours.includes(hour)) {
-    return NextResponse.json({ skipped: true, reason: `Current hour ${hour} not in schedule [${schedule.hours}]` });
+    if (!schedule.hours.includes(hour)) {
+      return NextResponse.json({ skipped: true, reason: `Current hour ${hour} not in schedule [${schedule.hours}]` });
+    }
   }
 
   const scraperUrl = process.env.SCRAPER_URL;

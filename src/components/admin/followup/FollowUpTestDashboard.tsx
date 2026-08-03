@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import LeadTable from "@/components/admin/followup/LeadTable";
 import FollowUpModal from "@/components/admin/followup/FollowUpModal";
@@ -29,17 +29,22 @@ function tomorrowStart(): Date {
   return d;
 }
 
+const subscribeToNothing = () => () => {};
+
 export default function FollowUpTestDashboard() {
-  const [leads, setLeads] = useState<FollowUpLead[]>([]);
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeToNothing, () => true, () => false);
+
+  if (!mounted) {
+    return <div className="h-64 rounded-xl bg-white border border-sand-200/60 animate-pulse" />;
+  }
+
+  return <FollowUpTestDashboardClient />;
+}
+
+function FollowUpTestDashboardClient() {
+  const [leads, setLeads] = useState<FollowUpLead[]>(() => loadTestLeads());
   const [filter, setFilter] = useState("all");
   const [modalLead, setModalLead] = useState<FollowUpLead | null>(null);
-
-  // Seed/load on mount — localStorage isn't accessible during SSR.
-  useEffect(() => {
-    setLeads(loadTestLeads());
-    setMounted(true);
-  }, []);
 
   const handleReset = () => {
     if (!confirm("Reset the 10 test leads and wipe all practice follow-ups?")) return;
@@ -134,7 +139,7 @@ export default function FollowUpTestDashboard() {
       </div>
 
       {/* Status pills — purely informational here; the real dashboard makes them clickable. */}
-      {mounted && Object.keys(byStatus).length > 0 && (
+      {Object.keys(byStatus).length > 0 && (
         <div className="flex flex-wrap gap-2 mb-6">
           {Object.entries(byStatus)
             .sort((a, b) => b[1] - a[1])

@@ -22,11 +22,6 @@ interface MonthData {
   won_value: number;
 }
 
-function formatCurrency(n: number): string {
-  if (n >= 1000) return `$${Math.round(n / 1000)}k`;
-  return `$${n}`;
-}
-
 export default function AnalyticsChart({ data }: { data: MonthData[] }) {
   if (data.length === 0) return null;
 

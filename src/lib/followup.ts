@@ -1,4 +1,4 @@
-import { shopifyGraphQL, getStores, REVENUE_FIELDS } from "@/lib/shopify";
+import { shopifyGraphQL } from "@/lib/shopify";
 import { getSupabase } from "@/lib/supabase";
 
 // ─── Category Configuration ─────────────────────────────────────────────────

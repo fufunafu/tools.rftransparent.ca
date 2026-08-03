@@ -8,11 +8,15 @@ export interface AutomationJob {
   slug: string;
   label: string;
   description: string;
+  kind: "sync" | "email";
+  result: string;
+  staleAfterHours: number;
   // The raw expression from vercel.json.
   cron: string;
   // Vercel runs crons on UTC, so the Toronto time these land at shifts by an
   // hour when daylight saving does.
   schedule: string;
+  scheduleDetail: string;
   // Set when a manual run sends real mail to real people. Those get a
   // confirmation step — a mis-click shouldn't email every employee.
   sendsEmail?: string;
@@ -22,46 +26,70 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
   {
     slug: "sync-calls",
     label: "Call sync",
-    description: "Pulls the previous day's phone records in so the Customer Service numbers are current.",
+    description: "Imports phone records from CIK and Grasshopper.",
+    kind: "sync",
+    result: "Updates Customer Service phone metrics",
+    staleAfterHours: 36,
     cron: "0 12 * * *",
-    schedule: "Every day, 12:00 UTC (about 8am Toronto)",
+    schedule: "Daily, around 8:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 12:00 UTC",
   },
   {
     slug: "sync-followup",
     label: "Follow-up sync",
-    description: "Refreshes open quotes from Shopify so the follow-up list matches what's actually outstanding.",
+    description: "Refreshes open Shopify quotes and their latest status.",
+    kind: "sync",
+    result: "Updates the Follow Up CRM queue",
+    staleAfterHours: 36,
     cron: "0 12 * * *",
-    schedule: "Every day, 12:00 UTC (about 8am Toronto)",
+    schedule: "Daily, around 8:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 12:00 UTC",
   },
   {
     slug: "sync-emails",
     label: "Email sync",
-    description: "Pulls the last two weeks of inbox activity from Gmail so email response metrics stay current.",
+    description: "Imports the latest two weeks of Gmail activity.",
+    kind: "sync",
+    result: "Updates email response analytics",
+    staleAfterHours: 36,
     cron: "0 12 * * *",
-    schedule: "Every day, 12:00 UTC (about 8am Toronto)",
+    schedule: "Daily, around 8:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 12:00 UTC",
   },
   {
     slug: "followup-reminders",
     label: "Follow-up reminders",
-    description: "Emails each store the leads due or overdue for a follow-up that day.",
+    description: "Sends each store its leads due or overdue that day.",
+    kind: "email",
+    result: "Sends to each store's follow-up inbox",
+    staleAfterHours: 96,
     cron: "0 13 * * 1-5",
-    schedule: "Weekdays, 13:00 UTC (about 9am Toronto)",
+    schedule: "Weekdays, around 9:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 13:00 UTC",
     sendsEmail: "each store's inbox",
   },
   {
     slug: "problems-digest",
     label: "Problem ticket digest",
-    description: "Weekly summary of open problem tickets, so stale ones can't quietly rot.",
+    description: "Sends a weekly summary of every open problem ticket.",
+    kind: "email",
+    result: "Sends to configured digest recipients",
+    staleAfterHours: 192,
     cron: "0 13 * * 1",
-    schedule: "Mondays, 13:00 UTC (about 9am Toronto)",
+    schedule: "Mondays, around 9:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 13:00 UTC",
     sendsEmail: "the problem-ticket digest recipients",
   },
   {
     slug: "send-employee-surveys",
     label: "Employee surveys",
-    description: "Sends each active employee their weekly survey link.",
+    description: "Sends every active employee a unique weekly survey link.",
+    kind: "email",
+    result: "Sends to every active employee",
+    staleAfterHours: 192,
     cron: "0 14 * * 5",
-    schedule: "Fridays, 14:00 UTC (about 10am Toronto)",
+    schedule: "Fridays, around 10:00 AM Toronto",
+    scheduleDetail: "Scheduler starts at 14:00 UTC",
     sendsEmail: "every active employee",
   },
 ];

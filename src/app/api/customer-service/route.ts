@@ -166,15 +166,6 @@ export async function GET(req: NextRequest) {
       }
     : null;
 
-  // Get last scraper run time (most recent successful run for this store)
-  const { data: lastRunRow } = await getSupabase()
-    .from("scraper_runs")
-    .select("finished_at")
-    .eq("store_id", storeId)
-    .eq("status", "success")
-    .order("finished_at", { ascending: false })
-    .limit(1);
-
   // Get latest call record per source (shows data freshness)
   const { data: lastCikRow } = await getSupabase()
     .from("call_records")

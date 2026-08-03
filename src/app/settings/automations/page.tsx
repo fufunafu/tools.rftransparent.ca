@@ -6,7 +6,7 @@ import { AUTOMATION_JOBS } from "@/lib/automations";
 import AutomationsPanel from "@/components/admin/settings/AutomationsPanel";
 
 export const metadata: Metadata = {
-  title: "Automations | Settings | RF Tools",
+  title: "Automations | Settings",
   robots: { index: false, follow: false },
 };
 
@@ -19,7 +19,7 @@ export default async function AutomationsPage() {
   ]);
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="mx-auto max-w-6xl">
       <AutomationsPanel
         jobs={AUTOMATION_JOBS}
         history={history}

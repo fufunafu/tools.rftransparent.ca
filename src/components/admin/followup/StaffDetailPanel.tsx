@@ -107,13 +107,13 @@ export default function StaffDetailPanel({
   onClose: () => void;
 }) {
   const [data, setData] = useState<ApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const queryKey = `${staff}:${store}:${range}`;
+  const loading = resolvedKey !== queryKey;
 
   useEffect(() => {
     const ctrl = new AbortController();
-    setLoading(true);
-    setError("");
     fetch(
       `/api/customer-service/follow-up?view=by_staff_monthly&store=${store}&range=${range}&staff=${encodeURIComponent(staff)}`,
       { signal: ctrl.signal },
@@ -121,14 +121,17 @@ export default function StaffDetailPanel({
       .then((r) => r.json())
       .then((d: ApiResponse | { error: string }) => {
         if ("error" in d) throw new Error(d.error);
+        setError("");
         setData(d);
       })
       .catch((e) => {
         if (e.name !== "AbortError") setError(e instanceof Error ? e.message : "Failed to load");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctrl.signal.aborted) setResolvedKey(queryKey);
+      });
     return () => ctrl.abort();
-  }, [staff, store, range]);
+  }, [staff, store, range, queryKey]);
 
   const displayName = staff === "__unknown__" ? "Unknown" : staff;
   const rangeLabel = range === "1y" ? "Last 12 months" : "All time";

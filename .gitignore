@@ -33,6 +33,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel
@@ -41,6 +42,16 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 .env*.local
+
+# browser test artifacts and authenticated session state
+/playwright-report/
+/test-results/
+/playwright/.auth/
+
+# Local design handoff/reference artifacts
+/Multi-store sales and operations dashboard.zip
+/README 2.md
+/design_handoff_ops_dashboard/
 
 # Local PII backups & one-off scripts — never commit (customer data)
 followup-revert-backup-*.pdf

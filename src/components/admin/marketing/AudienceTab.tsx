@@ -113,6 +113,14 @@ interface AudienceCacheEntry {
   languages: LanguageData[];
 }
 
+function SortIcon({ active, asc }: { active: boolean; asc: boolean }) {
+  return (
+    <span className={`ml-0.5 text-[10px] ${active ? "text-sand-900" : "text-sand-300"}`}>
+      {active ? (asc ? "\u2191" : "\u2193") : "\u2195"}
+    </span>
+  );
+}
+
 export default function AudienceTab({
   from,
   to,
@@ -128,7 +136,7 @@ export default function AudienceTab({
 }) {
   const [devices, setDevices] = useState<DeviceData[]>([]);
   const [geo, setGeo] = useState<GeoData[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   // Geo drill-down state
@@ -153,65 +161,70 @@ export default function AudienceTab({
 
   const demoParam = demo ? "&demo=true" : "";
   const marketParam = market !== "all" ? `&market=${market}` : "";
+  const cacheKey = `audience:${from}:${to}:${market}:${demo}`;
+  const queryKey = `${cacheKey}:${refreshKey}`;
+  const loading = resolvedKey !== queryKey;
 
   useEffect(() => {
     let cancelled = false;
-    const cacheKey = `audience:${from}:${to}:${market}:${demo}`;
 
-    const cached = mktCacheLoad<AudienceCacheEntry>(cacheKey);
-    if (cached) {
-      setDevices(cached.devices ?? []);
-      setGeo(cached.geo ?? []);
-      setAgeData(cached.age ?? []);
-      setGenderData(cached.gender ?? []);
-      setLanguages(cached.languages ?? []);
+    async function load() {
+      await Promise.resolve();
+      setError("");
       setSelectedCountry(null);
       setSelectedRegion(null);
-      setLoading(false);
-      return;
-    }
 
-    setLoading(true);
-    setError("");
-    setSelectedCountry(null);
-    setSelectedRegion(null);
+      const cached = mktCacheLoad<AudienceCacheEntry>(cacheKey);
+      if (cached) {
+        if (!cancelled) {
+          setDevices(cached.devices ?? []);
+          setGeo(cached.geo ?? []);
+          setAgeData(cached.age ?? []);
+          setGenderData(cached.gender ?? []);
+          setLanguages(cached.languages ?? []);
+          setResolvedKey(queryKey);
+        }
+        return;
+      }
 
-    Promise.all([
-      fetch(`/api/marketing?view=devices&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
-      fetch(`/api/marketing?view=geo&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
-      fetch(`/api/marketing?view=demographics&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
-      fetch(`/api/marketing?view=languages&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
-    ])
-      .then(([devJson, geoJson, demoJson, langJson]) => {
-        if (cancelled) return;
+      try {
+        const [devJson, geoJson, demographicsJson, langJson] = await Promise.all([
+          fetch(`/api/marketing?view=devices&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
+          fetch(`/api/marketing?view=geo&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
+          fetch(`/api/marketing?view=demographics&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
+          fetch(`/api/marketing?view=languages&from=${from}&to=${to}${demoParam}${marketParam}`).then((r) => r.json()),
+        ]);
         if (devJson.error) throw new Error(devJson.error);
         if (geoJson.error) throw new Error(geoJson.error);
         const entry: AudienceCacheEntry = {
           devices: devJson.devices ?? [],
           geo: geoJson.geo ?? [],
-          age: demoJson.age ?? [],
-          gender: demoJson.gender ?? [],
+          age: demographicsJson.age ?? [],
+          gender: demographicsJson.gender ?? [],
           languages: langJson.languages ?? [],
         };
-        setDevices(entry.devices);
-        setGeo(entry.geo);
-        setAgeData(entry.age);
-        setGenderData(entry.gender);
-        setLanguages(entry.languages);
-        mktCacheSave(cacheKey, entry);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
         if (!cancelled) {
-          setLoading(false);
+          setDevices(entry.devices);
+          setGeo(entry.geo);
+          setAgeData(entry.age);
+          setGenderData(entry.gender);
+          setLanguages(entry.languages);
+          mktCacheSave(cacheKey, entry);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load audience data");
+      } finally {
+        if (!cancelled) {
+          setResolvedKey(queryKey);
           setDemoLoading(false);
           setLangLoading(false);
         }
-      });
+      }
+    }
+
+    void load();
     return () => { cancelled = true; };
-  }, [from, to, demo, market, demoParam, marketParam, refreshKey]);
+  }, [cacheKey, queryKey, from, to, demoParam, marketParam]);
 
   const loadRegions = useCallback((country: GeoData) => {
     setSelectedCountry(country);
@@ -265,12 +278,6 @@ export default function AudienceTab({
   };
 
   const totalSpend = devices.reduce((s, d) => s + d.ad_spend, 0);
-  const SortIcon = ({ active, asc }: { active: boolean; asc: boolean }) => (
-    <span className={`ml-0.5 text-[10px] ${active ? "text-sand-900" : "text-sand-300"}`}>
-      {active ? (asc ? "\u2191" : "\u2193") : "\u2195"}
-    </span>
-  );
-
   return (
     <div className="space-y-6">
       {/* Device Split */}

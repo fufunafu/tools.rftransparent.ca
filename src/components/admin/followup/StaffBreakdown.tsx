@@ -57,7 +57,7 @@ export default function StaffBreakdown({
   onStaffClick?: (staff: string) => void;
 }) {
   const [staff, setStaff] = useState<StaffAgg[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("total");
@@ -65,10 +65,11 @@ export default function StaffBreakdown({
   // Local time window. "all" defers to the dashboard's coarse range prop (1y/all);
   // any other value sends an explicit `days=` that the API windows server-side.
   const [days, setDays] = useState<DaysValue>("all");
+  const queryKey = `${store}:${range}:${days}`;
+  const loading = resolvedKey !== queryKey;
 
   useEffect(() => {
     const ctrl = new AbortController();
-    setLoading(true);
     const url =
       days === "all"
         ? `/api/customer-service/follow-up?view=by_staff&store=${store}&range=${range}`
@@ -77,9 +78,11 @@ export default function StaffBreakdown({
       .then((r) => r.json())
       .then((d) => setStaff(d.staff ?? []))
       .catch((e) => { if (e.name !== "AbortError") setStaff([]); })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctrl.signal.aborted) setResolvedKey(queryKey);
+      });
     return () => ctrl.abort();
-  }, [store, range, days]);
+  }, [store, range, days, queryKey]);
 
   const hasDeleted = staff.some((s) => s.staff.endsWith(" (deleted)"));
 

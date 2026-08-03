@@ -51,6 +51,40 @@ const COLUMN_TOOLTIPS: Partial<Record<SortKey, string>> = {
   roas: "Return on Ad Spend = Revenue / Spend. A ROAS of 3x means $3 earned for every $1 spent.",
 };
 
+function SearchTermSortHeader({
+  column,
+  label,
+  align,
+  activeColumn,
+  ascending,
+  onSort,
+}: {
+  column: SortKey;
+  label: string;
+  align?: "left" | "right";
+  activeColumn: SortKey;
+  ascending: boolean;
+  onSort: (key: SortKey) => void;
+}) {
+  return (
+    <th
+      className={`px-4 py-3 text-xs font-medium text-sand-500 uppercase tracking-wider ${
+        align === "right" ? "text-right" : "text-left"
+      }`}
+    >
+      <button
+        type="button"
+        className="inline-flex items-center select-none hover:text-sand-700"
+        onClick={() => onSort(column)}
+      >
+        {label}
+        {COLUMN_TOOLTIPS[column] && <InfoTooltip text={COLUMN_TOOLTIPS[column]} />}
+        {activeColumn === column ? (ascending ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
+}
+
 export default function SearchTermsTab({
   from,
   to,
@@ -63,44 +97,52 @@ export default function SearchTermsTab({
   refreshKey?: number;
 }) {
   const [data, setData] = useState<SearchTermData[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("clicks");
   const [sortAsc, setSortAsc] = useState(false);
 
+  const cacheKey = `search:${from}:${to}:${demo}`;
+  const queryKey = `${cacheKey}:${refreshKey}`;
+  const loading = resolvedKey !== queryKey;
+
   useEffect(() => {
     let cancelled = false;
-    const cacheKey = `search:${from}:${to}:${demo}`;
 
-    const cached = mktCacheLoad<SearchTermData[]>(cacheKey);
-    if (cached) {
-      setData(cached);
-      setLoading(false);
-      return;
-    }
+    async function load() {
+      await Promise.resolve();
+      setError("");
+      const cached = mktCacheLoad<SearchTermData[]>(cacheKey);
+      if (cached) {
+        if (!cancelled) {
+          setData(cached);
+          setResolvedKey(queryKey);
+        }
+        return;
+      }
 
-    setLoading(true);
-    setError("");
-    const params = new URLSearchParams({ view: "search-terms", from, to });
-    if (demo) params.set("demo", "true");
-    fetch(`/api/marketing?${params}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled) return;
+      const params = new URLSearchParams({ view: "search-terms", from, to });
+      if (demo) params.set("demo", "true");
+      try {
+        const response = await fetch(`/api/marketing?${params}`);
+        const json = await response.json();
         if (json.error) throw new Error(json.error);
         const terms = json.searchTerms ?? [];
-        setData(terms);
-        mktCacheSave(cacheKey, terms);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        if (!cancelled) {
+          setData(terms);
+          mktCacheSave(cacheKey, terms);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load search terms");
+      } finally {
+        if (!cancelled) setResolvedKey(queryKey);
+      }
+    }
+
+    void load();
     return () => { cancelled = true; };
-  }, [from, to, demo, refreshKey]);
+  }, [cacheKey, queryKey, from, to, demo]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) setSortAsc(!sortAsc);
@@ -119,18 +161,6 @@ export default function SearchTermsTab({
     });
   }, [data, search, sortKey, sortAsc]);
 
-  const SortHeader = ({ k, label, align }: { k: SortKey; label: string; align?: string }) => (
-    <th
-      className={`px-4 py-3 text-xs font-medium text-sand-500 uppercase tracking-wider cursor-pointer hover:text-sand-700 select-none ${align === "right" ? "text-right" : "text-left"}`}
-      onClick={() => handleSort(k)}
-    >
-      <span className="inline-flex items-center">
-        {label}{COLUMN_TOOLTIPS[k] && <InfoTooltip text={COLUMN_TOOLTIPS[k]} />}
-        {sortKey === k ? (sortAsc ? " ↑" : " ↓") : ""}
-      </span>
-    </th>
-  );
-
   if (loading) return <div className="text-center py-12 text-sand-400">Loading search terms...</div>;
   if (error) return <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>;
 
@@ -139,6 +169,7 @@ export default function SearchTermsTab({
       <div className="flex items-center gap-3">
         <input
           type="text"
+          aria-label="Filter search terms"
           placeholder="Filter search terms..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -152,13 +183,13 @@ export default function SearchTermsTab({
           <table className="w-full">
             <thead className="bg-sand-50 border-b border-sand-200/60">
               <tr>
-                <SortHeader k="term" label="Search Term" />
-                <SortHeader k="clicks" label="Clicks" align="right" />
-                <SortHeader k="impressions" label="Impressions" align="right" />
-                <SortHeader k="ad_spend" label="Spend" align="right" />
-                <SortHeader k="conversions" label="Conv." align="right" />
-                <SortHeader k="revenue" label="Revenue" align="right" />
-                <SortHeader k="roas" label="ROAS" align="right" />
+                <SearchTermSortHeader column="term" label="Search Term" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="clicks" label="Clicks" align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="impressions" label="Impressions" align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="ad_spend" label="Spend" align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="conversions" label="Conv." align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="revenue" label="Revenue" align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <SearchTermSortHeader column="roas" label="ROAS" align="right" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-sand-100">

@@ -9,7 +9,6 @@ import {
   getFollowupDaysForStore,
   DEFAULT_FOLLOWUP_DAYS,
   FOLLOWUP_CATEGORIES,
-  MAX_ATTEMPTS,
   type LeadStatus,
   type FollowUpLead,
 } from "@/lib/followup";

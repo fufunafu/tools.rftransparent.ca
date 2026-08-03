@@ -13,7 +13,7 @@ export default async function PurchasingLayout({
   children: React.ReactNode;
 }) {
   if (!(await isAuthenticated())) redirect("/login");
-  if (!(await isManagementUser())) redirect("/warehouse");
+  if (!(await isManagementUser())) redirect("/access-denied");
 
   const summary = await getPurchasingSummary().catch(() => ({
     total_inventory_value: 0,

@@ -196,7 +196,7 @@ export default function ShopifyDashboard() {
     try {
       const chart = await apiGetChart(id, days);
       updateStore(id, { chart, chartState: "loaded" });
-    } catch (e) {
+    } catch {
       updateStore(id, { chartState: "error" });
     }
   }, [updateStore]);
@@ -220,7 +220,12 @@ export default function ShopifyDashboard() {
     loadChart(infos[0].id, 30);
   }, [loadMetrics, loadOrders, loadChart]);
 
-  useEffect(() => { bootstrap(); }, [bootstrap]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void bootstrap();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [bootstrap]);
 
   const switchTab = useCallback((id: string) => {
     setActiveTab(id);

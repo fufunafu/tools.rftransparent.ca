@@ -1,13 +1,5 @@
 "use client";
 
-function formatResponseTime(mins: number | null): string {
-  if (mins == null) return "—";
-  if (mins < 60) return `${mins} min`;
-  const hrs = Math.floor(mins / 60);
-  const rem = mins % 60;
-  return rem > 0 ? `${hrs}h ${rem}m` : `${hrs}h`;
-}
-
 function ChangeBadge({ value, invert }: { value: number | null | undefined; invert?: boolean }) {
   if (value == null) return null;
   const positive = invert ? value < 0 : value > 0;

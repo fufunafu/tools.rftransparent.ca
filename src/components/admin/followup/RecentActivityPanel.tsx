@@ -54,7 +54,9 @@ export default function RecentActivityPanel({
 }) {
   const [range, setRange] = useState<RangeValue>("7");
   const [data, setData] = useState<ApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
+  const queryKey = `${store}:${range}`;
+  const loading = resolvedKey !== queryKey;
 
   const rangeDescription =
     RANGE_OPTIONS.find((o) => o.value === range)?.description ?? "7 days";
@@ -65,16 +67,17 @@ export default function RecentActivityPanel({
 
   useEffect(() => {
     const ctrl = new AbortController();
-    setLoading(true);
     fetch(`/api/customer-service/follow-up?view=recent_activity&store=${store}&days=${range}`, {
       signal: ctrl.signal,
     })
       .then((r) => r.json())
       .then((d: ApiResponse) => setData(d))
       .catch((e) => { if (e.name !== "AbortError") setData(null); })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ctrl.signal.aborted) setResolvedKey(queryKey);
+      });
     return () => ctrl.abort();
-  }, [store, range]);
+  }, [store, range, queryKey]);
 
   if (loading) {
     return (

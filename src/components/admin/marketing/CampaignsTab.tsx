@@ -29,6 +29,32 @@ function formatNumber(n: number) {
 
 type SortKey = "campaign" | "ad_spend" | "revenue" | "roas" | "clicks" | "impressions" | "conversions";
 
+function CampaignSortHeader({
+  column,
+  label,
+  activeColumn,
+  ascending,
+  onSort,
+}: {
+  column: SortKey;
+  label: string;
+  activeColumn: SortKey;
+  ascending: boolean;
+  onSort: (key: SortKey) => void;
+}) {
+  return (
+    <th className="px-4 py-3 text-left text-xs font-medium text-sand-500 uppercase tracking-wider">
+      <button
+        type="button"
+        className="select-none hover:text-sand-700"
+        onClick={() => onSort(column)}
+      >
+        {label} {activeColumn === column ? (ascending ? "↑" : "↓") : ""}
+      </button>
+    </th>
+  );
+}
+
 export default function CampaignsTab({
   from,
   to,
@@ -43,44 +69,52 @@ export default function CampaignsTab({
   refreshKey?: number;
 }) {
   const [data, setData] = useState<CampaignData[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [resolvedKey, setResolvedKey] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("ad_spend");
   const [sortAsc, setSortAsc] = useState(false);
 
+  const cacheKey = `campaigns:${from}:${to}:${market}:${demo}`;
+  const queryKey = `${cacheKey}:${refreshKey}`;
+  const loading = resolvedKey !== queryKey;
+
   useEffect(() => {
     let cancelled = false;
-    const cacheKey = `campaigns:${from}:${to}:${market}:${demo}`;
 
-    const cached = mktCacheLoad<CampaignData[]>(cacheKey);
-    if (cached) {
-      setData(cached);
-      setLoading(false);
-      return;
-    }
+    async function load() {
+      await Promise.resolve();
+      setError("");
+      const cached = mktCacheLoad<CampaignData[]>(cacheKey);
+      if (cached) {
+        if (!cancelled) {
+          setData(cached);
+          setResolvedKey(queryKey);
+        }
+        return;
+      }
 
-    setLoading(true);
-    setError("");
-    const params = new URLSearchParams({ view: "campaigns", from, to });
-    if (demo) params.set("demo", "true");
-    if (market !== "all") params.set("market", market);
-    fetch(`/api/marketing?${params}`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (cancelled) return;
+      const params = new URLSearchParams({ view: "campaigns", from, to });
+      if (demo) params.set("demo", "true");
+      if (market !== "all") params.set("market", market);
+      try {
+        const response = await fetch(`/api/marketing?${params}`);
+        const json = await response.json();
         if (json.error) throw new Error(json.error);
         const campaigns = json.campaigns ?? [];
-        setData(campaigns);
-        mktCacheSave(cacheKey, campaigns);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        if (!cancelled) {
+          setData(campaigns);
+          mktCacheSave(cacheKey, campaigns);
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load campaigns");
+      } finally {
+        if (!cancelled) setResolvedKey(queryKey);
+      }
+    }
+
+    void load();
     return () => { cancelled = true; };
-  }, [from, to, demo, market, refreshKey]);
+  }, [cacheKey, queryKey, from, to, demo, market]);
 
   const handleSort = (key: SortKey) => {
     if (sortKey === key) {
@@ -98,15 +132,6 @@ export default function CampaignsTab({
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number);
   });
-
-  const SortHeader = ({ k, label }: { k: SortKey; label: string }) => (
-    <th
-      className="px-4 py-3 text-left text-xs font-medium text-sand-500 uppercase tracking-wider cursor-pointer hover:text-sand-700 select-none"
-      onClick={() => handleSort(k)}
-    >
-      {label} {sortKey === k ? (sortAsc ? "↑" : "↓") : ""}
-    </th>
-  );
 
   if (loading) return <div className="text-center py-12 text-sand-400">Loading campaign data...</div>;
   if (error) return <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">{error}</div>;
@@ -183,13 +208,13 @@ export default function CampaignsTab({
           <table className="w-full">
             <thead className="bg-sand-50 border-b border-sand-200/60">
               <tr>
-                <SortHeader k="campaign" label="Campaign" />
-                <SortHeader k="ad_spend" label="Spend" />
-                <SortHeader k="revenue" label="Revenue" />
-                <SortHeader k="roas" label="ROAS" />
-                <SortHeader k="clicks" label="Clicks" />
-                <SortHeader k="impressions" label="Impressions" />
-                <SortHeader k="conversions" label="Conv." />
+                <CampaignSortHeader column="campaign" label="Campaign" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="ad_spend" label="Spend" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="revenue" label="Revenue" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="roas" label="ROAS" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="clicks" label="Clicks" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="impressions" label="Impressions" activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
+                <CampaignSortHeader column="conversions" label="Conv." activeColumn={sortKey} ascending={sortAsc} onSort={handleSort} />
               </tr>
             </thead>
             <tbody className="divide-y divide-sand-100">

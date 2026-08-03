@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useId } from "react";
 import { MapContainer, TileLayer, CircleMarker, Popup } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -45,7 +45,7 @@ function dotColor(amount: number): string {
 
 export default function SalesMapView({ points }: { points: SalePoint[] }) {
   // Unique per mount so Leaflet always gets a fresh DOM element on remount
-  const mapKey = useRef(`map-${Math.random()}`);
+  const mapKey = useId();
 
   // Calculate center from points, default to North America
   const center: [number, number] = points.length > 0
@@ -57,7 +57,7 @@ export default function SalesMapView({ points }: { points: SalePoint[] }) {
 
   return (
     <MapContainer
-      key={mapKey.current}
+      key={mapKey}
       center={center}
       zoom={points.length > 50 ? 4 : 5}
       style={{ height: "100%", width: "100%" }}
