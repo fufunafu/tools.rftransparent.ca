@@ -657,7 +657,7 @@ export default function FollowUpDashboard({
       // res.json() would throw "Unexpected token 'A'". Read as text first
       // so the user sees a real status code instead of a parser error.
       const text = await res.text();
-      let json: { status?: string; error?: string; new_leads?: number; updated_leads?: number; auto_won?: number; stale_detected?: number; errors?: number; first_error?: string; lead_quote_sync?: { linked?: number; errors?: number; firstError?: string | null } };
+      let json: { status?: string; error?: string; new_leads?: number; updated_leads?: number; auto_won?: number; stale_detected?: number; errors?: number; first_error?: string; lead_quote_sync?: { linked?: number; staffAssigned?: number; errors?: number; firstError?: string | null } };
       try {
         json = JSON.parse(text);
       } catch {
@@ -671,6 +671,7 @@ export default function FollowUpDashboard({
         const staleDetected = json.stale_detected ?? 0;
         const errors = json.errors ?? 0;
         const linkedLeads = json.lead_quote_sync?.linked ?? 0;
+        const staffAssigned = json.lead_quote_sync?.staffAssigned ?? 0;
         const quoteSyncErrors = json.lead_quote_sync?.errors ?? 0;
         const parts: string[] = [];
         if (newLeads > 0) parts.push(`${newLeads} new`);
@@ -678,6 +679,7 @@ export default function FollowUpDashboard({
         if (autoWon > 0) parts.push(`${autoWon} auto-won`);
         if (staleDetected > 0) parts.push(`${staleDetected} stale`);
         if (linkedLeads > 0) parts.push(`${linkedLeads} leads linked to quotes`);
+        if (staffAssigned > 0) parts.push(`${staffAssigned} quote staff assigned`);
         const base = parts.length > 0 ? `Synced: ${parts.join(", ")}` : "Already up to date";
         if (errors > 0 || quoteSyncErrors > 0) {
           const totalErrors = errors + quoteSyncErrors;

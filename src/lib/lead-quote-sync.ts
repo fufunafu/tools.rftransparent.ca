@@ -10,6 +10,7 @@ export interface LeadForQuoteSync {
   submitted_at: string;
   outcome: LeadOutcome;
   quote_number: string | null;
+  assigned_to: string | null;
 }
 
 export interface DraftForLeadQuoteSync {
@@ -21,6 +22,8 @@ export interface DraftForLeadQuoteSync {
   shopify_created_at: string | null;
   shopify_status: string;
   first_synced_at: string;
+  last_invoice_sender: string | null;
+  created_by_staff: string | null;
 }
 
 export interface LeadQuoteMatch {
@@ -30,6 +33,12 @@ export interface LeadQuoteMatch {
   quoteAmount: number;
   quoteSentAt: string;
   outcome: "quoted" | "won";
+  responsibleStaff: string | null;
+}
+
+export interface LeadStaffMatch {
+  leadId: string;
+  responsibleStaff: string;
 }
 
 export interface LeadQuoteSyncSummary {
@@ -39,6 +48,7 @@ export interface LeadQuoteSyncSummary {
   linked: number;
   quoted: number;
   won: number;
+  staffAssigned: number;
   errors: number;
   firstError: string | null;
 }
@@ -58,6 +68,10 @@ function normalizedEmail(raw: string | null): string | null {
 function normalizedPhone(raw: string | null): string | null {
   const phone = sanitizePhone(raw);
   return phone && phone.length >= 10 ? phone : null;
+}
+
+function responsibleStaff(draft: DraftForLeadQuoteSync): string | null {
+  return draft.last_invoice_sender?.trim() || draft.created_by_staff?.trim() || null;
 }
 
 function latestLeadBeforeDraft(
@@ -137,9 +151,39 @@ export function matchDraftOrdersToLeads(
       quoteAmount: Number(draft.quote_amount) || 0,
       quoteSentAt,
       outcome: draft.shopify_status === "COMPLETED" ? "won" : "quoted",
+      responsibleStaff: responsibleStaff(draft),
     });
   }
 
+  return matches;
+}
+
+/** Match already-linked quotes to staff without changing the quote linkage. */
+export function matchStaffToLinkedLeads(
+  leads: LeadForQuoteSync[],
+  drafts: DraftForLeadQuoteSync[],
+): LeadStaffMatch[] {
+  const draftsByNumber = new Map<string, DraftForLeadQuoteSync[]>();
+  for (const draft of drafts) {
+    if (!responsibleStaff(draft)) continue;
+    draftsByNumber.set(draft.draft_name, [
+      ...(draftsByNumber.get(draft.draft_name) ?? []),
+      draft,
+    ]);
+  }
+
+  const matches: LeadStaffMatch[] = [];
+  for (const lead of leads) {
+    if (!lead.quote_number || lead.assigned_to) continue;
+    const candidates = draftsByNumber.get(lead.quote_number) ?? [];
+    const email = normalizedEmail(lead.email);
+    const phone = normalizedPhone(lead.phone);
+    const draft =
+      candidates.find((candidate) => email && normalizedEmail(candidate.customer_email) === email) ??
+      candidates.find((candidate) => phone && normalizedPhone(candidate.customer_phone) === phone);
+    const staff = draft ? responsibleStaff(draft) : null;
+    if (staff) matches.push({ leadId: lead.id, responsibleStaff: staff });
+  }
   return matches;
 }
 
@@ -165,7 +209,7 @@ export async function syncLeadQuotesFromFollowups(
   const leads = await fetchAllRows<LeadForQuoteSync>((from, to) =>
     supabase
       .from("leads")
-      .select("id,email,phone,submitted_at,outcome,quote_number")
+      .select("id,email,phone,submitted_at,outcome,quote_number,assigned_to")
       .order("submitted_at", { ascending: true })
       .range(from, to),
   );
@@ -173,7 +217,7 @@ export async function syncLeadQuotesFromFollowups(
   const drafts = await fetchAllRows<DraftForLeadQuoteSync>((from, to) => {
     let query = supabase
       .from("followup_leads")
-      .select("shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,shopify_status,first_synced_at")
+      .select("shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,shopify_status,first_synced_at,last_invoice_sender,created_by_staff")
       .in("shopify_status", ["INVOICE_SENT", "COMPLETED"])
       .order("shopify_created_at", { ascending: true })
       .range(from, to);
@@ -182,6 +226,9 @@ export async function syncLeadQuotesFromFollowups(
   });
 
   const matches = matchDraftOrdersToLeads(leads, drafts);
+  const staffMatches = matchStaffToLinkedLeads(leads, drafts);
+  const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+  const linkedLeadIds = new Set<string>();
   const summary: LeadQuoteSyncSummary = {
     leadsScanned: leads.length,
     draftsScanned: drafts.length,
@@ -189,6 +236,7 @@ export async function syncLeadQuotesFromFollowups(
     linked: 0,
     quoted: 0,
     won: 0,
+    staffAssigned: 0,
     errors: 0,
     firstError: null,
   };
@@ -221,8 +269,45 @@ export async function syncLeadQuotesFromFollowups(
       }
       if (result.updated === 0) continue;
       summary.linked++;
+      linkedLeadIds.add(result.match.leadId);
       if (result.match.outcome === "won") summary.won++;
       else summary.quoted++;
+    }
+  }
+
+  const staffByLeadId = new Map<string, string>();
+  for (const match of matches) {
+    const lead = leadById.get(match.leadId);
+    if (linkedLeadIds.has(match.leadId) && match.responsibleStaff && !lead?.assigned_to) {
+      staffByLeadId.set(match.leadId, match.responsibleStaff);
+    }
+  }
+  for (const match of staffMatches) {
+    staffByLeadId.set(match.leadId, match.responsibleStaff);
+  }
+
+  const staffUpdates = [...staffByLeadId].map(([leadId, staff]) => ({ leadId, staff }));
+  for (let offset = 0; offset < staffUpdates.length; offset += WRITE_CONCURRENCY) {
+    const batch = staffUpdates.slice(offset, offset + WRITE_CONCURRENCY);
+    const results = await Promise.all(batch.map(async ({ leadId, staff }) => {
+      const { data, error } = await supabase
+        .from("leads")
+        .update({ assigned_to: staff })
+        .eq("id", leadId)
+        .is("assigned_to", null)
+        .select("id");
+      return { leadId, updated: data?.length ?? 0, error };
+    }));
+
+    for (const result of results) {
+      if (result.error) {
+        summary.errors++;
+        const message = `[lead-quote-sync] staff ${result.leadId}: ${result.error.message}`;
+        console.error(message);
+        if (!summary.firstError) summary.firstError = message;
+      } else if (result.updated > 0) {
+        summary.staffAssigned++;
+      }
     }
   }
 

@@ -385,6 +385,12 @@ function LeadDetailPanel({
                   <span className="text-sand-700">{formatDateTime(lead.quote_sent_at)}</span>
                 </div>
               )}
+              {lead.assigned_to && (
+                <div className="flex justify-between gap-3">
+                  <span className="text-sand-500">Staff</span>
+                  <span className="text-sand-700 text-right">{lead.assigned_to}</span>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-sm text-sand-400">No quote sent yet.</p>
@@ -514,7 +520,8 @@ export default function LeadsDashboard() {
         if (
           !(l.name ?? "").toLowerCase().includes(q) &&
           !(l.email ?? "").toLowerCase().includes(q) &&
-          !(l.phone ?? "").includes(q)
+          !(l.phone ?? "").includes(q) &&
+          !(l.assigned_to ?? "").toLowerCase().includes(q)
         ) return false;
       }
       return true;
@@ -824,7 +831,7 @@ export default function LeadsDashboard() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, email, or phone"
+              placeholder="Search name, email, phone, or staff"
               aria-label="Search leads"
               className="w-full sm:w-64 px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
@@ -856,7 +863,7 @@ export default function LeadsDashboard() {
           </div>
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full min-w-[960px] text-sm">
+            <table className="w-full min-w-[1080px] text-sm">
               <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-200/60">
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Lead</th>
@@ -864,6 +871,7 @@ export default function LeadsDashboard() {
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Contact</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Staff</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Stage</th>
                   <th className="px-4 py-3"></th>
                 </tr>
@@ -915,6 +923,15 @@ export default function LeadsDashboard() {
                             <div className="text-[11px] text-sand-400">{formatCADWhole(Number(lead.quote_amount))}</div>
                           )}
                         </>
+                      ) : (
+                        <span className="text-sand-300">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sand-600">
+                      {lead.assigned_to ? (
+                        <span className="block max-w-[160px] truncate" title={lead.assigned_to}>
+                          {lead.assigned_to}
+                        </span>
                       ) : (
                         <span className="text-sand-300">-</span>
                       )}

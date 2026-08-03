@@ -43,7 +43,7 @@ async function handler(req: NextRequest) {
       store_id: "lead_quote_matching",
       label: "Lead quote matching",
       status: leadQuoteSync.errors > 0 ? "error" : "ok",
-      detail: `${leadQuoteSync.linked} linked, ${leadQuoteSync.quoted} quoted, ${leadQuoteSync.won} won, ${leadQuoteSync.errors} errors`,
+      detail: `${leadQuoteSync.linked} linked, ${leadQuoteSync.quoted} quoted, ${leadQuoteSync.won} won, ${leadQuoteSync.staffAssigned} staff assigned, ${leadQuoteSync.errors} errors`,
     });
   } catch (err) {
     results.push({

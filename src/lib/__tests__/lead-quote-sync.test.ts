@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   matchDraftOrdersToLeads,
+  matchStaffToLinkedLeads,
   type DraftForLeadQuoteSync,
   type LeadForQuoteSync,
 } from "@/lib/lead-quote-sync";
@@ -16,6 +17,7 @@ function lead(
     submitted_at: "2026-08-01T12:00:00.000Z",
     outcome: "contacted",
     quote_number: null,
+    assigned_to: null,
     ...overrides,
   };
 }
@@ -33,6 +35,8 @@ function draft(
     shopify_created_at: "2026-08-01T13:00:00.000Z",
     shopify_status: "INVOICE_SENT",
     first_synced_at: "2026-08-01T13:05:00.000Z",
+    last_invoice_sender: "Anne Seller",
+    created_by_staff: "Chris Creator",
     ...overrides,
   };
 }
@@ -52,6 +56,7 @@ describe("matchDraftOrdersToLeads", () => {
         quoteAmount: 1250.5,
         quoteSentAt: "2026-08-01T13:00:00.000Z",
         outcome: "quoted",
+        responsibleStaff: "Anne Seller",
       },
     ]);
   });
@@ -131,6 +136,15 @@ describe("matchDraftOrdersToLeads", () => {
     expect(match.outcome).toBe("won");
   });
 
+  it("falls back to the draft creator when no invoice sender is available", () => {
+    const [match] = matchDraftOrdersToLeads(
+      [lead("lead-1")],
+      [draft("D100", { last_invoice_sender: null })],
+    );
+
+    expect(match.responsibleStaff).toBe("Chris Creator");
+  });
+
   it("links only the earliest draft when one lead has multiple drafts", () => {
     const matches = matchDraftOrdersToLeads(
       [lead("lead-1")],
@@ -154,5 +168,48 @@ describe("matchDraftOrdersToLeads", () => {
     );
 
     expect(matches.map((match) => match.draftId)).toEqual(["D100"]);
+  });
+});
+
+describe("matchStaffToLinkedLeads", () => {
+  it("backfills the last invoice sender for an already-linked quote", () => {
+    const matches = matchStaffToLinkedLeads(
+      [lead("lead-1", { quote_number: "#D100" })],
+      [draft("D100")],
+    );
+
+    expect(matches).toEqual([
+      { leadId: "lead-1", responsibleStaff: "Anne Seller" },
+    ]);
+  });
+
+  it("uses phone as a fallback and never replaces a manual assignment", () => {
+    expect(
+      matchStaffToLinkedLeads(
+        [lead("lead-1", { email: "other@example.com", quote_number: "#D100" })],
+        [draft("D100", { customer_email: "unknown@example.com" })],
+      ),
+    ).toEqual([{ leadId: "lead-1", responsibleStaff: "Anne Seller" }]);
+
+    expect(
+      matchStaffToLinkedLeads(
+        [lead("lead-1", { quote_number: "#D100", assigned_to: "Manual Owner" })],
+        [draft("D100")],
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not use staff from a same-number draft with a different contact", () => {
+    expect(
+      matchStaffToLinkedLeads(
+        [lead("lead-1", { quote_number: "#D100" })],
+        [
+          draft("D100", {
+            customer_email: "other@example.com",
+            customer_phone: "4165559999",
+          }),
+        ],
+      ),
+    ).toEqual([]);
   });
 });
