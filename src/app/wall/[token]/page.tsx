@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { getWallToken } from "@/lib/settings";
 import { getOpsDashboard } from "@/lib/ops-dashboard";
@@ -26,17 +25,7 @@ export default async function WallPage({ params }: { params: Promise<{ token: st
   const expected = await getWallToken();
   if (!expected || token !== expected) notFound();
 
-  const headerList = await headers();
-  const host = headerList.get("host") ?? "localhost:3000";
-  const protocol = host.startsWith("localhost") ? "http" : "https";
-
-  // The board has no session, so the accounting route can't be called on its
-  // behalf; collection comes back as an unavailable Result and the card says
-  // so rather than showing a zero.
-  const [data, tickets] = await Promise.all([
-    getOpsDashboard(`${protocol}://${host}`, ""),
-    getTicketStats(),
-  ]);
+  const [data, tickets] = await Promise.all([getOpsDashboard(), getTicketStats()]);
 
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: BUSINESS_TIMEZONE,

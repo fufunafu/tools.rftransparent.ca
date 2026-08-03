@@ -444,10 +444,9 @@ export default function WallBoard({
               </div>
             </div>
           ) : (
-            // The board has no session; collection appears once a signed-in
-            // dashboard load has warmed the shared cache. Say which, instead
-            // of a zero that reads as "nothing owed".
-            <p className="text-[20px] text-slate-500 mt-3">Waiting for first dashboard load</p>
+            // Shopify unreachable — say so instead of a zero that reads as
+            // "nothing owed".
+            <p className="text-[20px] text-slate-500 mt-3">Unavailable</p>
           )}
         </Card>
       </div>

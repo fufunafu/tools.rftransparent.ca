@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getOpsDashboard } from "@/lib/ops-dashboard";
@@ -19,16 +18,8 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   if (!(await isAuthenticated())) redirect("/login");
 
-  // The collection figures come from the existing accounting route, which is
-  // session-gated — forward the caller's cookie rather than re-implementing
-  // the Shopify query and risking the two disagreeing.
-  const headerList = await headers();
-  const host = headerList.get("host") ?? "localhost:3000";
-  const protocol = host.startsWith("localhost") ? "http" : "https";
-  const cookie = headerList.get("cookie") ?? "";
-
   const [data, tickets, automations, wallToken] = await Promise.all([
-    getOpsDashboard(`${protocol}://${host}`, cookie),
+    getOpsDashboard(),
     getTicketStats(),
     getAutomationHealth(),
     // The board lives at /wall/[token]; linking to bare /wall 404s.

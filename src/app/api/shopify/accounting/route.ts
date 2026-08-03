@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { shopifyGraphQL, fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchAllPages, getStores, REVENUE_FIELDS, calcNetRevenue, type RevenueFields } from "@/lib/shopify";
+import { fetchUnpaidOrders } from "@/lib/collection";
 
 function dateStr(d: Date) {
   return d.toISOString().split("T")[0];
@@ -41,21 +42,6 @@ interface OrdersResponse {
     edges: { node: OrderNode; cursor: string }[];
     pageInfo: { hasNextPage: boolean };
   };
-}
-
-interface UnpaidOrderNode extends RevenueFields {
-  id: string;
-  name: string;
-  createdAt: string;
-  cancelledAt: string | null;
-  displayFinancialStatus: string;
-  totalPriceSet: { shopMoney: { amount: string; currencyCode: string } };
-  currentSubtotalPriceSet: { shopMoney: { amount: string } } | null;
-  customer: { firstName: string; lastName: string } | null;
-}
-
-interface UnpaidResponse {
-  orders: { edges: { node: UnpaidOrderNode }[] };
 }
 
 const ACCOUNTING_ORDERS_QUERY = `
@@ -111,30 +97,6 @@ async function fetchAllAccountingOrders(
   });
   return nodes;
 }
-
-// Cancelled orders keep their pending financial status forever, so without
-// the -status:cancelled clause the receivables list slowly fills with orders
-// nobody expects to collect — a cancelled 2025 draft was our "oldest unpaid".
-// cancelledAt is selected too as belt-and-braces for search-syntax quirks.
-const UNPAID_QUERY = `
-  query {
-    orders(first: 250, sortKey: CREATED_AT, reverse: true, query: "(financial_status:pending OR financial_status:partially_paid) AND -status:cancelled") {
-      edges {
-        node {
-          id
-          name
-          createdAt
-          cancelledAt
-          displayFinancialStatus
-          totalPriceSet { shopMoney { amount currencyCode } }
-          currentSubtotalPriceSet { shopMoney { amount } }
-          ${REVENUE_FIELDS}
-          customer { firstName lastName }
-        }
-      }
-    }
-  }
-`;
 
 interface ProductMarginRow {
   productTitle: string;
@@ -269,10 +231,12 @@ export async function GET(req: NextRequest) {
   const prevEnd = dateStr(daysAgo(days));
 
   try {
-    const [currentNodes, previousNodes, unpaidR] = await Promise.all([
+    const [currentNodes, previousNodes, unpaidOrders] = await Promise.all([
       fetchAllAccountingOrders(storeId, `created_at:>='${since}'`),
       fetchAllAccountingOrders(storeId, `created_at:>='${prevSince}' AND created_at:<'${prevEnd}'`),
-      shopifyGraphQL<UnpaidResponse>(storeId, UNPAID_QUERY),
+      // Shared with the ops dashboard's collection card — one definition of
+      // "unpaid" so the two can never disagree.
+      fetchUnpaidOrders(storeId),
     ]);
 
     const orders = currentNodes.map((n) => processOrder(n));
@@ -295,34 +259,6 @@ export async function GET(req: NextRequest) {
     const prevMargin = prevRevenue > 0 && prevWithCost.length > 0
       ? ((prevRevenue - prevCost) / prevRevenue) * 100
       : null;
-
-    // Unpaid / collection orders. The cancelled filter is belt-and-braces on
-    // top of the query's -status:cancelled clause, and the amount owed is the
-    // CURRENT subtotal — after edits and removed items — not the original,
-    // which showed a $0 cancelled order as $353 outstanding.
-    const unpaidOrders = unpaidR.orders.edges
-      .filter((e) => !e.node.cancelledAt)
-      .map((e) => ({
-      id: e.node.id,
-      name: e.node.name,
-      createdAt: e.node.createdAt,
-      financialStatus: e.node.displayFinancialStatus,
-      // Company customers often have no first name, and template-literalling a
-      // null produced customers literally called "null Skyline Glass and
-      // Mirror". Drop the empty halves and join what's left.
-      customer:
-        [e.node.customer?.firstName, e.node.customer?.lastName]
-          .filter((part): part is string => Boolean(part && part.trim()))
-          .join(" ") || "Guest",
-      amount: calcNetRevenue({
-        ...e.node,
-        subtotalPriceSet: e.node.currentSubtotalPriceSet ?? e.node.subtotalPriceSet,
-      }),
-      currency: e.node.totalPriceSet.shopMoney.currencyCode,
-      daysPending: Math.floor(
-        (Date.now() - new Date(e.node.createdAt).getTime()) / (1000 * 60 * 60 * 24)
-      ),
-    }));
 
     const totalUnpaid = unpaidOrders.reduce((s, o) => s + o.amount, 0);
 

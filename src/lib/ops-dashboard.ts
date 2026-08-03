@@ -7,11 +7,17 @@ import {
   type RevenueFields,
 } from "@/lib/shopify";
 import { cached } from "@/lib/api-cache";
+import { fetchUnpaidOrders } from "@/lib/collection";
 import { BUSINESS_TIMEZONE, startOfDayInTimeZone } from "@/lib/dates";
 import { computeMetrics, deduplicateRecords, type CallRecord } from "@/lib/call-metrics";
 import { getPurchasingSummary, listProductsWithMetrics } from "@/lib/purchasing/queries";
 import { getSalesTargets } from "@/lib/settings";
 import { type Result } from "@/lib/home-dashboard";
+import { fetchUnpaidOrders } from "@/lib/collection";
+import {
+  configuredSalesReps,
+  resolveSalesAttribution,
+} from "@/lib/sales-attribution";
 
 // Data behind the operations dashboard. Same contract as home-dashboard.ts:
 // every getter resolves to a value OR an error string and never throws, so one
@@ -96,6 +102,7 @@ export interface StoreSales {
 export interface SalesByStore {
   stores: StoreSales[];
   failedStores: string[];
+  warnings: string[];
   cachedAt: string | null;
 }
 
@@ -156,19 +163,21 @@ async function computeSalesByStore(): Promise<SalesByStore> {
     )
   );
 
-  const last7Keys = new Set(recentDayKeys(now, 7));
-  // The 7 complete days BEFORE today (-7..-1) — the baseline for "vs 7d".
-  // last7Keys includes today, so using it here left only 6 accumulating days
-  // divided by 7, understating the prior average ~14% and flattering today.
+  // Today has its own column. The seven and thirty day columns use complete
+  // days so their deltas compare equal windows and do not look artificially
+  // weak early in the current day.
   const prior7Keys = new Set(
     recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1), 7)
   );
+  const last7Keys = prior7Keys;
   const prev7Keys = new Set(
-    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -7), 7)
+    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -8), 7)
   );
-  const last30Keys = new Set(recentDayKeys(now, 30));
+  const last30Keys = new Set(
+    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1), 30)
+  );
   const prev30Keys = new Set(
-    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30), 30)
+    recentDayKeys(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -31), 30)
   );
   const sparkKeys = recentDayKeys(now, 14);
 
@@ -239,7 +248,14 @@ async function computeSalesByStore(): Promise<SalesByStore> {
     });
   });
 
-  return { stores, failedStores, cachedAt: null };
+  const warnings = [
+    ...failedStores.map((store) => `${store} sales are unavailable`),
+    ...stores
+      .filter((store) => store.truncated)
+      .map((store) => `${store.label} sales reached the pagination limit`),
+  ];
+
+  return { stores, failedStores, warnings, cachedAt: null };
 }
 
 export async function getSalesByStore(): Promise<Result<SalesByStore>> {
@@ -251,7 +267,7 @@ export async function getSalesByStore(): Promise<Result<SalesByStore>> {
     // totals as today's.
     const dayKey = businessDayKey(new Date().toISOString());
     const [{ data, cachedAt }, targets] = await Promise.all([
-      cached(`ops:sales:${dayKey}`, SALES_TTL_MS, computeSalesByStore),
+      cached(`ops:sales:v2:${dayKey}`, SALES_TTL_MS, computeSalesByStore),
       // Read OUTSIDE the cache and merged in here. Targets are one cheap
       // settings row, and burying them in the 5-minute Shopify cache meant
       // editing a target appeared to do nothing until the cache expired.
@@ -283,17 +299,19 @@ export interface WarehouseOps {
   unitsOnHand: number;
   openPoValue: number;
   /** Open purchase orders and how far off the soonest arrival is. */
-  openPoCount: number;
+  openPoCount: number | null;
   daysUntilNextArrival: number | null;
   /** Glass SKUs flagged reorder / reorder_plus_montreal. */
   reorderSkus: number;
   reorderUnits: number;
   montrealTransfers: number;
   /** Unfulfilled Shopify orders across every store. */
-  unfulfilled: number;
+  unfulfilled: number | null;
   oldestUnfulfilledDays: number | null;
   /** Mean hours from order to first fulfillment over the last 30 days. */
   avgFulfillmentHours: number | null;
+  warnings: string[];
+  cachedAt: string | null;
 }
 
 const EMPTY_OUTPUT: WarehouseOutput = { boxesBuilt: 0, ordersPacked: 0, walkinPickup: 0 };
@@ -385,12 +403,31 @@ async function getFulfillmentPicture(since: Date) {
     }
   }
 
+  const unfulfilledWarnings = stores.flatMap((store, index) => {
+    const result = unfulfilledResults[index];
+    if (result.status === "rejected") return [`${store.label} unfulfilled orders are unavailable`];
+    return result.value.truncated
+      ? [`${store.label} unfulfilled orders reached the pagination limit`]
+      : [];
+  });
+  const fulfilledWarnings = stores.flatMap((store, index) => {
+    const result = fulfilledResults[index];
+    if (result.status === "rejected") return [`${store.label} fulfillment history is unavailable`];
+    return result.value.truncated
+      ? [`${store.label} fulfillment history reached the pagination limit`]
+      : [];
+  });
+
   return {
-    unfulfilled: openOrders.length,
-    oldestUnfulfilledDays: oldest
+    unfulfilled: unfulfilledWarnings.length === 0 ? openOrders.length : null,
+    oldestUnfulfilledDays: oldest && unfulfilledWarnings.length === 0
       ? Math.floor((Date.now() - new Date(oldest).getTime()) / 86_400_000)
       : null,
-    avgFulfillmentHours: hoursCount > 0 ? Math.round((hoursTotal / hoursCount) * 10) / 10 : null,
+    avgFulfillmentHours:
+      hoursCount > 0 && fulfilledWarnings.length === 0
+        ? Math.round((hoursTotal / hoursCount) * 10) / 10
+        : null,
+    warnings: [...unfulfilledWarnings, ...fulfilledWarnings],
   };
 }
 
@@ -405,8 +442,12 @@ const OPS_TTL_MS = 5 * 60 * 1000;
 export async function getWarehouseOps(): Promise<Result<WarehouseOps>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
-    const { data } = await cached(`ops:warehouse:${dayKey}`, OPS_TTL_MS, computeWarehouseOps);
-    return ok(data);
+    const { data, cachedAt } = await cached(
+      `ops:warehouse:v2:${dayKey}`,
+      OPS_TTL_MS,
+      computeWarehouseOps
+    );
+    return ok({ ...data, cachedAt });
   } catch (err) {
     return fail(err, "Could not read warehouse data.");
   }
@@ -463,7 +504,7 @@ async function computeWarehouseOps(): Promise<WarehouseOps> {
       inventoryValue: summary.total_inventory_value,
       unitsOnHand: summary.units_on_hand,
       openPoValue: summary.open_po_value,
-      openPoCount: openPos.data?.length ?? 0,
+      openPoCount: openPos.error ? null : openPos.data?.length ?? 0,
       // Soonest arrival across everything on order. Products with no inbound
       // PO report null and are ignored rather than counted as "arriving today".
       daysUntilNextArrival:
@@ -477,6 +518,11 @@ async function computeWarehouseOps(): Promise<WarehouseOps> {
       montrealTransfers: products.filter(
         (p) => p.sop_label === "montreal_transfer" || p.sop_label === "reorder_plus_montreal"
       ).length,
+      warnings: [
+        ...fulfillment.warnings,
+        ...(openPos.error ? [`Purchase-order count is unavailable: ${openPos.error.message}`] : []),
+      ],
+      cachedAt: null,
     };
   }
 }
@@ -940,20 +986,6 @@ export interface CollectionOps {
   oldest: { name: string; days: number; amount: number; order: string } | null;
 }
 
-interface UnpaidOrder {
-  name?: string;
-  customer?: string;
-  daysPending?: number;
-  amount?: number;
-  total?: number;
-  orderNumber?: string;
-}
-
-/**
- * Reads the existing accounting route's unpaid block rather than
- * re-implementing the Shopify query, so the dashboard and the Accounting page
- * can never disagree about what is outstanding.
- */
 export interface OpsDashboard {
   sales: Result<SalesByStore>;
   warehouse: Result<WarehouseOps>;
@@ -963,74 +995,62 @@ export interface OpsDashboard {
 }
 
 /** Everything the dashboard needs, each source degrading on its own. */
-export async function getOpsDashboard(baseUrl: string, cookie: string): Promise<OpsDashboard> {
+export async function getOpsDashboard(): Promise<OpsDashboard> {
   const [sales, warehouse, customerService, performers, collection] = await Promise.all([
     getSalesByStore(),
     getWarehouseOps(),
     getCustomerServiceOps(),
     getTopPerformers(),
-    getCollectionOps(baseUrl, cookie),
+    getCollectionOps(),
   ]);
   return { sales, warehouse, customerService, performers, collection };
 }
 
-export async function getCollectionOps(baseUrl: string, cookie: string): Promise<Result<CollectionOps>> {
+export async function getCollectionOps(): Promise<Result<CollectionOps>> {
   try {
-    // Cached shared, not per session — the figures are company-wide, and the
-    // token-authed wall board (which has no cookie) then shows collection too
-    // whenever any signed-in load has warmed the cache. A cold cache with no
-    // cookie throws and is NOT cached, so the wall degrades instead of
-    // pinning a failure.
     const dayKey = businessDayKey(new Date().toISOString());
-    const { data } = await cached(`ops:collection:${dayKey}`, OPS_TTL_MS, () =>
-      computeCollectionOps(baseUrl, cookie)
-    );
+    const { data } = await cached(`ops:collection:${dayKey}`, OPS_TTL_MS, computeCollectionOps);
     return ok(data);
   } catch (err) {
     return fail(err, "Could not read unpaid orders.");
   }
 }
 
-async function computeCollectionOps(baseUrl: string, cookie: string): Promise<CollectionOps> {
-  {
-    const res = await fetch(`${baseUrl}/api/shopify/accounting?storeId=store1`, {
-      headers: { cookie },
-      cache: "no-store",
-    });
-    if (!res.ok) throw new Error(`Accounting API returned ${res.status}`);
-    const json = await res.json();
-    const unpaid = json?.unpaid ?? {};
-    const orders: UnpaidOrder[] = Array.isArray(unpaid.orders) ? unpaid.orders : [];
+/**
+ * Computed straight from Shopify via the shared fetchUnpaidOrders — the same
+ * function the Accounting API uses, so the two can't disagree. This used to
+ * proxy through that API with the caller's cookie, which meant the session-
+ * less wall board only showed collection while someone's dashboard visit
+ * kept the cache warm; on an always-on TV that read as "usually blank".
+ *
+ * dsoDays is no longer populated: it came from the accounting route's paid-
+ * order analysis, and at ~0.4 days (orders are paid at checkout) it said
+ * nothing worth a second Shopify pipeline. The header simply omits it.
+ */
+async function computeCollectionOps(): Promise<CollectionOps> {
+  const orders = await fetchUnpaidOrders("store1");
 
-    const amountOf = (o: UnpaidOrder) => o.amount ?? o.total ?? 0;
-    const over30 = orders.filter((o) => (o.daysPending ?? 0) >= 30);
-    const over60 = orders.filter((o) => (o.daysPending ?? 0) >= 60);
-    const over90 = orders.filter((o) => (o.daysPending ?? 0) >= 90);
-    const oldest = [...orders].sort((a, b) => (b.daysPending ?? 0) - (a.daysPending ?? 0))[0];
+  const over30 = orders.filter((o) => o.daysPending >= 30);
+  const over60 = orders.filter((o) => o.daysPending >= 60);
+  const over90 = orders.filter((o) => o.daysPending >= 90);
+  const oldest = [...orders].sort((a, b) => b.daysPending - a.daysPending)[0];
 
-    return {
-      over30Count: over30.length,
-      over30Amount: over30.reduce((s, o) => s + amountOf(o), 0),
-      over60Count: over60.length,
-      over60Amount: over60.reduce((s, o) => s + amountOf(o), 0),
-      over90Count: over90.length,
-      totalUnpaid: unpaid.totalUnpaid ?? orders.reduce((s, o) => s + amountOf(o), 0),
-      unpaidCount: unpaid.count ?? orders.length,
-      // Keep a decimal: most Shopify orders are paid at checkout, so the mean
-      // is well under a day and rounding to an integer renders a true "0.4"
-      // as a "0" that reads like a broken tile.
-      dsoDays:
-        typeof json?.dso?.avgDays === "number"
-          ? Math.round(json.dso.avgDays * 10) / 10
-          : null,
-      oldest: oldest
-        ? {
-            name: oldest.customer ?? oldest.name ?? "Unknown",
-            days: oldest.daysPending ?? 0,
-            amount: amountOf(oldest),
-            order: oldest.orderNumber ?? oldest.name ?? "",
-          }
-        : null,
-    };
-  }
+  return {
+    over30Count: over30.length,
+    over30Amount: over30.reduce((s, o) => s + o.amount, 0),
+    over60Count: over60.length,
+    over60Amount: over60.reduce((s, o) => s + o.amount, 0),
+    over90Count: over90.length,
+    totalUnpaid: orders.reduce((s, o) => s + o.amount, 0),
+    unpaidCount: orders.length,
+    dsoDays: null,
+    oldest: oldest
+      ? {
+          name: oldest.customer,
+          days: oldest.daysPending,
+          amount: oldest.amount,
+          order: oldest.name,
+        }
+      : null,
+  };
 }
