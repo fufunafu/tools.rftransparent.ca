@@ -570,11 +570,17 @@ function finiteOrNull(n: number | null | undefined): number | null {
 function windowFrom(deduped: CallRecord[]): CallWindow {
   const inbound = deduped.filter((r) => r.direction === "inbound").length;
 
-  // A window with no inbound calls has no miss rate. Reporting 0% there
-  // reads as a perfect day when it actually means "nothing to measure" —
-  // exactly the false all-clear this dashboard must never show.
-  if (inbound === 0) {
-    return { missRate: null, callbackRate: null, avgResponseTime: null, inbound: 0 };
+  // The miss rate is defined over WEEKDAY inbound calls only, and
+  // computeMetrics returns 0 — not null — when there are none. So a Sunday
+  // with a few weekend calls sailed past a total-inbound guard and rendered
+  // as a perfect green 0.0%, when the honest answer is "nothing to measure".
+  const weekdayInbound = deduped.filter((r) => {
+    if (r.direction !== "inbound") return false;
+    const day = new Date(r.call_start).getDay();
+    return day !== 0 && day !== 6;
+  }).length;
+  if (weekdayInbound === 0) {
+    return { missRate: null, callbackRate: null, avgResponseTime: null, inbound };
   }
 
   const metrics = computeMetrics(deduped);

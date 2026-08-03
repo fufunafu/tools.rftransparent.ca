@@ -56,16 +56,18 @@ function Card({
 }) {
   return (
     <div
-      className={`bg-slate-800 rounded-2xl border flex flex-col ${
+      className={`bg-slate-800 rounded-2xl border flex flex-col overflow-hidden ${
         warn ? "border-amber-400/40" : "border-white/[0.08]"
       }`}
     >
-      <p className="px-5 pt-4 text-[15px] font-medium uppercase tracking-wider text-slate-400">
+      <p className="px-5 pt-4 text-[15px] font-medium uppercase tracking-wider text-slate-400 shrink-0">
         {title}
       </p>
-      <div className="px-5 pb-4 pt-2 flex-1">{children}</div>
+      {/* min-h-0 + hidden overflow: if content ever exceeds the card, the
+          middle clips — the footer must never be what gets pushed out. */}
+      <div className="px-5 pb-4 pt-2 flex-1 min-h-0 overflow-hidden">{children}</div>
       {footer && (
-        <div className="px-5 py-3 border-t border-white/[0.08] text-[15px] text-slate-400">
+        <div className="px-5 py-3 border-t border-white/[0.08] text-[15px] text-slate-400 shrink-0">
           {footer}
         </div>
       )}
@@ -86,6 +88,7 @@ export default function WallBoard({
 }) {
   const router = useRouter();
   const [age, setAge] = useState("just now");
+  const [scale, setScale] = useState(1);
 
   // Refresh on an interval and say how stale the numbers are, so a frozen
   // board is obvious rather than quietly wrong.
@@ -100,6 +103,17 @@ export default function WallBoard({
       clearInterval(tick);
     };
   }, [router, generatedAt]);
+
+  // The board is laid out on a fixed 1920×1080 canvas and scaled to fit
+  // whatever it's shown on. Letting it reflow instead meant a browser window
+  // (~940px tall once chrome is counted) squeezed the middle row until card
+  // footers were pushed out of view.
+  useEffect(() => {
+    const fit = () => setScale(Math.min(window.innerWidth / 1920, window.innerHeight / 1080));
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, []);
 
   const sales = data.sales.ok ? data.sales.value : null;
   const cs = data.customerService.ok ? data.customerService.value : null;
@@ -146,7 +160,11 @@ export default function WallBoard({
     : [];
 
   return (
-    <div className="w-screen h-screen bg-slate-900 text-slate-50 overflow-hidden flex flex-col gap-4 px-10 py-8 box-border">
+    <div className="w-screen h-screen bg-slate-900 overflow-hidden flex items-center justify-center">
+      <div
+        className="w-[1920px] h-[1080px] shrink-0 text-slate-50 flex flex-col gap-4 px-10 py-8 box-border"
+        style={{ transform: `scale(${scale})` }}
+      >
       {/* Header */}
       <header className="flex items-center justify-between gap-6 shrink-0">
         <div className="flex items-center gap-4">
@@ -432,6 +450,7 @@ export default function WallBoard({
             <p className="text-[20px] text-slate-500 mt-3">Waiting for first dashboard load</p>
           )}
         </Card>
+      </div>
       </div>
     </div>
   );
