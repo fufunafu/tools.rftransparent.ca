@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getAuthenticatedUser } from "@/lib/admin-auth";
 import AccountForm from "@/components/admin/settings/AccountForm";
 import { getAccountPreferences, getPreferredName } from "@/lib/account-preferences";
+import { getProfileAvatarUrl } from "@/lib/profile-avatar";
 
 export const metadata: Metadata = {
   title: "Account & Preferences | Settings",
@@ -49,6 +50,7 @@ export default async function AccountPage() {
       <AccountForm
         email={email}
         displayName={displayName}
+        avatarUrl={getProfileAvatarUrl(user.user_metadata)}
         providerLabel={providerLabel(user)}
         lastSignInLabel={formatDate(user.last_sign_in_at, dateTimeFormatter)}
         memberSinceLabel={formatDate(user.created_at, dateFormatter)}

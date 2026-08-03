@@ -1,6 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+/* Profile photos use an authenticated API route, which is not compatible with the image optimizer. */
+/* eslint-disable @next/next/no-img-element */
+
+import { useRef, useState, type ReactNode } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import {
   HOME_PAGE_OPTIONS,
@@ -15,6 +18,7 @@ const INPUT_CLASS =
 interface AccountFormProps {
   email: string;
   displayName: string;
+  avatarUrl: string | null;
   providerLabel: string;
   lastSignInLabel: string;
   memberSinceLabel: string;
@@ -23,6 +27,7 @@ interface AccountFormProps {
 
 interface AccountUpdateDetail {
   displayName: string;
+  avatarUrl: string | null;
   preferences: AccountPreferences;
 }
 
@@ -38,6 +43,30 @@ function initialsFor(name: string, email: string): string {
   const words = source.split(/[\s._-]+/).filter(Boolean);
   const initials = words.length > 1 ? `${words[0][0]}${words[1][0]}` : words[0].slice(0, 2);
   return initials.toUpperCase();
+}
+
+function ProfilePhoto({
+  src,
+  name,
+  email,
+  className,
+}: {
+  src: string | null;
+  name: string;
+  email: string;
+  className: string;
+}) {
+  return (
+    <span
+      className={`flex shrink-0 items-center justify-center overflow-hidden bg-blue-500 font-semibold text-white ${className}`}
+    >
+      {src ? (
+        <img src={src} alt={`${name || email} profile`} className="h-full w-full object-cover" />
+      ) : (
+        initialsFor(name, email)
+      )}
+    </span>
+  );
 }
 
 function SectionHeading({
@@ -121,12 +150,18 @@ function StatusMessage({ type, children }: { type: "success" | "error"; children
 export default function AccountForm({
   email,
   displayName: initialDisplayName,
+  avatarUrl: initialAvatarUrl,
   providerLabel,
   lastSignInLabel,
   memberSinceLabel,
   initialPreferences,
 }: AccountFormProps) {
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [displayName, setDisplayName] = useState(initialDisplayName);
+  const [avatarUrl, setAvatarUrl] = useState(initialAvatarUrl);
+  const [avatarSaving, setAvatarSaving] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarMessage, setAvatarMessage] = useState<string | null>(null);
   const [savedDisplayName, setSavedDisplayName] = useState(initialDisplayName);
   const [preferences, setPreferences] = useState(initialPreferences);
   const [savedPreferences, setSavedPreferences] = useState(initialPreferences);
@@ -173,6 +208,63 @@ export default function AccountForm({
     setPreferences((current) => ({ ...current, [key]: value }));
   }
 
+  function announceAccountUpdate(nextAvatarUrl: string | null) {
+    window.dispatchEvent(
+      new CustomEvent<AccountUpdateDetail>("rf:account-updated", {
+        detail: {
+          displayName: displayName.trim() || savedDisplayName,
+          avatarUrl: nextAvatarUrl,
+          preferences,
+        },
+      }),
+    );
+  }
+
+  async function uploadAvatar(file: File) {
+    setAvatarSaving(true);
+    setAvatarError(null);
+    setAvatarMessage(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const res = await fetch("/api/settings/account/avatar", { method: "POST", body });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || typeof data.avatarUrl !== "string") {
+        throw new Error(data.error ?? "Could not upload the profile photo.");
+      }
+
+      await createSupabaseClient().auth.refreshSession();
+      setAvatarUrl(data.avatarUrl);
+      setAvatarMessage("Profile photo updated.");
+      announceAccountUpdate(data.avatarUrl);
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "Could not upload the profile photo.");
+    } finally {
+      setAvatarSaving(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = "";
+    }
+  }
+
+  async function removeAvatar() {
+    setAvatarSaving(true);
+    setAvatarError(null);
+    setAvatarMessage(null);
+    try {
+      const res = await fetch("/api/settings/account/avatar", { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error ?? "Could not remove the profile photo.");
+
+      await createSupabaseClient().auth.refreshSession();
+      setAvatarUrl(null);
+      setAvatarMessage("Profile photo removed.");
+      announceAccountUpdate(null);
+    } catch (error) {
+      setAvatarError(error instanceof Error ? error.message : "Could not remove the profile photo.");
+    } finally {
+      setAvatarSaving(false);
+    }
+  }
+
   async function saveProfile(e: React.FormEvent) {
     e.preventDefault();
     setProfileError(null);
@@ -201,7 +293,7 @@ export default function AccountForm({
       applyAccountPreferences(preferences);
       window.dispatchEvent(
         new CustomEvent<AccountUpdateDetail>("rf:account-updated", {
-          detail: { displayName: trimmedName, preferences },
+          detail: { displayName: trimmedName, avatarUrl, preferences },
         }),
       );
     } catch (error) {
@@ -284,9 +376,12 @@ export default function AccountForm({
           aria-hidden="true"
         />
         <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-blue-500 text-xl font-semibold shadow-lg shadow-blue-950/40 ring-1 ring-white/20">
-            {initialsFor(displayName, email)}
-          </div>
+          <ProfilePhoto
+            src={avatarUrl}
+            name={displayName}
+            email={email}
+            className="h-16 w-16 rounded-2xl text-xl shadow-lg shadow-blue-950/40 ring-1 ring-white/20"
+          />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="truncate text-xl font-semibold">{displayName || email}</h2>
@@ -316,8 +411,56 @@ export default function AccountForm({
             <SectionHeading
               icon={<ProfileIcon />}
               title="Profile"
-              description="Choose how your name appears in the navigation and account areas."
+              description="Choose how your photo and name appear across the workspace."
             />
+            <div className="mt-5 flex flex-col gap-4 rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:flex-row sm:items-center">
+              <ProfilePhoto
+                src={avatarUrl}
+                name={displayName}
+                email={email}
+                className="h-14 w-14 rounded-full text-base ring-2 ring-white shadow-sm"
+              />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-800">Profile photo</p>
+                <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                  JPG, PNG, or WebP up to 5 MB. Square photos work best.
+                </p>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <input
+                    ref={avatarInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="sr-only"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) void uploadAvatar(file);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={avatarSaving}
+                    onClick={() => avatarInputRef.current?.click()}
+                    className="text-xs font-semibold text-blue-600 transition hover:text-blue-700 disabled:text-slate-400"
+                  >
+                    {avatarSaving ? "Working…" : avatarUrl ? "Change photo" : "Upload photo"}
+                  </button>
+                  {avatarUrl && (
+                    <button
+                      type="button"
+                      disabled={avatarSaving}
+                      onClick={() => void removeAvatar()}
+                      className="text-xs font-semibold text-red-600 transition hover:text-red-700 disabled:text-slate-400"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+            {avatarError && <div className="mt-3"><StatusMessage type="error">{avatarError}</StatusMessage></div>}
+            {avatarMessage && !avatarError && (
+              <div className="mt-3"><StatusMessage type="success">{avatarMessage}</StatusMessage></div>
+            )}
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1.5 block text-xs font-medium text-slate-700">Display name</span>

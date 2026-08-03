@@ -6,6 +6,7 @@ import {
   getCustomDisplayName,
   getPreferredName,
 } from "@/lib/account-preferences";
+import { getProfileAvatarUrl } from "@/lib/profile-avatar";
 
 // Display name for the sidebar footer. Null for anyone without an employee
 // row (the owner, domain-allowlisted accounts) — the caller falls back to
@@ -49,6 +50,7 @@ export async function GET() {
   return NextResponse.json({
     email: user.email,
     name: preferredName,
+    avatarUrl: getProfileAvatarUrl(user.user_metadata),
     preferences: getAccountPreferences(user.user_metadata),
     isAdmin,
     isManagement,

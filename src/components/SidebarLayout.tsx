@@ -1,5 +1,8 @@
 "use client";
 
+/* Profile photos come from an authenticated route and cannot use the image optimizer. */
+/* eslint-disable @next/next/no-img-element */
+
 import { Fragment, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -60,6 +63,31 @@ function initialsFor(name: string | null, email: string): string {
   return letters.toUpperCase();
 }
 
+function ViewerAvatar({
+  name,
+  email,
+  avatarUrl,
+}: {
+  name: string | null;
+  email: string;
+  avatarUrl: string | null;
+}) {
+  const label = name || email || "Signed-in user";
+  return (
+    <span
+      role="img"
+      aria-label={`${label} profile`}
+      className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-600"
+    >
+      {avatarUrl ? (
+        <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+      ) : (
+        initialsFor(name, email)
+      )}
+    </span>
+  );
+}
+
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const {
@@ -77,9 +105,14 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     isAdmin: false,
     isManagement: false,
   });
-  const [viewer, setViewer] = useState<{ name: string | null; email: string }>({
+  const [viewer, setViewer] = useState<{
+    name: string | null;
+    email: string;
+    avatarUrl: string | null;
+  }>({
     name: null,
     email: "",
+    avatarUrl: null,
   });
   const [homePath, setHomePath] = useState(DEFAULT_ACCOUNT_PREFERENCES.homePage);
   const preferencesApplied = useRef(false);
@@ -157,6 +190,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         setViewer({
           name: typeof me.name === "string" ? me.name : null,
           email: typeof me.email === "string" ? me.email : "",
+          avatarUrl: typeof me.avatarUrl === "string" ? me.avatarUrl : null,
         });
         setHomePath(preferences.homePage);
         applyAccountPreferences(preferences);
@@ -173,6 +207,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     const onAccountUpdated = (event: Event) => {
       const detail = (event as CustomEvent<{
         displayName?: unknown;
+        avatarUrl?: unknown;
         preferences?: AccountPreferences;
       }>).detail;
       if (!detail) return;
@@ -180,6 +215,9 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       const updatedName = detail.displayName;
       if (typeof updatedName === "string" && updatedName.trim()) {
         setViewer((current) => ({ ...current, name: updatedName.trim() }));
+      }
+      if (detail.avatarUrl === null || typeof detail.avatarUrl === "string") {
+        setViewer((current) => ({ ...current, avatarUrl: detail.avatarUrl as string | null }));
       }
 
       const preferences = sanitizeAccountPreferences(detail.preferences);
@@ -389,12 +427,11 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             // sign-out behind, and needing to expand the rail to sign out is a
             // worse trade than one more 26px row.
             <div className="mt-1.5 flex flex-col items-center gap-1">
-              <span
-                className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center"
-                title={viewer.name ?? viewer.email}
-              >
-                {initialsFor(viewer.name, viewer.email)}
-              </span>
+              <ViewerAvatar
+                name={viewer.name}
+                email={viewer.email}
+                avatarUrl={viewer.avatarUrl}
+              />
               <a
                 href="/api/logout"
                 title="Sign out"
@@ -406,9 +443,11 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             </div>
           ) : (
             <div className="flex items-center gap-2.5 h-[38px] pl-[9px] pr-[5px]">
-              <span className="w-6 h-6 rounded-full bg-slate-200 text-slate-600 text-[10px] font-bold flex items-center justify-center shrink-0">
-                {initialsFor(viewer.name, viewer.email)}
-              </span>
+              <ViewerAvatar
+                name={viewer.name}
+                email={viewer.email}
+                avatarUrl={viewer.avatarUrl}
+              />
               <span className="flex-1 min-w-0 flex flex-col leading-[1.25]">
                 <span className="truncate text-xs font-semibold text-slate-900">
                   {viewer.name ?? viewer.email ?? ""}
