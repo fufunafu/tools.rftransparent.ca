@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
+import {
+  getAccountPreferences,
+  getCustomDisplayName,
+  getPreferredName,
+} from "@/lib/account-preferences";
 
 // Display name for the sidebar footer. Null for anyone without an employee
 // row (the owner, domain-allowlisted accounts) — the caller falls back to
@@ -30,15 +35,21 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [isAdmin, isManagement, name] = await Promise.all([
+  const [isAdmin, isManagement, employeeName] = await Promise.all([
     isAdminUser(),
     isManagementUser(),
     user.email ? getDisplayName(user.email.toLowerCase()) : Promise.resolve(null),
   ]);
 
+  const preferredName =
+    getCustomDisplayName(user.user_metadata) ??
+    employeeName ??
+    getPreferredName(user.user_metadata);
+
   return NextResponse.json({
     email: user.email,
-    name,
+    name: preferredName,
+    preferences: getAccountPreferences(user.user_metadata),
     isAdmin,
     isManagement,
   });

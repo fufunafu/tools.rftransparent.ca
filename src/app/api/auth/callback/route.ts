@@ -1,11 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { getAccountPreferences } from "@/lib/account-preferences";
+
+function safeNextPath(value: string | null): string | null {
+  return value && value.startsWith("/") && !value.startsWith("//") ? value : null;
+}
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  const requestedNext = safeNextPath(searchParams.get("next"));
 
   if (code) {
     const cookieStore = await cookies();
@@ -26,8 +31,9 @@ export async function GET(request: Request) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      const next = requestedNext ?? getAccountPreferences(data.user?.user_metadata).homePage;
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

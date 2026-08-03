@@ -51,5 +51,6 @@ export function useSidebarResize(initialWidth = 240) {
     sidebarRef,
     handleMouseDown,
     toggleCollapsed,
+    setCollapsed,
   };
 }

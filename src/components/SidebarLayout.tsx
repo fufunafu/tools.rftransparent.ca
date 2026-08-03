@@ -1,11 +1,17 @@
 "use client";
 
-import { Fragment, useState, useEffect, useSyncExternalStore } from "react";
+import { Fragment, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
 import CommandPalette from "@/components/CommandPalette";
 import SidebarNavRow from "@/components/SidebarNavRow";
+import {
+  DEFAULT_ACCOUNT_PREFERENCES,
+  applyAccountPreferences,
+  sanitizeAccountPreferences,
+  type AccountPreferences,
+} from "@/lib/account-preferences";
 import {
   NAV_GROUPS,
   NAV_ITEMS,
@@ -56,7 +62,14 @@ function initialsFor(name: string | null, email: string): string {
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { collapsed: rawCollapsed, width, sidebarRef, handleMouseDown, toggleCollapsed } = useSidebarResize(240);
+  const {
+    collapsed: rawCollapsed,
+    width,
+    sidebarRef,
+    handleMouseDown,
+    toggleCollapsed,
+    setCollapsed,
+  } = useSidebarResize(240);
   const [isMobile, setIsMobile] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -68,6 +81,8 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     name: null,
     email: "",
   });
+  const [homePath, setHomePath] = useState(DEFAULT_ACCOUNT_PREFERENCES.homePage);
+  const preferencesApplied = useRef(false);
   const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
   // the desktop collapse state. Shadowing `collapsed` here means the existing
@@ -134,6 +149,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       .then((res) => (res.ok ? res.json() : null))
       .then((me) => {
         if (!me) return;
+        const preferences = sanitizeAccountPreferences(me.preferences);
         setViewerAccess({
           isAdmin: me.isAdmin === true,
           isManagement: me.isManagement === true,
@@ -142,10 +158,40 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           name: typeof me.name === "string" ? me.name : null,
           email: typeof me.email === "string" ? me.email : "",
         });
+        setHomePath(preferences.homePage);
+        applyAccountPreferences(preferences);
+        if (!preferencesApplied.current) {
+          setCollapsed(preferences.sidebarMode === "compact");
+          preferencesApplied.current = true;
+        }
       })
       .catch(() => {});
     return () => ctrl.abort();
-  }, [pathname]);
+  }, [pathname, setCollapsed]);
+
+  useEffect(() => {
+    const onAccountUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        displayName?: unknown;
+        preferences?: AccountPreferences;
+      }>).detail;
+      if (!detail) return;
+
+      const updatedName = detail.displayName;
+      if (typeof updatedName === "string" && updatedName.trim()) {
+        setViewer((current) => ({ ...current, name: updatedName.trim() }));
+      }
+
+      const preferences = sanitizeAccountPreferences(detail.preferences);
+      setHomePath(preferences.homePage);
+      setCollapsed(preferences.sidebarMode === "compact");
+      applyAccountPreferences(preferences);
+      preferencesApplied.current = true;
+    };
+
+    window.addEventListener("rf:account-updated", onAccountUpdated);
+    return () => window.removeEventListener("rf:account-updated", onAccountUpdated);
+  }, [setCollapsed]);
   const isSectionOpen = (item: NavItem) => openSection === item.href;
   const toggleSection = (item: NavItem) =>
     setOpenSection((current) => (current === item.href ? null : item.href));
@@ -212,18 +258,22 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
           md:shrink-0 md:transition-[width] md:duration-200`}
       >
-        {/* Logo + collapse toggle. Not a link — Today is the home row now, and
-            two ways to reach the same page just raises the question of whether
-            they differ. */}
+        {/* Logo and collapse controls */}
         <div className="px-3 pt-3 pb-2.5 flex items-center gap-2.5">
-          <div className="w-[26px] h-[26px] rounded-[7px] bg-blue-600 flex items-center justify-center shrink-0">
-            <span className="text-white text-[10.5px] font-bold tracking-[0.02em]">RF</span>
-          </div>
-          {!collapsed && (
-            <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-slate-900">
-              RF Transparent
+          <Link
+            href={homePath}
+            title={collapsed ? "Go to your home page" : undefined}
+            className={`flex min-w-0 items-center gap-2.5 ${collapsed ? "" : "flex-1"}`}
+          >
+            <span className="w-[26px] h-[26px] rounded-[7px] bg-blue-600 flex items-center justify-center shrink-0">
+              <span className="text-white text-[10.5px] font-bold tracking-[0.02em]">RF</span>
             </span>
-          )}
+            {!collapsed && (
+              <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-slate-900">
+                RF Transparent
+              </span>
+            )}
+          </Link>
           {/* Desktop: collapse/expand toggle */}
           <button
             onClick={toggleCollapsed}
@@ -407,7 +457,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
             </svg>
           </button>
-          <Link href="/" className="flex items-center gap-3 flex-1 min-w-0">
+          <Link href={homePath} className="flex items-center gap-3 flex-1 min-w-0">
             <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
               <span className="text-white text-[10px] font-bold">RF</span>
             </span>
@@ -424,7 +474,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         </div>
 
         {/* Main content */}
-        <main className="flex-1 overflow-auto bg-slate-100">
+        <main data-app-main className="flex-1 overflow-auto bg-slate-100">
           <div className="p-4 md:p-8">
             {children}
           </div>

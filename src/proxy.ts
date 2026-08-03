@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedEmail } from "@/lib/authz";
+import { getAccountPreferences } from "@/lib/account-preferences";
 
 // IMPORTANT: Do not add any code between createServerClient and getUser().
 // A token refresh may happen here — cookies must be written back before
@@ -81,7 +82,8 @@ export async function proxy(request: NextRequest) {
 
   if (user && pathname === "/login") {
     const homeUrl = request.nextUrl.clone();
-    homeUrl.pathname = "/";
+    homeUrl.pathname = getAccountPreferences(user.user_metadata).homePage;
+    homeUrl.search = "";
     return NextResponse.redirect(homeUrl);
   }
 
