@@ -1,7 +1,56 @@
 import { describe, expect, it } from "vitest";
-import { buildCustomLeadTrend, buildLeadTrend } from "@/lib/lead-analytics";
+import {
+  buildCustomLeadTrend,
+  buildLeadTrend,
+  calculateLeadFunnel,
+} from "@/lib/lead-analytics";
 
 const NOW = new Date("2026-08-03T16:00:00.000Z");
+
+describe("calculateLeadFunnel", () => {
+  it("uses all leads as the denominator for call, quote, and order rates", () => {
+    const result = calculateLeadFunnel([
+      { call_status: "called", quote_number: "#D1", outcome: "won" },
+      { call_status: "no_answer", quote_number: "#D2", outcome: "quoted" },
+      { call_status: "not_called", quote_number: null, outcome: "new" },
+      { call_status: "not_called", quote_number: null, outcome: "lost" },
+    ]);
+
+    expect(result).toEqual({
+      total: 4,
+      attempted: 2,
+      quoted: 2,
+      won: 1,
+      callRate: 50,
+      quoteRate: 50,
+      conversionRate: 25,
+    });
+  });
+
+  it("counts no-answer calls as attempts and rounds rates to one decimal", () => {
+    const result = calculateLeadFunnel([
+      { call_status: "no_answer", quote_number: "#D1", outcome: "quoted" },
+      { call_status: "not_called", quote_number: null, outcome: "new" },
+      { call_status: "not_called", quote_number: null, outcome: "new" },
+    ]);
+
+    expect(result.callRate).toBe(33.3);
+    expect(result.quoteRate).toBe(33.3);
+    expect(result.conversionRate).toBe(0);
+  });
+
+  it("returns zero rates for an empty lead set", () => {
+    expect(calculateLeadFunnel([])).toEqual({
+      total: 0,
+      attempted: 0,
+      quoted: 0,
+      won: 0,
+      callRate: 0,
+      quoteRate: 0,
+      conversionRate: 0,
+    });
+  });
+});
 
 describe("buildLeadTrend", () => {
   it("separates website and Meta leads into daily Toronto buckets", () => {

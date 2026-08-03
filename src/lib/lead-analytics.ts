@@ -22,8 +22,42 @@ interface LeadDateSource {
   submitted_at: string;
 }
 
+interface LeadFunnelRow {
+  call_status: "not_called" | "no_answer" | "called";
+  quote_number: string | null;
+  outcome: "new" | "contacted" | "quoted" | "won" | "lost";
+}
+
+export interface LeadFunnelMetrics {
+  total: number;
+  attempted: number;
+  quoted: number;
+  won: number;
+  callRate: number;
+  quoteRate: number;
+  conversionRate: number;
+}
+
 const DAY_MS = 86_400_000;
 const TORONTO_TIME_ZONE = "America/Toronto";
+
+export function calculateLeadFunnel(leads: LeadFunnelRow[]): LeadFunnelMetrics {
+  const total = leads.length;
+  const attempted = leads.filter((lead) => lead.call_status !== "not_called").length;
+  const quoted = leads.filter((lead) => Boolean(lead.quote_number?.trim())).length;
+  const won = leads.filter((lead) => lead.outcome === "won").length;
+  const rate = (count: number) => total > 0 ? Math.round((count / total) * 1000) / 10 : 0;
+
+  return {
+    total,
+    attempted,
+    quoted,
+    won,
+    callRate: rate(attempted),
+    quoteRate: rate(quoted),
+    conversionRate: rate(won),
+  };
+}
 
 export function buildLeadTrend(
   leads: LeadDateSource[],

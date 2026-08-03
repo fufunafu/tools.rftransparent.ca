@@ -8,6 +8,7 @@ import { OUTCOME_LABELS, CALL_STATUS_LABELS } from "@/lib/customer-service/leads
 import {
   buildCustomLeadTrend,
   buildLeadTrend,
+  calculateLeadFunnel,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
 import { formatCADWhole } from "@/lib/format";
@@ -540,15 +541,12 @@ export default function LeadsDashboard() {
   }, [sourceLeads]);
 
   const metrics = useMemo(() => {
+    const funnel = calculateLeadFunnel(leads);
     const openLeads = leads.filter((l) => l.outcome !== "won" && l.outcome !== "lost");
     const uncalledLeads = openLeads.filter((l) => l.call_status === "not_called");
     const overdueUncalled = uncalledLeads.filter(
       (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
     ).length;
-    const won = leads.filter((l) => l.outcome === "won").length;
-    const lost = leads.filter((l) => l.outcome === "lost").length;
-    const closed = won + lost;
-    const conversion = closed > 0 ? Math.round((won / closed) * 100) : 0;
     const pipelineValue = leads
       .filter((l) => l.outcome === "quoted")
       .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
@@ -561,11 +559,9 @@ export default function LeadsDashboard() {
       ? responseTimes.reduce((sum, duration) => sum + duration, 0) / responseTimes.length
       : null;
     return {
+      ...funnel,
       uncalled: uncalledLeads.length,
       overdueUncalled,
-      won,
-      lost,
-      conversion,
       pipelineValue,
       openQuoteCount,
       averageResponseMs,
@@ -637,7 +633,7 @@ export default function LeadsDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
         <SummaryCard
           label={`New Leads (${trendLabel})`}
           value={trend.current.total}
@@ -651,16 +647,28 @@ export default function LeadsDashboard() {
           subtitle={metrics.overdueUncalled > 0 ? `${metrics.overdueUncalled} waiting over 24 hours` : "No overdue calls"}
         />
         <SummaryCard
-          label="Quoted Pipeline"
-          value={formatCADWhole(metrics.pipelineValue)}
-          color="bg-indigo-500"
-          subtitle={`${metrics.openQuoteCount} open quotes`}
+          label="Call Attempt Rate"
+          value={`${metrics.callRate}%`}
+          color="bg-sky-500"
+          subtitle={`${metrics.attempted} of ${metrics.total} all-time leads`}
         />
         <SummaryCard
-          label="Conversion"
-          value={`${metrics.conversion}%`}
+          label="Quote Rate"
+          value={`${metrics.quoteRate}%`}
+          color="bg-indigo-500"
+          subtitle={`${metrics.quoted} of ${metrics.total} all-time leads`}
+        />
+        <SummaryCard
+          label="Order Conversion"
+          value={`${metrics.conversionRate}%`}
           color="bg-green-500"
-          subtitle={`${metrics.won} won of ${metrics.won + metrics.lost} closed`}
+          subtitle={`${metrics.won} orders from ${metrics.total} all-time leads`}
+        />
+        <SummaryCard
+          label="Quoted Pipeline"
+          value={formatCADWhole(metrics.pipelineValue)}
+          color="bg-emerald-500"
+          subtitle={`${metrics.openQuoteCount} open quotes`}
         />
       </div>
 
