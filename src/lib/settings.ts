@@ -53,6 +53,37 @@ export async function putSalesTargets(targets: SalesTargets): Promise<void> {
   await putSetting(SALES_TARGETS_KEY, targets);
 }
 
+const WALL_ANNOUNCEMENT_KEY = "wall_announcement";
+
+/**
+ * The one-line banner across the top of the office wall board — "inventory
+ * count Saturday, no pickups before 11" territory. Deliberately a single
+ * message, not a list: the TV is glanced at, not read.
+ */
+export interface WallAnnouncement {
+  message: string;
+  /** Display name of whoever posted it, for the "— Robert" attribution. */
+  author: string;
+  updated_at: string;
+}
+
+export async function getWallAnnouncement(): Promise<WallAnnouncement | null> {
+  const stored = await getSetting<WallAnnouncement | null>(WALL_ANNOUNCEMENT_KEY, null);
+  if (!stored || typeof stored.message !== "string" || !stored.message.trim()) return null;
+  return stored;
+}
+
+export async function putWallAnnouncement(message: string, author: string): Promise<void> {
+  const trimmed = message.trim();
+  // An empty save clears the banner rather than storing an empty string.
+  await putSetting(
+    WALL_ANNOUNCEMENT_KEY,
+    trimmed
+      ? { message: trimmed.slice(0, 200), author: author.slice(0, 60), updated_at: new Date().toISOString() }
+      : null
+  );
+}
+
 const WALL_TOKEN_KEY = "wall_token";
 
 /**

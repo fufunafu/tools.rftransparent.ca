@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getWallToken } from "@/lib/settings";
+import { getWallToken, getWallAnnouncement } from "@/lib/settings";
 import { getOpsDashboard } from "@/lib/ops-dashboard";
 import { getTicketStats } from "@/lib/home-dashboard";
 import { BUSINESS_TIMEZONE } from "@/lib/dates";
@@ -25,7 +25,11 @@ export default async function WallPage({ params }: { params: Promise<{ token: st
   const expected = await getWallToken();
   if (!expected || token !== expected) notFound();
 
-  const [data, tickets] = await Promise.all([getOpsDashboard(), getTicketStats()]);
+  const [data, tickets, announcement] = await Promise.all([
+    getOpsDashboard(),
+    getTicketStats(),
+    getWallAnnouncement(),
+  ]);
 
   const today = new Intl.DateTimeFormat("en-CA", {
     timeZone: BUSINESS_TIMEZONE,
@@ -39,6 +43,7 @@ export default async function WallPage({ params }: { params: Promise<{ token: st
       data={data}
       today={today}
       ticketStats={tickets.ok ? tickets.value : null}
+      announcement={announcement}
       generatedAt={new Date().toISOString()}
     />
   );

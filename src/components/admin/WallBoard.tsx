@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { formatCADWhole, formatCADShort } from "@/lib/format";
-import type { OpsDashboard as OpsData } from "@/lib/ops-dashboard";
+import type { OpsDashboard as OpsData, Performer } from "@/lib/ops-dashboard";
 import type { TicketStats } from "@/lib/home-dashboard";
+import type { WallAnnouncement } from "@/lib/settings";
 
 // The office wall board (design 1b). Glanceable, not a show: no animation,
 // nothing clickable, nothing under 14px, and it must fit 1080px without
@@ -50,7 +51,7 @@ function Card({
   footer,
   children,
 }: {
-  title: string;
+  title: React.ReactNode;
   warn?: boolean;
   footer?: React.ReactNode;
   children: React.ReactNode;
@@ -76,15 +77,33 @@ function Card({
   );
 }
 
+/**
+ * Some follow-up logs are signed with an email rather than a name. Across a
+ * room, "aissatou" reads; "aissatou…89@gmail.com" doesn't.
+ */
+function displayName(name: string): string {
+  return name.includes("@") ? name.split("@")[0] : name;
+}
+
+/** "Week of Jul 27" — the Monday of the week an announcement was posted. */
+function weekOfLabel(iso: string): string {
+  const posted = new Date(iso);
+  const monday = new Date(posted);
+  monday.setDate(posted.getDate() - ((posted.getDay() + 6) % 7));
+  return `Week of ${monday.toLocaleDateString("en-US", { month: "long", day: "numeric" })}`;
+}
+
 export default function WallBoard({
   data,
   today,
   ticketStats,
+  announcement,
   generatedAt,
 }: {
   data: OpsData;
   today: string;
   ticketStats: TicketStats | null;
+  announcement: WallAnnouncement | null;
   generatedAt: string;
 }) {
   const router = useRouter();
@@ -135,28 +154,19 @@ export default function WallBoard({
     !data.performers.ok && "performers",
   ].filter(Boolean) as string[];
 
-  const leaders: { dept: string; name: string; value: string }[] = [
-    {
-      dept: "Warehouse",
-      name: perf?.warehouse[0]?.name ?? "—",
-      value: perf?.warehouse[0] ? `${num(perf.warehouse[0].value)} u` : "",
-    },
-    {
-      dept: "Sales",
-      name: perf?.sales[0]?.name ?? "—",
-      value: perf?.sales[0] ? formatCADShort(perf.sales[0].value) : "",
-    },
-    {
-      dept: "Customer service",
-      name: perf?.customerService[0]?.name ?? "—",
-      value: perf?.customerService[0] ? `${num(perf.customerService[0].value)} f/u` : "",
-    },
+  // Full top-3 per department, each with its own value formatting.
+  const leaderColumns: { dept: string; people: Performer[]; fmt: (n: number) => string }[] = [
+    { dept: "Warehouse", people: perf?.warehouse.slice(0, 3) ?? [], fmt: (n) => `${num(n)} u` },
+    { dept: "Sales", people: perf?.sales.slice(0, 3) ?? [], fmt: formatCADShort },
+    { dept: "Customer service", people: perf?.customerService.slice(0, 3) ?? [], fmt: num },
   ];
 
-  const runnersUp = perf
-    ? [perf.warehouse[1], perf.sales[1], perf.customerService[1]]
-        .filter((p): p is NonNullable<typeof p> => Boolean(p))
-        .map((p) => p.name)
+  // The design orders the store cards GRS · RF · BC.
+  const WALL_STORE_ORDER = ["GRS", "RF", "BC"];
+  const orderedStores = sales
+    ? [...sales.stores].sort(
+        (a, b) => WALL_STORE_ORDER.indexOf(a.code) - WALL_STORE_ORDER.indexOf(b.code)
+      )
     : [];
 
   return (
@@ -195,10 +205,27 @@ export default function WallBoard({
         </div>
       </header>
 
+      {/* Announcement — one line the whole office should see. Hidden when
+          nothing is posted, so the board never shows an empty frame. */}
+      {announcement && (
+        <div className="shrink-0 flex items-center gap-6 bg-slate-800 rounded-2xl border border-white/[0.08] border-l-4 border-l-blue-500 px-6 py-4">
+          <div className="shrink-0">
+            <p className="text-[14px] font-semibold uppercase tracking-wider text-blue-400">
+              Announcement
+            </p>
+            <p className="text-[14px] text-slate-400">{weekOfLabel(announcement.updated_at)}</p>
+          </div>
+          <p className="flex-1 text-[26px] font-semibold leading-snug truncate">
+            {announcement.message}
+          </p>
+          <p className="shrink-0 text-[16px] text-slate-400">— {announcement.author}</p>
+        </div>
+      )}
+
       {/* Stores */}
       <div className="grid grid-cols-3 gap-4 shrink-0">
         {sales ? (
-          sales.stores.map((s) => {
+          orderedStores.map((s) => {
             const targetPct = s.target ? (s.last30 / s.target) * 100 : null;
             const d = deltaText(s.todayRevenue, s.priorAverageToHour);
             return (
@@ -257,22 +284,53 @@ export default function WallBoard({
         )}
       </div>
 
-      {/* Ops row */}
-      <div className="grid grid-cols-3 gap-4 flex-1 min-h-0">
+      {/* Ops row — leaders get the wide middle slot, as in the design. */}
+      <div className="grid grid-cols-[500px_1fr_440px] gap-4 flex-1 min-h-0">
         {/* Daily reports aren't filed every day, so today's number is often a
-            true-but-useless 0. Windows tell the story instead. */}
-        <Card title="Warehouse output · 7d / 30d">
-          <div className="mt-2 space-y-4">
+            true-but-useless 0. Windows tell the story; the footer says how
+            current they are. */}
+        <Card
+          title="Warehouse output"
+          footer={
+            wh ? (
+              <>
+                Daily reports · last filed{" "}
+                <span className="text-slate-50 font-semibold">
+                  {wh.lastReportDate
+                    ? new Date(wh.lastReportDate + "T12:00:00").toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "never"}
+                </span>
+                {wh.lastReportDate && (
+                  <>
+                    , {wh.filedOnLastDate} of {wh.warehouseCrew} crew
+                  </>
+                )}
+              </>
+            ) : undefined
+          }
+        >
+          {/* Column headers, matching the design's 7 DAYS / 30 DAYS table. */}
+          <div className="grid grid-cols-[1fr_130px_130px] items-baseline mt-1">
+            <span />
+            <span className="text-[14px] uppercase tracking-wider text-slate-400 text-right">7 days</span>
+            <span className="text-[14px] uppercase tracking-wider text-slate-400 text-right">30 days</span>
+          </div>
+          <div className="mt-3 space-y-5">
             {[
               ["Boxes built", wh?.last7.boxesBuilt, wh?.last30.boxesBuilt],
               ["Orders packed", wh?.last7.ordersPacked, wh?.last30.ordersPacked],
               ["Walk-in / pick-up", wh?.last7.walkinPickup, wh?.last30.walkinPickup],
             ].map(([label, week, month]) => (
-              <div key={String(label)} className="flex items-baseline justify-between">
+              <div key={String(label)} className="grid grid-cols-[1fr_130px_130px] items-baseline">
                 <span className="text-[16px] text-slate-400">{label as string}</span>
-                <span className="tabular-nums">
-                  <span className="text-[34px] font-semibold">{wh ? num(week as number) : "—"}</span>
-                  <span className="text-[20px] text-slate-400"> / {wh ? num(month as number) : "—"}</span>
+                <span className="text-[36px] font-semibold tabular-nums text-right">
+                  {wh ? num(week as number) : "—"}
+                </span>
+                <span className="text-[36px] font-semibold tabular-nums text-right">
+                  {wh ? num(month as number) : "—"}
                 </span>
               </div>
             ))}
@@ -281,16 +339,38 @@ export default function WallBoard({
 
         <Card
           title="Leaders · last 30 days"
-          footer={runnersUp.length > 0 ? <>Runners-up: {runnersUp.join(" · ")}</> : undefined}
+          footer={<>Units built + packed + walk-in · net sold · follow-ups logged</>}
         >
-          <div className="mt-2 space-y-4">
-            {leaders.map((l) => (
-              <div key={l.dept}>
-                <p className="text-[15px] text-slate-400">{l.dept}</p>
-                <p className="text-[24px] font-semibold truncate leading-tight">
-                  {l.name}
-                  {l.value && <span className="text-blue-400 font-medium"> {l.value}</span>}
-                </p>
+          <div className="grid grid-cols-3 gap-6 mt-2">
+            {leaderColumns.map((col) => (
+              <div key={col.dept} className="min-w-0">
+                <p className="text-[14px] uppercase tracking-wider text-slate-400">{col.dept}</p>
+                {col.people.length === 0 ? (
+                  <p className="text-[20px] text-slate-500 mt-2">—</p>
+                ) : (
+                  <div className="mt-2 space-y-3">
+                    {/* #1 large, #2–3 smaller — readable across the room. */}
+                    <div>
+                      <p className="text-[22px] font-semibold leading-tight truncate">
+                        {displayName(col.people[0].name)}
+                      </p>
+                      <p className="text-[20px] font-semibold text-blue-400 tabular-nums">
+                        {col.fmt(col.people[0].value)}
+                      </p>
+                    </div>
+                    {col.people.slice(1).map((p, i) => (
+                      <div key={p.id} className="flex items-baseline justify-between gap-2 border-t border-white/[0.08] pt-2">
+                        <span className="text-[16px] text-slate-300 truncate">
+                          <span className="text-slate-500 mr-1.5">{i + 2}</span>
+                          {displayName(p.name)}
+                        </span>
+                        <span className="text-[16px] text-slate-400 tabular-nums shrink-0">
+                          {col.fmt(p.value)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -333,13 +413,6 @@ export default function WallBoard({
               {ticketStats?.oldest && (
                 <p className="text-[15px] text-slate-400">{ticketStats.oldest.client_name}</p>
               )}
-            </div>
-            <div>
-              <p className="text-[15px] text-slate-400">To reorder — glass</p>
-              <p className="text-[30px] font-semibold tabular-nums leading-tight text-amber-400">
-                {wh ? `${num(wh.reorderSkus)} SKUs` : "—"}
-              </p>
-              {wh && <p className="text-[15px] text-slate-400">{num(wh.reorderUnits)} units of glass</p>}
             </div>
           </div>
         </Card>
@@ -411,7 +484,14 @@ export default function WallBoard({
         </Card>
 
         <Card
-          title="Collection · RF only"
+          title={
+            <>
+              Collection{" "}
+              <span className="ml-1 text-[13px] font-bold normal-case tracking-normal text-blue-400 bg-blue-400/10 rounded-md px-2 py-0.5 align-middle">
+                RF only
+              </span>
+            </>
+          }
           footer={
             col?.oldest ? (
               <>

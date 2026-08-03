@@ -309,6 +309,15 @@ export interface WarehouseOps {
   oldestUnfulfilledDays: number | null;
   /** Mean hours from order to first fulfillment over the last 30 days. */
   avgFulfillmentHours: number | null;
+  /**
+   * How current the daily reports are: the most recent report date, how many
+   * crew filed that day, and the active warehouse headcount — the wall's
+   * "last filed Jul 31 · 6 of 11 crew" line, which is what tells a reader
+   * whether the output numbers are complete or just early.
+   */
+  lastReportDate: string | null;
+  filedOnLastDate: number;
+  warehouseCrew: number;
   warnings: string[];
   cachedAt: string | null;
 }
@@ -459,19 +468,20 @@ async function computeWarehouseOps(): Promise<WarehouseOps> {
 
     type ReportRow = {
       report_date: string;
+      employee_id: string;
       boxes_built: number;
       orders_packed: number;
       walkin_pickup: number;
     };
 
-    const [rows, summary, products, openPos, fulfillment] = await Promise.all([
+    const [rows, summary, products, openPos, fulfillment, crew] = await Promise.all([
       // Paged for the same reason the call query is — one row per employee
       // per day stays well under 1000 today, but a silent truncation here
       // would quietly under-report the team's output rather than error.
       fetchAllRows<ReportRow>((from, to) =>
         getSupabase()
           .from("warehouse_daily_reports")
-          .select("report_date, boxes_built, orders_packed, walkin_pickup")
+          .select("report_date, employee_id, boxes_built, orders_packed, walkin_pickup")
           .gte("report_date", since)
           .order("report_date", { ascending: true })
           .range(from, to)
@@ -483,7 +493,22 @@ async function computeWarehouseOps(): Promise<WarehouseOps> {
         .select("id")
         .in("status", ["ordered", "in_transit"]),
       getFulfillmentPicture(startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -30)),
+      getSupabase()
+        .from("employees")
+        .select("id", { count: "exact", head: true })
+        .eq("active", true)
+        .eq("department", "warehouse"),
     ]);
+
+    // Report currency: the newest filed date and how many of the crew filed
+    // it. "0 boxes today" means something different when nobody has filed yet.
+    const lastReportDate = rows.reduce<string | null>(
+      (max, r) => (max === null || r.report_date > max ? r.report_date : max),
+      null
+    );
+    const filedOnLastDate = lastReportDate
+      ? new Set(rows.filter((r) => r.report_date === lastReportDate).map((r) => r.employee_id)).size
+      : 0;
 
     // A day with no report contributes nothing — never estimate a missing day.
     const todayKeys = new Set(recentDayKeys(now, 1));
@@ -517,6 +542,9 @@ async function computeWarehouseOps(): Promise<WarehouseOps> {
       montrealTransfers: products.filter(
         (p) => p.sop_label === "montreal_transfer" || p.sop_label === "reorder_plus_montreal"
       ).length,
+      lastReportDate,
+      filedOnLastDate,
+      warehouseCrew: crew.count ?? 0,
       warnings: [
         ...fulfillment.warnings,
         ...(openPos.error ? [`Purchase-order count is unavailable: ${openPos.error.message}`] : []),
