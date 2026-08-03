@@ -7,11 +7,35 @@ import { getAccountPreferences } from "@/lib/account-preferences";
 // A token refresh may happen here — cookies must be written back before
 // any other logic runs.
 export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const isPublic =
+    pathname === "/login" ||
+    pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/cron/") ||
+    pathname.startsWith("/survey/") ||
+    pathname.startsWith("/api/survey/") ||
+    // The office TV board. Session-less by design so no shared machine stays
+    // signed in; the route itself checks the token and 404s without a valid
+    // one, so "public" here means "authenticated by token instead".
+    pathname.startsWith("/wall/") ||
+    pathname.startsWith("/api/customer-service/leads/webhook") ||
+    pathname.startsWith("/api/customer-service/leads/meta-webhook");
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    if (isPublic) return NextResponse.next({ request });
+
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    return NextResponse.redirect(loginUrl);
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -33,21 +57,6 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
-
-  const isPublic =
-    pathname === "/login" ||
-    pathname.startsWith("/api/auth/") ||
-    pathname.startsWith("/api/cron/") ||
-    pathname.startsWith("/survey/") ||
-    pathname.startsWith("/api/survey/") ||
-    // The office TV board. Session-less by design so no shared machine stays
-    // signed in; the route itself checks the token and 404s without a valid
-    // one, so "public" here means "authenticated by token instead".
-    pathname.startsWith("/wall/") ||
-    pathname.startsWith("/api/customer-service/leads/webhook") ||
-    pathname.startsWith("/api/customer-service/leads/meta-webhook");
 
   if (!user && !isPublic) {
     const loginUrl = request.nextUrl.clone();

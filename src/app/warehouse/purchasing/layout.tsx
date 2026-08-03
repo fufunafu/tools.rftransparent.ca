@@ -5,6 +5,8 @@ import { getPurchasingSummary } from "@/lib/purchasing/queries";
 import PurchasingTabs from "@/components/admin/purchasing/PurchasingTabs";
 import PurchasingSummaryStrip from "@/components/admin/purchasing/PurchasingSummaryStrip";
 
+export const dynamic = "force-dynamic";
+
 export default async function PurchasingLayout({
   children,
 }: {

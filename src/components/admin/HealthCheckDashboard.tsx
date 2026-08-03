@@ -25,11 +25,22 @@ interface EmailFreshnessRow {
   stale: boolean;
 }
 
+interface AutomationHealthData {
+  tableMissing: boolean;
+  failing: { slug: string; label: string }[];
+  silent: { slug: string; label: string; lastRun: string }[];
+  neverRun: { slug: string; label: string }[];
+  lastRunAt: string | null;
+  total: number;
+}
+
 interface InitialData {
   service_checks: string[];
   env_vars: CheckResult[];
   data_freshness: FreshnessRow[];
   email_freshness: EmailFreshnessRow[];
+  automations: AutomationHealthData | null;
+  automations_error: string | null;
   checked_at: string;
 }
 
@@ -127,9 +138,16 @@ export default function HealthCheckDashboard() {
 
   const serviceList = Array.from(services.values());
   const completedServices = serviceList.filter((s) => s.status !== "checking");
+  const automations = initData?.automations ?? null;
+  // "Slow" counts: a service limping at 50s is not operational. "Never run"
+  // jobs don't — matching the home page, a job that hasn't had its first
+  // scheduled firing yet isn't an incident.
   const issues = [
-    ...completedServices.filter((c) => c.status === "error"),
+    ...completedServices.filter((c) => c.status === "error" || c.status === "slow"),
     ...(initData?.env_vars.filter((c) => c.status !== "ok") ?? []),
+    ...(automations && !automations.tableMissing
+      ? [...automations.failing, ...automations.silent]
+      : []),
   ];
   const allDone = completedServices.length === serviceList.length && serviceList.length > 0;
 
@@ -232,6 +250,64 @@ export default function HealthCheckDashboard() {
 
       {initData && (
         <>
+          {/* Scheduled Jobs */}
+          {automations && !automations.tableMissing && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-widest text-sand-400 mb-3">
+                Scheduled Jobs
+              </p>
+              <div className="bg-white rounded-xl border border-sand-200/60 p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  {automations.failing.map((job) => (
+                    <span
+                      key={job.slug}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-red-500" />
+                      {job.label} — last run failed
+                    </span>
+                  ))}
+                  {automations.silent.map((job) => (
+                    <span
+                      key={job.slug}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200"
+                      title={`Last run ${formatDate(job.lastRun)}`}
+                    >
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      {job.label} — silent since {timeAgo(job.lastRun)}
+                    </span>
+                  ))}
+                  {automations.neverRun.map((job) => (
+                    <span
+                      key={job.slug}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-sand-50 text-sand-500 border border-sand-200"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-sand-300" />
+                      {job.label} — never run
+                    </span>
+                  ))}
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-50 text-green-700 border border-green-200">
+                    <span className="w-2 h-2 rounded-full bg-green-500" />
+                    {automations.total -
+                      automations.failing.length -
+                      automations.silent.length -
+                      automations.neverRun.length}{" "}
+                    of {automations.total} healthy
+                  </span>
+                </div>
+                <p className="text-[11px] text-sand-400 mt-2">
+                  Manage and run jobs on Settings → Automations.
+                  {automations.lastRunAt && ` Most recent run: ${timeAgo(automations.lastRunAt)}.`}
+                </p>
+              </div>
+            </div>
+          )}
+          {initData.automations_error && (
+            <div className="bg-amber-50 border border-amber-200 text-amber-700 rounded-xl p-4 text-sm">
+              Scheduled jobs unavailable: {initData.automations_error}
+            </div>
+          )}
+
           {/* Data Freshness */}
           <div>
             <p className="text-xs font-semibold uppercase tracking-widest text-sand-400 mb-3">
@@ -268,7 +344,14 @@ export default function HealthCheckDashboard() {
                       </td>
                       <td className="px-4 py-2.5 text-sand-600">
                         {row.last_scrape ? (
-                          <span title={formatDate(row.last_scrape)}>{timeAgo(row.last_scrape)}</span>
+                          <span title={formatDate(row.last_scrape)}>
+                            {timeAgo(row.last_scrape)}
+                            {row.scrape_status && row.scrape_status !== "success" && (
+                              <span className="ml-1.5 text-red-600 font-medium">
+                                · {row.scrape_status}
+                              </span>
+                            )}
+                          </span>
                         ) : (
                           <span className="text-sand-300">Never</span>
                         )}

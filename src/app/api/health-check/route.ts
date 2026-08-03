@@ -3,6 +3,11 @@ import { getSupabase } from "@/lib/supabase";
 import { STORES as SHOPIFY_STORES, shopifyGraphQL } from "@/lib/shopify";
 import { INBOXES } from "@/lib/gmail";
 import { isAuthenticated } from "@/lib/admin-auth";
+import { getMetaConnectionStatus } from "@/lib/customer-service/meta-leads";
+import { getAdMetrics } from "@/lib/google-ads";
+import { getAutomationHealth, type AutomationHealth } from "@/lib/home-dashboard";
+import { getWallToken } from "@/lib/settings";
+import { BUG_BUCKET } from "@/lib/bug-reports";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -30,6 +35,22 @@ interface EmailFreshnessRow {
   stale: boolean;
 }
 
+// Tables the app reads on hot paths. Several callers deliberately swallow a
+// missing table (api-cache, settings), so a dropped one degrades invisibly
+// everywhere except here.
+const CORE_TABLES = [
+  "app_settings",
+  "api_cache",
+  "cron_runs",
+  "call_records",
+  "email_messages",
+  "employees",
+  "followup_leads",
+  "leads",
+  "problem_tickets",
+  "bug_reports",
+];
+
 async function timedCheck(
   name: string,
   fn: () => Promise<string | undefined>,
@@ -51,11 +72,14 @@ async function timedCheck(
       detail,
     };
   } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
     return {
       name,
-      status: "error",
+      // "Not configured" is a setup state, not an outage — keep the two
+      // distinguishable on the dashboard.
+      status: message === "Not configured" ? "unconfigured" : "error",
       latency_ms: Date.now() - start,
-      detail: err instanceof Error ? err.message : "Unknown error",
+      detail: message,
     };
   }
 }
@@ -73,6 +97,36 @@ function envCheck(name: string, vars: string[]): CheckResult {
   };
 }
 
+// Shopify env can't be a flat var list: each store needs its host plus EITHER
+// a shpat_ access token OR the OAuth pair (shopify.ts makes the pair optional).
+// A store whose env vanishes also disappears from STORES — and with it from
+// the services grid — so this is the only place that still notices.
+function shopifyEnvCheck(): CheckResult {
+  const problems: string[] = [];
+  let configured = 0;
+  for (let i = 1; i <= 3; i++) {
+    const host = process.env[`SHOPIFY_STORE_${i}`];
+    const hasAuth = Boolean(
+      process.env[`SHOPIFY_ACCESS_TOKEN_${i}`] ||
+        (process.env[`SHOPIFY_CLIENT_ID_${i}`] && process.env[`SHOPIFY_CLIENT_SECRET_${i}`])
+    );
+    if (!host) {
+      problems.push(`SHOPIFY_STORE_${i} missing`);
+    } else if (!hasAuth) {
+      problems.push(`store ${i}: host set but no access token or OAuth pair`);
+    } else {
+      configured++;
+    }
+  }
+  if (configured === 0) {
+    return { name: "Shopify Env", status: "unconfigured", latency_ms: 0, detail: problems.join("; ") };
+  }
+  if (problems.length > 0) {
+    return { name: "Shopify Env", status: "error", latency_ms: 0, detail: problems.join("; ") };
+  }
+  return { name: "Shopify Env", status: "ok", latency_ms: 0, detail: "3 stores configured" };
+}
+
 // Define all service checks
 function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
   switch (name) {
@@ -86,11 +140,39 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
         return `Connected (${data?.length ?? 0} test rows)`;
       });
 
+    case "tables":
+      return () => timedCheck("Core Tables", async () => {
+        const missing: string[] = [];
+        await Promise.all(
+          CORE_TABLES.map(async (table) => {
+            const { error } = await getSupabase()
+              .from(table)
+              .select("*", { count: "exact", head: true });
+            if (error) missing.push(table);
+          })
+        );
+        if (missing.length > 0) throw new Error(`Unreadable: ${missing.join(", ")}`);
+        return `${CORE_TABLES.length} tables readable`;
+      });
+
+    case "storage":
+      return () => timedCheck("Supabase Storage", async () => {
+        const { error } = await getSupabase().storage.getBucket(BUG_BUCKET);
+        if (error) throw new Error(`Missing bucket: ${BUG_BUCKET}`);
+        return `${BUG_BUCKET} OK`;
+      });
+
     case "scraper":
       return () => timedCheck("Scraper (Render)", async () => {
         const url = process.env.SCRAPER_URL;
-        if (!url) throw new Error("SCRAPER_URL not set");
-        const res = await fetch(`${url}/health`, { cache: "no-store" });
+        if (!url) throw new Error("Not configured");
+        // Send the same bearer the real callers send, so an auth regression
+        // fails here and not just at 12:00 UTC.
+        const apiKey = process.env.SCRAPER_API_KEY;
+        const res = await fetch(`${url}/health`, {
+          cache: "no-store",
+          headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         const storeCount = json.stores?.length ?? 0;
@@ -99,34 +181,69 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
 
     case "google-ads":
       return () => timedCheck("Google Ads", async () => {
-        const clientId = process.env.GOOGLE_ADS_CLIENT_ID;
-        const clientSecret = process.env.GOOGLE_ADS_CLIENT_SECRET;
-        const refreshToken = process.env.GOOGLE_ADS_REFRESH_TOKEN;
-        if (!clientId || !clientSecret || !refreshToken) throw new Error("Not configured");
-        const res = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: new URLSearchParams({
-            grant_type: "refresh_token",
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: refreshToken,
-          }),
-        });
-        if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
-        return "Token OK";
+        if (
+          !process.env.GOOGLE_ADS_CLIENT_ID ||
+          !process.env.GOOGLE_ADS_CLIENT_SECRET ||
+          !process.env.GOOGLE_ADS_REFRESH_TOKEN ||
+          !process.env.GOOGLE_ADS_CUSTOMER_ID ||
+          !process.env.GOOGLE_ADS_DEVELOPER_TOKEN
+        )
+          throw new Error("Not configured");
+        // Real Ads API query, not just the OAuth handshake — the developer
+        // token and customer id can be wrong while the token still refreshes.
+        const today = new Date().toISOString().split("T")[0];
+        const metrics = await getAdMetrics(today, today);
+        return `API OK — $${Math.round(metrics.ad_spend)} spend today`;
       });
 
     case "resend":
       return () => timedCheck("Resend", async () => {
         const apiKey = process.env.RESEND_API_KEY;
-        if (!apiKey) throw new Error("RESEND_API_KEY not set");
+        if (!apiKey) throw new Error("Not configured");
         const res = await fetch("https://api.resend.com/domains", {
           headers: { Authorization: `Bearer ${apiKey}` },
           cache: "no-store",
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return "API OK";
+        // Every sender in the app is @rftransparent.ca — the API being up
+        // means nothing if that domain loses verification.
+        const json = await res.json();
+        const domains: { name?: string; status?: string }[] = json.data ?? [];
+        const sender = domains.find((d) => d.name === "rftransparent.ca");
+        if (!sender) throw new Error("rftransparent.ca not found in Resend domains");
+        if (sender.status !== "verified")
+          throw new Error(`rftransparent.ca is ${sender.status ?? "unverified"}`);
+        return "rftransparent.ca verified";
+      });
+
+    case "meta":
+      return () => timedCheck("Meta Lead Forms", async () => {
+        const status = await getMetaConnectionStatus();
+        if (!status.configured) throw new Error("Not configured");
+        if (!status.connected || status.error) throw new Error(status.error ?? "Not connected");
+        return `${status.page_name ?? "Page"} connected, leadgen subscribed`;
+      });
+
+    case "twilio":
+      return () => timedCheck("Twilio WhatsApp", async () => {
+        const sid = process.env.TWILIO_ACCOUNT_SID;
+        const auth = process.env.TWILIO_AUTH_TOKEN;
+        if (!sid || !auth || !process.env.TWILIO_WHATSAPP_FROM) throw new Error("Not configured");
+        const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}.json`, {
+          headers: { Authorization: `Basic ${Buffer.from(`${sid}:${auth}`).toString("base64")}` },
+          cache: "no-store",
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        if (json.status !== "active") throw new Error(`Account status: ${json.status}`);
+        return `${json.friendly_name ?? "Account"} active`;
+      });
+
+    case "wall":
+      return () => timedCheck("Wall Board Token", async () => {
+        const token = await getWallToken();
+        if (!token) throw new Error("No wall token set — the office TV board 404s");
+        return "Token set";
       });
 
     case "google-analytics":
@@ -192,12 +309,37 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
             }),
           });
           if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
-          return `Token OK (${inbox.email})`;
+          const { access_token } = await res.json();
+          // Hit the actual Gmail API — a token can refresh fine after losing
+          // the gmail.readonly scope, and then the email sync breaks while
+          // this check stays green.
+          const profileRes = await fetch(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+            { headers: { Authorization: `Bearer ${access_token}` }, cache: "no-store" }
+          );
+          if (!profileRes.ok) throw new Error(`Gmail API failed: ${profileRes.status}`);
+          const profile = await profileRes.json();
+          return `${profile.emailAddress ?? inbox.email} readable`;
         });
       }
       // Shopify stores — probe via a real API call ({ shop { name } })
       // rather than re-running the OAuth exchange. This works for both
       // client_credentials custom apps and shpat_ access-token custom apps.
+      if (name.startsWith("shopify-quotation-")) {
+        const idx = parseInt(name.replace("shopify-quotation-", ""), 10);
+        const store = SHOPIFY_STORES[idx];
+        if (!store) return null;
+        return () => timedCheck(`Shopify Quotes: ${store.label}`, async () => {
+          if (!store.quotationAccessToken) throw new Error("Not configured");
+          const data = await shopifyGraphQL<{ shop: { name: string } }>(
+            store.id,
+            "{ shop { name } }",
+            undefined,
+            { app: "quotation" }
+          );
+          return `Connected: ${data.shop.name}`;
+        });
+      }
       if (name.startsWith("shopify-")) {
         const idx = parseInt(name.replace("shopify-", ""), 10);
         const store = SHOPIFY_STORES[idx];
@@ -232,24 +374,48 @@ export async function GET(req: NextRequest) {
 
   // Full check mode — env vars + data freshness (fast, no external calls)
   const envChecks: CheckResult[] = [
-    envCheck("Supabase Env", ["NEXT_PUBLIC_SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]),
-    envCheck("Shopify Env", ["SHOPIFY_STORE_1", "SHOPIFY_CLIENT_ID_1", "SHOPIFY_CLIENT_SECRET_1"]),
+    envCheck("Supabase Env", [
+      "NEXT_PUBLIC_SUPABASE_URL",
+      "SUPABASE_SERVICE_ROLE_KEY",
+      // Missing anon key = the proxy bounces every visitor to /login.
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+    ]),
+    shopifyEnvCheck(),
     envCheck("Google Ads Env", ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN"]),
     envCheck("GA4 Env", ["GOOGLE_GA4_PROPERTY_ID"]),
-    envCheck("Anthropic Env", ["ANTHROPIC_API_KEY"]),
-    envCheck("OpenAI Env", ["OPENAI_API_KEY"]),
     envCheck("Resend Env", ["RESEND_API_KEY"]),
     envCheck("Scraper Env", ["SCRAPER_URL", "SCRAPER_API_KEY"]),
     envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN_RF", "GMAIL_REFRESH_TOKEN_GRS", "GMAIL_REFRESH_TOKEN_BC"]),
+    envCheck("Meta Env", ["META_PAGE_ACCESS_TOKEN", "META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN"]),
+    envCheck("Twilio Env", ["TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_WHATSAPP_FROM"]),
+    // CRON_SECRET missing means every scheduled job 401s — and those 401s are
+    // deliberately not recorded, so cron_runs just goes quiet.
+    envCheck("Cron & Webhook Secrets", ["CRON_SECRET", "LEADS_WEBHOOK_SECRET"]),
+    envCheck("App URLs", ["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_SITE_URL"]),
   ];
 
   // Data freshness
   const freshness: FreshnessRow[] = [];
   const staleThresholdMs = 48 * 60 * 60 * 1000;
+  // glass_railing_store has no phone lines — calls exist for these two only.
   const stores = ["bc_transparent", "rf_transparent"];
   const sources = ["cik", "grasshopper"];
 
   for (const storeId of stores) {
+    // One scraper run covers both sources for a store, and a run that FAILED
+    // still counts as the latest run — filtering to status=success here used
+    // to show a green timestamp from whenever the last success was, however
+    // long ago the scraper actually broke.
+    const { data: lastRun } = await getSupabase()
+      .from("scraper_runs")
+      .select("finished_at,status")
+      .eq("store_id", storeId)
+      .order("started_at", { ascending: false })
+      .limit(1);
+
+    const lastScrapeTime = lastRun?.[0]?.finished_at ?? null;
+    const scrapeStatus = lastRun?.[0]?.status ?? null;
+
     for (const source of sources) {
       const { data: latestCall } = await getSupabase()
         .from("call_records")
@@ -259,18 +425,7 @@ export async function GET(req: NextRequest) {
         .order("call_start", { ascending: false })
         .limit(1);
 
-      const { data: lastRun } = await getSupabase()
-        .from("scraper_runs")
-        .select("finished_at,status")
-        .eq("store_id", storeId)
-        .eq("status", "success")
-        .order("finished_at", { ascending: false })
-        .limit(1);
-
       const latestCallTime = latestCall?.[0]?.call_start ?? null;
-      const lastScrapeTime = lastRun?.[0]?.finished_at ?? null;
-      const scrapeStatus = lastRun?.[0]?.status ?? null;
-
       const isStale = latestCallTime
         ? Date.now() - new Date(latestCallTime).getTime() > staleThresholdMs
         : true;
@@ -310,15 +465,26 @@ export async function GET(req: NextRequest) {
     });
   }
 
+  // Scheduled jobs — same failing/silent/never-run analysis the home page's
+  // attention strip uses, shown here with the rest of the system's health.
+  const automationResult = await getAutomationHealth();
+  const automations: AutomationHealth | null = automationResult.ok ? automationResult.value : null;
+
   // List of service checks the frontend should call individually
   const serviceChecks = [
     "supabase",
+    "tables",
+    "storage",
     "scraper",
     ...SHOPIFY_STORES.map((_, i) => `shopify-${i}`),
+    ...SHOPIFY_STORES.flatMap((s, i) => (s.quotationAccessToken ? [`shopify-quotation-${i}`] : [])),
     "google-ads",
     "google-analytics",
     ...INBOXES.map((_, i) => `gmail-${i}`),
     "resend",
+    "meta",
+    "twilio",
+    "wall",
   ];
 
   return NextResponse.json({
@@ -326,6 +492,8 @@ export async function GET(req: NextRequest) {
     env_vars: envChecks,
     data_freshness: freshness,
     email_freshness: emailFreshness,
+    automations,
+    automations_error: automationResult.ok ? null : automationResult.error,
     checked_at: new Date().toISOString(),
   });
 }
