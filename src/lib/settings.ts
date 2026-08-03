@@ -75,13 +75,22 @@ export async function getWallAnnouncement(): Promise<WallAnnouncement | null> {
 
 export async function putWallAnnouncement(message: string, author: string): Promise<void> {
   const trimmed = message.trim();
-  // An empty save clears the banner rather than storing an empty string.
-  await putSetting(
-    WALL_ANNOUNCEMENT_KEY,
-    trimmed
-      ? { message: trimmed.slice(0, 200), author: author.slice(0, 60), updated_at: new Date().toISOString() }
-      : null
-  );
+  if (!trimmed) {
+    // "Cleared" is a DELETED row. app_settings.value is NOT NULL, so
+    // upserting null violates the constraint and the old banner silently
+    // survives — which put a stale message on the office TV.
+    const { error } = await getSupabase()
+      .from("app_settings")
+      .delete()
+      .eq("key", WALL_ANNOUNCEMENT_KEY);
+    if (error) throw new Error(error.message);
+    return;
+  }
+  await putSetting(WALL_ANNOUNCEMENT_KEY, {
+    message: trimmed.slice(0, 200),
+    author: author.slice(0, 60),
+    updated_at: new Date().toISOString(),
+  });
 }
 
 const WALL_TOKEN_KEY = "wall_token";
