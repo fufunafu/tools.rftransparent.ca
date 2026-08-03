@@ -369,7 +369,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
             </label>
             <label className="relative lg:w-48">
               <span className="sr-only">Due date</span>
-              <CalendarIcon className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <CalendarIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="date"
                 value={dueAt}
