@@ -517,7 +517,7 @@ function WarehouseCard({
 
 function CustomerServiceCard({ cs }: { cs: import("@/lib/ops-dashboard").CustomerServiceOps }) {
   const windows = [
-    { key: "yesterday", label: "yesterday", w: cs.yesterday },
+    { key: "yesterday", label: cs.yesterdayLabel.toLowerCase(), w: cs.yesterday },
     { key: "last7", label: "7 days", w: cs.last7 },
     { key: "last30", label: "30 days", w: cs.last30 },
   ];

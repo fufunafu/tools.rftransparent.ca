@@ -564,7 +564,15 @@ export interface CallWindow {
 }
 
 export interface CustomerServiceOps {
+  /**
+   * The most recent BUSINESS day, not the literal yesterday. The miss rate is
+   * defined over weekday calls, so on a Monday "yesterday" is a Sunday with
+   * nothing to measure and the column was a permanent dash. Friday is the
+   * answer someone glancing at the board actually wants.
+   */
   yesterday: CallWindow;
+  /** What to call that column: "Yesterday" normally, "Friday" on a Monday. */
+  yesterdayLabel: string;
   last7: CallWindow;
   last30: CallWindow;
   quotes: QuoteWindows;
@@ -716,11 +724,38 @@ export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps
   }
 }
 
+/**
+ * The most recent business day before today: -1 normally, further back over
+ * a weekend (Monday → Friday). Capped at -3 (a Tuesday after a long weekend
+ * still lands on the holiday Monday; the guard renders "—" there, which is
+ * honest — nobody worked).
+ */
+function lastBusinessDayOffset(now: Date): number {
+  for (let offset = -1; offset >= -3; offset--) {
+    const day = new Date(
+      startOfDayInTimeZone(now, BUSINESS_TIMEZONE, offset).getTime() + 12 * 3_600_000
+    ).getDay();
+    if (day !== 0 && day !== 6) return offset;
+  }
+  return -1;
+}
+
 async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
   const now = new Date();
   const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29).toISOString();
-  const yesterdayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
-  const todayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
+
+  // "Yesterday" is the last business day — see CustomerServiceOps. On a
+  // Monday that's Friday, and the column says so.
+  const businessOffset = lastBusinessDayOffset(now);
+  const yesterdayStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, businessOffset).toISOString();
+  const yesterdayEnd = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, businessOffset + 1).toISOString();
+  const yesterdayLabel =
+    businessOffset === -1
+      ? "Yesterday"
+      : new Date(
+          startOfDayInTimeZone(now, BUSINESS_TIMEZONE, businessOffset).getTime() + 12 * 3_600_000
+        ).toLocaleDateString("en-US", { weekday: "long", timeZone: BUSINESS_TIMEZONE });
+
   const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -6).toISOString();
 
   const quotes = await getQuoteWindows(now);
@@ -751,8 +786,9 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
 
   return {
     yesterday: windowFrom(
-      all.filter((r) => r.call_start >= yesterdayStart && r.call_start < todayStart)
+      all.filter((r) => r.call_start >= yesterdayStart && r.call_start < yesterdayEnd)
     ),
+    yesterdayLabel,
     last7: windowFrom(all.filter((r) => r.call_start >= sevenStart)),
     last30: windowFrom(all),
     quotes,

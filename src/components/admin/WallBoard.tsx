@@ -437,7 +437,7 @@ export default function WallBoard({
         >
           <div className="flex items-baseline gap-8 mt-2">
             {[
-              ["Yesterday", cs?.yesterday.missRate],
+              [cs?.yesterdayLabel ?? "Yesterday", cs?.yesterday.missRate],
               ["7 days", cs?.last7.missRate],
               ["30 days", cs?.last30.missRate],
             ].map(([label, value]) => (
