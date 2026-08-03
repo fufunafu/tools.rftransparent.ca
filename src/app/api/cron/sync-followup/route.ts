@@ -4,6 +4,7 @@ import { getStores } from "@/lib/shopify";
 import { syncDraftOrdersForStore } from "@/lib/followup";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { alertOnSoftFailures } from "@/lib/cron-monitor";
+import { syncLeadQuotesFromFollowups, type LeadQuoteSyncSummary } from "@/lib/lead-quote-sync";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -35,9 +36,27 @@ async function handler(req: NextRequest) {
     }
   }
 
+  let leadQuoteSync: LeadQuoteSyncSummary | null = null;
+  try {
+    leadQuoteSync = await syncLeadQuotesFromFollowups(stores.map((store) => store.id));
+    results.push({
+      store_id: "lead_quote_matching",
+      label: "Lead quote matching",
+      status: leadQuoteSync.errors > 0 ? "error" : "ok",
+      detail: `${leadQuoteSync.linked} linked, ${leadQuoteSync.quoted} quoted, ${leadQuoteSync.won} won, ${leadQuoteSync.errors} errors`,
+    });
+  } catch (err) {
+    results.push({
+      store_id: "lead_quote_matching",
+      label: "Lead quote matching",
+      status: "error",
+      detail: err instanceof Error ? err.message : "lead quote matching failed",
+    });
+  }
+
   console.log("[Cron sync-followup]", JSON.stringify(results));
   await alertOnSoftFailures("sync-followup", results);
-  return NextResponse.json({ results, synced_at: new Date().toISOString() });
+  return NextResponse.json({ results, lead_quote_sync: leadQuoteSync, synced_at: new Date().toISOString() });
 }
 
 // Every run — scheduled or manual — is recorded for /settings/automations.
