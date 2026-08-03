@@ -1,10 +1,21 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { CallStatus, Lead, LeadCallAttempt, LeadSource, Outcome } from "@/lib/customer-service/leads";
 import { OUTCOME_LABELS, CALL_STATUS_LABELS } from "@/lib/customer-service/leads";
+import {
+  buildCustomLeadTrend,
+  buildLeadTrend,
+  type LeadTrendRange,
+} from "@/lib/lead-analytics";
 import { formatCADWhole } from "@/lib/format";
+
+const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
+  ssr: false,
+  loading: () => <div className="h-full animate-pulse bg-sand-50 rounded-md" />,
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -28,10 +39,45 @@ function timeAgo(iso: string): string {
   return `${days} days ago`;
 }
 
+function formatDuration(milliseconds: number | null): string {
+  if (milliseconds == null) return "No calls yet";
+  const minutes = Math.max(0, Math.round(milliseconds / 60_000));
+  if (minutes < 60) return `${minutes} min avg response`;
+  const hours = Math.round((minutes / 60) * 10) / 10;
+  if (hours < 24) return `${hours} hr avg response`;
+  return `${Math.round((hours / 24) * 10) / 10} day avg response`;
+}
+
 const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
   website: { label: "Website", className: "bg-blue-100 text-blue-700" },
-  meta: { label: "Meta", className: "bg-purple-100 text-purple-700" },
+  meta: { label: "Meta", className: "bg-rose-100 text-rose-700" },
 };
+
+type TrendSelection = LeadTrendRange | "custom";
+
+const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string }[] = [
+  { value: "30d", label: "30 days", metricLabel: "30 days" },
+  { value: "90d", label: "90 days", metricLabel: "90 days" },
+  { value: "12m", label: "12 months", metricLabel: "12 months" },
+  { value: "custom", label: "Custom", metricLabel: "custom" },
+];
+
+function defaultCustomDates(): { from: string; to: string } {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const key = (date: Date) => {
+    const parts = formatter.formatToParts(date);
+    const value = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? "";
+    return `${value("year")}-${value("month")}-${value("day")}`;
+  };
+  const now = new Date();
+  return { from: key(new Date(now.getTime() - 29 * 86_400_000)), to: key(now) };
+}
 
 const OUTCOME_BADGE: Record<Outcome, string> = {
   new: "bg-blue-100 text-blue-700",
@@ -56,7 +102,33 @@ const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }
   { value: "all", label: "All", match: () => true },
 ];
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json());
+interface MetaStatus {
+  configured: boolean;
+  connected: boolean;
+  page_name: string | null;
+  subscribed: boolean;
+  error: string | null;
+  can_sync: boolean;
+}
+
+interface MetaSyncSummary {
+  forms: number;
+  fetched: number;
+  inserted: number;
+  deduped: number;
+  skipped: number;
+  failed: number;
+  errors: string[];
+}
+
+async function fetcher<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(body.error ?? `Request failed with status ${response.status}`);
+  }
+  return body as T;
+}
 
 // ─── Lead detail panel ───────────────────────────────────────────────────────
 
@@ -151,6 +223,27 @@ function LeadDetailPanel({
             </svg>
           </button>
         </div>
+
+        {(lead.phone || lead.email) && (
+          <div className="px-6 py-3 border-b border-sand-200/60 flex gap-2">
+            {lead.phone && (
+              <a
+                href={`tel:${lead.phone}`}
+                className="flex-1 text-center px-3 py-2 rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Call {lead.phone}
+              </a>
+            )}
+            {lead.email && (
+              <a
+                href={`mailto:${lead.email}`}
+                className="flex-1 text-center px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50"
+              >
+                Email lead
+              </a>
+            )}
+          </div>
+        )}
 
         {/* Submission */}
         <div className="px-6 py-5 border-b border-sand-200/60 space-y-3">
@@ -350,22 +443,71 @@ export default function LeadsDashboard() {
   const [filter, setFilter] = useState<string>("uncalled");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
   const [search, setSearch] = useState("");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
+  const [trendRange, setTrendRange] = useState<TrendSelection>("30d");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [chartSources, setChartSources] = useState({ website: true, meta: true });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [syncingMeta, setSyncingMeta] = useState(false);
+  const [syncResult, setSyncResult] = useState<MetaSyncSummary | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
-  const { data, isLoading } = useSWR<{ leads: Lead[] }>(
-    `/api/customer-service/leads${sourceFilter !== "all" ? `?source=${sourceFilter}` : ""}`,
-    fetcher
+  // Background refresh: SWR pauses polling while the tab is hidden
+  // (refreshWhenHidden defaults to false) and revalidateOnFocus catches up
+  // when it becomes visible again — overriding the provider-wide opt-out.
+  const autoRefreshOpts = {
+    refreshInterval: 60_000,
+    revalidateOnFocus: true,
+    focusThrottleInterval: 30_000,
+  };
+  const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
+    "/api/customer-service/leads",
+    fetcher,
+    autoRefreshOpts
   );
-  const leads = data?.leads ?? [];
+  const {
+    data: metaStatus,
+    error: metaStatusError,
+    mutate: refreshMetaStatus,
+  } = useSWR<MetaStatus>("/api/customer-service/leads?view=meta_status", fetcher, autoRefreshOpts);
+  const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
   const { mutate } = useSWRConfig();
 
   const refresh = () => {
     mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"));
   };
 
+  const syncMeta = async () => {
+    setSyncingMeta(true);
+    setSyncResult(null);
+    setSyncError(null);
+    try {
+      const response = await fetch("/api/customer-service/leads?action=sync_meta", {
+        method: "POST",
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `Meta sync failed with status ${response.status}`);
+      }
+      setSyncResult(body.summary as MetaSyncSummary);
+      refresh();
+      await refreshMetaStatus();
+    } catch (error) {
+      setSyncError(error instanceof Error ? error.message : "Meta sync failed");
+    } finally {
+      setSyncingMeta(false);
+    }
+  };
+
+  const sourceLeads = useMemo(
+    () => sourceFilter === "all" ? leads : leads.filter((lead) => lead.source === sourceFilter),
+    [leads, sourceFilter],
+  );
+
   const filtered = useMemo(() => {
     const tab = FILTER_TABS.find((t) => t.value === filter) ?? FILTER_TABS[FILTER_TABS.length - 1];
-    return leads.filter((l) => {
+    return sourceLeads.filter((l) => {
       if (!tab.match(l)) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
@@ -376,22 +518,26 @@ export default function LeadsDashboard() {
         ) return false;
       }
       return true;
+    }).sort((a, b) => {
+      const difference = new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
+      return sortOrder === "newest" ? difference : -difference;
     });
-  }, [leads, filter, search]);
+  }, [sourceLeads, filter, search, sortOrder]);
 
   const filterCounts: Record<string, number> = useMemo(() => {
     const result: Record<string, number> = {};
     for (const tab of FILTER_TABS) {
-      result[tab.value] = leads.filter((l) => tab.match(l)).length;
+      result[tab.value] = sourceLeads.filter((l) => tab.match(l)).length;
     }
     return result;
-  }, [leads]);
+  }, [sourceLeads]);
 
   const metrics = useMemo(() => {
-    const total = leads.length;
-    const uncalled = leads.filter((l) => l.call_status === "not_called").length;
-    const fromWebsite = leads.filter((l) => l.source === "website").length;
-    const fromMeta = leads.filter((l) => l.source === "meta").length;
+    const openLeads = leads.filter((l) => l.outcome !== "won" && l.outcome !== "lost");
+    const uncalledLeads = openLeads.filter((l) => l.call_status === "not_called");
+    const overdueUncalled = uncalledLeads.filter(
+      (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
+    ).length;
     const won = leads.filter((l) => l.outcome === "won").length;
     const lost = leads.filter((l) => l.outcome === "lost").length;
     const closed = won + lost;
@@ -399,72 +545,239 @@ export default function LeadsDashboard() {
     const pipelineValue = leads
       .filter((l) => l.outcome === "quoted")
       .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
-    return { total, uncalled, fromWebsite, fromMeta, won, lost, conversion, pipelineValue };
+    const openQuoteCount = leads.filter((l) => l.outcome === "quoted").length;
+    const responseTimes = leads
+      .filter((l) => l.first_call_at)
+      .map((l) => new Date(l.first_call_at!).getTime() - new Date(l.submitted_at).getTime())
+      .filter((duration) => duration >= 0);
+    const averageResponseMs = responseTimes.length > 0
+      ? responseTimes.reduce((sum, duration) => sum + duration, 0) / responseTimes.length
+      : null;
+    return {
+      uncalled: uncalledLeads.length,
+      overdueUncalled,
+      won,
+      lost,
+      conversion,
+      pipelineValue,
+      openQuoteCount,
+      averageResponseMs,
+    };
   }, [leads]);
+
+  const trend = useMemo(
+    () => trendRange === "custom"
+      ? buildCustomLeadTrend(leads, customFrom, customTo)
+      : buildLeadTrend(leads, trendRange),
+    [leads, trendRange, customFrom, customTo],
+  );
+  const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
+  const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
+  const trendComparison = trend.previous.total === 0
+    ? trend.current.total > 0 ? "No leads in the previous period" : "No leads in this period"
+    : `${Math.abs(trend.changePct ?? 0)}% ${Number(trend.changePct) >= 0 ? "increase" : "decrease"} vs previous ${comparisonLabel}`;
+  const sourceCounts = useMemo(() => ({
+    all: leads.length,
+    website: leads.filter((lead) => lead.source === "website").length,
+    meta: leads.filter((lead) => lead.source === "meta").length,
+  }), [leads]);
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
 
+  const selectTrendRange = (range: TrendSelection) => {
+    if (range === "custom" && (!customFrom || !customTo)) {
+      const defaults = defaultCustomDates();
+      setCustomFrom(defaults.from);
+      setCustomTo(defaults.to);
+    }
+    setTrendRange(range);
+  };
+
+  const toggleChartSource = (source: LeadSource) => {
+    setChartSources((current) => {
+      const other = source === "website" ? "meta" : "website";
+      if (current[source] && !current[other]) return current;
+      return { ...current, [source]: !current[source] };
+    });
+  };
+
   return (
     <>
-      {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-sand-900">Leads</h1>
           <p className="text-sm text-sand-500 mt-1">
-            Form submissions from your website and Meta ads — call, quote, close.
+            Track, contact, and convert website and Meta leads.
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {metaStatus?.connected && metaStatus.subscribed && (
+            <div className="flex items-center gap-2 text-xs text-sand-600">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>{metaStatus.page_name ? `Meta: ${metaStatus.page_name}` : "Meta connected"}</span>
+            </div>
+          )}
+          {metaStatus?.connected && metaStatus.can_sync && (
+            <button
+              type="button"
+              onClick={syncMeta}
+              disabled={syncingMeta}
+              className="px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50 disabled:opacity-60"
+            >
+              {syncingMeta ? "Syncing" : "Sync Meta"}
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <SummaryCard
-          label="Uncalled"
-          value={metrics.uncalled}
-          color={metrics.uncalled > 0 ? "bg-amber-400" : "bg-sand-300"}
-          subtitle={metrics.uncalled > 0 ? "Need a call" : "All caught up"}
-        />
-        <SummaryCard
-          label="Total Leads"
-          value={metrics.total}
+          label={`New Leads (${trendLabel})`}
+          value={trend.current.total}
           color="bg-blue-500"
-          subtitle={`${metrics.fromWebsite} website · ${metrics.fromMeta} Meta`}
+          subtitle={trendComparison}
         />
         <SummaryCard
-          label="Pipeline"
+          label="Need a Call"
+          value={metrics.uncalled}
+          color={metrics.uncalled > 0 ? "bg-amber-400" : "bg-emerald-500"}
+          subtitle={metrics.overdueUncalled > 0 ? `${metrics.overdueUncalled} waiting over 24 hours` : "No overdue calls"}
+        />
+        <SummaryCard
+          label="Quoted Pipeline"
           value={formatCADWhole(metrics.pipelineValue)}
           color="bg-indigo-500"
-          subtitle={`${filterCounts.open_quote ?? 0} open quotes`}
+          subtitle={`${metrics.openQuoteCount} open quotes`}
         />
         <SummaryCard
           label="Conversion"
           value={`${metrics.conversion}%`}
           color="bg-green-500"
-          subtitle={`${metrics.won} won / ${metrics.won + metrics.lost} closed`}
+          subtitle={`${metrics.won} won of ${metrics.won + metrics.lost} closed`}
         />
       </div>
 
-      {/* Source filter */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-xs text-sand-400 uppercase tracking-wider font-medium">Source</span>
-        <div className="inline-flex rounded-lg border border-sand-200 bg-white p-0.5 text-xs font-medium">
-          {(["all", "website", "meta"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSourceFilter(s)}
-              className={`px-3 py-1.5 rounded-md transition-colors capitalize ${
-                sourceFilter === s ? "bg-blue-600 text-white" : "text-sand-600 hover:text-sand-900"
-              }`}
-            >
-              {s === "all" ? "All sources" : s}
-            </button>
-          ))}
+      <section className="bg-white border border-sand-200 rounded-lg overflow-hidden">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 px-5 py-4 border-b border-sand-200">
+          <div>
+            <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
+            <p className="text-xs text-sand-500 mt-0.5">Website and Meta submissions over time</p>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+            <div className="flex items-center gap-4 text-sm">
+              <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chartSources.website}
+                  disabled={chartSources.website && !chartSources.meta}
+                  onChange={() => toggleChartSource("website")}
+                  className="w-4 h-4 accent-blue-600"
+                />
+                <span className="w-2.5 h-2.5 rounded-sm bg-blue-600" />
+                Website
+              </label>
+              <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chartSources.meta}
+                  disabled={chartSources.meta && !chartSources.website}
+                  onChange={() => toggleChartSource("meta")}
+                  className="w-4 h-4 accent-pink-600"
+                />
+                <span className="w-2.5 h-2.5 rounded-sm bg-pink-600" />
+                Meta
+              </label>
+            </div>
+            <div className="inline-flex self-start flex-wrap rounded-md border border-sand-200 bg-sand-50 p-0.5 text-xs font-medium">
+              {TREND_RANGES.map((range) => (
+                <button
+                  key={range.value}
+                  type="button"
+                  aria-pressed={trendRange === range.value}
+                  onClick={() => selectTrendRange(range.value)}
+                  className={`px-3 py-1.5 rounded transition-colors ${
+                    trendRange === range.value
+                      ? "bg-white text-sand-900 shadow-sm"
+                      : "text-sand-500 hover:text-sand-800"
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
-      </div>
+        {trendRange === "custom" && (
+          <div className="px-5 py-3 border-b border-sand-200 bg-sand-50 flex flex-wrap items-end gap-3">
+            <label className="text-xs font-medium text-sand-600">
+              From
+              <input
+                type="date"
+                value={customFrom}
+                max={customTo || undefined}
+                onChange={(event) => setCustomFrom(event.target.value)}
+                className="block mt-1 px-3 py-2 rounded-md border border-sand-200 bg-white text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </label>
+            <label className="text-xs font-medium text-sand-600">
+              To
+              <input
+                type="date"
+                value={customTo}
+                min={customFrom || undefined}
+                onChange={(event) => setCustomTo(event.target.value)}
+                className="block mt-1 px-3 py-2 rounded-md border border-sand-200 bg-white text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+            </label>
+          </div>
+        )}
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_240px]">
+          <div className="h-[260px] px-3 pt-4 pb-2 sm:px-5">
+            <LeadTrendChart
+              data={trend.points}
+              showWebsite={chartSources.website}
+              showMeta={chartSources.meta}
+            />
+          </div>
+          <div className="border-t lg:border-t-0 lg:border-l border-sand-200 px-5 py-4 flex flex-col justify-center gap-5">
+            <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
+            <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
+            <div className="pt-4 border-t border-sand-200">
+              <p className="text-xs text-sand-500">All sources</p>
+              <p className="text-2xl font-semibold text-sand-900 mt-0.5">{trend.current.total}</p>
+              <p className="text-xs text-sand-500 mt-1">{trendComparison}</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      {/* Lead table */}
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-sand-200/60 px-4 pt-3 gap-2">
+      {(metaStatusError || metaStatus?.error || syncError) && (
+        <div className="border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
+          <span className="font-medium">Meta sync needs attention. </span>
+          {metaStatusError?.message ?? metaStatus?.error ?? syncError}
+        </div>
+      )}
+      {syncResult && !syncError && (
+        <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 rounded-lg text-sm text-emerald-800">
+          Meta sync finished: {syncResult.inserted} imported, {syncResult.deduped} already present, {syncResult.failed} failed.
+        </div>
+      )}
+
+      {leadsError && (
+        <div className="border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
+          Could not load leads: {leadsError.message}
+        </div>
+      )}
+
+      <section className="bg-white rounded-lg border border-sand-200 overflow-hidden">
+        <div className="px-4 py-4 border-b border-sand-200">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div>
+              <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
+              <p className="text-xs text-sand-500 mt-0.5">{filtered.length} leads in this view</p>
+            </div>
+            <p className="hidden sm:block text-xs text-sand-500">{formatDuration(metrics.averageResponseMs)}</p>
+          </div>
           <div className="flex gap-1 overflow-x-auto">
             {FILTER_TABS.map((tab) => {
               const count = filterCounts[tab.value] ?? 0;
@@ -473,9 +786,9 @@ export default function LeadsDashboard() {
                 <button
                   key={tab.value}
                   onClick={() => setFilter(tab.value)}
-                  className={`px-3 py-2 text-sm font-medium rounded-t-lg transition-colors whitespace-nowrap ${
+                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
                     active
-                      ? "text-blue-600 border-b-2 border-blue-600 bg-blue-50/50"
+                      ? "text-blue-700 bg-blue-50"
                       : "text-sand-500 hover:text-sand-700 hover:bg-sand-50"
                   }`}
                 >
@@ -489,36 +802,69 @@ export default function LeadsDashboard() {
               );
             })}
           </div>
-          <div className="pb-2 sm:pb-0">
+        </div>
+        <div className="px-4 py-3 border-b border-sand-200 bg-sand-50 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="inline-flex self-start rounded-md border border-sand-200 bg-white p-0.5 text-xs font-medium">
+            {(["all", "website", "meta"] as const).map((source) => (
+              <button
+                key={source}
+                type="button"
+                aria-pressed={sourceFilter === source}
+                onClick={() => setSourceFilter(source)}
+                className={`px-3 py-1.5 rounded transition-colors ${
+                  sourceFilter === source ? "bg-sand-800 text-white" : "text-sand-600 hover:text-sand-900"
+                }`}
+              >
+                {source === "all" ? "All" : SOURCE_BADGE[source].label} {sourceCounts[source]}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, email, phone..."
-              className="w-full sm:w-64 px-3 py-1.5 text-sm border border-sand-200 rounded-lg bg-sand-50 text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:bg-white"
+              placeholder="Search name, email, or phone"
+              aria-label="Search leads"
+              className="w-full sm:w-64 px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+            <select
+              value={sortOrder}
+              onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
+              aria-label="Sort leads"
+              className="px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
           </div>
         </div>
 
         {isLoading ? (
           <div className="py-12 text-center text-sand-400 text-sm">Loading leads…</div>
+        ) : leadsError ? (
+          <div className="py-12 text-center text-red-500 text-sm">Lead data is unavailable.</div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sand-400 text-sm">
             {leads.length === 0
-              ? "No leads yet. Paste the install script into Powerful Form Builder to start receiving submissions."
+              ? sourceFilter === "meta"
+                ? "No Meta leads have been imported yet."
+                : sourceFilter === "website"
+                  ? "No website leads have been received yet."
+                  : "No leads have been received yet."
               : "No leads match this filter."}
           </div>
         ) : (
-          <div className="overflow-auto max-h-[calc(100vh-260px)]">
-            <table className="w-full text-sm">
+          <div className="overflow-auto max-h-[calc(100vh-220px)]">
+            <table className="w-full min-w-[960px] text-sm">
               <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-200/60">
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Lead</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Source</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Submitted</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Call</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Contact</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Outcome</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Stage</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -527,7 +873,11 @@ export default function LeadsDashboard() {
                   <tr
                     key={lead.id}
                     onClick={() => setSelectedLeadId(lead.id)}
-                    className="border-b border-sand-100 hover:bg-sand-50/50 cursor-pointer transition-colors"
+                    className={`border-b border-sand-100 hover:bg-sand-50 cursor-pointer transition-colors ${
+                      lead.call_status === "not_called" && lead.outcome !== "won" && lead.outcome !== "lost"
+                        ? "border-l-2 border-l-amber-400"
+                        : "border-l-2 border-l-transparent"
+                    }`}
                   >
                     <td className="px-4 py-3">
                       <div className="font-medium text-sand-900">{lead.name || "Unnamed"}</div>
@@ -566,7 +916,7 @@ export default function LeadsDashboard() {
                           )}
                         </>
                       ) : (
-                        <span className="text-sand-300">—</span>
+                        <span className="text-sand-300">-</span>
                       )}
                     </td>
                     <td className="px-4 py-3">
@@ -591,7 +941,7 @@ export default function LeadsDashboard() {
             </table>
           </div>
         )}
-      </div>
+      </section>
 
       {selectedLead && (
         <LeadDetailPanel
@@ -615,6 +965,35 @@ function SummaryCard({ label, value, color, subtitle }: { label: string; value: 
       </div>
       <p className="text-xl font-semibold text-sand-900">{value}</p>
       {subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{subtitle}</p>}
+    </div>
+  );
+}
+
+function SourceTotal({
+  label,
+  value,
+  total,
+  color,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  color: string;
+}) {
+  const share = total > 0 ? Math.round((value / total) * 100) : 0;
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className="flex items-center gap-2 font-medium text-sand-700">
+          <span className={`w-2.5 h-2.5 rounded-sm ${color}`} />
+          {label}
+        </span>
+        <span className="font-semibold text-sand-900">{value}</span>
+      </div>
+      <div className="mt-2 h-1.5 bg-sand-100 rounded-full overflow-hidden">
+        <div className={`h-full ${color}`} style={{ width: `${share}%` }} />
+      </div>
+      <p className="text-[11px] text-sand-400 mt-1">{share}% of leads</p>
     </div>
   );
 }

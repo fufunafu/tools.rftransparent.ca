@@ -2,15 +2,43 @@
 // a lead, log a call, update a lead's outcome / quote / notes.
 
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, getAuthenticatedUser } from "@/lib/admin-auth";
+import { isAuthenticated, getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import type { CallStatus, Outcome } from "@/lib/customer-service/leads";
+import {
+  getMetaConnectionStatus,
+  metaErrorMessage,
+  syncRecentMetaLeads,
+} from "@/lib/customer-service/meta-leads";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const ALLOWED_CALL_STATUSES: CallStatus[] = ["not_called", "no_answer", "called"];
 const ALLOWED_OUTCOMES: Outcome[] = ["new", "contacted", "quoted", "won", "lost"];
+
+// PostgREST caps every response at the project's max-rows — 1000 here — and
+// does it silently: a plain select just returns fewer rows than exist. The
+// Leads page showed "1000 total" while the table held 1066, and .range()
+// can't be used to ask for more than the cap in one request. So page through
+// it. Anything reading a whole table must go through this.
+const PAGE_SIZE = 1000;
+
+async function fetchAllPages<T>(
+  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ rows: T[]; error: string | null }> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await page(from, from + PAGE_SIZE - 1);
+    if (error) return { rows, error: error.message };
+    rows.push(...(data ?? []));
+    // A short page means we've reached the end.
+    if (!data || data.length < PAGE_SIZE) return { rows, error: null };
+  }
+}
+
+type LeadRow = { id: string; [key: string]: unknown };
+type AttemptRow = { lead_id: string; staff: string; called_at: string };
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
 
@@ -21,6 +49,14 @@ export async function GET(req: NextRequest) {
 
   const view = req.nextUrl.searchParams.get("view") ?? "list";
   const supabase = getSupabase();
+
+  if (view === "meta_status") {
+    const [status, canSync] = await Promise.all([
+      getMetaConnectionStatus(),
+      isAdminUser(),
+    ]);
+    return NextResponse.json({ ...status, can_sync: canSync });
+  }
 
   if (view === "call_attempts") {
     const leadId = req.nextUrl.searchParams.get("lead_id");
@@ -36,36 +72,60 @@ export async function GET(req: NextRequest) {
 
   // Default: list of leads, newest first, optionally filtered by source.
   const source = req.nextUrl.searchParams.get("source"); // null | 'website' | 'meta'
-  let query = supabase.from("leads").select("*").order("submitted_at", { ascending: false });
-  if (source === "website" || source === "meta") query = query.eq("source", source);
 
-  const { data: leads, error } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  const { rows: leads, error } = await fetchAllPages<LeadRow>((from, to) => {
+    let query = supabase
+      .from("leads")
+      .select("*")
+      .order("submitted_at", { ascending: false })
+      .range(from, to);
+    if (source === "website" || source === "meta") query = query.eq("source", source);
+    return query;
+  });
+  if (error) return NextResponse.json({ error }, { status: 500 });
 
   // Fetch call attempt aggregates so the table can show "last called by X".
-  const ids = (leads ?? []).map((l) => l.id);
-  let attemptAgg: Map<string, { count: number; last_at: string; last_staff: string }> = new Map();
+  // Paged for the same reason — one busy week of calls would otherwise push
+  // this past the cap and quietly drop the aggregate for some leads.
+  const ids = leads.map((l) => l.id);
+  const attemptAgg: Map<string, {
+    count: number;
+    first_at: string;
+    last_at: string;
+    last_staff: string;
+  }> = new Map();
   if (ids.length > 0) {
-    const { data: attempts } = await supabase
-      .from("lead_call_attempts")
-      .select("lead_id, staff, called_at")
-      .in("lead_id", ids)
-      .order("called_at", { ascending: false });
-    for (const a of attempts ?? []) {
+    const { rows: attempts } = await fetchAllPages<AttemptRow>((from, to) =>
+      supabase
+        .from("lead_call_attempts")
+        .select("lead_id, staff, called_at")
+        .in("lead_id", ids)
+        .order("called_at", { ascending: false })
+        .range(from, to),
+    );
+    for (const a of attempts) {
       const prev = attemptAgg.get(a.lead_id);
       if (!prev) {
-        attemptAgg.set(a.lead_id, { count: 1, last_at: a.called_at, last_staff: a.staff });
+        attemptAgg.set(a.lead_id, {
+          count: 1,
+          first_at: a.called_at,
+          last_at: a.called_at,
+          last_staff: a.staff,
+        });
       } else {
         prev.count += 1;
+        // Rows are newest-first, so each later row is an older attempt.
+        prev.first_at = a.called_at;
       }
     }
   }
 
-  const enriched = (leads ?? []).map((l) => {
+  const enriched = leads.map((l) => {
     const agg = attemptAgg.get(l.id);
     return {
       ...l,
       call_attempts_count: agg?.count ?? 0,
+      first_call_at: agg?.first_at ?? null,
       last_call_at: agg?.last_at ?? null,
       last_called_by: agg?.last_staff ?? null,
     };
@@ -82,6 +142,18 @@ export async function POST(req: NextRequest) {
 
   const action = req.nextUrl.searchParams.get("action");
   const supabase = getSupabase();
+
+  if (action === "sync_meta") {
+    if (!(await isAdminUser())) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    try {
+      const summary = await syncRecentMetaLeads();
+      return NextResponse.json({ ok: true, summary });
+    } catch (error) {
+      return NextResponse.json({ error: metaErrorMessage(error) }, { status: 502 });
+    }
+  }
 
   if (action === "log_call") {
     const body = await req.json().catch(() => ({}));
@@ -130,8 +202,23 @@ export async function PATCH(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => ({}));
-  const { id, ...rest } = body as { id?: string } & Record<string, unknown>;
-  if (!id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const { id, ids, ...rest } = body as {
+    id?: unknown;
+    ids?: unknown;
+  } & Record<string, unknown>;
+  const targetIds = Array.from(new Set(
+    typeof id === "string"
+      ? [id]
+      : Array.isArray(ids)
+        ? ids.filter((value): value is string => typeof value === "string" && value.length > 0)
+        : [],
+  ));
+  if (targetIds.length === 0) {
+    return NextResponse.json({ error: "id or ids required" }, { status: 400 });
+  }
+  if (targetIds.length > 2000) {
+    return NextResponse.json({ error: "Bulk updates are limited to 2000 leads" }, { status: 400 });
+  }
 
   const update: Record<string, unknown> = {};
   if (typeof rest.outcome === "string" && ALLOWED_OUTCOMES.includes(rest.outcome as Outcome)) {
@@ -152,7 +239,10 @@ export async function PATCH(req: NextRequest) {
   }
 
   const supabase = getSupabase();
-  const { error } = await supabase.from("leads").update(update).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ ok: true });
+  for (let offset = 0; offset < targetIds.length; offset += 200) {
+    const chunk = targetIds.slice(offset, offset + 200);
+    const { error } = await supabase.from("leads").update(update).in("id", chunk);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  return NextResponse.json({ ok: true, updated: targetIds.length });
 }

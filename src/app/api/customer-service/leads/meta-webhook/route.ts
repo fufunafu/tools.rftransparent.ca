@@ -98,9 +98,17 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Always 200 to Meta even if individual leads failed — they retry on
-  // non-2xx, which can compound issues. The results array exposes per-lead
-  // status for our own observability.
+  const failed = results.filter((result) => !result.ok);
+  if (failed.length > 0) {
+    // A non-2xx response asks Meta to retry. findOrInsertLead is idempotent,
+    // so successfully processed entries remain safe when the batch repeats.
+    console.error("[meta-leads] webhook processing failed", failed);
+    return NextResponse.json(
+      { ok: false, processed: results.length, failed: failed.length, results },
+      { status: 502 },
+    );
+  }
+
   return NextResponse.json({ ok: true, processed: results.length, results });
 }
 
@@ -171,7 +179,10 @@ async function processLead(
     email,
     phone,
     message,
-    raw_payload: { event: changeValue, lead: leadData },
+    external_id: leadgenId,
+    submitted_at:
+      typeof leadData.created_time === "string" ? leadData.created_time : null,
+    raw_payload: { meta_lead_id: leadgenId, event: changeValue, lead: leadData },
   });
 
   if (!result.ok && "error" in result) {

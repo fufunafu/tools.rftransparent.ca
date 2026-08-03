@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+const { sendNewLeadNotificationMock } = vi.hoisted(() => ({
+  sendNewLeadNotificationMock: vi.fn(),
+}));
+
+vi.mock("@/lib/lead-notifications", () => ({
+  sendNewLeadNotification: sendNewLeadNotificationMock,
+}));
+
 // ─── Supabase mock ───────────────────────────────────────────────────────────
 // findOrInsertLead uses two chains:
+//   from("leads").select("id").eq(...).contains(...).limit(1).maybeSingle()
 //   from("leads").select("id").eq(...).gte(...).or(...).limit(1).maybeSingle()
 //   from("leads").insert(row).select("id").single()
 
@@ -30,6 +39,7 @@ function makeChain() {
   const chain = {
     select: () => chain,
     eq: push("eq"),
+    contains: push("contains"),
     gte: push("gte"),
     or: push("or"),
     limit: push("limit"),
@@ -58,6 +68,8 @@ import {
 } from "@/lib/customer-service/leads";
 
 beforeEach(() => {
+  sendNewLeadNotificationMock.mockReset();
+  sendNewLeadNotificationMock.mockResolvedValue(true);
   state.selects = [];
   state.inserts = [];
   state.dedupResult = null;
@@ -233,6 +245,7 @@ describe("findOrInsertLead", () => {
 
     expect(result).toEqual({ ok: true, lead_id: "existing-lead", deduped: true });
     expect(state.inserts).toHaveLength(0);
+    expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
 
     // Dedup query scopes to the source and a recent submitted_at window
     const filters = state.selects[0].filters;
@@ -242,6 +255,25 @@ describe("findOrInsertLead", () => {
     const windowStart = new Date(gte.args[1] as string).getTime();
     expect(Date.now() - windowStart).toBeGreaterThan(9.9 * 60 * 1000);
     expect(Date.now() - windowStart).toBeLessThan(10.1 * 60 * 1000);
+  });
+
+  it("dedups a provider lead by its stable external id before the time window", async () => {
+    state.dedupResult = { id: "existing-meta-lead" };
+    const result = await findOrInsertLead(
+      leadInput({
+        source: "meta",
+        external_id: "meta-123",
+        raw_payload: { meta_lead_id: "meta-123" },
+      }),
+    );
+
+    expect(result).toEqual({ ok: true, lead_id: "existing-meta-lead", deduped: true });
+    expect(state.selects).toHaveLength(1);
+    expect(state.selects[0].filters).toContainEqual({
+      method: "contains",
+      args: ["raw_payload", { meta_lead_id: "meta-123" }],
+    });
+    expect(state.inserts).toHaveLength(0);
   });
 
   it("matches on email OR phone when both are present", async () => {
@@ -272,11 +304,63 @@ describe("findOrInsertLead", () => {
       email: "jane@example.com",
       message: "Need a quote",
     });
+    expect(sendNewLeadNotificationMock).toHaveBeenCalledWith({
+      leadId: "new-lead-id",
+      source: "website",
+      sourceDetail: "contact-form",
+      pageUrl: "https://example.com/contact",
+      name: "Jane Doe",
+      email: "jane@example.com",
+      phone: null,
+      message: "Need a quote",
+    });
+  });
+
+  it("does not notify for a historical import", async () => {
+    const result = await findOrInsertLead(leadInput({ send_notification: false }));
+
+    expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
+    expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps a saved lead successful when notification delivery throws", async () => {
+    sendNewLeadNotificationMock.mockRejectedValueOnce(new Error("Resend unavailable"));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const result = await findOrInsertLead(leadInput());
+
+    expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
+    expect(state.inserts).toHaveLength(1);
+    expect(consoleError).toHaveBeenCalledWith(
+      "[leads] notification failed:",
+      expect.any(Error),
+    );
+    consoleError.mockRestore();
+  });
+
+  it("preserves provider submission time without inserting the helper external_id field", async () => {
+    const result = await findOrInsertLead(
+      leadInput({
+        source: "meta",
+        external_id: "meta-456",
+        submitted_at: "2026-07-28T12:30:00.000Z",
+        raw_payload: { meta_lead_id: "meta-456" },
+      }),
+    );
+
+    expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
+    expect(state.inserts[0]).toMatchObject({
+      source: "meta",
+      submitted_at: "2026-07-28T12:30:00.000Z",
+      raw_payload: { meta_lead_id: "meta-456" },
+    });
+    expect(state.inserts[0]).not.toHaveProperty("external_id");
   });
 
   it("surfaces insert errors", async () => {
     state.insertResult = { data: null, error: { message: "boom" } };
     const result = await findOrInsertLead(leadInput());
     expect(result).toEqual({ ok: false, error: "boom" });
+    expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
   });
 });

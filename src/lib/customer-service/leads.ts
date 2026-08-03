@@ -1,6 +1,7 @@
 // Shared types + payload-extraction helpers for the Leads section.
 
 import { getSupabase } from "@/lib/supabase";
+import { sendNewLeadNotification } from "@/lib/lead-notifications";
 
 export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
@@ -39,6 +40,7 @@ export interface Lead {
   updated_at: string;
   // Joined call attempt counts when present
   call_attempts_count?: number;
+  first_call_at?: string | null;
   last_call_at?: string | null;
   last_called_by?: string | null;
 }
@@ -213,6 +215,13 @@ export interface UpsertLeadInput {
   phone: string | null;
   message: string | null;
   raw_payload: Record<string, unknown>;
+  // Stable provider identifier, such as Meta's leadgen_id. This is kept in
+  // raw_payload so ingestion stays idempotent without a schema dependency.
+  external_id?: string | null;
+  // Preserve the provider's submission time during historical imports.
+  submitted_at?: string | null;
+  // Historical imports should not generate one email per backfilled lead.
+  send_notification?: boolean;
 }
 
 export type UpsertLeadResult =
@@ -229,6 +238,20 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   }
 
   const supabase = getSupabase();
+
+  if (input.external_id) {
+    const { data: providerMatch } = await supabase
+      .from("leads")
+      .select("id")
+      .eq("source", input.source)
+      .contains("raw_payload", { meta_lead_id: input.external_id })
+      .limit(1)
+      .maybeSingle();
+
+    if (providerMatch) {
+      return { ok: true, lead_id: providerMatch.id, deduped: true };
+    }
+  }
 
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const orFilters: string[] = [];
@@ -249,12 +272,42 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
 
   const { data, error } = await supabase
     .from("leads")
-    .insert({ ...input, email, phone })
+    .insert({
+      source: input.source,
+      source_detail: input.source_detail,
+      form_id: input.form_id,
+      page_url: input.page_url,
+      name: input.name,
+      email,
+      phone,
+      message: input.message,
+      raw_payload: input.raw_payload,
+      ...(input.submitted_at ? { submitted_at: input.submitted_at } : {}),
+    })
     .select("id")
     .single();
 
   if (error) {
     return { ok: false, error: error.message };
+  }
+
+  if (input.send_notification !== false) {
+    try {
+      await sendNewLeadNotification({
+        leadId: data.id,
+        source: input.source,
+        sourceDetail: input.source_detail,
+        pageUrl: input.page_url,
+        name: input.name,
+        email,
+        phone,
+        message: input.message,
+      });
+    } catch (notificationError) {
+      // The lead is already saved. Never ask a webhook provider to retry it
+      // because a secondary notification failed.
+      console.error("[leads] notification failed:", notificationError);
+    }
   }
 
   return { ok: true, lead_id: data.id, deduped: false };
