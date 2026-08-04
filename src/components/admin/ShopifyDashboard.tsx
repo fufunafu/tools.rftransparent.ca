@@ -152,8 +152,10 @@ async function apiGetOrders(storeId: string): Promise<Order[]> {
   return j.data.orders.edges.map((e: { node: Order }) => e.node);
 }
 
-async function apiGetChart(storeId: string, days: number): Promise<ChartPoint[]> {
-  const res = await fetch(`/api/shopify/chart?storeId=${storeId}&days=${days}`);
+async function apiGetChart(storeId: string, days: number, fresh = false): Promise<ChartPoint[]> {
+  const params = new URLSearchParams({ storeId, days: String(days) });
+  if (fresh) params.set("refresh", "true");
+  const res = await fetch(`/api/shopify/chart?${params}`);
   if (!res.ok) { const j = await res.json(); throw new Error(j.error ?? `HTTP ${res.status}`); }
   const j = await res.json();
   if (j.error) throw new Error(j.error);
@@ -191,10 +193,10 @@ export default function ShopifyDashboard() {
     }
   }, [updateStore]);
 
-  const loadChart = useCallback(async (id: string, days: number) => {
+  const loadChart = useCallback(async (id: string, days: number, fresh = false) => {
     updateStore(id, { chartState: "loading", chartRange: days });
     try {
-      const chart = await apiGetChart(id, days);
+      const chart = await apiGetChart(id, days, fresh);
       updateStore(id, { chart, chartState: "loaded" });
     } catch {
       updateStore(id, { chartState: "error" });
@@ -238,7 +240,7 @@ export default function ShopifyDashboard() {
     stores.forEach((s) => {
       loadMetrics(s.id);
       if (s.ordersState === "loaded") loadOrders(s.id);
-      if (s.chartState === "loaded") loadChart(s.id, s.chartRange);
+      if (s.chartState === "loaded") loadChart(s.id, s.chartRange, true);
     });
   }, [stores, loadMetrics, loadOrders, loadChart]);
 

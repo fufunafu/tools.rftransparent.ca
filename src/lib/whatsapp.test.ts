@@ -22,8 +22,8 @@ beforeEach(() => {
   process.env.WHATSAPP_ACCESS_TOKEN = "test-token";
   process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789";
   process.env.WHATSAPP_GRAPH_API_VERSION = "v24.0";
-  process.env.WHATSAPP_SURVEY_TEMPLATE_NAME = "weekly_employee_checkin";
-  process.env.WHATSAPP_TEMPLATE_LANGUAGE = "en_US";
+  process.env.WHATSAPP_SURVEY_TEMPLATE_NAME = "weekly_checkin";
+  process.env.WHATSAPP_TEMPLATE_LANGUAGE = "en";
 });
 
 afterEach(() => {
@@ -65,14 +65,14 @@ describe("sendWhatsAppSurvey", () => {
       to: "14165550123",
       type: "template",
       template: {
-        name: "weekly_employee_checkin",
-        language: { code: "en_US" },
+        name: "weekly_checkin",
+        language: { code: "en" },
         components: [
           {
             type: "body",
             parameters: [
-              { type: "text", text: "Alex" },
-              { type: "text", text: "https://tools.example/survey/token" },
+              { type: "text", parameter_name: "name", text: "Alex" },
+              { type: "text", parameter_name: "link", text: "https://tools.example/survey/token" },
             ],
           },
         ],

@@ -13,14 +13,23 @@ export async function sendSurveys(): Promise<{ sent: number; skipped: number; er
   const supabase = getSupabase();
   const weekOf = getMondayOfWeek(new Date());
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/+$/, "");
+  const testRecipient = process.env.WHATSAPP_TEST_RECIPIENT?.trim() || null;
+  const testEmployeeId = process.env.WHATSAPP_TEST_EMPLOYEE_ID?.trim() || null;
   if (!appUrl) throw new Error("NEXT_PUBLIC_APP_URL is not configured");
+  if (Boolean(testRecipient) !== Boolean(testEmployeeId)) {
+    throw new Error("WHATSAPP_TEST_RECIPIENT and WHATSAPP_TEST_EMPLOYEE_ID must be configured together");
+  }
   assertWhatsAppConfigured();
 
-  const { data: employees, error: empError } = await supabase
+  let employeeQuery = supabase
     .from("employees")
     .select("id, name, phone")
-    .eq("active", true)
-    .not("phone", "is", null);
+    .eq("active", true);
+  employeeQuery = testEmployeeId
+    ? employeeQuery.eq("id", testEmployeeId)
+    : employeeQuery.not("phone", "is", null);
+
+  const { data: employees, error: empError } = await employeeQuery;
 
   if (empError) throw new Error(empError.message);
 
@@ -56,7 +65,7 @@ export async function sendSurveys(): Promise<{ sent: number; skipped: number; er
 
     try {
       await sendWhatsAppSurvey({
-        to: emp.phone,
+        to: testRecipient ?? emp.phone,
         employeeName: emp.name,
         surveyUrl: `${appUrl}/survey/${token}`,
       });

@@ -98,8 +98,8 @@ export async function sendWhatsAppSurvey({
           {
             type: "body",
             parameters: [
-              { type: "text", text: employeeName },
-              { type: "text", text: surveyUrl },
+              { type: "text", parameter_name: "name", text: employeeName },
+              { type: "text", parameter_name: "link", text: surveyUrl },
             ],
           },
         ],
