@@ -331,7 +331,7 @@ export default function EmployeePerformanceDashboard() {
         </div>
       )}
 
-      {loading && !payload ? <LoadingState /> : payload && departments.length === 0 ? (
+      {(loading && !payload) || (payload && departments.length > 0 && !department) ? <LoadingState /> : payload && departments.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white px-6 py-14 text-center shadow-sm">
           <p className="text-sm font-semibold text-slate-800">No supported performance profiles yet</p>
           <p className="mt-1 text-xs text-slate-500">Assign active employees to Customer Service, Sales, Management, or Warehouse.</p>
