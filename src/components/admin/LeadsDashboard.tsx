@@ -3,7 +3,14 @@
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
-import type { CallStatus, Lead, LeadCallAttempt, LeadSource, Outcome } from "@/lib/customer-service/leads";
+import type {
+  CallStatus,
+  Lead,
+  LeadCallAttempt,
+  LeadSource,
+  LeadSubmission,
+  Outcome,
+} from "@/lib/customer-service/leads";
 import {
   OUTCOME_LABELS,
   CALL_STATUS_LABELS,
@@ -139,6 +146,66 @@ async function fetcher<T>(url: string): Promise<T> {
 
 // ─── Lead detail panel ───────────────────────────────────────────────────────
 
+function SubmissionCard({
+  submission,
+  position,
+  total,
+}: {
+  submission: LeadSubmission;
+  position: number;
+  total: number;
+}) {
+  const details = extractSubmissionDetails(submission.raw_payload).filter((detail) => (
+    detail.value !== submission.message
+    && detail.value !== submission.email
+    && detail.value !== submission.phone
+    && detail.value !== submission.name
+  ));
+
+  return (
+    <article className="rounded-xl border border-sand-200 bg-white overflow-hidden">
+      <div className="flex items-start justify-between gap-3 bg-sand-50/70 px-4 py-3 border-b border-sand-200">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-sand-400">
+            Submission {position} of {total}
+          </p>
+          <p className="mt-1 text-sm font-medium text-sand-800 truncate">
+            {submission.source_detail || "Form submission"}
+          </p>
+        </div>
+        <time className="text-xs text-sand-500 whitespace-nowrap" dateTime={submission.submitted_at}>
+          {formatDateTime(submission.submitted_at)}
+        </time>
+      </div>
+
+      <div className="p-4 space-y-3">
+        {submission.message && (
+          <div>
+            <p className="text-[11px] font-medium text-sand-400 mb-1">Customer request</p>
+            <p className="text-sm leading-6 text-sand-700 whitespace-pre-wrap">{submission.message}</p>
+          </div>
+        )}
+
+        {details.length > 0 && (
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {details.map((detail) => (
+              <div key={detail.key} className="rounded-lg border border-sand-200 px-3 py-2.5 min-w-0">
+                <dt className="text-[11px] text-sand-400">{detail.label}</dt>
+                <dd className="mt-0.5 text-sm font-medium text-sand-800 break-words">{detail.value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+
+        <details className="text-xs">
+          <summary className="cursor-pointer text-sand-400 hover:text-sand-600">View raw submission</summary>
+          <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(submission.raw_payload, null, 2)}</pre>
+        </details>
+      </div>
+    </article>
+  );
+}
+
 function LeadDetailPanel({
   lead,
   onClose,
@@ -164,13 +231,27 @@ function LeadDetailPanel({
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
-  const submissionDetails = useMemo(
-    () => extractSubmissionDetails(lead.raw_payload).filter((detail) => (
-      detail.value !== lead.message
-      && detail.value !== lead.email
-      && detail.value !== lead.phone
-      && detail.value !== lead.name
-    )),
+  const submissions = useMemo(
+    () => {
+      const values = lead.submissions?.length
+        ? lead.submissions
+        : [{
+            id: lead.id,
+            source: lead.source,
+            source_detail: lead.source_detail,
+            form_id: lead.form_id,
+            page_url: lead.page_url,
+            name: lead.name,
+            email: lead.email,
+            phone: lead.phone,
+            message: lead.message,
+            raw_payload: lead.raw_payload,
+            submitted_at: lead.submitted_at,
+          }];
+      return [...values].sort(
+        (left, right) => new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime(),
+      );
+    },
     [lead],
   );
 
@@ -305,15 +386,17 @@ function LeadDetailPanel({
           )}
         </div>
 
-        {/* Submission */}
+        {/* Submissions */}
         <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-4">
           <div className="flex items-center justify-between gap-3">
-            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Lead details</h3>
-            <span className="text-xs text-sand-400">{timeAgo(lead.submitted_at)}</span>
+            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Submissions</h3>
+            <span className="text-xs text-sand-400">
+              {submissions.length} {submissions.length === 1 ? "submission" : "submissions"}
+            </span>
           </div>
           <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 rounded-xl border border-sand-200 bg-sand-50/60 p-4 text-sm">
             <div className="min-w-0">
-              <dt className="text-xs text-sand-400">Submitted</dt>
+              <dt className="text-xs text-sand-400">First submitted</dt>
               <dd className="mt-1 font-medium text-sand-800">{formatDateTime(lead.submitted_at)}</dd>
             </div>
             <div className="min-w-0">
@@ -332,38 +415,17 @@ function LeadDetailPanel({
                 <dd className="mt-1"><a href={`tel:${lead.phone}`} className="font-medium text-blue-600 hover:underline">{lead.phone}</a></dd>
               </div>
             )}
-            {lead.source_detail && (
-              <div className="sm:col-span-2 min-w-0">
-                <dt className="text-xs text-sand-400">Form</dt>
-                <dd className="mt-1 font-medium text-sand-800">{lead.source_detail}</dd>
-              </div>
-            )}
           </dl>
-          {lead.message && (
-            <div>
-              <p className="text-xs font-medium text-sand-500 mb-2">Customer request</p>
-              <div className="rounded-xl bg-white border border-sand-200 p-4 text-sm leading-6 text-sand-700 whitespace-pre-wrap">
-                {lead.message}
-              </div>
-            </div>
-          )}
-          {submissionDetails.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-sand-500 mb-2">Submission details</p>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {submissionDetails.map((detail) => (
-                  <div key={detail.key} className="rounded-lg border border-sand-200 px-3 py-2.5 min-w-0">
-                    <dt className="text-[11px] text-sand-400">{detail.label}</dt>
-                    <dd className="mt-0.5 text-sm font-medium text-sand-800 break-words">{detail.value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          )}
-          <details className="text-xs">
-            <summary className="cursor-pointer text-sand-400 hover:text-sand-600">View raw submission</summary>
-            <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(lead.raw_payload, null, 2)}</pre>
-          </details>
+          <div className="space-y-3">
+            {submissions.map((submission, index) => (
+              <SubmissionCard
+                key={submission.id}
+                submission={submission}
+                position={index + 1}
+                total={submissions.length}
+              />
+            ))}
+          </div>
         </section>
 
         {/* Call log */}
@@ -1051,8 +1113,12 @@ export default function LeadsDashboard() {
                       <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[lead.source].className}`}>
                         {SOURCE_BADGE[lead.source].label}
                       </span>
-                      {lead.source_detail && (
-                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">{lead.source_detail}</div>
+                      {((lead.duplicate_count ?? 1) > 1 || lead.source_detail) && (
+                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
+                          {(lead.duplicate_count ?? 1) > 1
+                            ? `${lead.duplicate_count} form submissions`
+                            : lead.source_detail}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-sand-600">

@@ -16,6 +16,20 @@ export interface LeadCallAttempt {
   called_at: string;
 }
 
+export interface LeadSubmission {
+  id: string;
+  source: LeadSource;
+  source_detail: string | null;
+  form_id: string | null;
+  page_url: string | null;
+  name: string | null;
+  email: string | null;
+  phone: string | null;
+  message: string | null;
+  raw_payload: Record<string, unknown>;
+  submitted_at: string;
+}
+
 export interface Lead {
   id: string;
   source: LeadSource;
@@ -45,6 +59,7 @@ export interface Lead {
   last_called_by?: string | null;
   duplicate_count?: number;
   duplicate_ids?: string[];
+  submissions?: LeadSubmission[];
 }
 
 export const OUTCOME_LABELS: Record<Outcome, string> = {

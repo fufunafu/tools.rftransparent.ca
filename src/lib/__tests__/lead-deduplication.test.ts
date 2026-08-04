@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
-import type { Lead } from "@/lib/customer-service/leads";
+import { CALL_STATUS_LABELS, type Lead } from "@/lib/customer-service/leads";
 
 function lead(id: string, overrides: Partial<Lead> = {}): Lead {
   return {
@@ -64,26 +64,78 @@ describe("consolidateDuplicateLeads", () => {
       assigned_to: "Shanaz Rohoman",
       call_attempts_count: 3,
     });
+    expect(result[0].submissions?.map((submission) => submission.id)).toEqual([
+      "empty-1",
+      "empty-2",
+      "won",
+    ]);
   });
 
-  it("keeps repeat projects outside the one-day window separate", () => {
+  it("combines repeat submissions across dates and forms for the same contact", () => {
     const result = consolidateDuplicateLeads([
-      lead("first", { submitted_at: "2026-07-17T12:00:00.000Z" }),
-      lead("second", { submitted_at: "2026-07-28T12:00:00.000Z" }),
+      lead("first", {
+        source_detail: "Surface Type Quiz",
+        submitted_at: "2026-06-19T03:22:20.000Z",
+      }),
+      lead("second", {
+        source_detail: "Fuanne Form",
+        submitted_at: "2026-06-23T17:06:33.000Z",
+        call_status: "no_answer",
+        call_attempts_count: 1,
+        last_call_at: "2026-06-24T16:44:33.000Z",
+      }),
     ]);
 
-    expect(result).toHaveLength(2);
-    expect(result.every((item) => item.duplicate_count === 1)).toBe(true);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "second",
+      duplicate_count: 2,
+      duplicate_ids: ["first", "second"],
+      submitted_at: "2026-06-19T03:22:20.000Z",
+      call_status: "no_answer",
+      call_attempts_count: 1,
+    });
+    expect(result[0].submissions).toEqual([
+      expect.objectContaining({ id: "first", source_detail: "Surface Type Quiz" }),
+      expect.objectContaining({ id: "second", source_detail: "Fuanne Form" }),
+    ]);
   });
 
-  it("does not combine matching contacts from different forms or sources", () => {
+  it("shows a combined Meta lead like Larry as No answer when either submission has no answer", () => {
+    const result = consolidateDuplicateLeads([
+      lead("larry-first", {
+        source: "meta",
+        name: "Larry",
+        source_detail: "Meta Lead Form A",
+      }),
+      lead("larry-second", {
+        source: "meta",
+        name: "Larry",
+        source_detail: "Meta Lead Form B",
+        submitted_at: "2026-08-04T12:08:04.000Z",
+        call_status: "no_answer",
+        call_attempts_count: 1,
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      name: "Larry",
+      source: "meta",
+      duplicate_count: 2,
+      call_status: "no_answer",
+      call_attempts_count: 1,
+    });
+    expect(CALL_STATUS_LABELS[result[0].call_status]).toBe("No answer");
+  });
+
+  it("keeps matching contacts from different sources separate", () => {
     const result = consolidateDuplicateLeads([
       lead("website"),
-      lead("other-form", { source_detail: "Warranty Form" }),
       lead("meta", { source: "meta" }),
     ]);
 
-    expect(result).toHaveLength(3);
+    expect(result).toHaveLength(2);
   });
 
   it("keeps separate quote numbers as separate projects", () => {

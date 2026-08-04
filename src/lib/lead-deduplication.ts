@@ -1,7 +1,5 @@
 import { sanitizePhone } from "@/lib/call-metrics";
-import type { Lead } from "@/lib/customer-service/leads";
-
-const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+import type { Lead, LeadSubmission } from "@/lib/customer-service/leads";
 
 export interface ConsolidatedLead extends Lead {
   duplicate_count: number;
@@ -18,13 +16,6 @@ function normalizedPhone(value: string | null): string | null {
   return phone && phone.length >= 10 ? phone : null;
 }
 
-function formIdentity(lead: Lead): string {
-  return lead.form_id?.trim().toLowerCase()
-    || lead.source_detail?.trim().toLowerCase()
-    || lead.page_url?.trim().toLowerCase()
-    || "unknown-form";
-}
-
 function sameContact(left: Lead, right: Lead): boolean {
   const leftPhone = normalizedPhone(left.phone);
   const rightPhone = normalizedPhone(right.phone);
@@ -35,8 +26,8 @@ function sameContact(left: Lead, right: Lead): boolean {
   return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
-function sameLeadContext(left: Lead, right: Lead): boolean {
-  return left.source === right.source && formIdentity(left) === formIdentity(right);
+function sameLeadSource(left: Lead, right: Lead): boolean {
+  return left.source === right.source;
 }
 
 function hasConflictingQuotes(group: Lead[], lead: Lead): boolean {
@@ -101,6 +92,22 @@ function latestDate(leads: Lead[], read: (lead: Lead) => string | null | undefin
   return values.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0] ?? null;
 }
 
+function toSubmission(lead: Lead): LeadSubmission {
+  return {
+    id: lead.id,
+    source: lead.source,
+    source_detail: lead.source_detail,
+    form_id: lead.form_id,
+    page_url: lead.page_url,
+    name: lead.name,
+    email: lead.email,
+    phone: lead.phone,
+    message: lead.message,
+    raw_payload: lead.raw_payload,
+    submitted_at: lead.submitted_at,
+  };
+}
+
 function mergeGroup(group: Lead[]): ConsolidatedLead {
   const chronological = [...group].sort(
     (left, right) => new Date(left.submitted_at).getTime() - new Date(right.submitted_at).getTime(),
@@ -138,13 +145,14 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,
     duplicate_ids: group.map((lead) => lead.id),
+    ...(group.length > 1 ? { submissions: chronological.map(toSubmission) } : {}),
   };
 }
 
 /**
- * Combine repeated submissions from the same source form and contact within one
- * day. The strongest workflow row remains canonical while calls, quote state,
- * and contact data are combined for the dashboard and its KPIs.
+ * Combine repeated submissions from the same source and contact into one
+ * customer-level lead. The strongest workflow row remains canonical while
+ * every original submission stays available in the detail panel.
  */
 export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const chronological = [...leads].sort(
@@ -153,13 +161,9 @@ export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const groups: Lead[][] = [];
 
   for (const lead of chronological) {
-    const leadTime = new Date(lead.submitted_at).getTime();
     const group = groups.find((candidate) => {
-      const firstTime = new Date(candidate[0].submitted_at).getTime();
-      if (!Number.isFinite(leadTime) || !Number.isFinite(firstTime)) return false;
-      if (leadTime - firstTime > DUPLICATE_WINDOW_MS) return false;
       if (hasConflictingQuotes(candidate, lead)) return false;
-      return candidate.some((member) => sameLeadContext(member, lead) && sameContact(member, lead));
+      return candidate.some((member) => sameLeadSource(member, lead) && sameContact(member, lead));
     });
 
     if (group) group.push(lead);
