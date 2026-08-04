@@ -99,6 +99,14 @@ npm run check
 npm run build
 ```
 
+For Gmail, add this authorized redirect URI to the Google OAuth web client:
+
+```text
+https://tools.rftransparent.ca/api/oauth/gmail/callback
+```
+
+After deployment, administrators connect or reconnect each company inbox from the Email card on `/health-check`. The callback verifies the selected mailbox, saves the refresh token in protected server-only settings, and runs the first sync automatically.
+
 After deployment, verify login, the home dashboard, automation health, and each enabled external data source.
 
 ## Security notes

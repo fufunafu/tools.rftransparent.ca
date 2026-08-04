@@ -26,6 +26,14 @@ interface EmailFreshnessRow {
   stale: boolean;
 }
 
+interface GmailConnectionData {
+  id: string;
+  inbox: string;
+  label: string;
+  connected: boolean;
+  source: "database" | "environment" | null;
+}
+
 interface AutomationHealthData {
   tableMissing: boolean;
   failing: { slug: string; label: string }[];
@@ -40,6 +48,7 @@ interface InitialData {
   env_vars: CheckResult[];
   data_freshness: FreshnessRow[];
   email_freshness: EmailFreshnessRow[];
+  gmail_connections: GmailConnectionData[];
   automations: AutomationHealthData | null;
   automations_error: string | null;
   checked_at: string;
@@ -128,7 +137,7 @@ function pendingLabel(id: string): string {
 
 function fixHint(check: CheckResult): string | null {
   if (check.name.startsWith("Gmail:") && check.detail?.includes("Token refresh failed")) {
-    return "Re-authorize this inbox and replace its Gmail refresh token in Vercel.";
+    return "Use Reconnect beside this inbox and approve Gmail access again.";
   }
   if (check.name === "Resend" && (check.detail?.includes("401") || check.detail?.includes("verified"))) {
     return "Replace RESEND_API_KEY in Vercel. Reminder emails and cron alerts depend on it.";
@@ -280,7 +289,15 @@ function MetricStat({ label, value, tone = "neutral" }: { label: string; value: 
   );
 }
 
-function ServiceRow({ check }: { check: CheckResult }) {
+function ServiceRow({
+  check,
+  actionHref,
+  actionLabel,
+}: {
+  check: CheckResult;
+  actionHref?: string;
+  actionLabel?: string;
+}) {
   const config = STATUS[check.status];
   return (
     <div className={`flex items-start gap-2 px-3 py-2 ${check.status === "error" ? "bg-rose-50/50" : ""}`}>
@@ -296,6 +313,14 @@ function ServiceRow({ check }: { check: CheckResult }) {
           </p>
         )}
       </div>
+      {actionHref && actionLabel && (
+        <Link
+          href={actionHref}
+          className="inline-flex h-7 shrink-0 items-center rounded-md border border-blue-200 bg-blue-50 px-2 text-[10px] font-semibold text-blue-700 transition hover:border-blue-300 hover:bg-blue-100"
+        >
+          {actionLabel}
+        </Link>
+      )}
       <StatusBadge status={check.status} />
     </div>
   );
@@ -321,7 +346,13 @@ function EnvironmentRows({ checks }: { checks: CheckResult[] }) {
   );
 }
 
-export default function HealthCheckDashboard() {
+export default function HealthCheckDashboard({
+  canManageGmail,
+  gmailNotice,
+}: {
+  canManageGmail: boolean;
+  gmailNotice: { status: "success" | "warning" | "error"; message: string } | null;
+}) {
   const [initData, setInitData] = useState<InitialData | null>(null);
   const [services, setServices] = useState<Map<string, CheckResult>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -523,6 +554,21 @@ export default function HealthCheckDashboard() {
         </div>
       )}
 
+      {gmailNotice && (
+        <div
+          role={gmailNotice.status === "error" ? "alert" : "status"}
+          className={`rounded-xl border px-4 py-3 text-xs font-medium ${
+            gmailNotice.status === "success"
+              ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+              : gmailNotice.status === "warning"
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-rose-200 bg-rose-50 text-rose-700"
+          }`}
+        >
+          {gmailNotice.message}
+        </div>
+      )}
+
       {allDone && issueCount > 0 && (
         <section className="overflow-hidden rounded-xl border border-amber-200 bg-white shadow-sm">
           <div className="flex items-start gap-2 border-b border-amber-100 bg-amber-50 px-4 py-3">
@@ -596,7 +642,29 @@ export default function HealthCheckDashboard() {
                   </div>
 
                   <div className="divide-y divide-slate-100">
-                    {groupServices.map(([id, check]) => <ServiceRow key={id} check={check} />)}
+                    {groupServices.map(([id, check]) => {
+                      const gmailConnection = initData.gmail_connections.find(
+                        (connection) => connection.id === id,
+                      );
+                      return (
+                        <ServiceRow
+                          key={id}
+                          check={check}
+                          actionHref={
+                            canManageGmail && gmailConnection
+                              ? `/api/oauth/gmail?inbox=${encodeURIComponent(gmailConnection.inbox)}`
+                              : undefined
+                          }
+                          actionLabel={
+                            gmailConnection
+                              ? gmailConnection.connected || check.status !== "unconfigured"
+                                ? "Reconnect"
+                                : "Connect"
+                              : undefined
+                          }
+                        />
+                      );
+                    })}
                   </div>
 
                   {group.key === "email" && initData.email_freshness.length > 0 && (

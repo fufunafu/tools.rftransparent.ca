@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { classifyDirection, extractEmail } from "@/lib/gmail";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  classifyDirection,
+  exchangeGmailAuthorizationCode,
+  extractEmail,
+  gmailAuthorizationUrl,
+  getGmailProfileEmail,
+  INBOXES,
+} from "@/lib/gmail";
 import type { GmailMessage } from "@/lib/gmail";
 
 function makeMsg(overrides: Partial<GmailMessage> = {}): GmailMessage {
@@ -59,5 +66,89 @@ describe("extractEmail", () => {
 
   it("handles complex display names", () => {
     expect(extractEmail('"Doe, John" <john@example.com>')).toBe("john@example.com");
+  });
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+});
+
+describe("gmailAuthorizationUrl", () => {
+  it("requests offline access for the selected mailbox and uses the app callback", () => {
+    vi.stubEnv("GMAIL_CLIENT_ID", "client-id");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://tools.example.com/");
+
+    const url = new URL(gmailAuthorizationUrl(INBOXES[1], "state-value"));
+
+    expect(url.origin + url.pathname).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(url.searchParams.get("redirect_uri")).toBe(
+      "https://tools.example.com/api/oauth/gmail/callback",
+    );
+    expect(url.searchParams.get("login_hint")).toBe(INBOXES[1].email);
+    expect(url.searchParams.get("access_type")).toBe("offline");
+    expect(url.searchParams.get("prompt")).toBe("consent");
+    expect(url.searchParams.get("state")).toBe("state-value");
+  });
+});
+
+describe("exchangeGmailAuthorizationCode", () => {
+  it("returns and caches offline credentials from Google", async () => {
+    vi.stubEnv("GMAIL_CLIENT_ID", "client-id");
+    vi.stubEnv("GMAIL_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://tools.example.com");
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: "access-token",
+          refresh_token: "refresh-token",
+          expires_in: 3600,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(exchangeGmailAuthorizationCode("auth-code")).resolves.toEqual({
+      accessToken: "access-token",
+      refreshToken: "refresh-token",
+      expiresIn: 3600,
+    });
+    const body = fetchMock.mock.calls[0][1]?.body as URLSearchParams;
+    expect(body.get("code")).toBe("auth-code");
+    expect(body.get("redirect_uri")).toBe("https://tools.example.com/api/oauth/gmail/callback");
+  });
+
+  it("rejects an exchange that does not grant offline access", async () => {
+    vi.stubEnv("GMAIL_CLIENT_ID", "client-id");
+    vi.stubEnv("GMAIL_CLIENT_SECRET", "client-secret");
+    vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://tools.example.com");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ access_token: "access-token", expires_in: 3600 }), {
+          status: 200,
+        }),
+      ),
+    );
+
+    await expect(exchangeGmailAuthorizationCode("auth-code")).rejects.toThrow(
+      "Google did not return offline access",
+    );
+  });
+});
+
+describe("getGmailProfileEmail", () => {
+  it("returns a normalized mailbox address", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ emailAddress: "Info@Glass-Railing.com" }), { status: 200 }),
+      ),
+    );
+
+    await expect(getGmailProfileEmail("access-token")).resolves.toBe(
+      "info@glass-railing.com",
+    );
   });
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { STORES as SHOPIFY_STORES, shopifyGraphQL } from "@/lib/shopify";
-import { INBOXES } from "@/lib/gmail";
+import { checkGmailInbox, getGmailConnectionStatus, INBOXES } from "@/lib/gmail";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getMetaConnectionStatus } from "@/lib/customer-service/meta-leads";
 import { getAdMetrics } from "@/lib/google-ads";
@@ -266,34 +266,7 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
         const idx = parseInt(name.replace("gmail-", ""), 10);
         const inbox = INBOXES[idx];
         if (!inbox) return null;
-        return () => timedCheck(`Gmail: ${inbox.label}`, async () => {
-          const clientId = process.env.GMAIL_CLIENT_ID;
-          const clientSecret = process.env.GMAIL_CLIENT_SECRET;
-          const refreshToken = process.env[inbox.refreshTokenEnv];
-          if (!clientId || !clientSecret || !refreshToken) throw new Error("Not configured");
-          const res = await fetch("https://oauth2.googleapis.com/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body: new URLSearchParams({
-              grant_type: "refresh_token",
-              client_id: clientId,
-              client_secret: clientSecret,
-              refresh_token: refreshToken,
-            }),
-          });
-          if (!res.ok) throw new Error(`Token refresh failed: ${res.status}`);
-          const { access_token } = await res.json();
-          // Hit the actual Gmail API — a token can refresh fine after losing
-          // the gmail.readonly scope, and then the email sync breaks while
-          // this check stays green.
-          const profileRes = await fetch(
-            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
-            { headers: { Authorization: `Bearer ${access_token}` }, cache: "no-store" }
-          );
-          if (!profileRes.ok) throw new Error(`Gmail API failed: ${profileRes.status}`);
-          const profile = await profileRes.json();
-          return `${profile.emailAddress ?? inbox.email} readable`;
-        });
+        return () => timedCheck(`Gmail: ${inbox.label}`, () => checkGmailInbox(inbox));
       }
       // Shopify stores — probe via a real API call ({ shop { name } })
       // rather than re-running the OAuth exchange. This works for both
@@ -358,7 +331,7 @@ export async function GET(req: NextRequest) {
     envCheck("GA4 Env", ["GOOGLE_GA4_PROPERTY_ID"]),
     envCheck("Resend Env", ["RESEND_API_KEY"]),
     envCheck("Scraper Env", ["SCRAPER_URL", "SCRAPER_API_KEY"]),
-    envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET", "GMAIL_REFRESH_TOKEN_RF", "GMAIL_REFRESH_TOKEN_GRS", "GMAIL_REFRESH_TOKEN_BC"]),
+    envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET"]),
     envCheck("Meta Env", ["META_PAGE_ACCESS_TOKEN", "META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN"]),
     envCheck("WhatsApp Env", [
       "WHATSAPP_ACCESS_TOKEN",
@@ -446,6 +419,13 @@ export async function GET(req: NextRequest) {
   // attention strip uses, shown here with the rest of the system's health.
   const automationResult = await getAutomationHealth();
   const automations: AutomationHealth | null = automationResult.ok ? automationResult.value : null;
+  const gmailConnections = await Promise.all(
+    INBOXES.map(async (inbox, index) => ({
+      id: `gmail-${index}`,
+      label: inbox.label,
+      ...(await getGmailConnectionStatus(inbox)),
+    })),
+  );
 
   // List of service checks the frontend should call individually
   const serviceChecks = [
@@ -469,6 +449,7 @@ export async function GET(req: NextRequest) {
     env_vars: envChecks,
     data_freshness: freshness,
     email_freshness: emailFreshness,
+    gmail_connections: gmailConnections,
     automations,
     automations_error: automationResult.ok ? null : automationResult.error,
     checked_at: new Date().toISOString(),
