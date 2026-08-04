@@ -3,9 +3,10 @@ import { sanitizePhone } from "@/lib/call-metrics";
 export const PERFORMANCE_RANGES = ["today", "7d", "30d", "all"] as const;
 export type PerformanceRange = (typeof PERFORMANCE_RANGES)[number];
 
-export interface PerformanceStore {
+export interface PerformanceLocation {
   id: string;
-  label: string;
+  name: string;
+  shopifyStoreIds: string[];
 }
 
 export interface PerformanceEmployeeRow {
@@ -81,6 +82,7 @@ export interface PerformanceWarehouseRow {
 
 export interface EmployeePerformanceInput {
   employees: PerformanceEmployeeRow[];
+  includedEmployeeIds?: string[];
   quotes: PerformanceQuoteRow[];
   followups: PerformanceFollowupRow[];
   leads: PerformanceLeadRow[];
@@ -104,8 +106,8 @@ export interface EmployeePerformanceRecord {
 
 export interface EmployeePerformancePayload {
   range: PerformanceRange;
-  store: PerformanceStore;
-  stores: PerformanceStore[];
+  location: PerformanceLocation;
+  locations: PerformanceLocation[];
   currentLabel: string;
   previousLabel: string | null;
   generatedAt: string;
@@ -381,12 +383,11 @@ function employeeLocationName(employee: PerformanceEmployeeRow): string | null {
   return location?.name ?? null;
 }
 
-export function employeeBelongsToStore(
+export function employeeBelongsToLocation(
   employee: PerformanceEmployeeRow,
-  storeId: string,
+  locationId: string,
 ): boolean {
-  const location = Array.isArray(employee.locations) ? employee.locations[0] : employee.locations;
-  return location?.shopify_store_ids?.includes(storeId) ?? false;
+  return employee.location_id === locationId;
 }
 
 interface StaffMatcher {
@@ -495,12 +496,20 @@ export function buildEmployeePerformance(
   input: EmployeePerformanceInput,
   range: PerformanceRange,
   now = new Date(),
-  store: PerformanceStore = { id: "all", label: "All stores" },
-  stores: PerformanceStore[] = [store],
+  location: PerformanceLocation = {
+    id: "all",
+    name: "All locations",
+    shopifyStoreIds: [],
+  },
+  locations: PerformanceLocation[] = [location],
 ): EmployeePerformancePayload {
   const window = getPerformanceWindow(range, now);
-  const employees = input.employees.filter((employee) => employee.active);
-  const matcher = createStaffMatcher(employees);
+  const allEmployees = input.employees.filter((employee) => employee.active);
+  const includedEmployeeIds = new Set(
+    input.includedEmployeeIds ?? allEmployees.map((employee) => employee.id),
+  );
+  const employees = allEmployees.filter((employee) => includedEmployeeIds.has(employee.id));
+  const matcher = createStaffMatcher(allEmployees);
   const metricsByEmployee = new Map<string, { current: Record<string, number>; previous: Record<string, number> }>();
   for (const employee of employees) {
     metricsByEmployee.set(employee.id, { current: emptyMetrics(), previous: emptyMetrics() });
@@ -536,13 +545,14 @@ export function buildEmployeePerformance(
     const owner = normalizedText(quote.last_invoice_sender)
       ? matcher.match(quote.last_invoice_sender)
       : matcher.match(quote.created_by_staff);
-    if (owner) quoteOwnerByLeadId.set(quote.id, owner);
+    if (owner && includedEmployeeIds.has(owner)) quoteOwnerByLeadId.set(quote.id, owner);
     const period = periodForDay(dayNumber(quote.shopify_created_at ?? quote.first_synced_at), window);
     if (!period) continue;
     if (!owner) {
       unattributedQuotes++;
       continue;
     }
+    if (!includedEmployeeIds.has(owner)) continue;
     matchedQuotes++;
     const values = metricsByEmployee.get(owner)?.[period];
     if (!values) continue;
@@ -566,6 +576,7 @@ export function buildEmployeePerformance(
       unattributedFollowups++;
       continue;
     }
+    if (!includedEmployeeIds.has(employeeId)) continue;
     matchedFollowups++;
     const values = metricsByEmployee.get(employeeId)?.[period];
     if (values) values.followups_completed += 1;
@@ -656,8 +667,8 @@ export function buildEmployeePerformance(
   const labels = currentAndPreviousLabel(range);
   return {
     range,
-    store,
-    stores,
+    location,
+    locations,
     currentLabel: labels.current,
     previousLabel: labels.previous,
     generatedAt: now.toISOString(),

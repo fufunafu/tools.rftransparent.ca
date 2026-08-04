@@ -21,6 +21,7 @@ function lead(id: string, overrides: Partial<Lead> = {}): Lead {
     quote_amount: null,
     quote_sent_at: null,
     lost_reason: null,
+    not_applicable_reason: null,
     notes: null,
     assigned_to: null,
     created_at: "2026-08-03T12:08:04.000Z",
@@ -239,6 +240,23 @@ describe("consolidateDuplicateLeads", () => {
       quote_number: "#D1",
       call_attempts_count: 2,
       last_called_by: "Extension 206",
+    });
+  });
+
+  it("keeps a combined customer Not Applicable after one submission is closed", () => {
+    const result = consolidateDuplicateLeads([
+      lead("first"),
+      lead("closed", {
+        submitted_at: "2026-08-03T13:00:00.000Z",
+        outcome: "not_applicable",
+        not_applicable_reason: "Forwarded to installer",
+      }),
+    ]);
+
+    expect(result[0]).toMatchObject({
+      id: "closed",
+      outcome: "not_applicable",
+      not_applicable_reason: "Forwarded to installer",
     });
   });
 });

@@ -6,6 +6,7 @@ import {
   searchAssistantKnowledge,
 } from "@/lib/assistant-knowledge";
 import { getSupabase } from "@/lib/supabase";
+import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -44,6 +45,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "No active evaluation cases found" }, { status: 400 });
   }
 
+  const initialPrompt = await getAssistantInitialPrompt();
+
   const invoiceBoxUrl = (
     process.env.INVOICEBOX_URL ?? "https://invoicebox-delta.vercel.app"
   ).replace(/\/+$/, "");
@@ -62,6 +65,7 @@ export async function POST(request: NextRequest) {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          initialPrompt,
           question: item.question,
           expectedAnswer: item.expected_answer,
           employee: {

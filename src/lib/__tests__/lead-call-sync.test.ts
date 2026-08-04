@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   matchPhoneCallsToLeads,
+  recoverLeadPhonesFromLinkedQuotes,
   type PhoneCallForLeadSync,
 } from "@/lib/lead-call-sync";
 
@@ -11,7 +12,9 @@ function lead(
 ) {
   return {
     id,
+    email: "jane@example.com",
     phone,
+    quote_number: null,
     submitted_at: submittedAt,
     call_status: "not_called" as const,
     outcome: "new" as const,
@@ -106,5 +109,61 @@ describe("matchPhoneCallsToLeads", () => {
 
   it("ignores malformed short phone numbers", () => {
     expect(matchPhoneCallsToLeads([lead("lead-1", "555")], [call({ to_number: "555" })])).toEqual([]);
+  });
+});
+
+describe("recoverLeadPhonesFromLinkedQuotes", () => {
+  it("recovers April's missing form phone from her linked quote", () => {
+    const [recovered] = recoverLeadPhonesFromLinkedQuotes(
+      [{
+        ...lead("april", null, "2026-08-03T22:03:53.000Z"),
+        email: "april@myfsdesign.com",
+        quote_number: "#D3042",
+      }],
+      [{
+        draft_name: "#D3042",
+        customer_email: "april@myfsdesign.com",
+        customer_phone: "+18287688673",
+      }],
+    );
+
+    expect(recovered.phone).toBe("+18287688673");
+  });
+
+  it("requires matching email when a quote number is reused", () => {
+    const [recovered] = recoverLeadPhonesFromLinkedQuotes(
+      [{
+        ...lead("april", null),
+        email: "april@myfsdesign.com",
+        quote_number: "#D3042",
+      }],
+      [
+        {
+          draft_name: "#D3042",
+          customer_email: "someone@example.com",
+          customer_phone: "+15145559999",
+        },
+        {
+          draft_name: "#D3042",
+          customer_email: " APRIL@MYFSDESIGN.COM ",
+          customer_phone: "+18287688673",
+        },
+      ],
+    );
+
+    expect(recovered.phone).toBe("+18287688673");
+  });
+
+  it("keeps an existing valid lead phone", () => {
+    const [recovered] = recoverLeadPhonesFromLinkedQuotes(
+      [{ ...lead("lead-1", "5145551234"), quote_number: "#D100" }],
+      [{
+        draft_name: "#D100",
+        customer_email: "jane@example.com",
+        customer_phone: "4165559999",
+      }],
+    );
+
+    expect(recovered.phone).toBe("5145551234");
   });
 });

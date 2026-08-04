@@ -3,12 +3,20 @@ import { getSupabase } from "@/lib/supabase";
 
 type LeadCallStatus = "not_called" | "no_answer" | "called";
 
-interface LeadForCallSync {
+export interface LeadForCallSync {
   id: string;
+  email: string | null;
   phone: string | null;
+  quote_number: string | null;
   submitted_at: string;
   call_status: LeadCallStatus;
-  outcome: "new" | "contacted" | "quoted" | "won" | "lost";
+  outcome: "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
+}
+
+export interface DraftContactForCallSync {
+  draft_name: string;
+  customer_email: string | null;
+  customer_phone: string | null;
 }
 
 export interface PhoneCallForLeadSync extends CallRecord {
@@ -36,6 +44,7 @@ export interface LeadCallSyncSummary {
   noAnswer: number;
   attemptsSynced: number;
   statusesUpdated: number;
+  phonesRecovered: number;
 }
 
 const PAGE_SIZE = 1000;
@@ -44,6 +53,39 @@ const WRITE_CHUNK_SIZE = 200;
 function matchablePhone(raw: string | null): string | null {
   const normalized = sanitizePhone(raw);
   return normalized && normalized.length >= 10 ? normalized : null;
+}
+
+function normalizedEmail(raw: string | null): string | null {
+  const email = raw?.replace(/\s+/g, "").toLowerCase() ?? "";
+  return email.includes("@") ? email : null;
+}
+
+/**
+ * Recover a missing lead phone from its linked Shopify draft. Quote numbers can
+ * repeat across stores and years, so the customer email must also match.
+ */
+export function recoverLeadPhonesFromLinkedQuotes(
+  leads: LeadForCallSync[],
+  drafts: DraftContactForCallSync[],
+): LeadForCallSync[] {
+  const draftsByNumber = new Map<string, DraftContactForCallSync[]>();
+  for (const draft of drafts) {
+    if (!matchablePhone(draft.customer_phone)) continue;
+    draftsByNumber.set(draft.draft_name, [
+      ...(draftsByNumber.get(draft.draft_name) ?? []),
+      draft,
+    ]);
+  }
+
+  return leads.map((lead) => {
+    if (matchablePhone(lead.phone) || !lead.quote_number) return lead;
+    const email = normalizedEmail(lead.email);
+    if (!email) return lead;
+    const draft = (draftsByNumber.get(lead.quote_number) ?? []).find(
+      (candidate) => normalizedEmail(candidate.customer_email) === email,
+    );
+    return draft?.customer_phone ? { ...lead, phone: draft.customer_phone } : lead;
+  });
 }
 
 function callStatus(call: PhoneCallForLeadSync): Exclude<LeadCallStatus, "not_called"> | null {
@@ -196,7 +238,7 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
   const leads = await fetchAllRows<LeadForCallSync>((from, to) =>
     supabase
       .from("leads")
-      .select("id,phone,submitted_at,call_status,outcome")
+      .select("id,email,phone,quote_number,submitted_at,call_status,outcome")
       .order("submitted_at", { ascending: true })
       .range(from, to),
   );
@@ -210,10 +252,35 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
       noAnswer: 0,
       attemptsSynced: 0,
       statusesUpdated: 0,
+      phonesRecovered: 0,
     };
   }
 
-  const earliestLead = leads[0].submitted_at;
+  const draftContacts = await fetchAllRows<DraftContactForCallSync>((from, to) =>
+    supabase
+      .from("followup_leads")
+      .select("draft_name,customer_email,customer_phone")
+      .not("customer_phone", "is", null)
+      .order("draft_name", { ascending: true })
+      .range(from, to),
+  );
+  const leadsWithRecoveredPhones = recoverLeadPhonesFromLinkedQuotes(leads, draftContacts);
+  const recoveredPhones = leadsWithRecoveredPhones.filter((lead, index) => (
+    lead.phone !== leads[index].phone
+  ));
+  for (let offset = 0; offset < recoveredPhones.length; offset += WRITE_CHUNK_SIZE) {
+    const batch = recoveredPhones.slice(offset, offset + WRITE_CHUNK_SIZE);
+    const results = await Promise.all(batch.map((lead) =>
+      supabase
+        .from("leads")
+        .update({ phone: lead.phone })
+        .eq("id", lead.id),
+    ));
+    const failed = results.find((result) => result.error);
+    if (failed?.error) throw new Error(failed.error.message);
+  }
+
+  const earliestLead = leadsWithRecoveredPhones[0].submitted_at;
   const calls = await fetchAllRows<PhoneCallForLeadSync>((from, to) =>
     supabase
       .from("call_records")
@@ -223,8 +290,8 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
       .range(from, to),
   );
   const dedupedCalls = deduplicateRecords(calls);
-  const matches = matchPhoneCallsToLeads(leads, dedupedCalls);
-  const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+  const matches = matchPhoneCallsToLeads(leadsWithRecoveredPhones, dedupedCalls);
+  const leadById = new Map(leadsWithRecoveredPhones.map((lead) => [lead.id, lead]));
 
   const attempts = matches.flatMap((match) => match.attempts);
   for (let offset = 0; offset < attempts.length; offset += WRITE_CHUNK_SIZE) {
@@ -258,5 +325,6 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
     noAnswer: matches.filter((match) => match.status === "no_answer").length,
     attemptsSynced: attempts.length,
     statusesUpdated: calledStatusUpdates.length + noAnswerIds.length,
+    phonesRecovered: recoveredPhones.length,
   };
 }

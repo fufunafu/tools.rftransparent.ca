@@ -58,6 +58,10 @@ function employeeInitials(name: string): string {
   return (words[0]?.slice(0, 2) || "?").toUpperCase();
 }
 
+function locationDisplayName(name: string): string {
+  return name.includes(" - ") ? name.split(" - ").slice(1).join(" - ") : name;
+}
+
 function metricDefinition(key: string): MetricDefinition {
   return EMPLOYEE_PERFORMANCE_METRICS.find((metric) => metric.key === key)!;
 }
@@ -178,7 +182,7 @@ function EmployeeDetailPanel({ record, payload }: {
 
 export default function EmployeePerformanceDashboard() {
   const [range, setRange] = useState<PerformanceRange>("7d");
-  const [storeId, setStoreId] = useState("store1");
+  const [locationId, setLocationId] = useState("");
   const [payload, setPayload] = useState<EmployeePerformancePayload | null>(null);
   const [department, setDepartment] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -189,10 +193,9 @@ export default function EmployeePerformanceDashboard() {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(
-        `/api/employees/performance?range=${range}&store=${storeId}`,
-        { signal },
-      );
+      const query = new URLSearchParams({ range });
+      if (locationId) query.set("location", locationId);
+      const response = await fetch(`/api/employees/performance?${query}`, { signal });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Employee performance could not be loaded");
       setPayload(data);
@@ -202,7 +205,7 @@ export default function EmployeePerformanceDashboard() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [range, storeId]);
+  }, [locationId, range]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -249,6 +252,7 @@ export default function EmployeePerformanceDashboard() {
   }, [employees, selectedId]);
 
   const selected = employees.find((record) => record.employee.id === selectedId) ?? null;
+  const activeLocationId = locationId || payload?.location.id || "";
   const featured = (FEATURED_METRICS[department] ?? []).map(metricDefinition);
   const totals = useMemo(() => {
     const sum = (key: string) => employees.reduce((total, record) => total + (record.metrics[key] ?? 0), 0);
@@ -283,25 +287,25 @@ export default function EmployeePerformanceDashboard() {
             </div>
             <h2 className="mt-2 text-lg font-semibold text-slate-950">Team performance</h2>
             <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-500">
-              Compare employee activity using attributable quote, follow-up, phone, and warehouse report data for one store at a time.
+              Compare employee activity using attributable quote, follow-up, phone, and warehouse report data for one physical location at a time.
             </p>
           </div>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
             <div>
-              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Store</p>
-              <div className="flex max-w-[calc(100vw-4rem)] overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Performance store">
-                {payload?.stores.map((store) => (
+              <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Store location</p>
+              <div className="flex max-w-[calc(100vw-4rem)] overflow-x-auto rounded-xl border border-slate-200 bg-slate-50 p-1" aria-label="Performance location">
+                {payload?.locations.map((location) => (
                   <button
-                    key={store.id}
+                    key={location.id}
                     type="button"
-                    onClick={() => setStoreId(store.id)}
+                    onClick={() => setLocationId(location.id)}
                     className={`min-h-9 whitespace-nowrap rounded-lg px-3 text-xs font-semibold transition ${
-                      storeId === store.id
+                      activeLocationId === location.id
                         ? "bg-slate-950 text-white shadow-sm"
                         : "text-slate-500 hover:text-slate-800"
                     }`}
                   >
-                    {store.label}
+                    {locationDisplayName(location.name)}
                   </button>
                 ))}
               </div>
@@ -366,7 +370,7 @@ export default function EmployeePerformanceDashboard() {
         <>
           <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-xs text-blue-700">
             <span className="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true" />
-            Showing performance for <strong>{payload.store.label}</strong> only.
+            Showing employees and activity for the <strong>{locationDisplayName(payload.location.name)}</strong> location only.
           </div>
           <div className={`grid grid-cols-2 gap-3 lg:grid-cols-4 ${loading ? "opacity-60" : ""}`} aria-busy={loading}>
             {totals.map((card) => <SummaryCard key={card.label} {...card} />)}
@@ -477,7 +481,7 @@ export default function EmployeePerformanceDashboard() {
             </div>
             <p className="mt-3 border-t border-slate-200 pt-3 text-[10px] text-slate-400">
               Updated {new Date(payload.generatedAt).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}. Results are read-only and visible only to the owner and managers.
-              {` Store scope: ${payload.store.label}.`}
+              {` Location scope: ${locationDisplayName(payload.location.name)}.`}
             </p>
           </section>
         </>

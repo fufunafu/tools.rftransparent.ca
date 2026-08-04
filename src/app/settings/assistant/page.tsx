@@ -6,6 +6,7 @@ import {
   listAssistantEvaluationCases,
   listAssistantKnowledge,
 } from "@/lib/assistant-knowledge";
+import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
 import { getSupabase } from "@/lib/supabase";
 
 export const metadata: Metadata = {
@@ -18,7 +19,8 @@ export default async function AssistantKnowledgePage() {
   if (!user) redirect("/login");
   if (!(await isAdminUser())) redirect("/access-denied");
 
-  const [knowledge, evaluations, employeeResult, locationResult] = await Promise.all([
+  const [initialPrompt, knowledge, evaluations, employeeResult, locationResult] = await Promise.all([
+    getAssistantInitialPrompt(),
     listAssistantKnowledge(),
     listAssistantEvaluationCases(),
     getSupabase().from("employees").select("department").not("department", "is", null),
@@ -38,6 +40,7 @@ export default async function AssistantKnowledgePage() {
 
   return (
     <AssistantKnowledgeManager
+      initialPrompt={initialPrompt}
       initialKnowledge={knowledge}
       initialEvaluations={evaluations}
       departments={departments}

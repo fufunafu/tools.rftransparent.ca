@@ -53,6 +53,7 @@ function callbackRequest(state = "expected-state") {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubEnv("GMAIL_CLIENT_ID", "client-id");
+  vi.stubEnv("GMAIL_CLIENT_SECRET", "client-secret");
   vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://tools.rftransparent.ca");
   mocks.getAuthenticatedUser.mockResolvedValue({ email: "admin@example.com" });
   mocks.isAdminEmail.mockResolvedValue(true);
@@ -84,6 +85,24 @@ describe("Gmail OAuth routes", () => {
     expect(cookies).toContain(GMAIL_OAUTH_STATE_COOKIE);
     expect(cookies).toContain(GMAIL_OAUTH_INBOX_COOKIE);
     expect(cookies.toLowerCase()).toContain("httponly");
+  });
+
+  it("returns to health check when the OAuth app is incomplete", async () => {
+    vi.stubEnv("GMAIL_CLIENT_SECRET", "");
+
+    const response = await startOAuth(
+      new NextRequest(
+        `https://tools.rftransparent.ca/api/oauth/gmail?inbox=${encodeURIComponent(inbox.email)}`,
+      ),
+    );
+
+    const location = response.headers.get("location") ?? "";
+    expect(location).toContain("/health-check?");
+    expect(location).toContain("gmail_status=error");
+    expect(new URL(location).searchParams.get("gmail_message")).toContain(
+      "Gmail OAuth is not configured",
+    );
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("rejects a callback whose state does not match", async () => {

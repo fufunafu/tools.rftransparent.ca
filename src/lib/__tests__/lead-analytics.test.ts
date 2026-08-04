@@ -19,6 +19,7 @@ describe("calculateLeadFunnel", () => {
 
     expect(result).toEqual({
       total: 4,
+      callEligible: 4,
       attempted: 2,
       quoted: 2,
       won: 1,
@@ -43,12 +44,55 @@ describe("calculateLeadFunnel", () => {
   it("returns zero rates for an empty lead set", () => {
     expect(calculateLeadFunnel([])).toEqual({
       total: 0,
+      callEligible: 0,
       attempted: 0,
       quoted: 0,
       won: 0,
       callRate: 0,
       quoteRate: 0,
       conversionRate: 0,
+    });
+  });
+
+  it("excludes Not Applicable leads from funnel denominators", () => {
+    const result = calculateLeadFunnel([
+      { call_status: "called", quote_number: "#D1", outcome: "won" },
+      { call_status: "not_called", quote_number: null, outcome: "not_applicable" },
+    ]);
+
+    expect(result).toMatchObject({
+      total: 1,
+      attempted: 1,
+      quoted: 1,
+      won: 1,
+      callRate: 100,
+      quoteRate: 100,
+      conversionRate: 100,
+    });
+  });
+
+  it("does not penalize call rate when an uncalled lead has no phone", () => {
+    const result = calculateLeadFunnel([
+      {
+        call_status: "called",
+        phone: "5145551234",
+        quote_number: "#D1",
+        outcome: "quoted",
+      },
+      {
+        call_status: "not_called",
+        phone: null,
+        quote_number: null,
+        outcome: "new",
+      },
+    ]);
+
+    expect(result).toMatchObject({
+      total: 2,
+      callEligible: 1,
+      attempted: 1,
+      callRate: 100,
+      quoteRate: 50,
     });
   });
 });
@@ -86,6 +130,7 @@ describe("calculateLeadFunnelBySource", () => {
 
     expect(result.meta).toEqual({
       total: 0,
+      callEligible: 0,
       attempted: 0,
       quoted: 0,
       won: 0,

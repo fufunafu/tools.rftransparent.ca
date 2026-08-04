@@ -5,6 +5,7 @@ import {
   normalizeWhatsAppPhone,
 } from "@/lib/whatsapp-employee-context";
 import { searchAssistantKnowledge } from "@/lib/assistant-knowledge";
+import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A valid phone number is required" }, { status: 400 });
   }
   const message = typeof payload?.message === "string" ? payload.message.trim().slice(0, 2000) : "";
+  const initialPrompt = await getAssistantInitialPrompt();
 
   const supabase = getSupabase();
   const { data: employees, error: employeeError } = await supabase
@@ -48,6 +50,7 @@ export async function POST(request: Request) {
   );
   if (!employee) {
     return NextResponse.json({
+      initialPrompt,
       employee: null,
       survey: null,
       knowledge: await safeKnowledgeSearch(message, null, null),
@@ -72,6 +75,7 @@ export async function POST(request: Request) {
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://tools.rftransparent.ca").replace(/\/+$/, "");
 
   return NextResponse.json({
+    initialPrompt,
     employee: {
       id: employee.id,
       name: employee.name,

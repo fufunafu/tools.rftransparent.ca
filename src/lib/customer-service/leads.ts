@@ -5,7 +5,7 @@ import { sendNewLeadNotification } from "@/lib/lead-notifications";
 
 export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
-export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost";
+export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
 export interface LeadCallAttempt {
   id: string;
@@ -48,6 +48,7 @@ export interface Lead {
   quote_amount: string | number | null;
   quote_sent_at: string | null;
   lost_reason: string | null;
+  not_applicable_reason: string | null;
   notes: string | null;
   assigned_to: string | null;
   created_at: string;
@@ -68,6 +69,7 @@ export const OUTCOME_LABELS: Record<Outcome, string> = {
   quoted: "Quoted",
   won: "Won",
   lost: "Lost",
+  not_applicable: "Not Applicable",
 };
 
 export const CALL_STATUS_LABELS: Record<CallStatus, string> = {

@@ -11,6 +11,16 @@ import {
 
 export const dynamic = "force-dynamic";
 
+function configurationError(request: NextRequest): NextResponse {
+  const url = new URL("/health-check", request.url);
+  url.searchParams.set("gmail_status", "error");
+  url.searchParams.set(
+    "gmail_message",
+    "Gmail OAuth is not configured. Review the Gmail environment settings and try again.",
+  );
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user?.email) {
@@ -25,9 +35,22 @@ export async function GET(request: NextRequest) {
   if (!inbox) {
     return NextResponse.json({ error: "Unknown Gmail inbox" }, { status: 400 });
   }
+  if (
+    !process.env.GMAIL_CLIENT_ID
+    || !process.env.GMAIL_CLIENT_SECRET
+    || !process.env.NEXT_PUBLIC_APP_URL
+  ) {
+    return configurationError(request);
+  }
 
   const state = randomBytes(24).toString("hex");
-  const response = NextResponse.redirect(gmailAuthorizationUrl(inbox, state));
+  let authorizationUrl: string;
+  try {
+    authorizationUrl = gmailAuthorizationUrl(inbox, state);
+  } catch {
+    return configurationError(request);
+  }
+  const response = NextResponse.redirect(authorizationUrl);
   const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",

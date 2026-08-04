@@ -136,7 +136,10 @@ function pendingLabel(id: string): string {
 }
 
 function fixHint(check: CheckResult): string | null {
-  if (check.name.startsWith("Gmail:") && check.detail?.includes("Token refresh failed")) {
+  if (
+    check.name.startsWith("Gmail:")
+    && check.detail?.toLowerCase().includes("token refresh failed")
+  ) {
     return "Use Reconnect beside this inbox and approve Gmail access again.";
   }
   if (check.name === "Resend" && (check.detail?.includes("401") || check.detail?.includes("verified"))) {
@@ -657,7 +660,7 @@ export default function HealthCheckDashboard({
                           }
                           actionLabel={
                             gmailConnection
-                              ? gmailConnection.connected || check.status !== "unconfigured"
+                              ? gmailConnection.connected
                                 ? "Reconnect"
                                 : "Connect"
                               : undefined

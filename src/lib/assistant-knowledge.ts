@@ -13,6 +13,9 @@ export const ASSISTANT_CATEGORIES = [
   "other",
 ] as const;
 
+export const ASSISTANT_INITIAL_PROMPT_MAX_LENGTH = 12000;
+export const ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH = 30000;
+
 export type AssistantCategory = (typeof ASSISTANT_CATEGORIES)[number];
 
 export interface AssistantKnowledgeEntry {

@@ -32,6 +32,7 @@ function workflowScore(lead: Lead): number {
     contacted: 100,
     quoted: 300,
     lost: 400,
+    not_applicable: 450,
     won: 500,
   }[lead.outcome];
   const callScore = lead.call_status === "called" ? 40 : lead.call_status === "no_answer" ? 20 : 0;
@@ -64,7 +65,8 @@ function bestOutcome(leads: Lead[]): Lead["outcome"] {
     contacted: 1,
     quoted: 2,
     lost: 3,
-    won: 4,
+    not_applicable: 4,
+    won: 5,
   };
   return [...leads].sort((left, right) => rank[right.outcome] - rank[left.outcome])[0].outcome;
 }

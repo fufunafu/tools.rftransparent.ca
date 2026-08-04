@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import {
   getEmployeePerformance,
-  getPerformanceStoreOptions,
+  getPerformanceLocationOptions,
 } from "@/lib/employee-performance-data";
 import {
   PERFORMANCE_RANGES,
@@ -26,20 +26,19 @@ export async function GET(request: NextRequest) {
 
   const value = request.nextUrl.searchParams.get("range");
   const range: PerformanceRange = isPerformanceRange(value) ? value : "7d";
-  const stores = getPerformanceStoreOptions();
-  if (stores.length === 0) {
-    return NextResponse.json({ error: "No Shopify stores are configured" }, { status: 500 });
-  }
-  const requestedStoreId = request.nextUrl.searchParams.get("store");
-  const store = requestedStoreId
-    ? stores.find((candidate) => candidate.id === requestedStoreId)
-    : stores[0];
-  if (!store) {
-    return NextResponse.json({ error: "Unknown store" }, { status: 400 });
-  }
-
   try {
-    const performance = await getEmployeePerformance(range, store.id);
+    const locations = await getPerformanceLocationOptions();
+    if (locations.length === 0) {
+      return NextResponse.json({ error: "No employee locations are configured" }, { status: 500 });
+    }
+    const requestedLocationId = request.nextUrl.searchParams.get("location");
+    const location = requestedLocationId
+      ? locations.find((candidate) => candidate.id === requestedLocationId)
+      : locations[0];
+    if (!location) {
+      return NextResponse.json({ error: "Unknown location" }, { status: 400 });
+    }
+    const performance = await getEmployeePerformance(range, location.id, locations);
     return NextResponse.json(performance);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Performance data could not be loaded";

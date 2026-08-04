@@ -1,7 +1,7 @@
 import { sanitizePhone } from "@/lib/call-metrics";
 import { getSupabase } from "@/lib/supabase";
 
-type LeadOutcome = "new" | "contacted" | "quoted" | "won" | "lost";
+type LeadOutcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
 export interface LeadForQuoteSync {
   id: string;
@@ -139,7 +139,8 @@ export function matchDraftOrdersToLeads(
       matchedLeadIds.has(lead.id) ||
       lead.quote_number ||
       lead.outcome === "won" ||
-      lead.outcome === "lost"
+      lead.outcome === "lost" ||
+      lead.outcome === "not_applicable"
     ) continue;
 
     matchedLeadIds.add(lead.id);
@@ -254,7 +255,7 @@ export async function syncLeadQuotesFromFollowups(
         })
         .eq("id", match.leadId)
         .is("quote_number", null)
-        .not("outcome", "in", "(won,lost)")
+        .not("outcome", "in", "(won,lost,not_applicable)")
         .select("id");
       return { match, updated: data?.length ?? 0, error };
     }));

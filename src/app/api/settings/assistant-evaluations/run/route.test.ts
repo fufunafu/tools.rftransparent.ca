@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   isAdminUser: vi.fn(),
   listCases: vi.fn(),
   searchKnowledge: vi.fn(),
+  getInitialPrompt: vi.fn(),
   insertRun: vi.fn(),
 }));
 
@@ -16,6 +17,9 @@ vi.mock("@/lib/admin-auth", () => ({
 vi.mock("@/lib/assistant-knowledge", () => ({
   listAssistantEvaluationCases: mocks.listCases,
   searchAssistantKnowledge: mocks.searchKnowledge,
+}));
+vi.mock("@/lib/assistant-prompt", () => ({
+  getAssistantInitialPrompt: mocks.getInitialPrompt,
 }));
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
@@ -55,6 +59,7 @@ beforeEach(() => {
   mocks.isAdminUser.mockResolvedValue(true);
   mocks.listCases.mockResolvedValue([evaluationCase]);
   mocks.searchKnowledge.mockResolvedValue([{ id: "knowledge-1", title: "Invoices" }]);
+  mocks.getInitialPrompt.mockResolvedValue("Use only approved company knowledge.");
   mocks.insertRun.mockResolvedValue({ error: null });
 });
 
@@ -95,6 +100,10 @@ describe("assistant evaluation runner", () => {
       "https://invoicebox.example.com/api/internal/assistant/evaluate",
       expect.objectContaining({ method: "POST", cache: "no-store" }),
     );
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      initialPrompt: "Use only approved company knowledge.",
+      question: evaluationCase.question,
+    });
     expect(mocks.insertRun).toHaveBeenCalledWith(expect.objectContaining({
       case_id: evaluationCase.id,
       passed: true,

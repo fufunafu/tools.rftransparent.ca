@@ -11,6 +11,7 @@ import {
   type Outcome,
 } from "@/lib/customer-service/leads";
 import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
+import { isCallablePhone } from "@/lib/call-metrics";
 import {
   getMetaConnectionStatus,
   metaErrorMessage,
@@ -21,7 +22,14 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const ALLOWED_CALL_STATUSES: CallStatus[] = ["not_called", "no_answer", "called"];
-const ALLOWED_OUTCOMES: Outcome[] = ["new", "contacted", "quoted", "won", "lost"];
+const ALLOWED_OUTCOMES: Outcome[] = [
+  "new",
+  "contacted",
+  "quoted",
+  "won",
+  "lost",
+  "not_applicable",
+];
 
 // PostgREST caps every response at the project's max-rows — 1000 here — and
 // does it silently: a plain select just returns fewer rows than exist. The
@@ -252,7 +260,19 @@ export async function PATCH(req: NextRequest) {
   if (rest.quote_number === null || typeof rest.quote_number === "string") update.quote_number = rest.quote_number;
   if (rest.quote_amount === null || typeof rest.quote_amount === "number") update.quote_amount = rest.quote_amount;
   if (rest.quote_sent_at === null || typeof rest.quote_sent_at === "string") update.quote_sent_at = rest.quote_sent_at;
+  if (rest.phone === null) {
+    update.phone = null;
+  } else if (typeof rest.phone === "string") {
+    const phone = rest.phone.trim();
+    if (!isCallablePhone(phone)) {
+      return NextResponse.json({ error: "Enter a valid phone number" }, { status: 400 });
+    }
+    update.phone = phone;
+  }
   if (rest.lost_reason === null || typeof rest.lost_reason === "string") update.lost_reason = rest.lost_reason;
+  if (rest.not_applicable_reason === null || typeof rest.not_applicable_reason === "string") {
+    update.not_applicable_reason = rest.not_applicable_reason;
+  }
   if (rest.notes === null || typeof rest.notes === "string") update.notes = rest.notes;
   if (rest.assigned_to === null || typeof rest.assigned_to === "string") update.assigned_to = rest.assigned_to;
 

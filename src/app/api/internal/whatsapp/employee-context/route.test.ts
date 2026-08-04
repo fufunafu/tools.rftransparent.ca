@@ -2,12 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getSupabaseMock = vi.fn();
 const searchAssistantKnowledgeMock = vi.fn();
+const getAssistantInitialPromptMock = vi.fn();
 
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => getSupabaseMock(),
 }));
 vi.mock("@/lib/assistant-knowledge", () => ({
   searchAssistantKnowledge: (...args: unknown[]) => searchAssistantKnowledgeMock(...args),
+}));
+vi.mock("@/lib/assistant-prompt", () => ({
+  getAssistantInitialPrompt: () => getAssistantInitialPromptMock(),
 }));
 
 import { POST } from "@/app/api/internal/whatsapp/employee-context/route";
@@ -63,6 +67,7 @@ beforeEach(() => {
   employeeResultMock.mockResolvedValue({ data: [], error: null });
   surveyResultMock.mockResolvedValue({ data: null, error: null });
   searchAssistantKnowledgeMock.mockResolvedValue([]);
+  getAssistantInitialPromptMock.mockResolvedValue("Custom initial prompt");
 });
 
 describe("POST /api/internal/whatsapp/employee-context", () => {
@@ -99,7 +104,12 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
     const response = await POST(createRequest({ phone: "+1 416 555 0199" }));
 
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ employee: null, survey: null, knowledge: [] });
+    expect(await response.json()).toEqual({
+      initialPrompt: "Custom initial prompt",
+      employee: null,
+      survey: null,
+      knowledge: [],
+    });
     expect(surveyResultMock).not.toHaveBeenCalled();
   });
 
@@ -147,6 +157,7 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      initialPrompt: "Custom initial prompt",
       employee: {
         id: "employee-1",
         name: "Alex",
@@ -211,6 +222,7 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
       link: null,
     });
     expect(body.knowledge).toEqual([]);
+    expect(body.initialPrompt).toBe("Custom initial prompt");
   });
 
   it("returns a controlled error when employee lookup fails", async () => {

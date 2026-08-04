@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEmployeePerformance,
-  employeeBelongsToStore,
+  employeeBelongsToLocation,
   getPerformanceWindow,
   performanceQueryStart,
   type EmployeePerformanceInput,
@@ -84,30 +84,48 @@ describe("employee performance ranges", () => {
   });
 });
 
-describe("employee performance stores", () => {
-  it("matches employees through their location store mapping", () => {
+describe("employee performance locations", () => {
+  it("matches employees through their assigned physical location", () => {
     const torontoEmployee = employee("toronto", "Toronto Employee", "customer_service", {
+      location_id: "toronto-location",
       locations: {
         name: "RF/GRS - Toronto",
         shopify_store_ids: ["store1", "store2"],
       },
     });
 
-    expect(employeeBelongsToStore(torontoEmployee, "store1")).toBe(true);
-    expect(employeeBelongsToStore(torontoEmployee, "store2")).toBe(true);
-    expect(employeeBelongsToStore(torontoEmployee, "store3")).toBe(false);
+    expect(employeeBelongsToLocation(torontoEmployee, "toronto-location")).toBe(true);
+    expect(employeeBelongsToLocation(torontoEmployee, "laval-location")).toBe(false);
   });
 
-  it("includes the selected store in the payload", () => {
-    const store = { id: "store3", label: "BC Transparent" };
-    const result = buildEmployeePerformance(input(), "7d", NOW, store, [store]);
+  it("includes the selected physical location in the payload", () => {
+    const location = {
+      id: "laval-location",
+      name: "BC - Laval",
+      shopifyStoreIds: ["store3"],
+    };
+    const result = buildEmployeePerformance(input(), "7d", NOW, location, [location]);
 
-    expect(result.store).toEqual(store);
-    expect(result.stores).toEqual([store]);
+    expect(result.location).toEqual(location);
+    expect(result.locations).toEqual([location]);
   });
 });
 
 describe("buildEmployeePerformance", () => {
+  it("excludes employees at other physical locations without marking their activity unattributed", () => {
+    const result = buildEmployeePerformance(input({
+      includedEmployeeIds: ["shanaz"],
+      quotes: [
+        quote("laval"),
+        quote("ste-julie", { last_invoice_sender: "Benjamin Dundas" }),
+      ],
+    }), "today", NOW);
+
+    expect(result.employees.map((row) => row.employee.id)).toEqual(["shanaz"]);
+    expect(result.employees[0].metrics.quotes_sent).toBe(1);
+    expect(result.dataQuality).toMatchObject({ matchedQuotes: 1, unattributedQuotes: 0 });
+  });
+
   it("attributes quotes and follow-ups, then measures recorded calls before quotes", () => {
     const result = buildEmployeePerformance(input({
       quotes: [

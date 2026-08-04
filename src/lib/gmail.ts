@@ -17,7 +17,7 @@ export interface GmailInbox {
   email: string;
   storeId: string;
   label: string;
-  refreshTokenEnv: string; // env var name holding the refresh token
+  refreshTokenEnv: string; // Legacy environment fallback for the refresh token.
 }
 
 export const INBOXES: GmailInbox[] = [
@@ -225,8 +225,7 @@ async function getRefreshToken(inbox: GmailInbox): Promise<string> {
     const connection = await getStoredGmailConnection(inbox);
     if (connection) return connection.refresh_token;
   } catch {
-    // A deployment can briefly precede its migration. The existing token is
-    // retained as a safe fallback so scheduled syncs keep working.
+    // Retain the environment fallback if protected settings are unavailable.
   }
 
   const fallback = process.env[inbox.refreshTokenEnv];

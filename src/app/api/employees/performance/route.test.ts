@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => ({
   getAuthenticatedUser: vi.fn(),
   isManagementUser: vi.fn(),
   getEmployeePerformance: vi.fn(),
-  getPerformanceStoreOptions: vi.fn(),
+  getPerformanceLocationOptions: vi.fn(),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
@@ -15,14 +15,19 @@ vi.mock("@/lib/admin-auth", () => ({
 
 vi.mock("@/lib/employee-performance-data", () => ({
   getEmployeePerformance: mocks.getEmployeePerformance,
-  getPerformanceStoreOptions: mocks.getPerformanceStoreOptions,
+  getPerformanceLocationOptions: mocks.getPerformanceLocationOptions,
 }));
 
 import { GET } from "@/app/api/employees/performance/route";
 
-function request(range = "7d", store = "store1") {
+const LOCATIONS = [
+  { id: "laval", name: "BC - Laval", shopifyStoreIds: ["store3"] },
+  { id: "toronto", name: "RF/GRS - Toronto", shopifyStoreIds: ["store1", "store2"] },
+];
+
+function request(range = "7d", location = "laval") {
   return new NextRequest(
-    `https://tools.rftransparent.ca/api/employees/performance?range=${range}&store=${store}`,
+    `https://tools.rftransparent.ca/api/employees/performance?range=${range}&location=${location}`,
   );
 }
 
@@ -30,10 +35,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getAuthenticatedUser.mockResolvedValue({ email: "manager@example.com" });
   mocks.isManagementUser.mockResolvedValue(true);
-  mocks.getPerformanceStoreOptions.mockReturnValue([
-    { id: "store1", label: "RF Transparent" },
-    { id: "store3", label: "BC Transparent" },
-  ]);
+  mocks.getPerformanceLocationOptions.mockResolvedValue(LOCATIONS);
   mocks.getEmployeePerformance.mockResolvedValue({ range: "7d", employees: [] });
 });
 
@@ -61,22 +63,22 @@ describe("GET /api/employees/performance", () => {
     const response = await GET(request("30d"));
 
     expect(response.status).toBe(200);
-    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("30d", "store1");
+    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("30d", "laval", LOCATIONS);
   });
 
   it("falls back to the seven-day range for unknown values", async () => {
     await GET(request("quarter"));
 
-    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("7d", "store1");
+    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("7d", "laval", LOCATIONS);
   });
 
-  it("scopes performance to the requested store", async () => {
-    await GET(request("7d", "store3"));
+  it("scopes performance to the requested location", async () => {
+    await GET(request("7d", "toronto"));
 
-    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("7d", "store3");
+    expect(mocks.getEmployeePerformance).toHaveBeenCalledWith("7d", "toronto", LOCATIONS);
   });
 
-  it("rejects an unknown store", async () => {
+  it("rejects an unknown location", async () => {
     const response = await GET(request("7d", "unknown"));
 
     expect(response.status).toBe(400);

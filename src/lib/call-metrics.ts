@@ -27,6 +27,11 @@ export function sanitizePhone(raw: string | null): string | null {
   return digits;
 }
 
+export function isCallablePhone(raw: string | null): boolean {
+  const phone = sanitizePhone(raw);
+  return Boolean(phone && phone.length >= 10);
+}
+
 export function pctChange(cur: number, prev: number): number | null {
   return prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
 }

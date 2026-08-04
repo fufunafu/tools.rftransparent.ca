@@ -118,7 +118,7 @@ async function handler(req: NextRequest) {
     results.push({
       scraper: "lead-call-matching",
       status: "ok",
-      detail: `${leadCallSync.called} called, ${leadCallSync.noAnswer} no answer`,
+      detail: `${leadCallSync.called} called, ${leadCallSync.noAnswer} no answer, ${leadCallSync.phonesRecovered} phones recovered`,
     });
   } catch (err) {
     results.push({

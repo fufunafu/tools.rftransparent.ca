@@ -125,6 +125,15 @@ describe("matchDraftOrdersToLeads", () => {
         [draft("D100")],
       ),
     ).toEqual([]);
+    expect(
+      matchDraftOrdersToLeads(
+        [
+          protectedOutcomes[0],
+          lead("newer", { outcome: "not_applicable", submitted_at: "2026-08-01T12:00:00.000Z" }),
+        ],
+        [draft("D100")],
+      ),
+    ).toEqual([]);
   });
 
   it("marks a completed draft as won", () => {

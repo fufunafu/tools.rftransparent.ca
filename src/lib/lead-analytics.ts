@@ -1,4 +1,5 @@
 import type { LeadSource } from "@/lib/customer-service/leads";
+import { isCallablePhone } from "@/lib/call-metrics";
 
 export type LeadTrendRange = "30d" | "90d" | "12m";
 
@@ -24,8 +25,9 @@ interface LeadDateSource {
 
 interface LeadFunnelRow {
   call_status: "not_called" | "no_answer" | "called";
+  phone?: string | null;
   quote_number: string | null;
-  outcome: "new" | "contacted" | "quoted" | "won" | "lost";
+  outcome: "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 }
 
 interface LeadFunnelSourceRow extends LeadFunnelRow {
@@ -34,6 +36,7 @@ interface LeadFunnelSourceRow extends LeadFunnelRow {
 
 export interface LeadFunnelMetrics {
   total: number;
+  callEligible: number;
   attempted: number;
   quoted: number;
   won: number;
@@ -48,18 +51,27 @@ const DAY_MS = 86_400_000;
 const TORONTO_TIME_ZONE = "America/Toronto";
 
 export function calculateLeadFunnel(leads: LeadFunnelRow[]): LeadFunnelMetrics {
-  const total = leads.length;
-  const attempted = leads.filter((lead) => lead.call_status !== "not_called").length;
-  const quoted = leads.filter((lead) => Boolean(lead.quote_number?.trim())).length;
-  const won = leads.filter((lead) => lead.outcome === "won").length;
-  const rate = (count: number) => total > 0 ? Math.round((count / total) * 1000) / 10 : 0;
+  const applicableLeads = leads.filter((lead) => lead.outcome !== "not_applicable");
+  const total = applicableLeads.length;
+  const callEligible = applicableLeads.filter((lead) => (
+    lead.call_status !== "not_called"
+    || lead.phone === undefined
+    || isCallablePhone(lead.phone)
+  )).length;
+  const attempted = applicableLeads.filter((lead) => lead.call_status !== "not_called").length;
+  const quoted = applicableLeads.filter((lead) => Boolean(lead.quote_number?.trim())).length;
+  const won = applicableLeads.filter((lead) => lead.outcome === "won").length;
+  const rate = (count: number, denominator = total) => (
+    denominator > 0 ? Math.round((count / denominator) * 1000) / 10 : 0
+  );
 
   return {
     total,
+    callEligible,
     attempted,
     quoted,
     won,
-    callRate: rate(attempted),
+    callRate: rate(attempted, callEligible),
     quoteRate: rate(quoted),
     conversionRate: rate(won),
   };

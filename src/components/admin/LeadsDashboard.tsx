@@ -25,6 +25,7 @@ import {
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
 import { formatCADShort, formatCADWhole } from "@/lib/format";
+import { isCallablePhone } from "@/lib/call-metrics";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
   ssr: false,
@@ -99,6 +100,7 @@ const OUTCOME_BADGE: Record<Outcome, string> = {
   quoted: "bg-indigo-100 text-indigo-700",
   won: "bg-green-100 text-green-700",
   lost: "bg-slate-100 text-slate-500",
+  not_applicable: "bg-stone-100 text-stone-600",
 };
 
 const CALL_BADGE: Record<CallStatus, string> = {
@@ -107,12 +109,24 @@ const CALL_BADGE: Record<CallStatus, string> = {
   called: "bg-green-50 text-green-700 border border-green-200",
 };
 
+function isClosedOutcome(outcome: Outcome): boolean {
+  return outcome === "won" || outcome === "lost" || outcome === "not_applicable";
+}
+
+function needsPhone(lead: Lead): boolean {
+  return lead.call_status === "not_called"
+    && !isClosedOutcome(lead.outcome)
+    && !isCallablePhone(lead.phone);
+}
+
 const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }[] = [
-  { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" },
-  { value: "no_quote", label: "Awaiting Quote", match: (l) => l.call_status !== "not_called" && !l.quote_number && l.outcome !== "won" && l.outcome !== "lost" },
+  { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" && !isClosedOutcome(l.outcome) && isCallablePhone(l.phone) },
+  { value: "no_phone", label: "No Phone", match: needsPhone },
+  { value: "no_quote", label: "Awaiting Quote", match: (l) => l.call_status !== "not_called" && !l.quote_number && !isClosedOutcome(l.outcome) },
   { value: "open_quote", label: "Open Quote", match: (l) => !!l.quote_number && l.outcome === "quoted" },
   { value: "won", label: "Won", match: (l) => l.outcome === "won" },
   { value: "lost", label: "Lost", match: (l) => l.outcome === "lost" },
+  { value: "not_applicable", label: "Not Applicable", match: (l) => l.outcome === "not_applicable" },
   { value: "all", label: "All", match: () => true },
 ];
 
@@ -235,6 +249,9 @@ function LeadDetailPanel({
   const [editingQuote, setEditingQuote] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
+  const [editingPhone, setEditingPhone] = useState(false);
+  const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
+  const phoneIsCallable = isCallablePhone(lead.phone);
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
   const submissions = useMemo(
     () => {
@@ -313,9 +330,16 @@ function LeadDetailPanel({
       quote_number: quoteNumber.trim() || null,
       quote_amount: quoteAmount.trim() ? Number(quoteAmount) : null,
       quote_sent_at: quoteNumber.trim() ? new Date().toISOString() : null,
-      outcome: quoteNumber.trim() && lead.outcome !== "won" && lead.outcome !== "lost" ? "quoted" : lead.outcome,
+      outcome: quoteNumber.trim() && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
     });
     setEditingQuote(false);
+  };
+
+  const handleSavePhone = async () => {
+    const phone = phoneNumber.trim();
+    if (!isCallablePhone(phone)) return;
+    await patchLead({ phone });
+    setEditingPhone(false);
   };
 
   return (
@@ -341,9 +365,15 @@ function LeadDetailPanel({
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
                   {OUTCOME_LABELS[lead.outcome]}
                 </span>
-                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
-                  {CALL_STATUS_LABELS[lead.call_status]}
-                </span>
+                {lead.outcome !== "not_applicable" && needsPhone(lead) ? (
+                  <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700">
+                    No phone
+                  </span>
+                ) : lead.outcome !== "not_applicable" && (
+                  <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
+                    {CALL_STATUS_LABELS[lead.call_status]}
+                  </span>
+                )}
                 {(lead.duplicate_count ?? 1) > 1 && (
                   <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
                     {lead.duplicate_count} submissions combined
@@ -365,7 +395,39 @@ function LeadDetailPanel({
         </div>
 
         <div className="px-5 sm:px-6 py-4 border-b border-sand-200 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {lead.phone ? (
+          {editingPhone ? (
+            <div className="rounded-lg border border-sand-200 bg-white p-2">
+              <input
+                type="tel"
+                value={phoneNumber}
+                onChange={(event) => setPhoneNumber(event.target.value)}
+                placeholder="Phone number"
+                aria-label="Lead phone number"
+                autoFocus
+                className="w-full rounded border border-sand-200 px-2.5 py-1.5 text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              />
+              <div className="mt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhoneNumber(lead.phone ?? "");
+                    setEditingPhone(false);
+                  }}
+                  className="px-2 py-1 text-xs font-medium text-sand-500"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePhone}
+                  disabled={!isCallablePhone(phoneNumber)}
+                  className="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Save phone
+                </button>
+              </div>
+            </div>
+          ) : phoneIsCallable ? (
             <a
               href={`tel:${lead.phone}`}
               className="text-center px-4 py-2.5 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
@@ -373,9 +435,13 @@ function LeadDetailPanel({
               Call {lead.phone}
             </a>
           ) : (
-            <div className="text-center px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm font-medium text-amber-800">
-              No phone submitted
-            </div>
+            <button
+              type="button"
+              onClick={() => setEditingPhone(true)}
+              className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-2.5 text-center text-sm font-semibold text-orange-800 hover:bg-orange-100"
+            >
+              + Add phone number
+            </button>
           )}
           {lead.email ? (
             <a
@@ -440,14 +506,30 @@ function LeadDetailPanel({
             <span className="text-xs text-sand-400">{attempts.length} {attempts.length === 1 ? "call" : "calls"}</span>
           </div>
           {attempts.length === 0 ? (
-            <div className={`rounded-xl border p-4 ${lead.phone ? "border-sand-200 bg-sand-50" : "border-amber-200 bg-amber-50"}`}>
-              <p className={`text-sm font-medium ${lead.phone ? "text-sand-700" : "text-amber-900"}`}>No calls linked to this lead</p>
-              <p className={`text-xs mt-1 leading-5 ${lead.phone ? "text-sand-500" : "text-amber-700"}`}>
-                {lead.phone
-                  ? "Automatic phone matching has not found a call after this submission."
-                  : "This submission did not include a phone number, so automatic call matching cannot identify it."}
-              </p>
-            </div>
+            lead.outcome === "not_applicable" ? (
+              <div className="rounded-xl border border-stone-200 bg-stone-50 p-4">
+                <p className="text-sm font-medium text-stone-700">No call required</p>
+                <p className="mt-1 text-xs leading-5 text-stone-500">
+                  This lead is marked Not Applicable and is excluded from the call queue.
+                </p>
+              </div>
+            ) : needsPhone(lead) ? (
+              <div className="rounded-xl border border-orange-200 bg-orange-50 p-4">
+                <p className="text-sm font-medium text-orange-900">No phone number available</p>
+                <p className="mt-1 text-xs leading-5 text-orange-700">
+                  This lead is excluded from the call queue. Add a phone number above if one becomes available.
+                </p>
+              </div>
+            ) : (
+              <div className={`rounded-xl border p-4 ${lead.phone ? "border-sand-200 bg-sand-50" : "border-amber-200 bg-amber-50"}`}>
+                <p className={`text-sm font-medium ${lead.phone ? "text-sand-700" : "text-amber-900"}`}>No calls linked to this lead</p>
+                <p className={`text-xs mt-1 leading-5 ${lead.phone ? "text-sand-500" : "text-amber-700"}`}>
+                  {lead.phone
+                    ? "Automatic phone matching has not found a call after this submission."
+                    : "No phone number was captured from the form or a linked quote, so automatic call matching cannot identify it."}
+                </p>
+              </div>
+            )
           ) : (
             <div className="space-y-2">
               {attempts.map((a) => (
@@ -468,47 +550,49 @@ function LeadDetailPanel({
             </div>
           )}
 
-          <div className="rounded-xl border border-sand-200 p-4 space-y-3">
-            <p className="text-sm font-semibold text-sand-800">Log a call manually</p>
-            <label className="block text-xs font-medium text-sand-500">
-              Result
-            <input
-              type="text"
-              value={callResult}
-              onChange={(e) => setCallResult(e.target.value)}
-                placeholder="For example, spoke and interested"
-                className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-            </label>
-            <label className="block text-xs font-medium text-sand-500">
-              Notes <span className="font-normal text-sand-400">(optional)</span>
-              <textarea
-              value={callNotes}
-              onChange={(e) => setCallNotes(e.target.value)}
-                rows={2}
-                placeholder="Add context for the next person"
-                className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-            />
-            </label>
-            <button
-              type="button"
-              onClick={handleLogCall}
-              disabled={logging}
-              className="w-full px-3 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {logging ? "Logging..." : "+ Log Call"}
-            </button>
-            {logError && (
-              <p className="text-xs text-red-600">{logError}</p>
-            )}
-          </div>
+          {lead.outcome !== "not_applicable" && phoneIsCallable && (
+            <div className="rounded-xl border border-sand-200 p-4 space-y-3">
+              <p className="text-sm font-semibold text-sand-800">Log a call manually</p>
+              <label className="block text-xs font-medium text-sand-500">
+                Result
+                <input
+                  type="text"
+                  value={callResult}
+                  onChange={(e) => setCallResult(e.target.value)}
+                  placeholder="For example, spoke and interested"
+                  className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+              </label>
+              <label className="block text-xs font-medium text-sand-500">
+                Notes <span className="font-normal text-sand-400">(optional)</span>
+                <textarea
+                  value={callNotes}
+                  onChange={(e) => setCallNotes(e.target.value)}
+                  rows={2}
+                  placeholder="Add context for the next person"
+                  className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={handleLogCall}
+                disabled={logging}
+                className="w-full px-3 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {logging ? "Logging..." : "+ Log Call"}
+              </button>
+              {logError && (
+                <p className="text-xs text-red-600">{logError}</p>
+              )}
+            </div>
+          )}
         </section>
 
         {/* Quote */}
         <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-3">
           <div className="flex items-center justify-between">
             <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Quote</h3>
-            {!editingQuote && (
+            {!editingQuote && lead.outcome !== "not_applicable" && (
               <button onClick={() => setEditingQuote(true)} className="text-xs font-medium text-blue-600 hover:text-blue-800">
                 {lead.quote_number ? "Edit" : "+ Link Quote"}
               </button>
@@ -560,6 +644,8 @@ function LeadDetailPanel({
                 </div>
               )}
             </div>
+          ) : lead.outcome === "not_applicable" ? (
+            <p className="text-sm text-stone-500">No quote required for a Not Applicable lead.</p>
           ) : (
             <p className="text-sm text-sand-400">No quote sent yet.</p>
           )}
@@ -583,15 +669,23 @@ function LeadDetailPanel({
               </button>
             ))}
           </div>
-          {lead.outcome === "lost" && (
+          {(lead.outcome === "lost" || lead.outcome === "not_applicable") && (
             <input
               type="text"
-              defaultValue={lead.lost_reason ?? ""}
+              defaultValue={lead.outcome === "lost"
+                ? lead.lost_reason ?? ""
+                : lead.not_applicable_reason ?? ""}
               onBlur={(e) => {
                 const val = e.target.value.trim();
-                if (val !== (lead.lost_reason ?? "")) patchLead({ lost_reason: val || null });
+                const savedValue = lead.outcome === "lost"
+                  ? lead.lost_reason ?? ""
+                  : lead.not_applicable_reason ?? "";
+                if (val === savedValue) return;
+                patchLead(lead.outcome === "lost"
+                  ? { lost_reason: val || null }
+                  : { not_applicable_reason: val || null });
               }}
-              placeholder="Lost reason"
+              placeholder={lead.outcome === "lost" ? "Lost reason" : "Reason, such as spam, forwarded, or unquotable"}
               className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           )}
@@ -715,8 +809,10 @@ export default function LeadsDashboard() {
 
   const metrics = useMemo(() => {
     const funnel = calculateLeadFunnel(leads);
-    const openLeads = leads.filter((l) => l.outcome !== "won" && l.outcome !== "lost");
-    const uncalledLeads = openLeads.filter((l) => l.call_status === "not_called");
+    const openLeads = leads.filter((l) => !isClosedOutcome(l.outcome));
+    const uncalledLeads = openLeads.filter((l) => (
+      l.call_status === "not_called" && isCallablePhone(l.phone)
+    ));
     const overdueUncalled = uncalledLeads.filter(
       (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
     );
@@ -744,7 +840,7 @@ export default function LeadsDashboard() {
       meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
     };
     const responseTimes = leads
-      .filter((l) => l.first_call_at)
+      .filter((l) => l.outcome !== "not_applicable" && l.first_call_at)
       .map((l) => new Date(l.first_call_at!).getTime() - new Date(l.submitted_at).getTime())
       .filter((duration) => duration >= 0);
     const averageResponseMs = responseTimes.length > 0
@@ -1104,7 +1200,7 @@ export default function LeadsDashboard() {
                     key={lead.id}
                     onClick={() => setSelectedLeadId(lead.id)}
                     className={`border-b border-sand-100 hover:bg-sand-50 cursor-pointer transition-colors ${
-                      lead.call_status === "not_called" && lead.outcome !== "won" && lead.outcome !== "lost"
+                      lead.call_status === "not_called" && !isClosedOutcome(lead.outcome) && isCallablePhone(lead.phone)
                         ? "border-l-2 border-l-amber-400"
                         : "border-l-2 border-l-transparent"
                     }`}
@@ -1137,9 +1233,19 @@ export default function LeadsDashboard() {
                       <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at)}</div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
-                        {CALL_STATUS_LABELS[lead.call_status]}
-                      </span>
+                      {lead.outcome === "not_applicable" ? (
+                        <span className="inline-block rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-600">
+                          Not required
+                        </span>
+                      ) : needsPhone(lead) ? (
+                        <span className="inline-block rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
+                          No phone
+                        </span>
+                      ) : (
+                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
+                          {CALL_STATUS_LABELS[lead.call_status]}
+                        </span>
+                      )}
                       {lead.last_called_by && lead.last_call_at && (
                         <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
                           {lead.last_called_by} · {timeAgo(lead.last_call_at)}
@@ -1174,13 +1280,16 @@ export default function LeadsDashboard() {
                       {lead.outcome === "lost" && lead.lost_reason && (
                         <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[160px]">{lead.lost_reason}</div>
                       )}
+                      {lead.outcome === "not_applicable" && lead.not_applicable_reason && (
+                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[160px]">{lead.not_applicable_reason}</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
                         onClick={(e) => { e.stopPropagation(); setSelectedLeadId(lead.id); }}
                         className="text-xs font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
                       >
-                        {lead.call_status === "not_called" ? "Log Call" : "View"}
+                        {lead.call_status === "not_called" && !isClosedOutcome(lead.outcome) && isCallablePhone(lead.phone) ? "Log Call" : "View"}
                       </button>
                     </td>
                   </tr>
@@ -1251,9 +1360,9 @@ function SummaryMetric({
 }
 
 const FUNNEL_COMPARISON_ROWS = [
-  { label: "Call attempt", rate: "callRate", count: "attempted" },
-  { label: "Quote rate", rate: "quoteRate", count: "quoted" },
-  { label: "Order conversion", rate: "conversionRate", count: "won" },
+  { label: "Call attempt", rate: "callRate", count: "attempted", denominator: "callEligible" },
+  { label: "Quote rate", rate: "quoteRate", count: "quoted", denominator: "total" },
+  { label: "Order conversion", rate: "conversionRate", count: "won", denominator: "total" },
 ] as const;
 
 function FunnelComparison({ metrics }: { metrics: LeadFunnelMetricsBySource }) {
@@ -1292,7 +1401,7 @@ function FunnelComparison({ metrics }: { metrics: LeadFunnelMetricsBySource }) {
                 <td key={source} className="px-3 py-2">
                   <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
                   <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
-                    {metrics[source][row.count]} / {metrics[source].total}
+                    {metrics[source][row.count]} / {metrics[source][row.denominator]}
                   </span>
                 </td>
               ))}
