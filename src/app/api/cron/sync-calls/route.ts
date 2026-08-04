@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { TRIGGERED_BY_HEADER, withCronRun } from "@/lib/automations";
+import {
+  SKIP_RUN_HISTORY_HEADER,
+  TRIGGERED_BY_HEADER,
+  withCronRun,
+} from "@/lib/automations";
 import { getSupabase } from "@/lib/supabase";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { alertOnSoftFailures } from "@/lib/cron-monitor";
@@ -36,7 +40,11 @@ async function handler(req: NextRequest) {
       .eq("key", "sync_schedule")
       .limit(1);
 
-    const schedule = settingsRow?.[0]?.value ?? { enabled: true, hours: [8, 17], timezone: "America/New_York" };
+    const schedule = settingsRow?.[0]?.value ?? {
+      enabled: true,
+      hours: [8, 11, 14, 17],
+      timezone: "America/New_York",
+    };
     if (!schedule.enabled) {
       return NextResponse.json({ skipped: true, reason: "Auto-sync is disabled" });
     }
@@ -46,7 +54,10 @@ async function handler(req: NextRequest) {
     const hour = parseInt(currentHour, 10);
 
     if (!schedule.hours.includes(hour)) {
-      return NextResponse.json({ skipped: true, reason: `Current hour ${hour} not in schedule [${schedule.hours}]` });
+      return NextResponse.json(
+        { skipped: true, reason: `Current hour ${hour} not in schedule [${schedule.hours}]` },
+        { headers: { [SKIP_RUN_HISTORY_HEADER]: "true" } },
+      );
     }
   }
 

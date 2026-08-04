@@ -719,6 +719,26 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
         results.push("Grasshopper: failed to reach scraper");
       }
 
+      // Importing call records and matching them to leads are separate steps.
+      // Do both before reporting completion so "Called" status is current as
+      // soon as a manual Sync All finishes.
+      try {
+        const leadSyncRes = await fetch("/api/customer-service?action=sync-lead-calls", {
+          method: "POST",
+        });
+        const leadSyncJson = await leadSyncRes.json();
+        if (!leadSyncRes.ok) {
+          results.push(`Lead matching: ${leadSyncJson.error || "failed"}`);
+        } else {
+          const summary = leadSyncJson.lead_call_sync;
+          results.push(
+            `Lead matching: ${summary.statusesUpdated ?? 0} statuses updated`,
+          );
+        }
+      } catch {
+        results.push("Lead matching: failed to reach RF Tools");
+      }
+
       setSyncAllStatus(`Done — ${results.join(" · ")}`);
       setSyncKey((k) => k + 1);
       await Promise.all([loadSummary(), loadHistory(), loadCallbacks(), loadPatterns()]);

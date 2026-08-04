@@ -30,9 +30,9 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     kind: "sync",
     result: "Call history used by Customer Service metrics",
     staleAfterHours: 36,
-    cron: "0 12 * * *",
-    schedule: "Daily, around 8:00 AM Toronto",
-    scheduleDetail: "Scheduler starts at 12:00 UTC",
+    cron: "0 * * * *",
+    schedule: "At the hours selected on the Phones page",
+    scheduleDetail: "Hourly dispatcher checks the saved Eastern Time schedule",
   },
   {
     slug: "sync-followup",
@@ -102,6 +102,10 @@ export function findJob(slug: string): AutomationJob | undefined {
 // from the scheduler firing.
 export const TRIGGERED_BY_HEADER = "x-triggered-by";
 
+// Off-hour dispatcher checks are expected no-ops. They should not displace
+// the latest real import in automation history.
+export const SKIP_RUN_HISTORY_HEADER = "x-skip-run-history";
+
 /**
  * Wraps a cron route handler so every run lands in cron_runs. Recording is
  * best-effort inside recordCronRun, so this can't turn a working job into a
@@ -126,7 +130,7 @@ export function withCronRun(
 
     // A 401 is an unauthenticated probe, not a run — recording those would
     // fill the history with noise from anyone poking the public URL.
-    if (res.status !== 401) {
+    if (res.status !== 401 && res.headers.get(SKIP_RUN_HISTORY_HEADER) !== "true") {
       const { status, detail } = await summarize(res);
       await recordCronRun(job, status, detail, { startedAt, triggeredBy });
     }

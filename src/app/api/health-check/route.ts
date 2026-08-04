@@ -9,6 +9,7 @@ import { getAutomationHealth, type AutomationHealth } from "@/lib/home-dashboard
 import { getWallToken } from "@/lib/settings";
 import { BUG_BUCKET } from "@/lib/bug-reports";
 import { checkWhatsAppConnection } from "@/lib/whatsapp";
+import { checkResendHealth } from "@/lib/resend";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -198,24 +199,7 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
       });
 
     case "resend":
-      return () => timedCheck("Resend", async () => {
-        const apiKey = process.env.RESEND_API_KEY;
-        if (!apiKey) throw new Error("Not configured");
-        const res = await fetch("https://api.resend.com/domains", {
-          headers: { Authorization: `Bearer ${apiKey}` },
-          cache: "no-store",
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        // Every sender in the app is @rftransparent.ca — the API being up
-        // means nothing if that domain loses verification.
-        const json = await res.json();
-        const domains: { name?: string; status?: string }[] = json.data ?? [];
-        const sender = domains.find((d) => d.name === "rftransparent.ca");
-        if (!sender) throw new Error("rftransparent.ca not found in Resend domains");
-        if (sender.status !== "verified")
-          throw new Error(`rftransparent.ca is ${sender.status ?? "unverified"}`);
-        return "rftransparent.ca verified";
-      });
+      return () => timedCheck("Resend", checkResendHealth);
 
     case "meta":
       return () => timedCheck("Meta Lead Forms", async () => {

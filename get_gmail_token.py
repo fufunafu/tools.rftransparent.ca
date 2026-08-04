@@ -7,7 +7,7 @@ HOW TO USE:
 3. Log in with the Gmail account you want to authorize
 4. After authorizing, the browser redirects to localhost (page won't load - that's OK)
 5. Copy the FULL URL from the address bar and paste it into the terminal
-6. The script prints the refresh token — save it
+6. The script prints the refresh token; save it
 
 WHERE TO SAVE THE TOKEN:
 - info@glass-railing.com    → GMAIL_REFRESH_TOKEN_RF   (in .env.local + Vercel)
@@ -19,12 +19,35 @@ PREREQUISITES:
 - http://localhost must be in Authorized redirect URIs (Google Cloud Console → Credentials → OAuth Client)
 - Tokens from production apps don't expire (unlike testing mode which expires after 7 days)
 """
-import urllib.parse, urllib.request, json, os
+import json
+import os
+from pathlib import Path
+import urllib.parse
+import urllib.request
 
-CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
-CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET", "")
+def load_local_env() -> None:
+    """Load simple KEY=value pairs without overwriting shell variables."""
+    env_path = Path(__file__).with_name(".env.local")
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ.setdefault(name.strip(), value)
+
+
+load_local_env()
+
+CLIENT_ID = os.environ.get("GMAIL_CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("GMAIL_CLIENT_SECRET", "")
 if not CLIENT_ID or not CLIENT_SECRET:
-    print("ERROR: Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET env vars first")
+    print("ERROR: Set GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET in .env.local first")
     exit(1)
 SCOPES = "https://www.googleapis.com/auth/gmail.readonly"
 REDIRECT = "http://localhost"

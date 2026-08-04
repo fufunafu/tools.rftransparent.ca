@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminUser, isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { sanitizePhone, pctChange, computeMetrics, deduplicateRecords } from "@/lib/call-metrics";
 import type { CallRecord } from "@/lib/call-metrics";
+import { syncLeadCallStatuses } from "@/lib/lead-call-sync";
 
 // Grasshopper scraping takes 2-3 min via Playwright
 export const maxDuration = 300;
@@ -672,6 +673,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const view = req.nextUrl.searchParams.get("view");
+  const action = req.nextUrl.searchParams.get("action");
+
+  // Complete the second half of a manual phone import by matching the newly
+  // stored call records to leads. Keep this server-side and admin-only so the
+  // browser never needs the cron secret.
+  if (action === "sync-lead-calls") {
+    if (!(await isAdminUser())) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    try {
+      const summary = await syncLeadCallStatuses();
+      return NextResponse.json({ status: "success", lead_call_sync: summary });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Lead call matching failed" },
+        { status: 500 },
+      );
+    }
+  }
 
   // --- Save/update callback note ---
   if (view === "note") {

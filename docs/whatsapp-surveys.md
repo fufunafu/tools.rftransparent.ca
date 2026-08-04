@@ -8,7 +8,7 @@ Create and approve a WhatsApp message template in WhatsApp Manager with these va
 
 - Name: `weekly_checkin`
 - Language: `en`
-- Body: `Hi {{name}} 👋 It's your weekly check-in! Please take 2 minutes to share how you're doing this week: {{link}}`
+- Body: `Hi {{name}}! It is time for your weekly check-in. Please take 2 minutes to share how you are doing this week: {{link}} Please do not share this private link.`
 
 The first body parameter is the employee name. The second is the unique survey URL. If Meta assigns a different category or you choose a different template name or language, use the approved values in the environment variables below.
 

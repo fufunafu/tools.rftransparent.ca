@@ -5,7 +5,11 @@ import { getSupabase } from "@/lib/supabase";
 export const dynamic = "force-dynamic";
 
 const SETTING_KEY = "sync_schedule";
-const DEFAULT_SCHEDULE = { enabled: true, hours: [8, 17], timezone: "America/New_York" };
+const DEFAULT_SCHEDULE = {
+  enabled: true,
+  hours: [8, 11, 14, 17],
+  timezone: "America/New_York",
+};
 
 export async function GET() {
   if (!(await isAuthenticated()))
