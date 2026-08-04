@@ -4,7 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 // writing is best-effort and NEVER throws, so a missing table (migration 062
 // is applied by hand) can't stop someone from saving a setting.
 
-export type SettingsArea = "notifications" | "rates" | "access" | "automations";
+export type SettingsArea = "notifications" | "rates" | "access" | "automations" | "assistant";
 
 export interface SettingChange {
   area: string;

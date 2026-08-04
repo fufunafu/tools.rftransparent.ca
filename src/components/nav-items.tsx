@@ -205,6 +205,7 @@ export const SETTINGS_ITEM: NavItem = {
   ),
   children: [
     { href: "/settings/access", label: "Who Can Sign In", status: "done", access: "admin" },
+    { href: "/settings/assistant", label: "Assistant Knowledge", status: "done", access: "admin" },
     { href: "/employees", label: "Employees", status: "done" },
     { href: "/settings/notifications", label: "Notifications", status: "done" },
     { href: "/settings/rates", label: "Rates & Thresholds", status: "done" },

@@ -4,6 +4,7 @@ import {
   isValidWhatsAppAssistantSecret,
   normalizeWhatsAppPhone,
 } from "@/lib/whatsapp-employee-context";
+import { searchAssistantKnowledge } from "@/lib/assistant-knowledge";
 
 export const dynamic = "force-dynamic";
 
@@ -20,11 +21,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const payload = (await request.json().catch(() => null)) as { phone?: unknown } | null;
+  const payload = (await request.json().catch(() => null)) as {
+    phone?: unknown;
+    message?: unknown;
+  } | null;
   const phone = typeof payload?.phone === "string" ? normalizeWhatsAppPhone(payload.phone) : null;
   if (!phone) {
     return NextResponse.json({ error: "A valid phone number is required" }, { status: 400 });
   }
+  const message = typeof payload?.message === "string" ? payload.message.trim().slice(0, 2000) : "";
 
   const supabase = getSupabase();
   const { data: employees, error: employeeError } = await supabase
@@ -41,7 +46,13 @@ export async function POST(request: Request) {
   const employee = (employees ?? []).find((candidate) =>
     typeof candidate.phone === "string" && normalizeWhatsAppPhone(candidate.phone) === phone
   );
-  if (!employee) return NextResponse.json({ employee: null, survey: null });
+  if (!employee) {
+    return NextResponse.json({
+      employee: null,
+      survey: null,
+      knowledge: await safeKnowledgeSearch(message, null, null),
+    });
+  }
 
   const { data: survey, error: surveyError } = await supabase
     .from("employee_surveys")
@@ -57,6 +68,7 @@ export async function POST(request: Request) {
   }
 
   const location = employee.locations?.name ?? null;
+  const knowledge = await safeKnowledgeSearch(message, employee.department, location);
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://tools.rftransparent.ca").replace(/\/+$/, "");
 
   return NextResponse.json({
@@ -73,5 +85,23 @@ export async function POST(request: Request) {
           link: survey.responded_at ? null : `${appUrl}/survey/${survey.token}`,
         }
       : null,
+    knowledge,
   });
+}
+
+async function safeKnowledgeSearch(
+  message: string,
+  department: string | null,
+  location: string | null,
+) {
+  if (!message) return [];
+  try {
+    return await searchAssistantKnowledge(message, { department, location });
+  } catch (error) {
+    console.error(
+      "[whatsapp-assistant] Knowledge search failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return [];
+  }
 }
