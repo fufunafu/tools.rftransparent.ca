@@ -4,7 +4,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated, getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
-import type { CallStatus, Outcome } from "@/lib/customer-service/leads";
+import {
+  extractContactFields,
+  type Lead,
+  type CallStatus,
+  type Outcome,
+} from "@/lib/customer-service/leads";
+import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
 import {
   getMetaConnectionStatus,
   metaErrorMessage,
@@ -59,12 +65,20 @@ export async function GET(req: NextRequest) {
   }
 
   if (view === "call_attempts") {
-    const leadId = req.nextUrl.searchParams.get("lead_id");
-    if (!leadId) return NextResponse.json({ error: "lead_id required" }, { status: 400 });
+    const leadIds = (req.nextUrl.searchParams.get("lead_ids")
+      ?? req.nextUrl.searchParams.get("lead_id")
+      ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+    if (leadIds.length === 0) {
+      return NextResponse.json({ error: "lead_id or lead_ids required" }, { status: 400 });
+    }
     const { data, error } = await supabase
       .from("lead_call_attempts")
       .select("*")
-      .eq("lead_id", leadId)
+      .in("lead_id", leadIds)
       .order("called_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ attempts: data ?? [] });
@@ -120,18 +134,26 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const enriched = leads.map((l) => {
+  const enriched: Lead[] = leads.map((l) => {
     const agg = attemptAgg.get(l.id);
+    const recovered = l.raw_payload && typeof l.raw_payload === "object" && !Array.isArray(l.raw_payload)
+      ? extractContactFields(l.raw_payload as Record<string, unknown>)
+      : { name: null, email: null, phone: null, message: null };
+    const present = (value: unknown) => typeof value === "string" && value.trim() ? value : null;
     return {
       ...l,
+      name: present(l.name) ?? recovered.name,
+      email: present(l.email) ?? recovered.email,
+      phone: present(l.phone) ?? recovered.phone,
+      message: present(l.message) ?? recovered.message,
       call_attempts_count: agg?.count ?? 0,
       first_call_at: agg?.first_at ?? null,
       last_call_at: agg?.last_at ?? null,
       last_called_by: agg?.last_staff ?? null,
-    };
+    } as unknown as Lead;
   });
 
-  return NextResponse.json({ leads: enriched });
+  return NextResponse.json({ leads: consolidateDuplicateLeads(enriched) });
 }
 
 // ─── POST ────────────────────────────────────────────────────────────────────

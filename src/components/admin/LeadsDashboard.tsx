@@ -1,10 +1,14 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type { CallStatus, Lead, LeadCallAttempt, LeadSource, Outcome } from "@/lib/customer-service/leads";
-import { OUTCOME_LABELS, CALL_STATUS_LABELS } from "@/lib/customer-service/leads";
+import {
+  OUTCOME_LABELS,
+  CALL_STATUS_LABELS,
+  extractSubmissionDetails,
+} from "@/lib/customer-service/leads";
 import {
   buildCustomLeadTrend,
   buildLeadTrend,
@@ -144,8 +148,9 @@ function LeadDetailPanel({
   onClose: () => void;
   onChanged: () => void;
 }) {
+  const callAttemptLeadIds = lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id];
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
-    `/api/customer-service/leads?view=call_attempts&lead_id=${lead.id}`,
+    `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}`,
     fetcher
   );
   const attempts = attemptsData?.attempts ?? [];
@@ -158,6 +163,29 @@ function LeadDetailPanel({
   const [editingQuote, setEditingQuote] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
+  const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
+  const submissionDetails = useMemo(
+    () => extractSubmissionDetails(lead.raw_payload).filter((detail) => (
+      detail.value !== lead.message
+      && detail.value !== lead.email
+      && detail.value !== lead.phone
+      && detail.value !== lead.name
+    )),
+    [lead],
+  );
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
 
   const handleLogCall = async () => {
     setLogging(true);
@@ -205,97 +233,159 @@ function LeadDetailPanel({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex justify-end z-50" onClick={onClose}>
-      <div className="bg-white w-full max-w-md h-full overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-sand-950/40 flex justify-end z-50" onClick={onClose}>
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="lead-detail-title"
+        className="bg-white w-full max-w-xl h-full overflow-y-auto shadow-2xl"
+        onClick={(event) => event.stopPropagation()}
+      >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-sand-200/60 flex items-center justify-between sticky top-0 bg-white z-10">
-          <div>
-            <h3 className="text-lg font-semibold text-sand-900">{lead.name || "Unnamed lead"}</h3>
-            <div className="flex items-center gap-2 mt-1">
-              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[lead.source].className}`}>
-                {SOURCE_BADGE[lead.source].label}
-              </span>
-              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
-                {OUTCOME_LABELS[lead.outcome]}
-              </span>
+        <div className="px-5 sm:px-6 py-5 border-b border-sand-200 sticky top-0 bg-white/95 backdrop-blur z-10">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-[11px] font-medium uppercase tracking-wider text-sand-400">
+                {SOURCE_BADGE[lead.source].label} lead
+              </p>
+              <h2 id="lead-detail-title" className="mt-1 text-2xl font-semibold tracking-tight text-sand-900 truncate">
+                {displayName}
+              </h2>
+              <div className="flex flex-wrap items-center gap-2 mt-2">
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
+                  {OUTCOME_LABELS[lead.outcome]}
+                </span>
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
+                  {CALL_STATUS_LABELS[lead.call_status]}
+                </span>
+                {(lead.duplicate_count ?? 1) > 1 && (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
+                    {lead.duplicate_count} submissions combined
+                  </span>
+                )}
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close lead details"
+              className="text-sand-400 hover:text-sand-700 hover:bg-sand-100 rounded-full p-2 transition-colors"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
-          <button onClick={onClose} className="text-sand-400 hover:text-sand-600 p-1">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
 
-        {(lead.phone || lead.email) && (
-          <div className="px-6 py-3 border-b border-sand-200/60 flex gap-2">
-            {lead.phone && (
-              <a
-                href={`tel:${lead.phone}`}
-                className="flex-1 text-center px-3 py-2 rounded-md bg-blue-600 text-sm font-medium text-white hover:bg-blue-700"
-              >
-                Call {lead.phone}
-              </a>
-            )}
-            {lead.email && (
-              <a
-                href={`mailto:${lead.email}`}
-                className="flex-1 text-center px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50"
-              >
-                Email lead
-              </a>
-            )}
-          </div>
-        )}
+        <div className="px-5 sm:px-6 py-4 border-b border-sand-200 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {lead.phone ? (
+            <a
+              href={`tel:${lead.phone}`}
+              className="text-center px-4 py-2.5 rounded-lg bg-blue-600 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+            >
+              Call {lead.phone}
+            </a>
+          ) : (
+            <div className="text-center px-4 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-sm font-medium text-amber-800">
+              No phone submitted
+            </div>
+          )}
+          {lead.email ? (
+            <a
+              href={`mailto:${lead.email}`}
+              className="text-center px-4 py-2.5 rounded-lg border border-sand-300 bg-white text-sm font-semibold text-sand-700 hover:bg-sand-50 transition-colors"
+            >
+              Email lead
+            </a>
+          ) : (
+            <div className="text-center px-4 py-2.5 rounded-lg bg-sand-50 border border-sand-200 text-sm font-medium text-sand-400">
+              No email submitted
+            </div>
+          )}
+        </div>
 
         {/* Submission */}
-        <div className="px-6 py-5 border-b border-sand-200/60 space-y-3">
-          <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Submission</h4>
-          <div className="space-y-1.5 text-sm">
-            {lead.source_detail && (
-              <div className="flex justify-between gap-3">
-                <span className="text-sand-500">Source</span>
-                <span className="text-sand-700 text-right truncate max-w-[240px]">{lead.source_detail}</span>
-              </div>
-            )}
-            <div className="flex justify-between gap-3">
-              <span className="text-sand-500">Submitted</span>
-              <span className="text-sand-700">{formatDateTime(lead.submitted_at)}</span>
+        <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Lead details</h3>
+            <span className="text-xs text-sand-400">{timeAgo(lead.submitted_at)}</span>
+          </div>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4 rounded-xl border border-sand-200 bg-sand-50/60 p-4 text-sm">
+            <div className="min-w-0">
+              <dt className="text-xs text-sand-400">Submitted</dt>
+              <dd className="mt-1 font-medium text-sand-800">{formatDateTime(lead.submitted_at)}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-sand-400">Assigned to</dt>
+              <dd className="mt-1 font-medium text-sand-800 truncate">{lead.assigned_to || "Unassigned"}</dd>
             </div>
             {lead.email && (
-              <div className="flex justify-between gap-3">
-                <span className="text-sand-500">Email</span>
-                <a href={`mailto:${lead.email}`} className="text-blue-600 hover:underline">{lead.email}</a>
+              <div className="min-w-0">
+                <dt className="text-xs text-sand-400">Email</dt>
+                <dd className="mt-1 truncate"><a href={`mailto:${lead.email}`} className="font-medium text-blue-600 hover:underline">{lead.email}</a></dd>
               </div>
             )}
             {lead.phone && (
-              <div className="flex justify-between gap-3">
-                <span className="text-sand-500">Phone</span>
-                <a href={`tel:${lead.phone}`} className="text-blue-600 hover:underline">{lead.phone}</a>
+              <div className="min-w-0">
+                <dt className="text-xs text-sand-400">Phone</dt>
+                <dd className="mt-1"><a href={`tel:${lead.phone}`} className="font-medium text-blue-600 hover:underline">{lead.phone}</a></dd>
               </div>
             )}
-          </div>
+            {lead.source_detail && (
+              <div className="sm:col-span-2 min-w-0">
+                <dt className="text-xs text-sand-400">Form</dt>
+                <dd className="mt-1 font-medium text-sand-800">{lead.source_detail}</dd>
+              </div>
+            )}
+          </dl>
           {lead.message && (
-            <div className="rounded-lg bg-sand-50 border border-sand-200/60 p-3 text-sm text-sand-700 whitespace-pre-wrap">
-              {lead.message}
+            <div>
+              <p className="text-xs font-medium text-sand-500 mb-2">Customer request</p>
+              <div className="rounded-xl bg-white border border-sand-200 p-4 text-sm leading-6 text-sand-700 whitespace-pre-wrap">
+                {lead.message}
+              </div>
+            </div>
+          )}
+          {submissionDetails.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-sand-500 mb-2">Submission details</p>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {submissionDetails.map((detail) => (
+                  <div key={detail.key} className="rounded-lg border border-sand-200 px-3 py-2.5 min-w-0">
+                    <dt className="text-[11px] text-sand-400">{detail.label}</dt>
+                    <dd className="mt-0.5 text-sm font-medium text-sand-800 break-words">{detail.value}</dd>
+                  </div>
+                ))}
+              </dl>
             </div>
           )}
           <details className="text-xs">
-            <summary className="cursor-pointer text-sand-400 hover:text-sand-600">Raw submission</summary>
-            <pre className="mt-2 p-2 rounded bg-sand-50 border border-sand-200/60 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(lead.raw_payload, null, 2)}</pre>
+            <summary className="cursor-pointer text-sand-400 hover:text-sand-600">View raw submission</summary>
+            <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(lead.raw_payload, null, 2)}</pre>
           </details>
-        </div>
+        </section>
 
         {/* Call log */}
-        <div className="px-6 py-5 border-b border-sand-200/60 space-y-3">
-          <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Call Log</h4>
+        <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Call activity</h3>
+            <span className="text-xs text-sand-400">{attempts.length} {attempts.length === 1 ? "call" : "calls"}</span>
+          </div>
           {attempts.length === 0 ? (
-            <p className="text-sm text-sand-400">No calls logged yet.</p>
+            <div className={`rounded-xl border p-4 ${lead.phone ? "border-sand-200 bg-sand-50" : "border-amber-200 bg-amber-50"}`}>
+              <p className={`text-sm font-medium ${lead.phone ? "text-sand-700" : "text-amber-900"}`}>No calls linked to this lead</p>
+              <p className={`text-xs mt-1 leading-5 ${lead.phone ? "text-sand-500" : "text-amber-700"}`}>
+                {lead.phone
+                  ? "Automatic phone matching has not found a call after this submission."
+                  : "This submission did not include a phone number, so automatic call matching cannot identify it."}
+              </p>
+            </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {attempts.map((a) => (
-                <div key={a.id} className="flex gap-3">
-                  <div className="w-8 h-8 rounded-full bg-sand-100 flex items-center justify-center text-xs font-medium text-sand-600 shrink-0 uppercase">
+                <div key={a.id} className="flex gap-3 rounded-xl border border-sand-200 p-3">
+                  <div className="w-9 h-9 rounded-full bg-blue-50 flex items-center justify-center text-xs font-semibold text-blue-700 shrink-0 uppercase">
                     {a.staff.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -311,25 +401,33 @@ function LeadDetailPanel({
             </div>
           )}
 
-          <div className="rounded-lg border border-sand-200 p-3 space-y-2">
+          <div className="rounded-xl border border-sand-200 p-4 space-y-3">
+            <p className="text-sm font-semibold text-sand-800">Log a call manually</p>
+            <label className="block text-xs font-medium text-sand-500">
+              Result
             <input
               type="text"
               value={callResult}
               onChange={(e) => setCallResult(e.target.value)}
-              placeholder="Call result (e.g. Spoke — interested)"
-              className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                placeholder="For example, spoke and interested"
+                className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
-            <input
-              type="text"
+            </label>
+            <label className="block text-xs font-medium text-sand-500">
+              Notes <span className="font-normal text-sand-400">(optional)</span>
+              <textarea
               value={callNotes}
               onChange={(e) => setCallNotes(e.target.value)}
-              placeholder="Notes (optional)"
-              className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+                rows={2}
+                placeholder="Add context for the next person"
+                className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
             />
+            </label>
             <button
+              type="button"
               onClick={handleLogCall}
               disabled={logging}
-              className="w-full px-3 py-1.5 text-sm font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full px-3 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {logging ? "Logging..." : "+ Log Call"}
             </button>
@@ -337,12 +435,12 @@ function LeadDetailPanel({
               <p className="text-xs text-red-600">{logError}</p>
             )}
           </div>
-        </div>
+        </section>
 
         {/* Quote */}
-        <div className="px-6 py-5 border-b border-sand-200/60 space-y-3">
+        <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-3">
           <div className="flex items-center justify-between">
-            <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</h4>
+            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Quote</h3>
             {!editingQuote && (
               <button onClick={() => setEditingQuote(true)} className="text-xs font-medium text-blue-600 hover:text-blue-800">
                 {lead.quote_number ? "Edit" : "+ Link Quote"}
@@ -371,8 +469,8 @@ function LeadDetailPanel({
               </div>
             </div>
           ) : lead.quote_number ? (
-            <div className="rounded-lg bg-sand-50 border border-sand-200/60 p-3 text-sm space-y-1">
-              <div className="flex justify-between">
+            <div className="rounded-xl bg-sand-50 border border-sand-200 p-4 text-sm space-y-2">
+              <div className="flex justify-between gap-3">
                 <span className="text-sand-500">Quote #</span>
                 <span className="font-medium text-sand-900">{lead.quote_number}</span>
               </div>
@@ -398,12 +496,12 @@ function LeadDetailPanel({
           ) : (
             <p className="text-sm text-sand-400">No quote sent yet.</p>
           )}
-        </div>
+        </section>
 
         {/* Outcome */}
-        <div className="px-6 py-5 space-y-3">
-          <h4 className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Outcome</h4>
-          <div className="grid grid-cols-2 gap-2">
+        <section className="px-5 sm:px-6 py-6 space-y-3">
+          <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Outcome</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {(Object.keys(OUTCOME_LABELS) as Outcome[]).map((o) => (
               <button
                 key={o}
@@ -440,8 +538,8 @@ function LeadDetailPanel({
             rows={3}
             className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
           />
-        </div>
-      </div>
+        </section>
+      </aside>
     </div>
   );
 }
@@ -943,6 +1041,11 @@ export default function LeadsDashboard() {
                       <div className="text-[11px] text-sand-400 truncate max-w-[220px]">
                         {[lead.email, lead.phone].filter(Boolean).join(" · ")}
                       </div>
+                      {(lead.duplicate_count ?? 1) > 1 && (
+                        <div className="text-[11px] text-violet-600 mt-0.5">
+                          {lead.duplicate_count} submissions combined
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[lead.source].className}`}>

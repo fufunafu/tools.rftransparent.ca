@@ -21,11 +21,20 @@ interface RecordedQuery {
 const state: {
   selects: RecordedQuery[];
   inserts: Record<string, unknown>[];
-  dedupResult: { id: string } | null;
+  updates: Record<string, unknown>[];
+  dedupResult: {
+    id: string;
+    name?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    message?: string | null;
+    raw_payload?: Record<string, unknown>;
+  } | null;
   insertResult: { data: { id: string } | null; error: { message: string } | null };
 } = {
   selects: [],
   inserts: [],
+  updates: [],
   dedupResult: null,
   insertResult: { data: { id: "new-lead-id" }, error: null },
 };
@@ -51,6 +60,10 @@ function makeChain() {
       state.inserts.push(row);
       return chain;
     },
+    update: (row: Record<string, unknown>) => {
+      state.updates.push(row);
+      return chain;
+    },
     single: () => Promise.resolve(state.insertResult),
   };
   return chain;
@@ -62,6 +75,7 @@ vi.mock("@/lib/supabase", () => ({
 
 import {
   extractContactFields,
+  extractSubmissionDetails,
   extractMetaLeadFields,
   findOrInsertLead,
   type UpsertLeadInput,
@@ -72,6 +86,7 @@ beforeEach(() => {
   sendNewLeadNotificationMock.mockResolvedValue(true);
   state.selects = [];
   state.inserts = [];
+  state.updates = [];
   state.dedupResult = null;
   state.insertResult = { data: { id: "new-lead-id" }, error: null };
 });
@@ -102,11 +117,62 @@ describe("extractContactFields", () => {
     expect(result).toEqual({ name: "Jane", email: "j@x.com", phone: "555", message: "hi" });
   });
 
-  it("returns nulls for empty/whitespace mapped values", () => {
+  it("falls back field by field when mapped values are empty", () => {
     const result = extractContactFields({
       mapped: { name: "  ", email: "", phone: undefined, message: null },
+      fields: { name: "Fallback Name", email: "fallback@example.com", phone: "555" },
     });
-    expect(result).toEqual({ name: null, email: null, phone: null, message: null });
+    expect(result).toEqual({
+      name: "Fallback Name",
+      email: "fallback@example.com",
+      phone: "555",
+      message: null,
+    });
+  });
+
+  it("uses Powerful Form Builder labels to recover custom name fields", () => {
+    const result = extractContactFields({
+      fields: {
+        "text-5": "Brenda",
+        "text-6": "Luskey",
+        email: "brenda@example.com",
+        "phone-1": "",
+        _keyLabel: JSON.stringify({
+          "text-5": "First Name",
+          "text-6": "Last Name",
+          email: "Email",
+          "phone-1": "Phone Number",
+        }),
+      },
+      mapped: { email: "brenda@example.com" },
+    });
+
+    expect(result).toEqual({
+      name: "Brenda Luskey",
+      email: "brenda@example.com",
+      phone: null,
+      message: null,
+    });
+  });
+
+  it("turns labeled project fields into readable submission details", () => {
+    const payload = {
+      fields: {
+        "text-5": "Brenda",
+        "select-2": "Matte Black",
+        "select-3": "48 inches",
+        _keyLabel: JSON.stringify({
+          "text-5": "First Name",
+          "select-2": "Hardware Color",
+          "select-3": "Railing Height",
+        }),
+      },
+    };
+
+    expect(extractSubmissionDetails(payload)).toEqual([
+      { key: "select-2", label: "Hardware Color", value: "Matte Black" },
+      { key: "select-3", label: "Railing Height", value: "48 inches" },
+    ]);
   });
 
   it("falls back to common field names inside payload.fields", () => {
@@ -246,6 +312,7 @@ describe("findOrInsertLead", () => {
     expect(result).toEqual({ ok: true, lead_id: "existing-lead", deduped: true });
     expect(state.inserts).toHaveLength(0);
     expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
+    expect(state.updates).toHaveLength(1);
 
     // Dedup query scopes to the source and a recent submitted_at window
     const filters = state.selects[0].filters;
@@ -253,8 +320,37 @@ describe("findOrInsertLead", () => {
     const gte = filters.find((f) => f.method === "gte")!;
     expect(gte.args[0]).toBe("submitted_at");
     const windowStart = new Date(gte.args[1] as string).getTime();
-    expect(Date.now() - windowStart).toBeGreaterThan(9.9 * 60 * 1000);
-    expect(Date.now() - windowStart).toBeLessThan(10.1 * 60 * 1000);
+    expect(Date.now() - windowStart).toBeGreaterThan(23.9 * 60 * 60 * 1000);
+    expect(Date.now() - windowStart).toBeLessThan(24.1 * 60 * 60 * 1000);
+  });
+
+  it("enriches a recent duplicate with corrected contact details", async () => {
+    state.dedupResult = {
+      id: "existing-lead",
+      name: null,
+      email: "bev'scarpentry@hotmail.com",
+      phone: "902-527-8969",
+      message: null,
+      raw_payload: { old: true },
+    };
+
+    const result = await findOrInsertLead(leadInput({
+      name: "Bev",
+      email: "bevscarpentry@hotmail.com",
+      phone: "902-527-8969",
+      message: "Two angled sections",
+      raw_payload: { corrected: true },
+    }));
+
+    expect(result).toEqual({ ok: true, lead_id: "existing-lead", deduped: true });
+    expect(state.inserts).toHaveLength(0);
+    expect(state.updates[0]).toEqual({
+      name: "Bev",
+      email: "bevscarpentry@hotmail.com",
+      phone: "902-527-8969",
+      message: "Two angled sections",
+      raw_payload: { corrected: true },
+    });
   });
 
   it("dedups a provider lead by its stable external id before the time window", async () => {
