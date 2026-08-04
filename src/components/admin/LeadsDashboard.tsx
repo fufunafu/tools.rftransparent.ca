@@ -9,9 +9,11 @@ import {
   buildCustomLeadTrend,
   buildLeadTrend,
   calculateLeadFunnel,
+  calculateLeadFunnelBySource,
+  type LeadFunnelMetricsBySource,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
-import { formatCADWhole } from "@/lib/format";
+import { formatCADShort, formatCADWhole } from "@/lib/format";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
   ssr: false,
@@ -546,11 +548,30 @@ export default function LeadsDashboard() {
     const uncalledLeads = openLeads.filter((l) => l.call_status === "not_called");
     const overdueUncalled = uncalledLeads.filter(
       (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
-    ).length;
-    const pipelineValue = leads
-      .filter((l) => l.outcome === "quoted")
+    );
+    const pipelineLeads = leads.filter((l) => l.outcome === "quoted");
+    const pipelineValue = pipelineLeads
       .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
-    const openQuoteCount = leads.filter((l) => l.outcome === "quoted").length;
+    const uncalledBySource = {
+      website: uncalledLeads.filter((lead) => lead.source === "website").length,
+      meta: uncalledLeads.filter((lead) => lead.source === "meta").length,
+    };
+    const overdueUncalledBySource = {
+      website: overdueUncalled.filter((lead) => lead.source === "website").length,
+      meta: overdueUncalled.filter((lead) => lead.source === "meta").length,
+    };
+    const pipelineBySource = {
+      website: pipelineLeads
+        .filter((lead) => lead.source === "website")
+        .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
+      meta: pipelineLeads
+        .filter((lead) => lead.source === "meta")
+        .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
+    };
+    const openQuoteCountBySource = {
+      website: pipelineLeads.filter((lead) => lead.source === "website").length,
+      meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
+    };
     const responseTimes = leads
       .filter((l) => l.first_call_at)
       .map((l) => new Date(l.first_call_at!).getTime() - new Date(l.submitted_at).getTime())
@@ -561,12 +582,17 @@ export default function LeadsDashboard() {
     return {
       ...funnel,
       uncalled: uncalledLeads.length,
-      overdueUncalled,
+      uncalledBySource,
+      overdueUncalled: overdueUncalled.length,
+      overdueUncalledBySource,
       pipelineValue,
-      openQuoteCount,
+      pipelineBySource,
+      openQuoteCount: pipelineLeads.length,
+      openQuoteCountBySource,
       averageResponseMs,
     };
   }, [leads]);
+  const metricsBySource = useMemo(() => calculateLeadFunnelBySource(leads), [leads]);
 
   const trend = useMemo(
     () => trendRange === "custom"
@@ -633,53 +659,70 @@ export default function LeadsDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
-        <SummaryCard
-          label={`New Leads (${trendLabel})`}
-          value={trend.current.total}
-          color="bg-blue-500"
-          subtitle={trendComparison}
-        />
-        <SummaryCard
-          label="Need a Call"
-          value={metrics.uncalled}
-          color={metrics.uncalled > 0 ? "bg-amber-400" : "bg-emerald-500"}
-          subtitle={metrics.overdueUncalled > 0 ? `${metrics.overdueUncalled} waiting over 24 hours` : "No overdue calls"}
-        />
-        <SummaryCard
-          label="Call Attempt Rate"
-          value={`${metrics.callRate}%`}
-          color="bg-sky-500"
-          subtitle={`${metrics.attempted} of ${metrics.total} all-time leads`}
-        />
-        <SummaryCard
-          label="Quote Rate"
-          value={`${metrics.quoteRate}%`}
-          color="bg-indigo-500"
-          subtitle={`${metrics.quoted} of ${metrics.total} all-time leads`}
-        />
-        <SummaryCard
-          label="Order Conversion"
-          value={`${metrics.conversionRate}%`}
-          color="bg-green-500"
-          subtitle={`${metrics.won} orders from ${metrics.total} all-time leads`}
-        />
-        <SummaryCard
-          label="Quoted Pipeline"
-          value={formatCADWhole(metrics.pipelineValue)}
-          color="bg-emerald-500"
-          subtitle={`${metrics.openQuoteCount} open quotes`}
-        />
-      </div>
+      <section className="bg-white rounded-lg border border-sand-200/60 overflow-hidden">
+        <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(560px,1fr)]">
+          <div className="grid sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-sand-200/60 xl:border-r xl:border-sand-200/60">
+            <SummaryMetric
+              label={`New Leads (${trendLabel})`}
+              value={trend.current.total}
+              color="bg-blue-500"
+              subtitle={trendComparison}
+              sourceDetails={{
+                website: {
+                  value: trend.current.website,
+                  detail: `${trend.current.total > 0 ? Math.round((trend.current.website / trend.current.total) * 100) : 0}% of period`,
+                },
+                meta: {
+                  value: trend.current.meta,
+                  detail: `${trend.current.total > 0 ? Math.round((trend.current.meta / trend.current.total) * 100) : 0}% of period`,
+                },
+              }}
+            />
+            <SummaryMetric
+              label="Need a Call"
+              value={metrics.uncalled}
+              color={metrics.uncalled > 0 ? "bg-amber-400" : "bg-emerald-500"}
+              subtitle={metrics.overdueUncalled > 0 ? `${metrics.overdueUncalled} waiting over 24 hours` : "No overdue calls"}
+              sourceDetails={{
+                website: {
+                  value: metrics.uncalledBySource.website,
+                  detail: `${metrics.overdueUncalledBySource.website} overdue`,
+                },
+                meta: {
+                  value: metrics.uncalledBySource.meta,
+                  detail: `${metrics.overdueUncalledBySource.meta} overdue`,
+                },
+              }}
+            />
+            <SummaryMetric
+              label="Quoted Pipeline"
+              value={formatCADWhole(metrics.pipelineValue)}
+              color="bg-emerald-500"
+              subtitle={`${metrics.openQuoteCount} open quotes`}
+              sourceDetails={{
+                website: {
+                  value: formatCADShort(metrics.pipelineBySource.website),
+                  detail: `${metrics.openQuoteCountBySource.website} quotes`,
+                },
+                meta: {
+                  value: formatCADShort(metrics.pipelineBySource.meta),
+                  detail: `${metrics.openQuoteCountBySource.meta} quotes`,
+                },
+              }}
+            />
+          </div>
+          <FunnelComparison metrics={metricsBySource} />
+        </div>
+      </section>
 
       <section className="bg-white border border-sand-200 rounded-lg overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 px-5 py-4 border-b border-sand-200">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 border-b border-sand-200">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
             <p className="text-xs text-sand-500 mt-0.5">Website and Meta submissions over time</p>
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-            <div className="flex items-center gap-4 text-sm">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+            <div className="flex items-center gap-3 text-xs">
               <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
                 <input
                   type="checkbox"
@@ -703,14 +746,14 @@ export default function LeadsDashboard() {
                 Meta
               </label>
             </div>
-            <div className="inline-flex self-start flex-wrap rounded-md border border-sand-200 bg-sand-50 p-0.5 text-xs font-medium">
+            <div className="inline-flex self-start flex-wrap rounded-md border border-sand-200 bg-sand-50 p-0.5 text-[11px] font-medium">
               {TREND_RANGES.map((range) => (
                 <button
                   key={range.value}
                   type="button"
                   aria-pressed={trendRange === range.value}
                   onClick={() => selectTrendRange(range.value)}
-                  className={`px-3 py-1.5 rounded transition-colors ${
+                  className={`px-2.5 py-1 rounded transition-colors ${
                     trendRange === range.value
                       ? "bg-white text-sand-900 shadow-sm"
                       : "text-sand-500 hover:text-sand-800"
@@ -747,20 +790,20 @@ export default function LeadsDashboard() {
           </div>
         )}
         <div className="grid lg:grid-cols-[minmax(0,1fr)_240px]">
-          <div className="h-[260px] px-3 pt-4 pb-2 sm:px-5">
+          <div className="h-[210px] px-3 pt-3 pb-1 sm:px-4">
             <LeadTrendChart
               data={trend.points}
               showWebsite={chartSources.website}
               showMeta={chartSources.meta}
             />
           </div>
-          <div className="border-t lg:border-t-0 lg:border-l border-sand-200 px-5 py-4 flex flex-col justify-center gap-5">
+          <div className="border-t lg:border-t-0 lg:border-l border-sand-200 px-4 py-3 flex flex-col justify-center gap-3">
             <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
             <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
-            <div className="pt-4 border-t border-sand-200">
+            <div className="pt-3 border-t border-sand-200">
               <p className="text-xs text-sand-500">All sources</p>
-              <p className="text-2xl font-semibold text-sand-900 mt-0.5">{trend.current.total}</p>
-              <p className="text-xs text-sand-500 mt-1">{trendComparison}</p>
+              <p className="text-xl font-semibold text-sand-900 mt-0.5">{trend.current.total}</p>
+              <p className="text-[11px] text-sand-500 mt-0.5">{trendComparison}</p>
             </div>
           </div>
         </div>
@@ -981,15 +1024,102 @@ export default function LeadsDashboard() {
 
 // ─── Subcomponents ───────────────────────────────────────────────────────────
 
-function SummaryCard({ label, value, color, subtitle }: { label: string; value: string | number; color: string; subtitle?: string }) {
+interface SourceMetricDetail {
+  value: string | number;
+  detail: string;
+}
+
+function SummaryMetric({
+  label,
+  value,
+  color,
+  subtitle,
+  sourceDetails,
+}: {
+  label: string;
+  value: string | number;
+  color: string;
+  subtitle?: string;
+  sourceDetails: Record<LeadSource, SourceMetricDetail>;
+}) {
   return (
-    <div className="bg-white rounded-xl border border-sand-200/60 p-4">
+    <div className="flex min-h-40 flex-col p-4">
       <div className="flex items-center gap-2 mb-1">
         <span className={`w-2 h-2 rounded-full ${color}`} />
         <p className="text-[11px] text-sand-400 uppercase tracking-wider">{label}</p>
       </div>
       <p className="text-xl font-semibold text-sand-900">{value}</p>
       {subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{subtitle}</p>}
+      <div className="mt-auto grid grid-cols-2 gap-3 border-t border-sand-100 pt-3">
+        {(["website", "meta"] as const).map((source) => (
+          <div key={source} className="min-w-0">
+            <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
+              <span className={`w-2 h-2 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
+              <span className="capitalize">{source}</span>
+            </div>
+            <p className="mt-0.5 truncate text-sm font-semibold text-sand-800" title={String(sourceDetails[source].value)}>
+              {sourceDetails[source].value}
+            </p>
+            <p className="truncate text-[10px] text-sand-400" title={sourceDetails[source].detail}>
+              {sourceDetails[source].detail}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const FUNNEL_COMPARISON_ROWS = [
+  { label: "Call attempt", rate: "callRate", count: "attempted" },
+  { label: "Quote rate", rate: "quoteRate", count: "quoted" },
+  { label: "Order conversion", rate: "conversionRate", count: "won" },
+] as const;
+
+function FunnelComparison({ metrics }: { metrics: LeadFunnelMetricsBySource }) {
+  return (
+    <div className="border-t border-sand-200/60 xl:border-t-0">
+      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200/60">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-indigo-500" />
+          <p className="text-[11px] text-sand-500 uppercase tracking-wider">Performance by source</p>
+        </div>
+        <span className="text-[10px] text-sand-400 uppercase tracking-wider">All-time</span>
+      </div>
+      <table className="w-full table-fixed text-left">
+        <thead>
+          <tr className="border-b border-sand-100">
+            <th className="w-[42%] px-4 py-2 text-[10px] font-medium text-sand-400 uppercase tracking-wider">Metric</th>
+            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm bg-blue-600" />
+                Website
+              </span>
+            </th>
+            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-sm bg-pink-600" />
+                Meta
+              </span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {FUNNEL_COMPARISON_ROWS.map((row) => (
+            <tr key={row.rate} className="border-b border-sand-100 last:border-b-0">
+              <th className="px-4 py-2 text-xs font-medium text-sand-600">{row.label}</th>
+              {(["website", "meta"] as const).map((source) => (
+                <td key={source} className="px-3 py-2">
+                  <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
+                  <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
+                    {metrics[source][row.count]} / {metrics[source].total}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1015,10 +1145,10 @@ function SourceTotal({
         </span>
         <span className="font-semibold text-sand-900">{value}</span>
       </div>
-      <div className="mt-2 h-1.5 bg-sand-100 rounded-full overflow-hidden">
+      <div className="mt-1.5 h-1.5 bg-sand-100 rounded-full overflow-hidden">
         <div className={`h-full ${color}`} style={{ width: `${share}%` }} />
       </div>
-      <p className="text-[11px] text-sand-400 mt-1">{share}% of leads</p>
+      <p className="text-[10px] text-sand-400 mt-0.5">{share}% of leads</p>
     </div>
   );
 }

@@ -28,6 +28,10 @@ interface LeadFunnelRow {
   outcome: "new" | "contacted" | "quoted" | "won" | "lost";
 }
 
+interface LeadFunnelSourceRow extends LeadFunnelRow {
+  source: LeadSource;
+}
+
 export interface LeadFunnelMetrics {
   total: number;
   attempted: number;
@@ -37,6 +41,8 @@ export interface LeadFunnelMetrics {
   quoteRate: number;
   conversionRate: number;
 }
+
+export type LeadFunnelMetricsBySource = Record<LeadSource, LeadFunnelMetrics>;
 
 const DAY_MS = 86_400_000;
 const TORONTO_TIME_ZONE = "America/Toronto";
@@ -56,6 +62,15 @@ export function calculateLeadFunnel(leads: LeadFunnelRow[]): LeadFunnelMetrics {
     callRate: rate(attempted),
     quoteRate: rate(quoted),
     conversionRate: rate(won),
+  };
+}
+
+export function calculateLeadFunnelBySource(
+  leads: LeadFunnelSourceRow[],
+): LeadFunnelMetricsBySource {
+  return {
+    website: calculateLeadFunnel(leads.filter((lead) => lead.source === "website")),
+    meta: calculateLeadFunnel(leads.filter((lead) => lead.source === "meta")),
   };
 }
 

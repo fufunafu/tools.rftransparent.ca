@@ -3,6 +3,7 @@ import {
   buildCustomLeadTrend,
   buildLeadTrend,
   calculateLeadFunnel,
+  calculateLeadFunnelBySource,
 } from "@/lib/lead-analytics";
 
 const NOW = new Date("2026-08-03T16:00:00.000Z");
@@ -41,6 +42,49 @@ describe("calculateLeadFunnel", () => {
 
   it("returns zero rates for an empty lead set", () => {
     expect(calculateLeadFunnel([])).toEqual({
+      total: 0,
+      attempted: 0,
+      quoted: 0,
+      won: 0,
+      callRate: 0,
+      quoteRate: 0,
+      conversionRate: 0,
+    });
+  });
+});
+
+describe("calculateLeadFunnelBySource", () => {
+  it("uses each source total as the denominator for its rates", () => {
+    const result = calculateLeadFunnelBySource([
+      { source: "website", call_status: "called", quote_number: "#D1", outcome: "quoted" },
+      { source: "website", call_status: "not_called", quote_number: null, outcome: "new" },
+      { source: "meta", call_status: "no_answer", quote_number: null, outcome: "contacted" },
+      { source: "meta", call_status: "called", quote_number: "#D2", outcome: "won" },
+      { source: "meta", call_status: "not_called", quote_number: null, outcome: "new" },
+    ]);
+
+    expect(result.website).toMatchObject({
+      total: 2,
+      attempted: 1,
+      quoted: 1,
+      callRate: 50,
+      quoteRate: 50,
+    });
+    expect(result.meta).toMatchObject({
+      total: 3,
+      attempted: 2,
+      quoted: 1,
+      callRate: 66.7,
+      quoteRate: 33.3,
+    });
+  });
+
+  it("returns zeroed metrics when a source has no leads", () => {
+    const result = calculateLeadFunnelBySource([
+      { source: "website", call_status: "called", quote_number: null, outcome: "contacted" },
+    ]);
+
+    expect(result.meta).toEqual({
       total: 0,
       attempted: 0,
       quoted: 0,
