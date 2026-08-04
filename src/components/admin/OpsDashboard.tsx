@@ -745,9 +745,9 @@ function CollectionCard({ c }: { c: import("@/lib/ops-dashboard").CollectionOps 
           src="Shopify Admin API · unpaid orders (RF)"
         />
         <Stat
-          label="To be collected" value={formatCADShort(c.totalUnpaid)} sub={`${c.unpaidCount} orders`}
+          label="Total outstanding" value={formatCADShort(c.totalUnpaid)} sub={`${c.unpaidCount} orders`}
           href="/accounting/analysis"
-          dataLabel="To be collected" calc="Total outstanding across every unpaid RF order."
+          dataLabel="Total outstanding" calc="Every unpaid RF order summed, including fresh invoices still inside normal terms. The wall board's 'To collect' shows only the 60-day-plus slice — the part needing collection effort."
           src="Shopify Admin API · unpaid orders (RF)"
         />
         <Stat

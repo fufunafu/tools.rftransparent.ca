@@ -517,9 +517,13 @@ export default function WallBoard({
                 </p>
               </div>
               <div>
-                <p className="text-[15px] text-slate-400">To collect</p>
+                {/* The owner's definition: money needing collection EFFORT is
+                    what's past 60 days — fresh invoices inside normal terms
+                    aren't "to collect" yet. Total outstanding lives on the
+                    desktop dashboard. */}
+                <p className="text-[15px] text-slate-400">To collect · 60d+</p>
                 <p className="text-[38px] font-semibold tabular-nums leading-tight">
-                  {formatCADShort(col.totalUnpaid)}
+                  {formatCADShort(col.over60Amount)}
                 </p>
               </div>
             </div>
