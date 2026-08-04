@@ -59,7 +59,6 @@ export interface Lead {
   last_called_by?: string | null;
   duplicate_count?: number;
   duplicate_ids?: string[];
-  sources?: LeadSource[];
   submissions?: LeadSubmission[];
 }
 

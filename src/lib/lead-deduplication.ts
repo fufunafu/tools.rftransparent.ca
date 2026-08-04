@@ -114,6 +114,11 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
 
   return {
     ...canonical,
+    source: chronological[0].source,
+    source_detail: chronological[0].source_detail,
+    form_id: chronological[0].form_id,
+    page_url: chronological[0].page_url,
+    raw_payload: chronological[0].raw_payload,
     name: canonical.name || latestNonEmpty(chronological, (lead) => lead.name),
     email: canonical.email || latestNonEmpty(chronological, (lead) => lead.email),
     phone: canonical.phone || latestNonEmpty(chronological, (lead) => lead.phone),
@@ -132,7 +137,6 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,
     duplicate_ids: group.map((lead) => lead.id),
-    sources: Array.from(new Set(chronological.map((lead) => lead.source))),
     ...(group.length > 1 ? { submissions: chronological.map(toSubmission) } : {}),
   };
 }

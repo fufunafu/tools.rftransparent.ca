@@ -95,20 +95,6 @@ describe("calculateLeadFunnelBySource", () => {
     });
   });
 
-  it("includes a combined client in every source that submitted a lead", () => {
-    const result = calculateLeadFunnelBySource([
-      {
-        source: "website",
-        sources: ["website", "meta"],
-        call_status: "called",
-        quote_number: "#D1",
-        outcome: "quoted",
-      },
-    ]);
-
-    expect(result.website).toMatchObject({ total: 1, quoted: 1 });
-    expect(result.meta).toMatchObject({ total: 1, quoted: 1 });
-  });
 });
 
 describe("buildLeadTrend", () => {

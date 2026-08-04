@@ -145,13 +145,34 @@ describe("consolidateDuplicateLeads", () => {
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({
       duplicate_count: 2,
-      sources: ["website", "meta"],
+      source: "website",
       call_status: "called",
     });
     expect(result[0].submissions?.map((submission) => submission.source)).toEqual([
       "website",
       "meta",
     ]);
+  });
+
+  it("attributes a combined client to Meta when Meta was the first submission", () => {
+    const result = consolidateDuplicateLeads([
+      lead("website", {
+        source: "website",
+        submitted_at: "2026-08-04T12:08:04.000Z",
+      }),
+      lead("meta", {
+        source: "meta",
+        source_detail: "Meta Lead Form",
+        submitted_at: "2026-08-03T12:08:04.000Z",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      source: "meta",
+      source_detail: "Meta Lead Form",
+      duplicate_count: 2,
+    });
   });
 
   it("combines contacts when email matches even if phone numbers differ", () => {
