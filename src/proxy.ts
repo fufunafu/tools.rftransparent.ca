@@ -19,7 +19,8 @@ export async function proxy(request: NextRequest) {
     // one, so "public" here means "authenticated by token instead".
     pathname.startsWith("/wall/") ||
     pathname.startsWith("/api/customer-service/leads/webhook") ||
-    pathname.startsWith("/api/customer-service/leads/meta-webhook");
+    pathname.startsWith("/api/customer-service/leads/meta-webhook") ||
+    pathname === "/api/internal/whatsapp/employee-context";
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
