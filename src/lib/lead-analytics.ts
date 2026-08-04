@@ -30,6 +30,7 @@ interface LeadFunnelRow {
 
 interface LeadFunnelSourceRow extends LeadFunnelRow {
   source: LeadSource;
+  sources?: LeadSource[];
 }
 
 export interface LeadFunnelMetrics {
@@ -68,9 +69,11 @@ export function calculateLeadFunnel(leads: LeadFunnelRow[]): LeadFunnelMetrics {
 export function calculateLeadFunnelBySource(
   leads: LeadFunnelSourceRow[],
 ): LeadFunnelMetricsBySource {
+  const hasSource = (lead: LeadFunnelSourceRow, source: LeadSource) =>
+    lead.sources?.length ? lead.sources.includes(source) : lead.source === source;
   return {
-    website: calculateLeadFunnel(leads.filter((lead) => lead.source === "website")),
-    meta: calculateLeadFunnel(leads.filter((lead) => lead.source === "meta")),
+    website: calculateLeadFunnel(leads.filter((lead) => hasSource(lead, "website"))),
+    meta: calculateLeadFunnel(leads.filter((lead) => hasSource(lead, "meta"))),
   };
 }
 

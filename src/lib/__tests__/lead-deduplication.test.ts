@@ -129,16 +129,57 @@ describe("consolidateDuplicateLeads", () => {
     expect(CALL_STATUS_LABELS[result[0].call_status]).toBe("No answer");
   });
 
-  it("keeps matching contacts from different sources separate", () => {
+  it("combines matching contacts across Website and Meta sources", () => {
     const result = consolidateDuplicateLeads([
-      lead("website"),
-      lead("meta", { source: "meta" }),
+      lead("website", {
+        email: "website@example.com",
+        call_status: "called",
+      }),
+      lead("meta", {
+        source: "meta",
+        email: "meta@example.com",
+        submitted_at: "2026-08-04T12:08:04.000Z",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      duplicate_count: 2,
+      sources: ["website", "meta"],
+      call_status: "called",
+    });
+    expect(result[0].submissions?.map((submission) => submission.source)).toEqual([
+      "website",
+      "meta",
+    ]);
+  });
+
+  it("combines contacts when email matches even if phone numbers differ", () => {
+    const result = consolidateDuplicateLeads([
+      lead("website", { phone: "+1 780 555 0101" }),
+      lead("meta", {
+        source: "meta",
+        phone: "+1 780 555 0102",
+        submitted_at: "2026-08-04T12:08:04.000Z",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+  });
+
+  it("keeps contacts separate when neither email nor phone matches", () => {
+    const result = consolidateDuplicateLeads([
+      lead("first"),
+      lead("second", {
+        email: "someone-else@example.com",
+        phone: "+1 780 555 0199",
+      }),
     ]);
 
     expect(result).toHaveLength(2);
   });
 
-  it("keeps separate quote numbers as separate projects", () => {
+  it("keeps one client when matching submissions have different quote numbers", () => {
     const result = consolidateDuplicateLeads([
       lead("quote-1", { outcome: "quoted", quote_number: "#D1" }),
       lead("quote-2", {
@@ -148,7 +189,8 @@ describe("consolidateDuplicateLeads", () => {
       }),
     ]);
 
-    expect(result).toHaveLength(2);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ duplicate_count: 2 });
   });
 
   it("combines call summaries even when the quote and calls landed on different rows", () => {
@@ -159,6 +201,7 @@ describe("consolidateDuplicateLeads", () => {
         quote_amount: 1000,
       }),
       lead("call", {
+        source: "meta",
         submitted_at: "2026-08-03T12:10:00.000Z",
         call_status: "called",
         outcome: "contacted",

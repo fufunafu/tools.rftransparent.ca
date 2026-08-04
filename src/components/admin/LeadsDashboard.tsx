@@ -67,6 +67,14 @@ const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
   meta: { label: "Meta", className: "bg-rose-100 text-rose-700" },
 };
 
+function leadSources(lead: Lead): LeadSource[] {
+  return lead.sources?.length ? lead.sources : [lead.source];
+}
+
+function hasLeadSource(lead: Lead, source: LeadSource): boolean {
+  return leadSources(lead).includes(source);
+}
+
 type TrendSelection = LeadTrendRange | "custom";
 
 const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string }[] = [
@@ -166,9 +174,14 @@ function SubmissionCard({
     <article className="rounded-xl border border-sand-200 bg-white overflow-hidden">
       <div className="flex items-start justify-between gap-3 bg-sand-50/70 px-4 py-3 border-b border-sand-200">
         <div className="min-w-0">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-sand-400">
-            Submission {position} of {total}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-sand-400">
+              Submission {position} of {total}
+            </p>
+            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${SOURCE_BADGE[submission.source].className}`}>
+              {SOURCE_BADGE[submission.source].label}
+            </span>
+          </div>
           <p className="mt-1 text-sm font-medium text-sand-800 truncate">
             {submission.source_detail || "Form submission"}
           </p>
@@ -327,7 +340,7 @@ function LeadDetailPanel({
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
               <p className="text-[11px] font-medium uppercase tracking-wider text-sand-400">
-                {SOURCE_BADGE[lead.source].label} lead
+                {leadSources(lead).map((source) => SOURCE_BADGE[source].label).join(" + ")} lead
               </p>
               <h2 id="lead-detail-title" className="mt-1 text-2xl font-semibold tracking-tight text-sand-900 truncate">
                 {displayName}
@@ -670,7 +683,7 @@ export default function LeadsDashboard() {
   };
 
   const sourceLeads = useMemo(
-    () => sourceFilter === "all" ? leads : leads.filter((lead) => lead.source === sourceFilter),
+    () => sourceFilter === "all" ? leads : leads.filter((lead) => hasLeadSource(lead, sourceFilter)),
     [leads, sourceFilter],
   );
 
@@ -680,11 +693,17 @@ export default function LeadsDashboard() {
       if (!tab.match(l)) return false;
       if (search.trim()) {
         const q = search.toLowerCase();
+        const submissionValues = l.submissions?.flatMap((submission) => [
+          submission.name,
+          submission.email,
+          submission.phone,
+        ]) ?? [];
         if (
           !(l.name ?? "").toLowerCase().includes(q) &&
           !(l.email ?? "").toLowerCase().includes(q) &&
           !(l.phone ?? "").includes(q) &&
-          !(l.assigned_to ?? "").toLowerCase().includes(q)
+          !(l.assigned_to ?? "").toLowerCase().includes(q) &&
+          !submissionValues.some((value) => (value ?? "").toLowerCase().includes(q))
         ) return false;
       }
       return true;
@@ -713,24 +732,24 @@ export default function LeadsDashboard() {
     const pipelineValue = pipelineLeads
       .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
     const uncalledBySource = {
-      website: uncalledLeads.filter((lead) => lead.source === "website").length,
-      meta: uncalledLeads.filter((lead) => lead.source === "meta").length,
+      website: uncalledLeads.filter((lead) => hasLeadSource(lead, "website")).length,
+      meta: uncalledLeads.filter((lead) => hasLeadSource(lead, "meta")).length,
     };
     const overdueUncalledBySource = {
-      website: overdueUncalled.filter((lead) => lead.source === "website").length,
-      meta: overdueUncalled.filter((lead) => lead.source === "meta").length,
+      website: overdueUncalled.filter((lead) => hasLeadSource(lead, "website")).length,
+      meta: overdueUncalled.filter((lead) => hasLeadSource(lead, "meta")).length,
     };
     const pipelineBySource = {
       website: pipelineLeads
-        .filter((lead) => lead.source === "website")
+        .filter((lead) => hasLeadSource(lead, "website"))
         .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
       meta: pipelineLeads
-        .filter((lead) => lead.source === "meta")
+        .filter((lead) => hasLeadSource(lead, "meta"))
         .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
     };
     const openQuoteCountBySource = {
-      website: pipelineLeads.filter((lead) => lead.source === "website").length,
-      meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
+      website: pipelineLeads.filter((lead) => hasLeadSource(lead, "website")).length,
+      meta: pipelineLeads.filter((lead) => hasLeadSource(lead, "meta")).length,
     };
     const responseTimes = leads
       .filter((l) => l.first_call_at)
@@ -754,11 +773,21 @@ export default function LeadsDashboard() {
   }, [leads]);
   const metricsBySource = useMemo(() => calculateLeadFunnelBySource(leads), [leads]);
 
+  const submissionRows = useMemo(
+    () => leads.flatMap((lead) => lead.submissions?.length
+      ? lead.submissions.map((submission) => ({
+          source: submission.source,
+          submitted_at: submission.submitted_at,
+        }))
+      : [{ source: lead.source, submitted_at: lead.submitted_at }]),
+    [leads],
+  );
+
   const trend = useMemo(
     () => trendRange === "custom"
-      ? buildCustomLeadTrend(leads, customFrom, customTo)
-      : buildLeadTrend(leads, trendRange),
-    [leads, trendRange, customFrom, customTo],
+      ? buildCustomLeadTrend(submissionRows, customFrom, customTo)
+      : buildLeadTrend(submissionRows, trendRange),
+    [submissionRows, trendRange, customFrom, customTo],
   );
   const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
   const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
@@ -767,8 +796,8 @@ export default function LeadsDashboard() {
     : `${Math.abs(trend.changePct ?? 0)}% ${Number(trend.changePct) >= 0 ? "increase" : "decrease"} vs previous ${comparisonLabel}`;
   const sourceCounts = useMemo(() => ({
     all: leads.length,
-    website: leads.filter((lead) => lead.source === "website").length,
-    meta: leads.filter((lead) => lead.source === "meta").length,
+    website: leads.filter((lead) => hasLeadSource(lead, "website")).length,
+    meta: leads.filter((lead) => hasLeadSource(lead, "meta")).length,
   }), [leads]);
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
@@ -1110,9 +1139,13 @@ export default function LeadsDashboard() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[lead.source].className}`}>
-                        {SOURCE_BADGE[lead.source].label}
-                      </span>
+                      <div className="flex flex-wrap gap-1">
+                        {leadSources(lead).map((source) => (
+                          <span key={source} className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[source].className}`}>
+                            {SOURCE_BADGE[source].label}
+                          </span>
+                        ))}
+                      </div>
                       {((lead.duplicate_count ?? 1) > 1 || lead.source_detail) && (
                         <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
                           {(lead.duplicate_count ?? 1) > 1

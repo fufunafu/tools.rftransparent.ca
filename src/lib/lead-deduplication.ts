@@ -26,19 +26,6 @@ function sameContact(left: Lead, right: Lead): boolean {
   return Boolean(leftEmail && rightEmail && leftEmail === rightEmail);
 }
 
-function sameLeadSource(left: Lead, right: Lead): boolean {
-  return left.source === right.source;
-}
-
-function hasConflictingQuotes(group: Lead[], lead: Lead): boolean {
-  const quoteNumbers = new Set(
-    [...group, lead]
-      .map((item) => item.quote_number?.trim().toLowerCase())
-      .filter((quote): quote is string => Boolean(quote)),
-  );
-  return quoteNumbers.size > 1;
-}
-
 function workflowScore(lead: Lead): number {
   const outcomeScore = {
     new: 0,
@@ -145,14 +132,16 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,
     duplicate_ids: group.map((lead) => lead.id),
+    sources: Array.from(new Set(chronological.map((lead) => lead.source))),
     ...(group.length > 1 ? { submissions: chronological.map(toSubmission) } : {}),
   };
 }
 
 /**
- * Combine repeated submissions from the same source and contact into one
- * customer-level lead. The strongest workflow row remains canonical while
- * every original submission stays available in the detail panel.
+ * Combine submissions sharing either a normalized phone number or email into
+ * one customer-level lead, regardless of source or form. The strongest
+ * workflow row remains canonical while every original submission stays
+ * available in the detail panel.
  */
 export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const chronological = [...leads].sort(
@@ -161,10 +150,7 @@ export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const groups: Lead[][] = [];
 
   for (const lead of chronological) {
-    const group = groups.find((candidate) => {
-      if (hasConflictingQuotes(candidate, lead)) return false;
-      return candidate.some((member) => sameLeadSource(member, lead) && sameContact(member, lead));
-    });
+    const group = groups.find((candidate) => candidate.some((member) => sameContact(member, lead)));
 
     if (group) group.push(lead);
     else groups.push([lead]);
