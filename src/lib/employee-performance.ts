@@ -3,6 +3,11 @@ import { sanitizePhone } from "@/lib/call-metrics";
 export const PERFORMANCE_RANGES = ["today", "7d", "30d", "all"] as const;
 export type PerformanceRange = (typeof PERFORMANCE_RANGES)[number];
 
+export interface PerformanceStore {
+  id: string;
+  label: string;
+}
+
 export interface PerformanceEmployeeRow {
   id: string;
   name: string;
@@ -12,7 +17,13 @@ export interface PerformanceEmployeeRow {
   shopify_tags: string[] | null;
   active: boolean;
   location_id: string | null;
-  locations?: { name: string } | { name: string }[] | null;
+  locations?: {
+    name: string;
+    shopify_store_ids?: string[] | null;
+  } | {
+    name: string;
+    shopify_store_ids?: string[] | null;
+  }[] | null;
 }
 
 export interface PerformanceQuoteRow {
@@ -93,6 +104,8 @@ export interface EmployeePerformanceRecord {
 
 export interface EmployeePerformancePayload {
   range: PerformanceRange;
+  store: PerformanceStore;
+  stores: PerformanceStore[];
   currentLabel: string;
   previousLabel: string | null;
   generatedAt: string;
@@ -368,6 +381,14 @@ function employeeLocationName(employee: PerformanceEmployeeRow): string | null {
   return location?.name ?? null;
 }
 
+export function employeeBelongsToStore(
+  employee: PerformanceEmployeeRow,
+  storeId: string,
+): boolean {
+  const location = Array.isArray(employee.locations) ? employee.locations[0] : employee.locations;
+  return location?.shopify_store_ids?.includes(storeId) ?? false;
+}
+
 interface StaffMatcher {
   match(value: string | null | undefined): string | null;
 }
@@ -474,6 +495,8 @@ export function buildEmployeePerformance(
   input: EmployeePerformanceInput,
   range: PerformanceRange,
   now = new Date(),
+  store: PerformanceStore = { id: "all", label: "All stores" },
+  stores: PerformanceStore[] = [store],
 ): EmployeePerformancePayload {
   const window = getPerformanceWindow(range, now);
   const employees = input.employees.filter((employee) => employee.active);
@@ -633,6 +656,8 @@ export function buildEmployeePerformance(
   const labels = currentAndPreviousLabel(range);
   return {
     range,
+    store,
+    stores,
     currentLabel: labels.current,
     previousLabel: labels.previous,
     generatedAt: now.toISOString(),

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEmployeePerformance,
+  employeeBelongsToStore,
   getPerformanceWindow,
   performanceQueryStart,
   type EmployeePerformanceInput,
@@ -80,6 +81,29 @@ describe("employee performance ranges", () => {
   it("includes a 30-day call lookback before the previous period", () => {
     expect(performanceQueryStart("today", NOW)).toBe("2026-07-03T00:00:00.000Z");
     expect(performanceQueryStart("all", NOW)).toBeNull();
+  });
+});
+
+describe("employee performance stores", () => {
+  it("matches employees through their location store mapping", () => {
+    const torontoEmployee = employee("toronto", "Toronto Employee", "customer_service", {
+      locations: {
+        name: "RF/GRS - Toronto",
+        shopify_store_ids: ["store1", "store2"],
+      },
+    });
+
+    expect(employeeBelongsToStore(torontoEmployee, "store1")).toBe(true);
+    expect(employeeBelongsToStore(torontoEmployee, "store2")).toBe(true);
+    expect(employeeBelongsToStore(torontoEmployee, "store3")).toBe(false);
+  });
+
+  it("includes the selected store in the payload", () => {
+    const store = { id: "store3", label: "BC Transparent" };
+    const result = buildEmployeePerformance(input(), "7d", NOW, store, [store]);
+
+    expect(result.store).toEqual(store);
+    expect(result.stores).toEqual([store]);
   });
 });
 

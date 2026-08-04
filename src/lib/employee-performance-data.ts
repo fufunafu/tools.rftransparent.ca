@@ -2,8 +2,10 @@ import "server-only";
 
 import { unstable_cache } from "next/cache";
 import { getSupabase } from "@/lib/supabase";
+import { getStores } from "@/lib/shopify";
 import {
   buildEmployeePerformance,
+  employeeBelongsToStore,
   getPerformanceWindow,
   performanceQueryStart,
   type EmployeePerformanceInput,
@@ -15,6 +17,7 @@ import {
   type PerformancePhoneCallRow,
   type PerformanceQuoteRow,
   type PerformanceRange,
+  type PerformanceStore,
   type PerformanceWarehouseRow,
 } from "@/lib/employee-performance";
 
@@ -38,6 +41,7 @@ async function fetchAllRows<T>(
 async function loadEmployeePerformanceInput(
   range: PerformanceRange,
   now: Date,
+  storeId: string,
 ): Promise<EmployeePerformanceInput> {
   const supabase = getSupabase();
   const queryStart = performanceQueryStart(range, now);
@@ -46,7 +50,7 @@ async function loadEmployeePerformanceInput(
     fetchAllRows<PerformanceEmployeeRow>((from, to) =>
       supabase
         .from("employees")
-        .select("id,name,email,email_alt,department,shopify_tags,active,location_id,locations(name)")
+        .select("id,name,email,email_alt,department,shopify_tags,active,location_id,locations(name,shopify_store_ids)")
         .eq("active", true)
         .order("name", { ascending: true })
         .range(from, to) as unknown as PromiseLike<{
@@ -58,6 +62,7 @@ async function loadEmployeePerformanceInput(
       supabase
         .from("followup_leads")
         .select("id,draft_name,customer_email,customer_phone,quote_amount,shopify_status,lead_status,next_followup_at,closed_at,shopify_created_at,first_synced_at,last_invoice_sender,created_by_staff")
+        .eq("store_id", storeId)
         .order("shopify_created_at", { ascending: true, nullsFirst: true })
         .range(from, to) as unknown as PromiseLike<{
           data: PerformanceQuoteRow[] | null;
@@ -67,10 +72,14 @@ async function loadEmployeePerformanceInput(
     fetchAllRows<PerformanceFollowupRow>((from, to) => {
       let query = supabase
         .from("followup_logs")
-        .select("id,lead_id,logged_by,created_at")
+        .select("id,lead_id,logged_by,created_at,followup_leads!inner(store_id)")
+        .eq("followup_leads.store_id", storeId)
         .order("created_at", { ascending: true });
       if (queryStart) query = query.gte("created_at", queryStart);
-      return query.range(from, to);
+      return query.range(from, to) as unknown as PromiseLike<{
+        data: PerformanceFollowupRow[] | null;
+        error: { message: string } | null;
+      }>;
     }),
     fetchAllRows<PerformanceLeadRow>((from, to) =>
       supabase
@@ -91,6 +100,7 @@ async function loadEmployeePerformanceInput(
       let query = supabase
         .from("call_records")
         .select("id,call_start,from_number,to_number,direction,duration_min,endpoint")
+        .eq("store_id", storeId === "store3" ? "bc_transparent" : "rf_transparent")
         .order("call_start", { ascending: true });
       if (queryStart) query = query.gte("call_start", queryStart);
       return query.range(from, to) as unknown as PromiseLike<{
@@ -109,7 +119,7 @@ async function loadEmployeePerformanceInput(
   ]);
 
   return {
-    employees,
+    employees: employees.filter((employee) => employeeBelongsToStore(employee, storeId)),
     quotes,
     followups,
     leads,
@@ -122,19 +132,29 @@ async function loadEmployeePerformanceInput(
 async function loadAndBuildPerformance(
   range: PerformanceRange,
   now: Date,
+  store: PerformanceStore,
+  stores: PerformanceStore[],
 ): Promise<EmployeePerformancePayload> {
-  const input = await loadEmployeePerformanceInput(range, now);
-  return buildEmployeePerformance(input, range, now);
+  const input = await loadEmployeePerformanceInput(range, now, store.id);
+  return buildEmployeePerformance(input, range, now, store, stores);
+}
+
+export function getPerformanceStoreOptions(): PerformanceStore[] {
+  return getStores().map((store) => ({ id: store.id, label: store.label }));
 }
 
 export async function getEmployeePerformance(
   range: PerformanceRange,
+  storeId: string,
 ): Promise<EmployeePerformancePayload> {
+  const stores = getPerformanceStoreOptions();
+  const store = stores.find((candidate) => candidate.id === storeId);
+  if (!store) throw new Error(`Unknown performance store: ${storeId}`);
   const now = new Date();
   const day = getPerformanceWindow(range, now).today;
   return unstable_cache(
-    () => loadAndBuildPerformance(range, now),
-    ["employee-performance-v1", range, String(day)],
+    () => loadAndBuildPerformance(range, now, store, stores),
+    ["employee-performance-v2", store.id, range, String(day)],
     { revalidate: 300 },
   )();
 }
