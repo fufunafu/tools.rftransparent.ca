@@ -1,5 +1,6 @@
 "use client";
 
+import type { KeyboardEvent } from "react";
 import {
   Bar,
   BarChart,
@@ -11,15 +12,60 @@ import {
 } from "recharts";
 import type { LeadTrendPoint } from "@/lib/lead-analytics";
 
+interface SelectableTickProps {
+  x?: number;
+  y?: number;
+  payload?: { index?: number };
+  data: LeadTrendPoint[];
+  onSelectRange?: (from: string, to: string) => void;
+}
+
+function SelectableTick({ x = 0, y = 0, payload, data, onSelectRange }: SelectableTickProps) {
+  const point = payload?.index == null ? null : data[payload.index];
+  if (!point) return null;
+
+  const select = () => onSelectRange?.(point.rangeStart, point.rangeEnd);
+  const handleKeyDown = (event: KeyboardEvent<SVGTextElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    select();
+  };
+
+  return (
+    <text
+      x={x}
+      y={y}
+      dy={16}
+      textAnchor="middle"
+      role={onSelectRange ? "button" : undefined}
+      tabIndex={onSelectRange ? 0 : undefined}
+      aria-label={onSelectRange ? `Filter leads to ${point.fullLabel}` : undefined}
+      onClick={onSelectRange ? select : undefined}
+      onKeyDown={onSelectRange ? handleKeyDown : undefined}
+      className={onSelectRange ? "cursor-pointer fill-slate-500 hover:fill-slate-900" : "fill-slate-500"}
+      fontSize={11}
+    >
+      {point.label}
+    </text>
+  );
+}
+
 export default function LeadTrendChart({
   data,
   showWebsite,
   showMeta,
+  onSelectRange,
 }: {
   data: LeadTrendPoint[];
   showWebsite: boolean;
   showMeta: boolean;
+  onSelectRange?: (from: string, to: string) => void;
 }) {
+  const selectBarRange = (bar: { payload?: LeadTrendPoint }) => {
+    if (!bar.payload) return;
+    onSelectRange?.(bar.payload.rangeStart, bar.payload.rangeEnd);
+  };
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -20 }}>
@@ -28,7 +74,7 @@ export default function LeadTrendChart({
           dataKey="label"
           axisLine={false}
           tickLine={false}
-          tick={{ fill: "#64748b", fontSize: 11 }}
+          tick={<SelectableTick data={data} onSelectRange={onSelectRange} />}
           minTickGap={24}
         />
         <YAxis
@@ -55,6 +101,8 @@ export default function LeadTrendChart({
             stackId="leads"
             fill="#2563eb"
             radius={showMeta ? [0, 0, 2, 2] : [2, 2, 2, 2]}
+            onClick={onSelectRange ? selectBarRange : undefined}
+            className={onSelectRange ? "cursor-pointer" : undefined}
           />
         )}
         {showMeta && (
@@ -64,6 +112,8 @@ export default function LeadTrendChart({
             stackId="leads"
             fill="#db2777"
             radius={showWebsite ? [2, 2, 0, 0] : [2, 2, 2, 2]}
+            onClick={onSelectRange ? selectBarRange : undefined}
+            className={onSelectRange ? "cursor-pointer" : undefined}
           />
         )}
       </BarChart>

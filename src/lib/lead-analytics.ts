@@ -6,6 +6,8 @@ export type LeadTrendRange = "30d" | "90d" | "12m";
 export interface LeadTrendPoint {
   label: string;
   fullLabel: string;
+  rangeStart: string;
+  rangeEnd: string;
   website: number;
   meta: number;
   total: number;
@@ -156,6 +158,8 @@ function buildDayWindow(
     points.push({
       label: formatDay(start),
       fullLabel: start === end ? formatDay(start, true) : `${formatDay(start, true)} to ${formatDay(end, true)}`,
+      rangeStart: dateKeyFromDay(start),
+      rangeEnd: dateKeyFromDay(end),
       website: 0,
       meta: 0,
       total: 0,
@@ -193,9 +197,13 @@ function buildCustomMonthlyTrend(
   const points: LeadTrendPoint[] = [];
 
   for (let month = firstMonth; month <= lastMonth; month += 1) {
+    const monthStart = dayNumberFromMonth(month);
+    const monthEnd = dayNumberFromMonth(month + 1) - 1;
     points.push({
       label: formatMonth(month),
       fullLabel: formatMonth(month, true),
+      rangeStart: dateKeyFromDay(Math.max(monthStart, currentStartDay)),
+      rangeEnd: dateKeyFromDay(Math.min(monthEnd, currentEndDay)),
       website: 0,
       meta: 0,
       total: 0,
@@ -227,9 +235,13 @@ function buildMonthlyTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary
   const points: LeadTrendPoint[] = [];
 
   for (let month = currentStart; month <= currentMonth; month += 1) {
+    const monthStart = dayNumberFromMonth(month);
+    const monthEnd = dayNumberFromMonth(month + 1) - 1;
     points.push({
       label: formatMonth(month),
       fullLabel: formatMonth(month, true),
+      rangeStart: dateKeyFromDay(monthStart),
+      rangeEnd: dateKeyFromDay(monthEnd),
       website: 0,
       meta: 0,
       total: 0,
@@ -289,6 +301,16 @@ function torontoMonthNumber(date: Date): number {
 function monthNumberFromDay(dayNumber: number): number {
   const date = new Date(dayNumber * DAY_MS);
   return date.getUTCFullYear() * 12 + date.getUTCMonth();
+}
+
+function dayNumberFromMonth(monthNumber: number): number {
+  const year = Math.floor(monthNumber / 12);
+  const month = monthNumber % 12;
+  return Math.floor(Date.UTC(year, month, 1) / DAY_MS);
+}
+
+function dateKeyFromDay(dayNumber: number): string {
+  return new Date(dayNumber * DAY_MS).toISOString().slice(0, 10);
 }
 
 function parseDateKey(value: string): number | null {

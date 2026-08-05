@@ -156,7 +156,13 @@ describe("buildLeadTrend", () => {
     );
 
     expect(result.current).toEqual({ total: 3, website: 1, meta: 2 });
-    expect(result.points.at(-1)).toMatchObject({ label: "Aug 3", website: 1, meta: 0 });
+    expect(result.points.at(-1)).toMatchObject({
+      label: "Aug 3",
+      rangeStart: "2026-08-03",
+      rangeEnd: "2026-08-03",
+      website: 1,
+      meta: 0,
+    });
     expect(result.points.find((point) => point.label === "Aug 2")).toMatchObject({ meta: 1 });
   });
 
@@ -188,8 +194,18 @@ describe("buildLeadTrend", () => {
     );
 
     expect(result.points).toHaveLength(12);
-    expect(result.points[0]).toMatchObject({ label: "Sep", website: 1 });
-    expect(result.points.at(-1)).toMatchObject({ label: "Aug", meta: 1 });
+    expect(result.points[0]).toMatchObject({
+      label: "Sep",
+      rangeStart: "2025-09-01",
+      rangeEnd: "2025-09-30",
+      website: 1,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      label: "Aug",
+      rangeStart: "2026-08-01",
+      rangeEnd: "2026-08-31",
+      meta: 1,
+    });
   });
 
   it("supports an exact custom date range", () => {
@@ -206,6 +222,10 @@ describe("buildLeadTrend", () => {
     expect(result.current).toEqual({ total: 2, website: 1, meta: 1 });
     expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
     expect(result.points).toHaveLength(3);
+    expect(result.points[0]).toMatchObject({
+      rangeStart: "2026-08-01",
+      rangeEnd: "2026-08-01",
+    });
     expect(result.changePct).toBe(100);
   });
 
@@ -217,7 +237,15 @@ describe("buildLeadTrend", () => {
     );
 
     expect(result.points).toHaveLength(8);
-    expect(result.points.find((point) => point.label === "Apr")).toMatchObject({ meta: 1 });
+    expect(result.points.find((point) => point.label === "Apr")).toMatchObject({
+      rangeStart: "2026-04-01",
+      rangeEnd: "2026-04-30",
+      meta: 1,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      rangeStart: "2026-08-01",
+      rangeEnd: "2026-08-03",
+    });
   });
 });
 

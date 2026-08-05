@@ -1042,6 +1042,12 @@ export default function LeadsDashboard() {
     });
   };
 
+  const selectChartRange = (from: string, to: string) => {
+    setCustomFrom(from);
+    setCustomTo(to);
+    setTrendRange("custom");
+  };
+
   return (
     <>
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1207,6 +1213,7 @@ export default function LeadsDashboard() {
               data={trend.points}
               showWebsite={chartSources.website}
               showMeta={chartSources.meta}
+              onSelectRange={selectChartRange}
             />
           </div>
           <div className="border-t lg:border-t-0 lg:border-l border-sand-200 px-4 py-3 flex flex-col justify-center gap-3">
