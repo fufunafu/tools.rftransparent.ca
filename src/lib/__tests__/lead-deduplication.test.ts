@@ -243,6 +243,28 @@ describe("consolidateDuplicateLeads", () => {
     });
   });
 
+  it("keeps the earliest call and quote timestamps for response-time reporting", () => {
+    const result = consolidateDuplicateLeads([
+      lead("first", {
+        quote_number: "#D1",
+        quote_sent_at: "2026-08-03T14:00:00.000Z",
+        first_call_at: "2026-08-03T13:00:00.000Z",
+      }),
+      lead("second", {
+        submitted_at: "2026-08-03T12:30:00.000Z",
+        quote_number: "#D2",
+        quote_sent_at: "2026-08-03T16:00:00.000Z",
+        first_call_at: "2026-08-03T15:00:00.000Z",
+      }),
+    ]);
+
+    expect(result[0]).toMatchObject({
+      submitted_at: "2026-08-03T12:08:04.000Z",
+      first_call_at: "2026-08-03T13:00:00.000Z",
+      first_quote_at: "2026-08-03T14:00:00.000Z",
+    });
+  });
+
   it("keeps a combined customer Not Applicable after one submission is closed", () => {
     const result = consolidateDuplicateLeads([
       lead("first"),

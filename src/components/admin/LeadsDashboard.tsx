@@ -26,6 +26,10 @@ import {
 } from "@/lib/lead-analytics";
 import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
+import {
+  formatLeadResponseTime,
+  leadResponseTimeMs,
+} from "@/lib/lead-response-times";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
   ssr: false,
@@ -52,15 +56,6 @@ function timeAgo(iso: string): string {
   const days = Math.floor(hours / 24);
   if (days === 1) return "1 day ago";
   return `${days} days ago`;
-}
-
-function formatDuration(milliseconds: number | null): string {
-  if (milliseconds == null) return "No calls yet";
-  const minutes = Math.max(0, Math.round(milliseconds / 60_000));
-  if (minutes < 60) return `${minutes} min avg response`;
-  const hours = Math.round((minutes / 60) * 10) / 10;
-  if (hours < 24) return `${hours} hr avg response`;
-  return `${Math.round((hours / 24) * 10) / 10} day avg response`;
 }
 
 const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
@@ -119,7 +114,37 @@ function needsPhone(lead: Lead): boolean {
     && !isCallablePhone(lead.phone);
 }
 
+function LeadResponseSummary({ lead }: { lead: Lead }) {
+  if (lead.outcome === "not_applicable") {
+    return <span className="text-[11px] text-sand-400">Not required</span>;
+  }
+
+  const callTime = leadResponseTimeMs(lead.submitted_at, lead.first_call_at);
+  const quoteTime = leadResponseTimeMs(
+    lead.submitted_at,
+    lead.first_quote_at ?? lead.quote_sent_at,
+  );
+
+  return (
+    <div className="space-y-1 text-[11px]">
+      <div className="flex items-center gap-2">
+        <span className="w-9 text-sand-400">Call</span>
+        <span className={callTime == null ? "text-sand-400" : "font-medium text-sand-700"}>
+          {callTime == null ? "Pending" : formatLeadResponseTime(callTime)}
+        </span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="w-9 text-sand-400">Quote</span>
+        <span className={quoteTime == null ? "text-sand-400" : "font-medium text-sand-700"}>
+          {quoteTime == null ? "Pending" : formatLeadResponseTime(quoteTime)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }[] = [
+  { value: "all", label: "All", match: () => true },
   { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" && !isClosedOutcome(l.outcome) && isCallablePhone(l.phone) },
   { value: "no_phone", label: "No Phone", match: needsPhone },
   { value: "no_quote", label: "Awaiting Quote", match: (l) => l.call_status !== "not_called" && !l.quote_number && !isClosedOutcome(l.outcome) },
@@ -127,7 +152,6 @@ const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }
   { value: "won", label: "Won", match: (l) => l.outcome === "won" },
   { value: "lost", label: "Lost", match: (l) => l.outcome === "lost" },
   { value: "not_applicable", label: "Not Applicable", match: (l) => l.outcome === "not_applicable" },
-  { value: "all", label: "All", match: () => true },
 ];
 
 interface MetaStatus {
@@ -232,7 +256,7 @@ function LeadDetailPanel({
 }: {
   lead: Lead;
   onClose: () => void;
-  onChanged: () => void;
+  onChanged: () => void | Promise<unknown>;
 }) {
   const callAttemptLeadIds = lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id];
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
@@ -251,6 +275,8 @@ function LeadDetailPanel({
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
+  const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const phoneIsCallable = isCallablePhone(lead.phone);
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
   const submissions = useMemo(
@@ -276,6 +302,9 @@ function LeadDetailPanel({
     },
     [lead],
   );
+  const firstQuoteAt = lead.first_quote_at ?? lead.quote_sent_at;
+  const timeToFirstCall = leadResponseTimeMs(lead.submitted_at, lead.first_call_at);
+  const timeToFirstQuote = leadResponseTimeMs(lead.submitted_at, firstQuoteAt);
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -316,30 +345,48 @@ function LeadDetailPanel({
     }
   };
 
-  const patchLead = async (update: Record<string, unknown>) => {
-    await fetch("/api/customer-service/leads", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: lead.id, ...update }),
-    });
-    onChanged();
+  const patchLead = async (update: Record<string, unknown>): Promise<boolean> => {
+    setSaveError(null);
+    try {
+      const response = await fetch("/api/customer-service/leads", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: lead.id, ...update }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(body.error ?? `Could not save changes (${response.status})`);
+      }
+      await onChanged();
+      return true;
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Could not save changes");
+      return false;
+    }
+  };
+
+  const handleOutcomeChange = async (outcome: Outcome) => {
+    if (outcome === lead.outcome || savingOutcome) return;
+    setSavingOutcome(outcome);
+    await patchLead({ outcome });
+    setSavingOutcome(null);
   };
 
   const handleSaveQuote = async () => {
-    await patchLead({
+    const saved = await patchLead({
       quote_number: quoteNumber.trim() || null,
       quote_amount: quoteAmount.trim() ? Number(quoteAmount) : null,
       quote_sent_at: quoteNumber.trim() ? new Date().toISOString() : null,
       outcome: quoteNumber.trim() && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
     });
-    setEditingQuote(false);
+    if (saved) setEditingQuote(false);
   };
 
   const handleSavePhone = async () => {
     const phone = phoneNumber.trim();
     if (!isCallablePhone(phone)) return;
-    await patchLead({ phone });
-    setEditingPhone(false);
+    const saved = await patchLead({ phone });
+    if (saved) setEditingPhone(false);
   };
 
   return (
@@ -473,6 +520,24 @@ function LeadDetailPanel({
             <div className="min-w-0">
               <dt className="text-xs text-sand-400">Assigned to</dt>
               <dd className="mt-1 font-medium text-sand-800 truncate">{lead.assigned_to || "Unassigned"}</dd>
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-sand-400">Time to first call</dt>
+              <dd className="mt-1 font-medium text-sand-800">
+                {timeToFirstCall == null ? "Not called yet" : formatLeadResponseTime(timeToFirstCall)}
+              </dd>
+              {lead.first_call_at && (
+                <dd className="mt-0.5 text-[11px] text-sand-400">{formatDateTime(lead.first_call_at)}</dd>
+              )}
+            </div>
+            <div className="min-w-0">
+              <dt className="text-xs text-sand-400">Time to first quote</dt>
+              <dd className="mt-1 font-medium text-sand-800">
+                {timeToFirstQuote == null ? "Not quoted yet" : formatLeadResponseTime(timeToFirstQuote)}
+              </dd>
+              {firstQuoteAt && (
+                <dd className="mt-0.5 text-[11px] text-sand-400">{formatDateTime(firstQuoteAt)}</dd>
+              )}
             </div>
             {lead.email && (
               <div className="min-w-0">
@@ -658,17 +723,25 @@ function LeadDetailPanel({
             {(Object.keys(OUTCOME_LABELS) as Outcome[]).map((o) => (
               <button
                 key={o}
-                onClick={() => patchLead({ outcome: o })}
+                type="button"
+                onClick={() => handleOutcomeChange(o)}
+                disabled={savingOutcome !== null}
+                aria-pressed={(savingOutcome ?? lead.outcome) === o}
                 className={`text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
-                  lead.outcome === o
+                  (savingOutcome ?? lead.outcome) === o
                     ? "border-blue-500 bg-blue-50 text-blue-700"
-                    : "border-sand-200 text-sand-600 hover:bg-sand-50"
+                    : "border-sand-200 text-sand-600 hover:bg-sand-50 disabled:cursor-wait disabled:opacity-60"
                 }`}
               >
-                {OUTCOME_LABELS[o]}
+                {savingOutcome === o ? "Saving..." : OUTCOME_LABELS[o]}
               </button>
             ))}
           </div>
+          {saveError && (
+            <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+              {saveError}
+            </p>
+          )}
           {(lead.outcome === "lost" || lead.outcome === "not_applicable") && (
             <input
               type="text"
@@ -708,7 +781,7 @@ function LeadDetailPanel({
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
 export default function LeadsDashboard() {
-  const [filter, setFilter] = useState<string>("uncalled");
+  const [filter, setFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
   const [search, setSearch] = useState("");
   const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
@@ -742,9 +815,9 @@ export default function LeadsDashboard() {
   const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
   const { mutate } = useSWRConfig();
 
-  const refresh = () => {
-    mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"));
-  };
+  const refresh = () => (
+    mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"))
+  );
 
   const syncMeta = async () => {
     setSyncingMeta(true);
@@ -774,7 +847,7 @@ export default function LeadsDashboard() {
   );
 
   const filtered = useMemo(() => {
-    const tab = FILTER_TABS.find((t) => t.value === filter) ?? FILTER_TABS[FILTER_TABS.length - 1];
+    const tab = FILTER_TABS.find((t) => t.value === filter) ?? FILTER_TABS[0];
     return sourceLeads.filter((l) => {
       if (!tab.match(l)) return false;
       if (search.trim()) {
@@ -798,6 +871,27 @@ export default function LeadsDashboard() {
       return sortOrder === "newest" ? difference : -difference;
     });
   }, [sourceLeads, filter, search, sortOrder]);
+
+  const queueResponseMetrics = useMemo(() => {
+    const visibleLeads = filtered.filter((lead) => lead.outcome !== "not_applicable");
+    const callTimes = visibleLeads
+      .map((lead) => leadResponseTimeMs(lead.submitted_at, lead.first_call_at))
+      .filter((duration): duration is number => duration != null);
+    const quoteTimes = visibleLeads
+      .map((lead) => leadResponseTimeMs(
+        lead.submitted_at,
+        lead.first_quote_at ?? lead.quote_sent_at,
+      ))
+      .filter((duration): duration is number => duration != null);
+    return {
+      averageCallMs: callTimes.length > 0
+        ? callTimes.reduce((sum, duration) => sum + duration, 0) / callTimes.length
+        : null,
+      averageQuoteMs: quoteTimes.length > 0
+        ? quoteTimes.reduce((sum, duration) => sum + duration, 0) / quoteTimes.length
+        : null,
+    };
+  }, [filtered]);
 
   const filterCounts: Record<string, number> = useMemo(() => {
     const result: Record<string, number> = {};
@@ -839,13 +933,6 @@ export default function LeadsDashboard() {
       website: pipelineLeads.filter((lead) => lead.source === "website").length,
       meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
     };
-    const responseTimes = leads
-      .filter((l) => l.outcome !== "not_applicable" && l.first_call_at)
-      .map((l) => new Date(l.first_call_at!).getTime() - new Date(l.submitted_at).getTime())
-      .filter((duration) => duration >= 0);
-    const averageResponseMs = responseTimes.length > 0
-      ? responseTimes.reduce((sum, duration) => sum + duration, 0) / responseTimes.length
-      : null;
     return {
       ...funnel,
       uncalled: uncalledLeads.length,
@@ -856,7 +943,6 @@ export default function LeadsDashboard() {
       pipelineBySource,
       openQuoteCount: pipelineLeads.length,
       openQuoteCountBySource,
-      averageResponseMs,
     };
   }, [leads]);
   const metricsBySource = useMemo(() => calculateLeadFunnelBySource(leads), [leads]);
@@ -1095,73 +1181,96 @@ export default function LeadsDashboard() {
       )}
 
       <section className="bg-white rounded-lg border border-sand-200 overflow-hidden">
-        <div className="px-4 py-4 border-b border-sand-200">
-          <div className="flex items-center justify-between gap-3 mb-3">
-            <div>
-              <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
-              <p className="text-xs text-sand-500 mt-0.5">{filtered.length} leads in this view</p>
-            </div>
-            <p className="hidden sm:block text-xs text-sand-500">{formatDuration(metrics.averageResponseMs)}</p>
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200">
+          <div>
+            <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
+            <p className="text-xs text-sand-500 mt-0.5">
+              {filtered.length === leads.length
+                ? `${leads.length} leads`
+                : `${filtered.length} of ${leads.length} leads`}
+            </p>
           </div>
-          <div className="flex gap-1 overflow-x-auto">
-            {FILTER_TABS.map((tab) => {
-              const count = filterCounts[tab.value] ?? 0;
-              const active = filter === tab.value;
-              return (
-                <button
-                  key={tab.value}
-                  onClick={() => setFilter(tab.value)}
-                  className={`px-3 py-2 text-sm font-medium rounded-md transition-colors whitespace-nowrap ${
-                    active
-                      ? "text-blue-700 bg-blue-50"
-                      : "text-sand-500 hover:text-sand-700 hover:bg-sand-50"
-                  }`}
-                >
-                  {tab.label}
-                  {count > 0 && (
-                    <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-blue-100 text-blue-600" : "bg-sand-100 text-sand-500"}`}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
+          <div className="hidden sm:flex items-center gap-3 text-xs text-sand-500">
+            <span>
+              Avg. call <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.averageCallMs)}</strong>
+            </span>
+            <span className="h-4 w-px bg-sand-200" aria-hidden="true" />
+            <span>
+              Avg. quote <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.averageQuoteMs)}</strong>
+            </span>
           </div>
         </div>
-        <div className="px-4 py-3 border-b border-sand-200 bg-sand-50 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div className="inline-flex self-start rounded-md border border-sand-200 bg-white p-0.5 text-xs font-medium">
-            {(["all", "website", "meta"] as const).map((source) => (
-              <button
-                key={source}
-                type="button"
-                aria-pressed={sourceFilter === source}
-                onClick={() => setSourceFilter(source)}
-                className={`px-3 py-1.5 rounded transition-colors ${
-                  sourceFilter === source ? "bg-sand-800 text-white" : "text-sand-600 hover:text-sand-900"
-                }`}
-              >
-                {source === "all" ? "All" : SOURCE_BADGE[source].label} {sourceCounts[source]}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full lg:w-auto">
+        <div className="px-4 py-3 border-b border-sand-200 bg-sand-50 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
-              type="text"
+              type="search"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(event) => setSearch(event.target.value)}
               placeholder="Search name, email, phone, or staff"
               aria-label="Search leads"
-              className="w-full sm:w-64 px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="w-full min-w-0 sm:flex-1 px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+            <select
+              value={sourceFilter}
+              onChange={(event) => setSourceFilter(event.target.value as "all" | LeadSource)}
+              aria-label="Filter leads by source"
+              className="w-full sm:w-auto px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            >
+              <option value="all">All sources ({sourceCounts.all})</option>
+              <option value="website">Website ({sourceCounts.website})</option>
+              <option value="meta">Meta ({sourceCounts.meta})</option>
+            </select>
             <select
               value={sortOrder}
               onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
               aria-label="Sort leads"
-              className="px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="w-full sm:w-auto px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             >
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="hidden sm:block shrink-0 text-[11px] font-medium uppercase tracking-wider text-sand-400">
+              View
+            </span>
+            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5">
+              {FILTER_TABS.map((tab) => {
+                const count = filterCounts[tab.value] ?? 0;
+                const active = filter === tab.value;
+                return (
+                  <button
+                    key={tab.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setFilter(tab.value)}
+                    className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                      active
+                        ? "border-sand-800 bg-sand-800 text-white"
+                        : "border-sand-200 bg-white text-sand-600 hover:border-sand-300 hover:text-sand-900"
+                    }`}
+                  >
+                    {tab.label}
+                    <span className={`ml-1.5 ${active ? "text-sand-200" : "text-sand-400"}`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {(filter !== "all" || sourceFilter !== "all" || search.trim()) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilter("all");
+                  setSourceFilter("all");
+                  setSearch("");
+                }}
+                className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800"
+              >
+                Reset
+              </button>
+            )}
           </div>
         </div>
 
@@ -1181,12 +1290,13 @@ export default function LeadsDashboard() {
           </div>
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full min-w-[1080px] text-sm">
+            <table className="w-full min-w-[1180px] text-sm">
               <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-200/60">
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Lead</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Source</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Response</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Contact</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Staff</th>
@@ -1231,6 +1341,9 @@ export default function LeadsDashboard() {
                     <td className="px-4 py-3 text-sand-600">
                       <div>{formatDate(lead.submitted_at)}</div>
                       <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at)}</div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <LeadResponseSummary lead={lead} />
                     </td>
                     <td className="px-4 py-3">
                       {lead.outcome === "not_applicable" ? (

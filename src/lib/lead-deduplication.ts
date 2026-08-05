@@ -131,6 +131,7 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     quote_number: quoteLead?.quote_number ?? canonical.quote_number,
     quote_amount: quoteLead?.quote_amount ?? canonical.quote_amount,
     quote_sent_at: quoteLead?.quote_sent_at ?? canonical.quote_sent_at,
+    first_quote_at: earliestDate(group, (lead) => lead.first_quote_at ?? lead.quote_sent_at),
     assigned_to: quoteLead?.assigned_to ?? canonical.assigned_to
       ?? latestNonEmpty(chronological, (lead) => lead.assigned_to),
     call_attempts_count: group.reduce((sum, lead) => sum + (lead.call_attempts_count ?? 0), 0),
