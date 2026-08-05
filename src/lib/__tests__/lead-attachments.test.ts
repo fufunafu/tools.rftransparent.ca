@@ -41,5 +41,7 @@ describe("lead attachment validation", () => {
     const disposition = attachmentContentDisposition('Plan 🏠 "final".pdf');
     expect(disposition).toContain('filename="Plan _ final.pdf"');
     expect(disposition).toContain("filename*=UTF-8''Plan%20%F0%9F%8F%A0%20%22final%22.pdf");
+    expect(attachmentContentDisposition("drawing.svg", "attachment"))
+      .toContain('attachment; filename="drawing.svg"');
   });
 });

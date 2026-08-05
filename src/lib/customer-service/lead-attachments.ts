@@ -115,9 +115,12 @@ export function parsePendingAttachments(value: unknown): PendingLeadAttachment[]
   return attachments;
 }
 
-export function attachmentContentDisposition(filename: string): string {
+export function attachmentContentDisposition(
+  filename: string,
+  disposition: "inline" | "attachment" = "inline",
+): string {
   const ascii = filename.replace(/[^\x20-\x7E]+/g, "_").replace(/["\\]/g, "");
-  return `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+  return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

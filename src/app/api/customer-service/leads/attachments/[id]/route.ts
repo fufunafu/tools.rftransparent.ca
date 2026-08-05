@@ -40,7 +40,10 @@ export async function GET(
   return new NextResponse(file, {
     headers: {
       "Content-Type": attachment.content_type || "application/octet-stream",
-      "Content-Disposition": attachmentContentDisposition(attachment.filename),
+      "Content-Disposition": attachmentContentDisposition(
+        attachment.filename,
+        attachment.content_type === "image/svg+xml" ? "attachment" : "inline",
+      ),
       "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",
     },
