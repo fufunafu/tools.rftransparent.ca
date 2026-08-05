@@ -109,22 +109,26 @@ export async function GET(req: NextRequest) {
   // Fetch call attempt aggregates so the table can show "last called by X".
   // Paged for the same reason — one busy week of calls would otherwise push
   // this past the cap and quietly drop the aggregate for some leads.
-  const ids = leads.map((l) => l.id);
   const attemptAgg: Map<string, {
     count: number;
     first_at: string;
     last_at: string;
     last_staff: string;
   }> = new Map();
-  if (ids.length > 0) {
-    const { rows: attempts } = await fetchAllPages<AttemptRow>((from, to) =>
+  if (leads.length > 0) {
+    // Read the linked attempt table directly. Sending every lead ID through
+    // one .in() filter creates a URL that PostgREST rejects once the queue is
+    // large, which previously made every timing value disappear.
+    const { rows: attempts, error: attemptsError } = await fetchAllPages<AttemptRow>((from, to) =>
       supabase
         .from("lead_call_attempts")
         .select("lead_id, staff, called_at")
-        .in("lead_id", ids)
         .order("called_at", { ascending: false })
         .range(from, to),
     );
+    if (attemptsError) {
+      return NextResponse.json({ error: attemptsError }, { status: 500 });
+    }
     for (const a of attempts) {
       const prev = attemptAgg.get(a.lead_id);
       if (!prev) {
