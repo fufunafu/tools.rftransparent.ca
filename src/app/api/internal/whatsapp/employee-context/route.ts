@@ -1,11 +1,22 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import {
   isValidWhatsAppAssistantSecret,
   normalizeWhatsAppPhone,
 } from "@/lib/whatsapp-employee-context";
-import { searchAssistantKnowledge } from "@/lib/assistant-knowledge";
+import {
+  recordAssistantKnowledgeQuery,
+  listAssistantKnowledgeForContext,
+  searchAssistantKnowledge,
+  type AssistantKnowledgeMatch,
+} from "@/lib/assistant-knowledge";
 import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
+import {
+  formatAssistantKnowledgeContext,
+  rewriteAssistantRetrievalQuery,
+  type AssistantConversationMessage,
+} from "@/lib/assistant-retrieval";
 
 export const dynamic = "force-dynamic";
 
@@ -25,12 +36,14 @@ export async function POST(request: Request) {
   const payload = (await request.json().catch(() => null)) as {
     phone?: unknown;
     message?: unknown;
+    messages?: unknown;
   } | null;
   const phone = typeof payload?.phone === "string" ? normalizeWhatsAppPhone(payload.phone) : null;
   if (!phone) {
     return NextResponse.json({ error: "A valid phone number is required" }, { status: 400 });
   }
   const message = typeof payload?.message === "string" ? payload.message.trim().slice(0, 2000) : "";
+  const history = normalizeConversationHistory(payload?.messages);
   const initialPrompt = await getAssistantInitialPrompt();
 
   const supabase = getSupabase();
@@ -49,12 +62,21 @@ export async function POST(request: Request) {
     typeof candidate.phone === "string" && normalizeWhatsAppPhone(candidate.phone) === phone
   );
   if (!employee) {
+    const retrieval = await retrieveKnowledge({
+      message,
+      history,
+      employeeId: null,
+      department: null,
+      location: null,
+      safetyIdentifier: createHash("sha256").update(phone).digest("hex"),
+    });
     return NextResponse.json({
+      contractVersion: 2,
       initialPrompt,
       employee: null,
       survey: null,
-      knowledge: await safeKnowledgeSearch(message, null, null),
-    });
+      ...retrievalResponse(retrieval),
+    }, { headers: { "Cache-Control": "no-store" } });
   }
 
   const { data: survey, error: surveyError } = await supabase
@@ -71,10 +93,18 @@ export async function POST(request: Request) {
   }
 
   const location = employee.locations?.name ?? null;
-  const knowledge = await safeKnowledgeSearch(message, employee.department, location);
+  const retrieval = await retrieveKnowledge({
+    message,
+    history,
+    employeeId: employee.id,
+    department: employee.department,
+    location,
+    safetyIdentifier: createHash("sha256").update(employee.id).digest("hex"),
+  });
   const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "https://tools.rftransparent.ca").replace(/\/+$/, "");
 
   return NextResponse.json({
+    contractVersion: 2,
     initialPrompt,
     employee: {
       id: employee.id,
@@ -89,23 +119,93 @@ export async function POST(request: Request) {
           link: survey.responded_at ? null : `${appUrl}/survey/${survey.token}`,
         }
       : null,
-    knowledge,
-  });
+    ...retrievalResponse(retrieval),
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
-async function safeKnowledgeSearch(
-  message: string,
-  department: string | null,
-  location: string | null,
-) {
-  if (!message) return [];
+async function retrieveKnowledge({
+  message,
+  history,
+  employeeId,
+  department,
+  location,
+  safetyIdentifier,
+}: {
+  message: string;
+  history: AssistantConversationMessage[];
+  employeeId: string | null;
+  department: string | null;
+  location: string | null;
+  safetyIdentifier: string;
+}): Promise<{ query: string; knowledge: AssistantKnowledgeMatch[] }> {
+  if (!message) {
+    try {
+      return {
+        query: "",
+        knowledge: await listAssistantKnowledgeForContext({ department, location }),
+      };
+    } catch (error) {
+      console.error(
+        "[whatsapp-assistant] Compatibility knowledge load failed:",
+        error instanceof Error ? error.message : error,
+      );
+      return { query: "", knowledge: [] };
+    }
+  }
+  const query = await rewriteAssistantRetrievalQuery({ message, history, safetyIdentifier });
+  let knowledge: AssistantKnowledgeMatch[] = [];
   try {
-    return await searchAssistantKnowledge(message, { department, location });
+    knowledge = await searchAssistantKnowledge(query, { department, location });
   } catch (error) {
     console.error(
       "[whatsapp-assistant] Knowledge search failed:",
       error instanceof Error ? error.message : error,
     );
-    return [];
   }
+  try {
+    await recordAssistantKnowledgeQuery({
+      employeeId,
+      message,
+      rewrittenQuery: query,
+      department,
+      location,
+      matches: knowledge,
+    });
+  } catch (error) {
+    console.error(
+      "[whatsapp-assistant] Knowledge query logging failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  return { query, knowledge };
+}
+
+function retrievalResponse(retrieval: { query: string; knowledge: AssistantKnowledgeMatch[] }) {
+  return {
+    knowledge: retrieval.knowledge,
+    knowledgeContext: formatAssistantKnowledgeContext(retrieval.knowledge),
+    retrieval: {
+      query: retrieval.query,
+      mode: retrieval.query ? "hybrid" : "compatibility",
+      matched: retrieval.knowledge.length > 0,
+      citations: retrieval.knowledge.map((entry) => ({
+        knowledgeId: entry.id,
+        title: entry.title,
+        sourceId: entry.source_id,
+        sourceTitle: entry.source_title,
+      })),
+    },
+  };
+}
+
+function normalizeConversationHistory(value: unknown): AssistantConversationMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-8).flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const role = "role" in item ? item.role : null;
+    const content = "content" in item ? item.content : null;
+    if ((role !== "user" && role !== "assistant") || typeof content !== "string") return [];
+    const normalized = content.trim().slice(0, 2000);
+    return normalized ? [{ role, content: normalized }] : [];
+  });
 }

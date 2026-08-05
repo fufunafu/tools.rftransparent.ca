@@ -3,15 +3,25 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const getSupabaseMock = vi.fn();
 const searchAssistantKnowledgeMock = vi.fn();
 const getAssistantInitialPromptMock = vi.fn();
+const recordAssistantKnowledgeQueryMock = vi.fn();
+const rewriteAssistantRetrievalQueryMock = vi.fn();
+const listAssistantKnowledgeForContextMock = vi.fn();
 
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => getSupabaseMock(),
 }));
 vi.mock("@/lib/assistant-knowledge", () => ({
   searchAssistantKnowledge: (...args: unknown[]) => searchAssistantKnowledgeMock(...args),
+  recordAssistantKnowledgeQuery: (...args: unknown[]) => recordAssistantKnowledgeQueryMock(...args),
+  listAssistantKnowledgeForContext: (...args: unknown[]) => listAssistantKnowledgeForContextMock(...args),
 }));
 vi.mock("@/lib/assistant-prompt", () => ({
   getAssistantInitialPrompt: () => getAssistantInitialPromptMock(),
+}));
+vi.mock("@/lib/assistant-retrieval", () => ({
+  rewriteAssistantRetrievalQuery: (...args: unknown[]) => rewriteAssistantRetrievalQueryMock(...args),
+  formatAssistantKnowledgeContext: (entries: Array<{ title: string; content: string }>) =>
+    entries.map((entry) => `${entry.title}: ${entry.content}`).join("\n"),
 }));
 
 import { POST } from "@/app/api/internal/whatsapp/employee-context/route";
@@ -68,6 +78,9 @@ beforeEach(() => {
   surveyResultMock.mockResolvedValue({ data: null, error: null });
   searchAssistantKnowledgeMock.mockResolvedValue([]);
   getAssistantInitialPromptMock.mockResolvedValue("Custom initial prompt");
+  recordAssistantKnowledgeQueryMock.mockResolvedValue(undefined);
+  rewriteAssistantRetrievalQueryMock.mockImplementation(({ message }) => Promise.resolve(message));
+  listAssistantKnowledgeForContextMock.mockResolvedValue([]);
 });
 
 describe("POST /api/internal/whatsapp/employee-context", () => {
@@ -105,12 +118,60 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      contractVersion: 2,
       initialPrompt: "Custom initial prompt",
       employee: null,
       survey: null,
       knowledge: [],
+      knowledgeContext: "",
+      retrieval: { query: "", mode: "compatibility", matched: false, citations: [] },
     });
     expect(surveyResultMock).not.toHaveBeenCalled();
+  });
+
+  it("returns published answers when a legacy caller omits the message", async () => {
+    const publishedAnswer = {
+      id: "knowledge-1",
+      title: "Company creation",
+      content: "RF Transparent was created in 2015.",
+      category: "company",
+      department: null,
+      location: null,
+      keywords: ["created", "founded", "2015"],
+      source_id: null,
+      source_title: null,
+      source_excerpt: null,
+      rank: 0,
+    };
+    listAssistantKnowledgeForContextMock.mockResolvedValueOnce([publishedAnswer]);
+
+    const response = await POST(createRequest({ phone: "+1 999 999 9999" }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      contractVersion: 2,
+      initialPrompt: "Custom initial prompt",
+      employee: null,
+      survey: null,
+      knowledge: [publishedAnswer],
+      knowledgeContext: "Company creation: RF Transparent was created in 2015.",
+      retrieval: {
+        query: "",
+        mode: "compatibility",
+        matched: true,
+        citations: [{
+          knowledgeId: "knowledge-1",
+          title: "Company creation",
+          sourceId: null,
+          sourceTitle: null,
+        }],
+      },
+    });
+    expect(listAssistantKnowledgeForContextMock).toHaveBeenCalledWith({
+      department: null,
+      location: null,
+    });
+    expect(searchAssistantKnowledgeMock).not.toHaveBeenCalled();
   });
 
   it("returns matched employee context and the latest pending survey link", async () => {
@@ -146,6 +207,9 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
         department: null,
         location: null,
         keywords: ["invoice"],
+        source_id: null,
+        source_title: null,
+        source_excerpt: null,
         rank: 0.7,
       },
     ]);
@@ -157,6 +221,7 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
+      contractVersion: 2,
       initialPrompt: "Custom initial prompt",
       employee: {
         id: "employee-1",
@@ -178,14 +243,33 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
           department: null,
           location: null,
           keywords: ["invoice"],
+          source_id: null,
+          source_title: null,
+          source_excerpt: null,
           rank: 0.7,
         },
       ],
+      knowledgeContext: "Submitting invoices: Send the invoice photo in this WhatsApp chat.",
+      retrieval: {
+        query: "How do I submit an invoice?",
+        mode: "hybrid",
+        matched: true,
+        citations: [{
+          knowledgeId: "knowledge-1",
+          title: "Submitting invoices",
+          sourceId: null,
+          sourceTitle: null,
+        }],
+      },
     });
     expect(searchAssistantKnowledgeMock).toHaveBeenCalledWith(
       "How do I submit an invoice?",
       { department: "Sales", location: "Toronto" },
     );
+    expect(recordAssistantKnowledgeQueryMock).toHaveBeenCalledWith(expect.objectContaining({
+      employeeId: "employee-1",
+      message: "How do I submit an invoice?",
+    }));
   });
 
   it("does not expose a link for a completed survey", async () => {
@@ -222,6 +306,14 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
       link: null,
     });
     expect(body.knowledge).toEqual([]);
+    expect(body.knowledgeContext).toBe("");
+    expect(body.retrieval).toEqual({
+      query: "",
+      mode: "compatibility",
+      matched: false,
+      citations: [],
+    });
+    expect(body.contractVersion).toBe(2);
     expect(body.initialPrompt).toBe("Custom initial prompt");
   });
 

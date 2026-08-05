@@ -5,10 +5,11 @@ import {
   assistantKnowledgeDraftRequestSchema,
   generateAssistantKnowledgeDraft,
 } from "@/lib/assistant-knowledge-draft";
+import { saveAssistantKnowledgeSource } from "@/lib/assistant-knowledge-source";
 import { getSupabase } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 export async function POST(request: NextRequest) {
   const user = await getAuthenticatedUser();
@@ -46,19 +47,33 @@ export async function POST(request: NextRequest) {
   try {
     const result = await generateAssistantKnowledgeDraft({
       source: parsed.data.source,
+      refinement: parsed.data.refinement ?? "",
+      currentDrafts: parsed.data.currentDrafts ?? [],
       departments,
       locations,
       safetyIdentifier: createHash("sha256")
         .update(user.email ?? user.id)
         .digest("hex"),
     });
-    if (!result.publishable) {
+    if (!result.publishable || result.drafts.length === 0) {
       return NextResponse.json(
         { error: result.reviewNote, model: result.model },
         { status: 422 },
       );
     }
-    return NextResponse.json(result);
+    const sourceId = await saveAssistantKnowledgeSource({
+      id: parsed.data.sourceId,
+      title: parsed.data.sourceName || result.drafts[0].title,
+      sourceKind: parsed.data.sourceKind ?? "text",
+      content: parsed.data.source,
+      refinement: parsed.data.refinement,
+      actor: user.email ?? user.id,
+    });
+    return NextResponse.json({
+      ...result,
+      sourceId,
+      drafts: result.drafts.map((draft) => ({ ...draft, source_id: sourceId })),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not create knowledge draft" },

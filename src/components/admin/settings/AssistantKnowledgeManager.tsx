@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
   ASSISTANT_CATEGORIES,
@@ -9,10 +9,11 @@ import {
   type AssistantCategory,
   type AssistantEvaluationCase,
   type AssistantKnowledgeEntry,
+  type AssistantKnowledgeGap,
 } from "@/lib/assistant-knowledge";
 
-type Tab = "prompt" | "knowledge" | "tests";
-type CollectionTab = Exclude<Tab, "prompt">;
+type Tab = "prompt" | "knowledge" | "gaps" | "tests";
+type CollectionTab = "knowledge" | "tests";
 
 interface KnowledgeDraft {
   id?: string;
@@ -22,6 +23,8 @@ interface KnowledgeDraft {
   department: string;
   location: string;
   keywords: string;
+  source_id?: string | null;
+  source_excerpt?: string | null;
   active: boolean;
 }
 
@@ -34,6 +37,16 @@ interface EvaluationDraft {
   active: boolean;
 }
 
+interface AIWorkingDraft extends Omit<KnowledgeDraft, "keywords"> {
+  keywords: string[];
+}
+
+interface KnowledgeChatMessage {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+}
+
 const EMPTY_KNOWLEDGE: KnowledgeDraft = {
   title: "",
   content: "",
@@ -41,6 +54,8 @@ const EMPTY_KNOWLEDGE: KnowledgeDraft = {
   department: "",
   location: "",
   keywords: "",
+  source_id: null,
+  source_excerpt: null,
   active: true,
 };
 
@@ -50,6 +65,12 @@ const EMPTY_EVALUATION: EvaluationDraft = {
   department: "",
   location: "",
   active: true,
+};
+
+const INITIAL_CHAT_MESSAGE: KnowledgeChatMessage = {
+  id: "knowledge-assistant-welcome",
+  role: "assistant",
+  content: "What should employees know?",
 };
 
 const INPUT_CLASS =
@@ -232,8 +253,6 @@ function Modal({
   busy,
   onClose,
   onSubmit,
-  submitLabel = "Save",
-  busyLabel = "Saving...",
   children,
 }: {
   title: string;
@@ -241,8 +260,6 @@ function Modal({
   busy: boolean;
   onClose: () => void;
   onSubmit: (event: React.FormEvent) => void;
-  submitLabel?: string;
-  busyLabel?: string;
   children: React.ReactNode;
 }) {
   if (!open) return null;
@@ -277,7 +294,7 @@ function Modal({
             Cancel
           </button>
           <button type="submit" disabled={busy} className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-            {busy ? busyLabel : submitLabel}
+            {busy ? "Saving..." : "Save"}
           </button>
         </div>
       </form>
@@ -289,23 +306,35 @@ export default function AssistantKnowledgeManager({
   initialPrompt,
   initialKnowledge,
   initialEvaluations,
+  initialGaps,
   departments,
   locations,
 }: {
   initialPrompt: string;
   initialKnowledge: AssistantKnowledgeEntry[];
   initialEvaluations: AssistantEvaluationCase[];
+  initialGaps: AssistantKnowledgeGap[];
   departments: string[];
   locations: string[];
 }) {
-  const [tab, setTab] = useState<Tab>("prompt");
+  const [tab, setTab] = useState<Tab>("knowledge");
   const [prompt, setPrompt] = useState(initialPrompt);
   const [savedPrompt, setSavedPrompt] = useState(initialPrompt);
   const [knowledge, setKnowledge] = useState(initialKnowledge);
   const [evaluations, setEvaluations] = useState(initialEvaluations);
+  const [gaps] = useState(initialGaps);
   const [query, setQuery] = useState("");
   const [knowledgeDraft, setKnowledgeDraft] = useState<KnowledgeDraft | null>(null);
-  const [knowledgeSource, setKnowledgeSource] = useState<string | null>(null);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSource, setChatSource] = useState<string | null>(null);
+  const [chatSourceId, setChatSourceId] = useState<string | null>(null);
+  const [chatDrafts, setChatDrafts] = useState<AIWorkingDraft[]>([]);
+  const [chatReviewNote, setChatReviewNote] = useState<string | null>(null);
+  const [reviewingDraftIndex, setReviewingDraftIndex] = useState<number | null>(null);
+  const [chatMessages, setChatMessages] = useState<KnowledgeChatMessage[]>([
+    INITIAL_CHAT_MESSAGE,
+  ]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const [aiDraftNote, setAiDraftNote] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [evaluationDraft, setEvaluationDraft] = useState<EvaluationDraft | null>(null);
@@ -313,6 +342,7 @@ export default function AssistantKnowledgeManager({
   const [running, setRunning] = useState<string | null>(null);
   const [promptSaving, setPromptSaving] = useState(false);
   const [drafting, setDrafting] = useState(false);
+  const [indexing, setIndexing] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
@@ -334,9 +364,8 @@ export default function AssistantKnowledgeManager({
   const publishedAnswers = knowledge.filter((entry) => entry.active).length;
   const activeChecks = evaluations.filter((item) => item.active);
   const passingChecks = activeChecks.filter((item) => item.latest_run?.passed).length;
-  const checksNeedingAttention = activeChecks.filter(
-    (item) => !item.latest_run || !item.latest_run.passed,
-  ).length;
+  const failingChecks = activeChecks.filter((item) => item.latest_run?.passed === false).length;
+  const notRunChecks = activeChecks.filter((item) => !item.latest_run).length;
   const orderedEvaluations = useMemo(
     () => [...evaluations].sort((left, right) => {
       const score = (item: AssistantEvaluationCase) =>
@@ -345,6 +374,10 @@ export default function AssistantKnowledgeManager({
     }),
     [evaluations],
   );
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ block: "nearest" });
+  }, [chatMessages, drafting]);
 
   async function savePrompt(event: React.FormEvent) {
     event.preventDefault();
@@ -400,6 +433,18 @@ export default function AssistantKnowledgeManager({
       if (!response.ok) throw new Error(payload.error ?? "Could not save answer");
       await reload();
       setKnowledgeDraft(null);
+      if (reviewingDraftIndex !== null) {
+        setChatDrafts((current) => current.filter((_, index) => index !== reviewingDraftIndex));
+        setChatMessages((current) => [
+          ...current,
+          {
+            id: `knowledge-assistant-published-${Date.now()}`,
+            role: "assistant",
+            content: `Published "${knowledgeDraft.title}".`,
+          },
+        ]);
+      }
+      setReviewingDraftIndex(null);
       setAiDraftNote(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save answer");
@@ -410,35 +455,77 @@ export default function AssistantKnowledgeManager({
 
   async function generateKnowledgeDraft(event: React.FormEvent) {
     event.preventDefault();
-    if (knowledgeSource === null) return;
+    const message = chatInput.trim();
+    if (!message) return;
+    const source = chatSource ?? message;
+    const userMessage: KnowledgeChatMessage = {
+      id: `knowledge-user-${Date.now()}`,
+      role: "user",
+      content: message,
+    };
     setDrafting(true);
     setDraftError(null);
+    setChatInput("");
+    setChatMessages((current) => [...current, userMessage]);
     try {
       const response = await fetch("/api/settings/assistant-knowledge/draft", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source: knowledgeSource }),
+        body: JSON.stringify({
+          source,
+          sourceId: chatSourceId ?? undefined,
+          refinement: chatSource ? message : "",
+          currentDrafts: chatDrafts,
+        }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Could not create knowledge draft");
-      if (!payload.draft) throw new Error("The AI did not return a knowledge draft");
+      if (!Array.isArray(payload.drafts) || payload.drafts.length === 0) {
+        throw new Error("The AI did not return any knowledge drafts");
+      }
 
-      setKnowledgeDraft({
-        title: payload.draft.title,
-        content: payload.draft.content,
-        category: payload.draft.category,
-        department: payload.draft.department,
-        location: payload.draft.location,
-        keywords: payload.draft.keywords.join(", "),
-        active: payload.draft.active,
-      });
-      setAiDraftNote(payload.reviewNote ?? "Review this draft before publishing");
-      setKnowledgeSource(null);
+      setChatSource(source);
+      setChatSourceId(payload.sourceId ?? null);
+      setChatDrafts(payload.drafts);
+      setChatReviewNote(payload.reviewNote ?? "Review this draft before publishing");
+      setChatMessages((current) => [
+        ...current,
+        {
+          id: `knowledge-assistant-${Date.now()}`,
+          role: "assistant",
+          content: `${chatSource ? "Updated" : "Created"} ${payload.drafts.length} knowledge ${payload.drafts.length === 1 ? "bit" : "bits"}. ${payload.reviewNote ?? "Ready for review."}`,
+        },
+      ]);
     } catch (cause) {
       setDraftError(cause instanceof Error ? cause.message : "Could not create knowledge draft");
+      setChatInput(message);
+      setChatMessages((current) => current.filter((item) => item.id !== userMessage.id));
     } finally {
       setDrafting(false);
     }
+  }
+
+  function reviewAIKnowledgeDraft(index: number) {
+    const chatDraft = chatDrafts[index];
+    if (!chatDraft) return;
+    setReviewingDraftIndex(index);
+    setAiDraftNote(chatReviewNote ?? "Review this draft before publishing");
+    setKnowledgeDraft({
+      ...chatDraft,
+      keywords: chatDraft.keywords.join(", "),
+    });
+  }
+
+  function resetKnowledgeChat() {
+    setChatInput("");
+    setChatSource(null);
+    setChatSourceId(null);
+    setChatDrafts([]);
+    setChatReviewNote(null);
+    setReviewingDraftIndex(null);
+    setChatMessages([INITIAL_CHAT_MESSAGE]);
+    setAiDraftNote(null);
+    setDraftError(null);
   }
 
   async function saveEvaluation(event: React.FormEvent) {
@@ -460,6 +547,22 @@ export default function AssistantKnowledgeManager({
       setError(cause instanceof Error ? cause.message : "Could not save quality check");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function reindexKnowledge() {
+    setIndexing(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/assistant-knowledge/reindex", {
+        method: "POST",
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Could not reindex answers");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not reindex answers");
+    } finally {
+      setIndexing(false);
     }
   }
 
@@ -506,6 +609,7 @@ export default function AssistantKnowledgeManager({
 
   function editKnowledge(entry: AssistantKnowledgeEntry) {
     setAiDraftNote(null);
+    setReviewingDraftIndex(null);
     setKnowledgeDraft({
       id: entry.id,
       title: entry.title,
@@ -514,6 +618,8 @@ export default function AssistantKnowledgeManager({
       department: entry.department ?? "",
       location: entry.location ?? "",
       keywords: entry.keywords.join(", "),
+      source_id: entry.source_id,
+      source_excerpt: entry.source_excerpt,
       active: entry.active,
     });
   }
@@ -530,32 +636,27 @@ export default function AssistantKnowledgeManager({
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <header>
+    <div className="mx-auto max-w-7xl space-y-5">
+      <header className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">WhatsApp</p>
           <h1 className="mt-1 text-2xl font-semibold text-slate-950">Employee assistant</h1>
         </div>
+        <dl className="flex divide-x divide-slate-200 self-start sm:self-auto">
+          <div className="pr-5">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Answers published</dt>
+            <dd className="mt-1 text-sm font-semibold text-slate-800">
+              {publishedAnswers} <span className="font-normal text-slate-400">of {knowledge.length}</span>
+            </dd>
+          </div>
+          <div className="pl-5">
+            <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Checks active</dt>
+            <dd className="mt-1 text-sm font-semibold text-slate-800">
+              {activeChecks.length} <span className="font-normal text-slate-400">of {evaluations.length}</span>
+            </dd>
+          </div>
+        </dl>
       </header>
-
-      <dl className="grid grid-cols-2 border-y border-slate-200 sm:grid-cols-4">
-        <div className="border-r border-slate-200 px-3 py-3 sm:px-4">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Published answers</dt>
-          <dd className="mt-1 text-xl font-semibold text-slate-900">{publishedAnswers}</dd>
-        </div>
-        <div className="px-3 py-3 sm:border-r sm:border-slate-200 sm:px-4">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Active checks</dt>
-          <dd className="mt-1 text-xl font-semibold text-slate-900">{activeChecks.length}</dd>
-        </div>
-        <div className="border-r border-t border-slate-200 px-3 py-3 sm:border-t-0 sm:px-4">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Passing</dt>
-          <dd className="mt-1 text-xl font-semibold text-emerald-700">{passingChecks}</dd>
-        </div>
-        <div className="border-t border-slate-200 px-3 py-3 sm:border-t-0 sm:px-4">
-          <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Needs review</dt>
-          <dd className={`mt-1 text-xl font-semibold ${checksNeedingAttention ? "text-rose-700" : "text-slate-900"}`}>{checksNeedingAttention}</dd>
-        </div>
-      </dl>
 
       {error && (
         <div role="alert" className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -566,239 +667,323 @@ export default function AssistantKnowledgeManager({
         </div>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div role="tablist" aria-label="Assistant settings" className="grid h-9 w-full grid-cols-3 self-start rounded-lg border border-slate-200 bg-slate-100 p-0.5 sm:w-auto">
-          {(["prompt", "knowledge", "tests"] as const).map((value) => (
-            <button
-              key={value}
-              id={`assistant-${value}-tab`}
-              type="button"
-              role="tab"
-              aria-selected={tab === value}
-              aria-controls={`assistant-${value}-panel`}
-              onClick={() => setTab(value)}
-              className={`rounded-md px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === value ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800"}`}
-            >
-              {value === "prompt"
-                ? "Initial prompt"
-                : value === "knowledge"
-                  ? `Answers (${knowledge.length})`
-                  : `Checks (${evaluations.length})`}
-            </button>
-          ))}
-        </div>
-
-        {tab === "knowledge" ? (
-          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
-            <div className="relative min-w-0 flex-1 sm:max-w-xs">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true">
-                <circle cx="11" cy="11" r="6.5" /><path strokeLinecap="round" d="m16 16 4 4" />
-              </svg>
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search answers" aria-label="Search answers" className={`${INPUT_CLASS} h-9 pl-9`} />
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setDraftError(null);
-                setKnowledgeSource("");
-              }}
-              className="h-9 shrink-0 rounded-lg border border-blue-200 bg-blue-50 px-3 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              Draft with AI
-            </button>
-            <button type="button" onClick={() => { setAiDraftNote(null); setKnowledgeDraft({ ...EMPTY_KNOWLEDGE }); }} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
-              <PlusIcon /> New answer
-            </button>
-          </div>
-        ) : tab === "tests" ? (
-          <div className="flex items-center gap-2">
-            <button type="button" onClick={() => void runTests()} disabled={running !== null || evaluations.every((item) => !item.active)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
-              <PlayIcon /> {running === "all" ? "Running..." : "Run active checks"}
-            </button>
-            <button type="button" onClick={() => setEvaluationDraft({ ...EMPTY_EVALUATION })} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
-              <PlusIcon /> New check
-            </button>
-          </div>
-        ) : null}
-      </div>
-
-      <div
-        id={`assistant-${tab}-panel`}
-        role="tabpanel"
-        aria-labelledby={`assistant-${tab}-tab`}
-      >
-        {tab === "prompt" ? (
-          <form onSubmit={savePrompt} className="border-y border-slate-200 py-5">
-            <label htmlFor="assistant-initial-prompt" className="block text-sm font-semibold text-slate-800">
-              Initial prompt
-            </label>
-            <textarea
-              id="assistant-initial-prompt"
-              required
-              maxLength={ASSISTANT_INITIAL_PROMPT_MAX_LENGTH}
-              rows={16}
-              value={prompt}
-              onChange={(event) => {
-                setPrompt(event.target.value);
-                setPromptSaved(false);
-              }}
-              className={`${INPUT_CLASS} mt-2 min-h-72 resize-y font-mono text-xs leading-5`}
-            />
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <span className="text-xs text-slate-400">
-                {prompt.length.toLocaleString()} / {ASSISTANT_INITIAL_PROMPT_MAX_LENGTH.toLocaleString()}
-              </span>
-              <div className="flex min-h-9 items-center gap-3">
-                {promptSaved && <span className="text-xs font-medium text-emerald-700">Saved</span>}
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_400px]">
+        <div className="min-w-0 space-y-4">
+          <div className="flex flex-col gap-3 border-b border-slate-200 sm:flex-row sm:items-end sm:justify-between">
+            <div role="tablist" aria-label="Assistant settings" className="-mb-px flex min-w-0 overflow-x-auto">
+              {(["knowledge", "gaps", "prompt", "tests"] as const).map((value) => (
                 <button
-                  type="submit"
-                  disabled={promptSaving || prompt === savedPrompt || !prompt.trim()}
-                  className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  key={value}
+                  id={`assistant-${value}-tab`}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === value}
+                  aria-controls={`assistant-${value}-panel`}
+                  onClick={() => setTab(value)}
+                  className={`h-11 shrink-0 border-b-2 px-3 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${tab === value ? "border-blue-600 text-blue-700" : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"}`}
                 >
-                  {promptSaving ? "Saving..." : "Save prompt"}
+                  {value === "knowledge"
+                    ? `Answers (${knowledge.length})`
+                    : value === "gaps"
+                      ? `Gaps (${gaps.length})`
+                    : value === "prompt"
+                      ? "Prompt"
+                      : `Checks (${evaluations.length})`}
+                </button>
+              ))}
+            </div>
+
+            {tab === "knowledge" ? (
+              <div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2 pb-3">
+                <div className="relative min-w-0 flex-1 basis-full sm:max-w-xs sm:basis-auto">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true">
+                    <circle cx="11" cy="11" r="6.5" /><path strokeLinecap="round" d="m16 16 4 4" />
+                  </svg>
+                  <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search answers" aria-label="Search answers" className={`${INPUT_CLASS} h-9 pl-9`} />
+                </div>
+                <button type="button" onClick={() => void reindexKnowledge()} disabled={indexing || knowledge.length === 0} className="h-9 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                  {indexing ? "Indexing..." : "Reindex"}
+                </button>
+                <button type="button" onClick={() => { setAiDraftNote(null); setReviewingDraftIndex(null); setKnowledgeDraft({ ...EMPTY_KNOWLEDGE }); }} className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                  <PlusIcon /> New answer
                 </button>
               </div>
-            </div>
-          </form>
-        ) : tab === "knowledge" ? (
-        visibleKnowledge.length === 0 ? (
-          <div className="border-y border-slate-200 py-12 text-center">
-            <p className="text-sm font-medium text-slate-600">
-              {knowledge.length === 0 ? "No answers yet" : "No answers match this search"}
-            </p>
-            {knowledge.length === 0 && (
-              <button type="button" onClick={() => setKnowledgeDraft({ ...EMPTY_KNOWLEDGE })} className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
-                <PlusIcon /> New answer
-              </button>
+            ) : tab === "tests" ? (
+              <div className="flex flex-wrap items-center justify-end gap-2 pb-3">
+                <button type="button" onClick={() => void runTests()} disabled={running !== null || evaluations.every((item) => !item.active)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
+                  <PlayIcon /> {running === "all" ? "Running..." : "Run active checks"}
+                </button>
+                <button type="button" onClick={() => setEvaluationDraft({ ...EMPTY_EVALUATION })} className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                  <PlusIcon /> New check
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          <div id={`assistant-${tab}-panel`} role="tabpanel" aria-labelledby={`assistant-${tab}-tab`}>
+            {tab === "prompt" ? (
+              <form onSubmit={savePrompt} className="space-y-3">
+                <label htmlFor="assistant-initial-prompt" className="block text-sm font-semibold text-slate-800">
+                  Initial prompt
+                </label>
+                <textarea
+                  id="assistant-initial-prompt"
+                  required
+                  maxLength={ASSISTANT_INITIAL_PROMPT_MAX_LENGTH}
+                  rows={20}
+                  value={prompt}
+                  onChange={(event) => {
+                    setPrompt(event.target.value);
+                    setPromptSaved(false);
+                  }}
+                  className={`${INPUT_CLASS} min-h-96 resize-y font-mono text-xs leading-5`}
+                />
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="text-xs text-slate-400">
+                    {prompt.length.toLocaleString()} / {ASSISTANT_INITIAL_PROMPT_MAX_LENGTH.toLocaleString()}
+                  </span>
+                  <div className="flex min-h-9 items-center gap-3">
+                    {promptSaved && <span className="text-xs font-medium text-emerald-700">Saved</span>}
+                    <button type="submit" disabled={promptSaving || prompt === savedPrompt || !prompt.trim()} className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                      {promptSaving ? "Saving..." : "Save prompt"}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            ) : tab === "knowledge" ? (
+              visibleKnowledge.length === 0 ? (
+                <div className="border-y border-slate-200 py-12 text-center">
+                  <p className="text-sm font-medium text-slate-600">
+                    {knowledge.length === 0 ? "No answers yet" : "No answers match this search"}
+                  </p>
+                  {knowledge.length === 0 && (
+                    <button type="button" onClick={() => { setAiDraftNote(null); setReviewingDraftIndex(null); setKnowledgeDraft({ ...EMPTY_KNOWLEDGE }); }} className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                      <PlusIcon /> New answer
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="grid gap-3 xl:grid-cols-2">
+                  {visibleKnowledge.map((entry) => (
+                    <article key={entry.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="min-w-0 break-words text-sm font-semibold text-slate-900">{entry.title}</h2>
+                            <StatusBadge active={entry.active} kind="answer" />
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] font-medium text-slate-500">
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5">{CATEGORY_LABELS[entry.category]}</span>
+                            <span>Audience: {scopeLabel(entry.department, entry.location)}</span>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <button type="button" onClick={() => editKnowledge(entry)} aria-label={`Edit ${entry.title}`} title="Edit" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><PencilIcon /></button>
+                          <button type="button" onClick={() => setDeleteTarget({ type: "knowledge", id: entry.id, label: entry.title })} aria-label={`Delete ${entry.title}`} title="Delete" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><TrashIcon /></button>
+                        </div>
+                      </div>
+                      <div className="mt-3 border-l-2 border-blue-200 pl-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Approved reply</p>
+                        <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs leading-5 text-slate-600">{entry.content}</p>
+                      </div>
+                      <div className="mt-3 flex min-w-0 items-center justify-between gap-3 border-t border-slate-100 pt-2.5">
+                        <p className="min-w-0 truncate text-[10px] text-slate-400">
+                          {entry.keywords.length > 0 ? `Matches: ${entry.keywords.join(", ")}` : "No extra matching words"}
+                        </p>
+                        <p className="shrink-0 text-[10px] text-slate-400">Updated {formatTime(entry.updated_at)}</p>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )
+            ) : tab === "gaps" ? (
+              gaps.length === 0 ? (
+                <div className="border-y border-slate-200 py-12 text-center">
+                  <p className="text-sm font-medium text-slate-600">No unanswered questions recorded</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-200 border-y border-slate-200">
+                  {gaps.map((gap) => (
+                    <div key={gap.id} className="py-3">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{gap.message}</p>
+                        <span className="shrink-0 text-[10px] text-slate-400">{formatTime(gap.created_at)}</span>
+                      </div>
+                      {gap.rewritten_query !== gap.message && (
+                        <p className="mt-1 text-xs text-slate-500">Searched for: {gap.rewritten_query}</p>
+                      )}
+                      <p className="mt-1 text-[10px] font-medium text-slate-400">
+                        Audience: {scopeLabel(gap.department, gap.location)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              <div className="space-y-4">
+                <dl className="grid grid-cols-3 border-y border-slate-200">
+                  <div className="border-r border-slate-200 px-3 py-3">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Passing</dt>
+                    <dd className="mt-1 text-xl font-semibold text-emerald-700">{passingChecks}</dd>
+                  </div>
+                  <div className="border-r border-slate-200 px-3 py-3">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Failing</dt>
+                    <dd className={`mt-1 text-xl font-semibold ${failingChecks ? "text-rose-700" : "text-slate-700"}`}>{failingChecks}</dd>
+                  </div>
+                  <div className="px-3 py-3">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Not run</dt>
+                    <dd className={`mt-1 text-xl font-semibold ${notRunChecks ? "text-amber-700" : "text-slate-700"}`}>{notRunChecks}</dd>
+                  </div>
+                </dl>
+
+                {evaluations.length === 0 ? (
+                  <div className="border-y border-slate-200 py-12 text-center">
+                    <p className="text-sm font-medium text-slate-600">No quality checks yet</p>
+                    <button type="button" onClick={() => setEvaluationDraft({ ...EMPTY_EVALUATION })} className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
+                      <PlusIcon /> New check
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {orderedEvaluations.map((item) => (
+                      <article key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h2 className="break-words text-sm font-semibold text-slate-900">{item.question}</h2>
+                              <StatusBadge active={item.active} kind="check" />
+                              <CheckResultBadge item={item} />
+                            </div>
+                            <p className="mt-1.5 text-[10px] font-medium text-slate-500">Audience: {scopeLabel(item.department, item.location)}</p>
+                            <div className="mt-3 border-l-2 border-slate-200 pl-3">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Expected reply</p>
+                              <p className="mt-1 text-xs leading-5 text-slate-600">{item.expected_answer}</p>
+                            </div>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
+                            <button type="button" onClick={() => void runTests(item.id)} disabled={running !== null} aria-label={`Run quality check ${item.question}`} title="Run check" className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 disabled:opacity-40"><PlayIcon /></button>
+                            <button type="button" onClick={() => editEvaluation(item)} aria-label={`Edit quality check ${item.question}`} title="Edit" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><PencilIcon /></button>
+                            <button type="button" onClick={() => setDeleteTarget({ type: "tests", id: item.id, label: item.question })} aria-label={`Delete quality check ${item.question}`} title="Delete" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><TrashIcon /></button>
+                          </div>
+                        </div>
+                        {item.latest_run && (
+                          <div className={`mt-4 rounded-lg border p-3 ${item.latest_run.passed ? "border-emerald-200 bg-emerald-50/60" : "border-rose-200 bg-rose-50/60"}`}>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`text-[10px] font-semibold uppercase ${item.latest_run.passed ? "text-emerald-700" : "text-rose-700"}`}>{item.latest_run.passed ? "Passed" : "Failed"}</span>
+                              <span className="text-[10px] text-slate-400">{formatTime(item.latest_run.created_at)}</span>
+                            </div>
+                            <div className="mt-2 grid gap-3 md:grid-cols-2">
+                              <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Assistant reply</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-600">{item.latest_run.answer || "No answer returned"}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Evaluator finding</p>
+                                <p className="mt-1 text-xs leading-5 text-slate-600">{item.latest_run.reason}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
           </div>
-        ) : (
-          <div className="grid gap-3 lg:grid-cols-2">
-            {visibleKnowledge.map((entry) => (
-              <article key={entry.id} className="rounded-lg border border-slate-200 bg-white p-4">
-                <div className="flex items-start gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="min-w-0 break-words text-sm font-semibold text-slate-900">{entry.title}</h2>
-                      <StatusBadge active={entry.active} kind="answer" />
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] font-medium text-slate-500">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5">{CATEGORY_LABELS[entry.category]}</span>
-                      <span>Audience: {scopeLabel(entry.department, entry.location)}</span>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <button type="button" onClick={() => editKnowledge(entry)} aria-label={`Edit ${entry.title}`} title="Edit" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><PencilIcon /></button>
-                    <button type="button" onClick={() => setDeleteTarget({ type: "knowledge", id: entry.id, label: entry.title })} aria-label={`Delete ${entry.title}`} title="Delete" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><TrashIcon /></button>
-                  </div>
-                </div>
-                <div className="mt-3 border-l-2 border-blue-200 pl-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Approved reply</p>
-                  <p className="mt-1 line-clamp-4 whitespace-pre-wrap text-xs leading-5 text-slate-600">{entry.content}</p>
-                </div>
-                <div className="mt-3 flex min-w-0 items-center justify-between gap-3 border-t border-slate-100 pt-2.5">
-                  <p className="min-w-0 truncate text-[10px] text-slate-400">
-                    {entry.keywords.length > 0 ? `Matches: ${entry.keywords.join(", ")}` : "No extra matching words"}
-                  </p>
-                  <p className="shrink-0 text-[10px] text-slate-400">Updated {formatTime(entry.updated_at)}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        )
-      ) : evaluations.length === 0 ? (
-        <div className="border-y border-slate-200 py-12 text-center">
-          <p className="text-sm font-medium text-slate-600">No quality checks yet</p>
-          <button type="button" onClick={() => setEvaluationDraft({ ...EMPTY_EVALUATION })} className="mt-3 inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-xs font-semibold text-white hover:bg-blue-700">
-            <PlusIcon /> New check
-          </button>
         </div>
-      ) : (
-        <div className="space-y-3">
-          {orderedEvaluations.map((item) => (
-            <article key={item.id} className="rounded-lg border border-slate-200 bg-white p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="break-words text-sm font-semibold text-slate-900">{item.question}</h2>
-                    <StatusBadge active={item.active} kind="check" />
-                    <CheckResultBadge item={item} />
-                  </div>
-                  <p className="mt-1.5 text-[10px] font-medium text-slate-500">Audience: {scopeLabel(item.department, item.location)}</p>
-                  <div className="mt-3 border-l-2 border-slate-200 pl-3">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Expected reply</p>
-                    <p className="mt-1 text-xs leading-5 text-slate-600">{item.expected_answer}</p>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1 self-end sm:self-start">
-                  <button type="button" onClick={() => void runTests(item.id)} disabled={running !== null} aria-label={`Run quality check ${item.question}`} title="Run check" className="flex h-8 w-8 items-center justify-center rounded-lg text-emerald-600 hover:bg-emerald-50 disabled:opacity-40"><PlayIcon /></button>
-                  <button type="button" onClick={() => editEvaluation(item)} aria-label={`Edit quality check ${item.question}`} title="Edit" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"><PencilIcon /></button>
-                  <button type="button" onClick={() => setDeleteTarget({ type: "tests", id: item.id, label: item.question })} aria-label={`Delete quality check ${item.question}`} title="Delete" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><TrashIcon /></button>
-                </div>
+
+        <aside className="order-first min-w-0 lg:order-last lg:sticky lg:top-6">
+          <section aria-labelledby="knowledge-assistant-heading" className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-blue-600">Knowledge assistant</p>
+                <h2 id="knowledge-assistant-heading" className="mt-0.5 truncate text-sm font-semibold text-slate-900">Build an approved answer</h2>
               </div>
-              {item.latest_run && (
-                <div className={`mt-4 rounded-lg border p-3 ${item.latest_run.passed ? "border-emerald-200 bg-emerald-50/60" : "border-rose-200 bg-rose-50/60"}`}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={`text-[10px] font-semibold uppercase ${item.latest_run.passed ? "text-emerald-700" : "text-rose-700"}`}>{item.latest_run.passed ? "Passed" : "Failed"}</span>
-                    <span className="text-[10px] text-slate-400">{formatTime(item.latest_run.created_at)}</span>
-                  </div>
-                  <div className="mt-2 grid gap-3 md:grid-cols-2">
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Assistant reply</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">{item.latest_run.answer || "No answer returned"}</p>
-                    </div>
-                    <div>
-                      <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">Evaluator finding</p>
-                      <p className="mt-1 text-xs leading-5 text-slate-600">{item.latest_run.reason}</p>
-                    </div>
-                  </div>
+              {(chatSource || chatMessages.length > 1) && (
+                <button type="button" onClick={resetKnowledgeChat} disabled={drafting} className="shrink-0 text-xs font-semibold text-slate-500 hover:text-slate-800 disabled:opacity-40">
+                  New chat
+                </button>
+              )}
+            </div>
+
+            <div aria-live="polite" className="h-64 space-y-2 overflow-y-auto px-3 py-3 lg:h-[26rem]">
+              {chatMessages.map((message) => (
+                <div key={message.id} className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <p className={`max-w-[90%] break-words whitespace-pre-wrap rounded-lg px-3 py-2 text-xs leading-5 ${message.role === "user" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}>
+                    {message.content}
+                  </p>
+                </div>
+              ))}
+              {drafting && (
+                <div className="flex justify-start">
+                  <p className="rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-500">Creating draft...</p>
                 </div>
               )}
-            </article>
-          ))}
-        </div>
-        )}
-      </div>
+              <div ref={chatEndRef} />
+            </div>
 
-      <Modal
-        title="Draft answer with AI"
-        open={knowledgeSource !== null}
-        busy={drafting}
-        onClose={() => setKnowledgeSource(null)}
-        onSubmit={generateKnowledgeDraft}
-        submitLabel="Create draft"
-        busyLabel="Creating..."
-      >
-        {knowledgeSource !== null && (
-          <div className="space-y-4">
-            {draftError && (
-              <div role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                {draftError}
+            {draftError && <div role="alert" className="border-t border-rose-100 bg-rose-50 px-3 py-2 text-xs text-rose-700">{draftError}</div>}
+
+            {chatDrafts.length > 0 && (
+              <div className="max-h-72 overflow-y-auto border-t border-slate-100 bg-emerald-50/60">
+                <div className="flex items-center justify-between gap-3 px-3 py-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-emerald-800">
+                    {chatDrafts.length} knowledge {chatDrafts.length === 1 ? "bit" : "bits"}
+                  </p>
+                  <p className="text-[10px] text-slate-500">Review and publish separately</p>
+                </div>
+                {chatDrafts.map((draft, index) => (
+                  <div key={`${draft.title}-${index}`} className="border-t border-emerald-100 px-3 py-2.5">
+                    <div className="flex items-start gap-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-xs font-semibold text-slate-900">{draft.title}</p>
+                        <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                          {CATEGORY_LABELS[draft.category]} / {scopeLabel(draft.department || null, draft.location || null)} / {draft.keywords.length} keywords
+                        </p>
+                      </div>
+                      <button type="button" onClick={() => reviewAIKnowledgeDraft(index)} className="h-8 shrink-0 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800">
+                        Review
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
-            <Field label="Notes or email">
-              <textarea
-                required
-                autoFocus
-                maxLength={ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH}
-                rows={14}
-                value={knowledgeSource}
-                onChange={(event) => {
-                  setKnowledgeSource(event.target.value);
-                  setDraftError(null);
-                }}
-                placeholder="Paste an email, policy note, or approved answer"
-                className={`${INPUT_CLASS} min-h-72 resize-y leading-5`}
-              />
-            </Field>
-            <p className="text-right text-xs text-slate-400">
-              {knowledgeSource.length.toLocaleString()} / {ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH.toLocaleString()}
-            </p>
-          </div>
-        )}
-      </Modal>
 
-      <Modal title={knowledgeDraft?.id ? "Edit approved answer" : "New approved answer"} open={knowledgeDraft !== null} busy={busy} onClose={() => { setKnowledgeDraft(null); setAiDraftNote(null); }} onSubmit={saveKnowledge}>
+            <form onSubmit={generateKnowledgeDraft} className="border-t border-slate-100 p-3">
+              <label>
+                <span className="sr-only">Message knowledge assistant</span>
+                <textarea
+                  required
+                  maxLength={chatSource ? 4000 : ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH}
+                  rows={4}
+                  value={chatInput}
+                  onChange={(event) => {
+                    setChatInput(event.target.value);
+                    setDraftError(null);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      event.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  placeholder={chatSource ? "Ask for changes to the knowledge bits" : "Paste notes, a transcript, or other source material"}
+                  className={`${INPUT_CLASS} min-h-24 resize-y leading-5`}
+                />
+              </label>
+              <div className="mt-2 flex justify-end">
+                <button type="submit" disabled={drafting || !chatInput.trim()} className="h-9 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">
+                  Send
+                </button>
+              </div>
+            </form>
+          </section>
+        </aside>
+      </div>
+
+      <Modal title={knowledgeDraft?.id ? "Edit approved answer" : "New approved answer"} open={knowledgeDraft !== null} busy={busy} onClose={() => { setKnowledgeDraft(null); setAiDraftNote(null); setReviewingDraftIndex(null); }} onSubmit={saveKnowledge}>
         {knowledgeDraft && (
           <div className="space-y-5">
             {aiDraftNote && (

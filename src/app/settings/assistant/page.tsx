@@ -4,13 +4,14 @@ import AssistantKnowledgeManager from "@/components/admin/settings/AssistantKnow
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import {
   listAssistantEvaluationCases,
+  listAssistantKnowledgeGaps,
   listAssistantKnowledge,
 } from "@/lib/assistant-knowledge";
 import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
 import { getSupabase } from "@/lib/supabase";
 
 export const metadata: Metadata = {
-  title: "Assistant Knowledge | Settings",
+  title: "Employee Assistant | Settings",
   robots: { index: false, follow: false },
 };
 
@@ -19,10 +20,11 @@ export default async function AssistantKnowledgePage() {
   if (!user) redirect("/login");
   if (!(await isAdminUser())) redirect("/access-denied");
 
-  const [initialPrompt, knowledge, evaluations, employeeResult, locationResult] = await Promise.all([
+  const [initialPrompt, knowledge, evaluations, gaps, employeeResult, locationResult] = await Promise.all([
     getAssistantInitialPrompt(),
     listAssistantKnowledge(),
     listAssistantEvaluationCases(),
+    listAssistantKnowledgeGaps(),
     getSupabase().from("employees").select("department").not("department", "is", null),
     getSupabase().from("locations").select("name").order("name"),
   ]);
@@ -43,6 +45,7 @@ export default async function AssistantKnowledgePage() {
       initialPrompt={initialPrompt}
       initialKnowledge={knowledge}
       initialEvaluations={evaluations}
+      initialGaps={gaps}
       departments={departments}
       locations={locations}
     />

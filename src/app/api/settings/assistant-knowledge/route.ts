@@ -1,5 +1,10 @@
+import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
+import {
+  buildAssistantKnowledgeEmbeddingInput,
+  createAssistantEmbedding,
+} from "@/lib/assistant-embeddings";
 import {
   assistantKnowledgeInputSchema,
   listAssistantKnowledge,
@@ -48,13 +53,34 @@ export async function POST(request: NextRequest) {
   const now = new Date().toISOString();
   const { id, ...input } = parsed.data;
   const supabase = getSupabase();
+  let embedding: number[];
+  let embeddingModel: string;
+  try {
+    const generated = await createAssistantEmbedding(
+      buildAssistantKnowledgeEmbeddingInput(input),
+      createHash("sha256").update(actor).digest("hex"),
+    );
+    embedding = generated.embedding;
+    embeddingModel = generated.model;
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not index answer" },
+      { status: 502 },
+    );
+  }
+  const persistedInput = {
+    ...input,
+    embedding,
+    embedding_model: embeddingModel,
+    embedded_at: now,
+  };
 
   if (id) {
     const { data, error } = await supabase
       .from("assistant_knowledge")
-      .update({ ...input, updated_by: actor, updated_at: now })
+      .update({ ...persistedInput, updated_by: actor, updated_at: now })
       .eq("id", id)
-      .select("id, title, content, category, department, location, keywords, active, created_by, updated_by, created_at, updated_at")
+      .select("id, title, content, category, department, location, keywords, source_id, source_excerpt, active, created_by, updated_by, created_at, updated_at")
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
@@ -68,8 +94,8 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase
     .from("assistant_knowledge")
-    .insert({ ...input, created_by: actor, updated_by: actor })
-    .select("id, title, content, category, department, location, keywords, active, created_by, updated_by, created_at, updated_at")
+    .insert({ ...persistedInput, created_by: actor, updated_by: actor })
+    .select("id, title, content, category, department, location, keywords, source_id, source_excerpt, active, created_by, updated_by, created_at, updated_at")
     .single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
