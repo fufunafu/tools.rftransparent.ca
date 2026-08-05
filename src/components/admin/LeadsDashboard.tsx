@@ -48,6 +48,11 @@ function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
 function timeAgo(iso: string): string {
   const diffMs = Date.now() - new Date(iso).getTime();
   const minutes = Math.floor(diffMs / (1000 * 60));
@@ -162,6 +167,7 @@ function LeadResponseSummary({ lead }: { lead: Lead }) {
 
 const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }[] = [
   { value: "all", label: "All", match: () => true },
+  { value: "installation", label: "Installation", match: (l) => l.installation_requested === true },
   { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" && !isClosedOutcome(l.outcome) && isCallablePhone(l.phone) },
   { value: "no_phone", label: "No Phone", match: needsPhone },
   { value: "no_quote", label: "Awaiting Quote", match: (l) => l.call_status !== "not_called" && !l.quote_number && !isClosedOutcome(l.outcome) },
@@ -224,7 +230,13 @@ function SubmissionCard({
     && detail.value !== submission.email
     && detail.value !== submission.phone
     && detail.value !== submission.name
+    && !submission.attachments?.some((attachment) => attachment.filename === detail.value)
   ));
+  const uploadErrors = Array.isArray(submission.raw_payload.upload_errors)
+    ? submission.raw_payload.upload_errors.filter(
+        (value): value is string => typeof value === "string" && Boolean(value.trim()),
+      )
+    : [];
 
   return (
     <article className="rounded-xl border border-sand-200 bg-white overflow-hidden">
@@ -266,6 +278,37 @@ function SubmissionCard({
           </dl>
         )}
 
+        {submission.attachments && submission.attachments.length > 0 && (
+          <div>
+            <p className="text-[11px] font-medium text-sand-400 mb-2">Project drawing</p>
+            <div className="space-y-2">
+              {submission.attachments.map((attachment) => (
+                <a
+                  key={attachment.id}
+                  href={`/api/customer-service/leads/attachments/${attachment.id}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-800 transition-colors hover:bg-blue-100"
+                >
+                  <span className="min-w-0 truncate font-medium">{attachment.filename}</span>
+                  <span className="shrink-0 text-xs text-blue-600">
+                    {formatFileSize(attachment.size_bytes)} · Open
+                  </span>
+                </a>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {uploadErrors.length > 0 && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+            <p className="text-[11px] font-semibold text-amber-800">Drawing upload did not finish</p>
+            {uploadErrors.map((error, index) => (
+              <p key={`${error}-${index}`} className="mt-1 text-xs text-amber-700">{error}</p>
+            ))}
+          </div>
+        )}
+
         <details className="text-xs">
           <summary className="cursor-pointer text-sand-400 hover:text-sand-600">View raw submission</summary>
           <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(submission.raw_payload, null, 2)}</pre>
@@ -302,6 +345,7 @@ function LeadDetailPanel({
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
   const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
+  const [savingInstallation, setSavingInstallation] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const phoneIsCallable = isCallablePhone(lead.phone);
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
@@ -319,8 +363,10 @@ function LeadDetailPanel({
             email: lead.email,
             phone: lead.phone,
             message: lead.message,
+            installation_requested: lead.installation_requested,
             raw_payload: lead.raw_payload,
             submitted_at: lead.submitted_at,
+            attachments: lead.attachments,
           }];
       return [...values].sort(
         (left, right) => new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime(),
@@ -371,13 +417,21 @@ function LeadDetailPanel({
     }
   };
 
-  const patchLead = async (update: Record<string, unknown>): Promise<boolean> => {
+  const patchLead = async (
+    update: Record<string, unknown>,
+    allSubmissions = false,
+  ): Promise<boolean> => {
     setSaveError(null);
     try {
       const response = await fetch("/api/customer-service/leads", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: lead.id, ...update }),
+        body: JSON.stringify({
+          ...(allSubmissions
+            ? { ids: lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id] }
+            : { id: lead.id }),
+          ...update,
+        }),
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -415,6 +469,15 @@ function LeadDetailPanel({
     if (saved) setEditingPhone(false);
   };
 
+  const handleInstallationToggle = async () => {
+    if (savingInstallation) return;
+    setSavingInstallation(true);
+    await patchLead({
+      installation_requested: lead.installation_requested === true ? null : true,
+    }, true);
+    setSavingInstallation(false);
+  };
+
   return (
     <div className="fixed inset-0 bg-sand-950/40 flex justify-end z-50" onClick={onClose}>
       <aside
@@ -450,6 +513,11 @@ function LeadDetailPanel({
                 {(lead.duplicate_count ?? 1) > 1 && (
                   <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200">
                     {lead.duplicate_count} submissions combined
+                  </span>
+                )}
+                {lead.installation_requested === true && (
+                  <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-teal-50 text-teal-700 border border-teal-200">
+                    Installation requested
                   </span>
                 )}
               </div>
@@ -529,6 +597,49 @@ function LeadDetailPanel({
             </div>
           )}
         </div>
+
+        <section className="px-5 sm:px-6 py-4 border-b border-sand-200">
+          <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border p-4 ${
+            lead.installation_requested === true
+              ? "border-teal-200 bg-teal-50"
+              : "border-sand-200 bg-sand-50"
+          }`}>
+            <div>
+              <h3 className={`text-sm font-semibold ${
+                lead.installation_requested === true ? "text-teal-900" : "text-sand-800"
+              }`}>
+                {lead.installation_requested === true
+                  ? "Installation requested"
+                  : lead.installation_requested === false
+                    ? "Installation not requested"
+                    : "Installation preference not recorded"}
+              </h3>
+              <p className={`mt-1 text-xs ${
+                lead.installation_requested === true ? "text-teal-700" : "text-sand-500"
+              }`}>
+                {lead.installation_requested === true
+                  ? "This lead should be included in the installation queue."
+                  : "Use the button for an older lead or a preference received outside the form."}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleInstallationToggle}
+              disabled={savingInstallation}
+              className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                lead.installation_requested === true
+                  ? "border border-teal-300 bg-white text-teal-800 hover:bg-teal-100"
+                  : "bg-teal-700 text-white hover:bg-teal-800"
+              }`}
+            >
+              {savingInstallation
+                ? "Saving..."
+                : lead.installation_requested === true
+                  ? "Remove installation mark"
+                  : "Mark installation requested"}
+            </button>
+          </div>
+        </section>
 
         {/* Submissions */}
         <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-4">
@@ -1359,7 +1470,7 @@ export default function LeadsDashboard() {
           </div>
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full min-w-[1180px] text-sm">
+            <table className="w-full min-w-[1280px] text-sm">
               <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-200/60">
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Lead</th>
@@ -1367,6 +1478,7 @@ export default function LeadsDashboard() {
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Response</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Contact</th>
+                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Installation</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Staff</th>
                   <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Stage</th>
@@ -1432,6 +1544,17 @@ export default function LeadsDashboard() {
                         <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
                           {lead.last_called_by} · {timeAgo(lead.last_call_at)}
                         </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {lead.installation_requested === true ? (
+                        <span className="inline-block rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">
+                          Requested
+                        </span>
+                      ) : lead.installation_requested === false ? (
+                        <span className="text-xs text-sand-400">Not requested</span>
+                      ) : (
+                        <span className="text-xs text-sand-300">Not recorded</span>
                       )}
                     </td>
                     <td className="px-4 py-3">

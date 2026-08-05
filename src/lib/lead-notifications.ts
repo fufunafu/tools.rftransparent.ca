@@ -13,6 +13,7 @@ export interface NewLeadNotification {
   email: string | null;
   phone: string | null;
   message: string | null;
+  installationRequested: boolean | null;
 }
 
 /**
@@ -53,6 +54,7 @@ function buildText(lead: NewLeadNotification, sourceLabel: string): string {
     `Name: ${displayText(lead.name)}`,
     `Email: ${displayText(lead.email)}`,
     `Phone: ${displayText(lead.phone)}`,
+    `Installation: ${installationLabel(lead.installationRequested)}`,
     `Source: ${displayText(lead.sourceDetail)}`,
     `Page: ${displayText(lead.pageUrl)}`,
     "",
@@ -69,6 +71,7 @@ function buildHtml(lead: NewLeadNotification, sourceLabel: string): string {
     ["Name", lead.name],
     ["Email", lead.email],
     ["Phone", lead.phone],
+    ["Installation", installationLabel(lead.installationRequested)],
     ["Source", lead.sourceDetail],
     ["Page", lead.pageUrl],
   ]
@@ -96,6 +99,12 @@ function displayText(value: string | null, maxLength = 5000): string {
   const clean = value?.trim();
   if (!clean) return "Not provided";
   return clean.length > maxLength ? `${clean.slice(0, maxLength)}...` : clean;
+}
+
+function installationLabel(value: boolean | null): string {
+  if (value === true) return "Requested";
+  if (value === false) return "Not requested";
+  return "Not recorded";
 }
 
 function cleanHeaderText(value: string | null): string {

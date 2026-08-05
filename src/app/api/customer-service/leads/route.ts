@@ -10,6 +10,7 @@ import {
   type CallStatus,
   type Outcome,
 } from "@/lib/customer-service/leads";
+import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
 import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
 import { isCallablePhone } from "@/lib/call-metrics";
 import {
@@ -53,6 +54,7 @@ async function fetchAllPages<T>(
 
 type LeadRow = { id: string; [key: string]: unknown };
 type AttemptRow = { lead_id: string; staff: string; called_at: string };
+type AttachmentRow = LeadAttachment;
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
 
@@ -106,6 +108,26 @@ export async function GET(req: NextRequest) {
   });
   if (error) return NextResponse.json({ error }, { status: 500 });
 
+  const attachmentsByLead = new Map<string, LeadAttachment[]>();
+  const { rows: attachments, error: attachmentsError } = await fetchAllPages<AttachmentRow>((from, to) =>
+    supabase
+      .from("lead_attachments")
+      .select("id, lead_id, field_name, filename, content_type, size_bytes, created_at")
+      .order("created_at", { ascending: true })
+      .range(from, to),
+  );
+  const attachmentsTableMissing = attachmentsError
+    ? /lead_attachments|schema cache|relation/i.test(attachmentsError)
+    : false;
+  if (attachmentsError && !attachmentsTableMissing) {
+    return NextResponse.json({ error: attachmentsError }, { status: 500 });
+  }
+  for (const attachment of attachments) {
+    const current = attachmentsByLead.get(attachment.lead_id) ?? [];
+    current.push(attachment);
+    attachmentsByLead.set(attachment.lead_id, current);
+  }
+
   // Fetch call attempt aggregates so the table can show "last called by X".
   // Paged for the same reason — one busy week of calls would otherwise push
   // this past the cap and quietly drop the aggregate for some leads.
@@ -158,6 +180,7 @@ export async function GET(req: NextRequest) {
       email: present(l.email) ?? recovered.email,
       phone: present(l.phone) ?? recovered.phone,
       message: present(l.message) ?? recovered.message,
+      attachments: attachmentsByLead.get(l.id) ?? [],
       call_attempts_count: agg?.count ?? 0,
       first_call_at: agg?.first_at ?? null,
       last_call_at: agg?.last_at ?? null,
@@ -279,6 +302,9 @@ export async function PATCH(req: NextRequest) {
   }
   if (rest.notes === null || typeof rest.notes === "string") update.notes = rest.notes;
   if (rest.assigned_to === null || typeof rest.assigned_to === "string") update.assigned_to = rest.assigned_to;
+  if (rest.installation_requested === null || typeof rest.installation_requested === "boolean") {
+    update.installation_requested = rest.installation_requested;
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "no valid fields to update" }, { status: 400 });

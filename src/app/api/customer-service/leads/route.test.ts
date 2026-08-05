@@ -5,12 +5,14 @@ const {
   isAuthenticatedMock,
   getSupabaseMock,
   leadRangeMock,
+  attachmentRangeMock,
   attemptRangeMock,
   attemptInMock,
 } = vi.hoisted(() => ({
   isAuthenticatedMock: vi.fn(),
   getSupabaseMock: vi.fn(),
   leadRangeMock: vi.fn(),
+  attachmentRangeMock: vi.fn(),
   attemptRangeMock: vi.fn(),
   attemptInMock: vi.fn(),
 }));
@@ -57,6 +59,7 @@ beforeEach(() => {
       email: "jane@example.com",
       phone: "+15145551234",
       message: null,
+      installation_requested: true,
       raw_payload: {},
       submitted_at: "2026-08-05T12:00:00.000Z",
       call_status: "called",
@@ -81,11 +84,28 @@ beforeEach(() => {
     }],
     error: null,
   });
+  attachmentRangeMock.mockResolvedValue({
+    data: [{
+      id: "attachment-1",
+      lead_id: "lead-1",
+      field_name: "file-1",
+      filename: "drawing.pdf",
+      content_type: "application/pdf",
+      size_bytes: 1024,
+      created_at: "2026-08-05T12:00:01.000Z",
+    }],
+    error: null,
+  });
 
   const leadsQuery = queryBuilder(leadRangeMock);
+  const attachmentsQuery = queryBuilder(attachmentRangeMock);
   const attemptsQuery = queryBuilder(attemptRangeMock);
   getSupabaseMock.mockReturnValue({
-    from: vi.fn((table: string) => table === "leads" ? leadsQuery : attemptsQuery),
+    from: vi.fn((table: string) => {
+      if (table === "leads") return leadsQuery;
+      if (table === "lead_attachments") return attachmentsQuery;
+      return attemptsQuery;
+    }),
   });
 });
 
@@ -101,6 +121,10 @@ describe("GET /api/customer-service/leads", () => {
       last_call_at: "2026-08-05T12:30:00.000Z",
       last_called_by: "Extension 212",
       call_attempts_count: 1,
+      attachments: [expect.objectContaining({
+        id: "attachment-1",
+        filename: "drawing.pdf",
+      })],
     });
   });
 });

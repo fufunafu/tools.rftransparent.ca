@@ -8,6 +8,7 @@ import { getAdMetrics } from "@/lib/google-ads";
 import { getAutomationHealth, type AutomationHealth } from "@/lib/home-dashboard";
 import { getWallToken } from "@/lib/settings";
 import { BUG_BUCKET } from "@/lib/bug-reports";
+import { LEAD_ATTACHMENT_BUCKET } from "@/lib/customer-service/lead-attachments";
 import { checkWhatsAppConnection } from "@/lib/whatsapp";
 import { checkResendHealth } from "@/lib/resend";
 
@@ -49,6 +50,7 @@ const CORE_TABLES = [
   "employees",
   "followup_leads",
   "leads",
+  "lead_attachments",
   "problem_tickets",
   "bug_reports",
 ];
@@ -159,9 +161,13 @@ function getServiceCheck(name: string): (() => Promise<CheckResult>) | null {
 
     case "storage":
       return () => timedCheck("Supabase Storage", async () => {
-        const { error } = await getSupabase().storage.getBucket(BUG_BUCKET);
-        if (error) throw new Error(`Missing bucket: ${BUG_BUCKET}`);
-        return `${BUG_BUCKET} OK`;
+        const buckets = [BUG_BUCKET, LEAD_ATTACHMENT_BUCKET];
+        const results = await Promise.all(
+          buckets.map((bucket) => getSupabase().storage.getBucket(bucket)),
+        );
+        const missing = buckets.filter((_, index) => results[index].error);
+        if (missing.length > 0) throw new Error(`Missing bucket: ${missing.join(", ")}`);
+        return `${buckets.join(", ")} OK`;
       });
 
     case "scraper":

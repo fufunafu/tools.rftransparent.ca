@@ -28,6 +28,7 @@ const state: {
     email?: string | null;
     phone?: string | null;
     message?: string | null;
+    installation_requested?: boolean | null;
     raw_payload?: Record<string, unknown>;
   } | null;
   insertResult: { data: { id: string } | null; error: { message: string } | null };
@@ -75,6 +76,7 @@ vi.mock("@/lib/supabase", () => ({
 
 import {
   extractContactFields,
+  extractInstallationRequested,
   extractSubmissionDetails,
   extractMetaLeadFields,
   findOrInsertLead,
@@ -231,6 +233,45 @@ describe("extractContactFields", () => {
   });
 });
 
+// ─── extractInstallationRequested ───────────────────────────────────────────
+
+describe("extractInstallationRequested", () => {
+  it("reads Powerful Form Builder's bracketed custom-button field", () => {
+    const payload = {
+      fields: {
+        "button-1[]": "Yes",
+        _keyLabel: JSON.stringify({
+          "button-1": "Do you need installation?",
+        }),
+      },
+    };
+
+    expect(extractInstallationRequested(payload)).toBe(true);
+    expect(extractSubmissionDetails(payload)).toContainEqual({
+      key: "button-1",
+      label: "Do you need installation?",
+      value: "Yes",
+    });
+  });
+
+  it("recognizes a negative installation answer", () => {
+    expect(extractInstallationRequested({
+      fields: { "button-1[]": "No" },
+    })).toBe(false);
+  });
+
+  it("prefers an explicit mapped installation value", () => {
+    expect(extractInstallationRequested({
+      mapped: { installation_requested: true },
+      fields: { "button-1[]": "No" },
+    })).toBe(true);
+  });
+
+  it("returns null when no installation preference was recorded", () => {
+    expect(extractInstallationRequested({ fields: { email: "jane@example.com" } })).toBeNull();
+  });
+});
+
 // ─── extractMetaLeadFields ──────────────────────────────────────────────────
 
 describe("extractMetaLeadFields", () => {
@@ -339,6 +380,7 @@ describe("findOrInsertLead", () => {
       email: "bevscarpentry@hotmail.com",
       phone: "902-527-8969",
       message: "Two angled sections",
+      installation_requested: null,
       raw_payload: { corrected: true },
     }));
 
@@ -349,6 +391,7 @@ describe("findOrInsertLead", () => {
       email: "bevscarpentry@hotmail.com",
       phone: "902-527-8969",
       message: "Two angled sections",
+      installation_requested: null,
       raw_payload: { corrected: true },
     });
   });
@@ -409,7 +452,15 @@ describe("findOrInsertLead", () => {
       email: "jane@example.com",
       phone: null,
       message: "Need a quote",
+      installationRequested: null,
     });
+  });
+
+  it("stores the extracted installation preference", async () => {
+    const result = await findOrInsertLead(leadInput({ installation_requested: true }));
+
+    expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
+    expect(state.inserts[0].installation_requested).toBe(true);
   });
 
   it("does not notify for a historical import", async () => {

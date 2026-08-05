@@ -2,6 +2,7 @@
 
 import { getSupabase } from "@/lib/supabase";
 import { sendNewLeadNotification } from "@/lib/lead-notifications";
+import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
 
 export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
@@ -26,8 +27,10 @@ export interface LeadSubmission {
   email: string | null;
   phone: string | null;
   message: string | null;
+  installation_requested: boolean | null;
   raw_payload: Record<string, unknown>;
   submitted_at: string;
+  attachments?: LeadAttachment[];
 }
 
 export interface Lead {
@@ -40,6 +43,7 @@ export interface Lead {
   email: string | null;
   phone: string | null;
   message: string | null;
+  installation_requested: boolean | null;
   raw_payload: Record<string, unknown>;
   submitted_at: string;
   call_status: CallStatus;
@@ -62,6 +66,7 @@ export interface Lead {
   duplicate_count?: number;
   duplicate_ids?: string[];
   submissions?: LeadSubmission[];
+  attachments?: LeadAttachment[];
 }
 
 export const OUTCOME_LABELS: Record<Outcome, string> = {
@@ -162,6 +167,43 @@ export function extractContactFields(payload: Record<string, unknown>): {
   };
 }
 
+/**
+ * Read an installation preference from mapped values or labeled form fields.
+ *
+ * Powerful Form Builder names its custom button group `button-1[]`, while its
+ * `_keyLabel` metadata identifies the same control as `button-1`. Supporting
+ * both forms keeps the extractor independent of that serialization detail.
+ */
+export function extractInstallationRequested(
+  payload: Record<string, unknown>,
+): boolean | null {
+  const fields = isRecord(payload.fields) ? payload.fields : payload;
+  const mapped = isRecord(payload.mapped) ? payload.mapped : {};
+  const directKeys = [
+    "installation_requested",
+    "installation",
+    "needs_installation",
+    "need_installation",
+    "button-1",
+  ];
+
+  for (const key of directKeys) {
+    const mappedValue = parseInstallationValue(mapped[key]);
+    if (mappedValue !== null) return mappedValue;
+
+    const fieldValue = parseInstallationValue(findSerializedFieldValue(fields, key));
+    if (fieldValue !== null) return fieldValue;
+  }
+
+  for (const [key, label] of Object.entries(formFieldLabels(fields))) {
+    if (!/(^| )install(ation|er|ing)?( |$)/.test(normalizedLabel(label))) continue;
+    const value = parseInstallationValue(findSerializedFieldValue(fields, key));
+    if (value !== null) return value;
+  }
+
+  return null;
+}
+
 export interface LeadSubmissionDetail {
   key: string;
   label: string;
@@ -177,7 +219,7 @@ export function extractSubmissionDetails(
   const details: LeadSubmissionDetail[] = [];
 
   for (const [key, label] of Object.entries(labels)) {
-    const value = displayFieldValue(fields[key]);
+    const value = displayFieldValue(findSerializedFieldValue(fields, key));
     if (!value || isContactLabel(label)) continue;
     details.push({ key, label, value });
   }
@@ -253,6 +295,7 @@ export interface UpsertLeadInput {
   email: string | null;
   phone: string | null;
   message: string | null;
+  installation_requested?: boolean | null;
   raw_payload: Record<string, unknown>;
   // Stable provider identifier, such as Meta's leadgen_id. This is kept in
   // raw_payload so ingestion stays idempotent without a schema dependency.
@@ -298,7 +341,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   if (phone) orFilters.push(`phone.eq.${phone}`);
   let duplicateQuery = supabase
     .from("leads")
-    .select("id,name,email,phone,message,raw_payload")
+    .select("id,name,email,phone,message,installation_requested,raw_payload")
     .eq("source", input.source)
     .gte("submitted_at", duplicateWindowStart);
   if (input.form_id) duplicateQuery = duplicateQuery.eq("form_id", input.form_id);
@@ -316,6 +359,8 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
         email: email ?? existing.email ?? null,
         phone: phone ?? existing.phone ?? null,
         message: input.message ?? existing.message ?? null,
+        installation_requested:
+          input.installation_requested ?? existing.installation_requested ?? null,
         raw_payload: input.raw_payload,
       })
       .eq("id", existing.id)
@@ -336,6 +381,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
       email,
       phone,
       message: input.message,
+      installation_requested: input.installation_requested ?? null,
       raw_payload: input.raw_payload,
       ...(input.submitted_at ? { submitted_at: input.submitted_at } : {}),
     })
@@ -357,6 +403,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
         email,
         phone,
         message: input.message,
+        installationRequested: input.installation_requested ?? null,
       });
     } catch (notificationError) {
       // The lead is already saved. Never ask a webhook provider to retry it
@@ -470,5 +517,47 @@ function displayFieldValue(value: unknown): string | null {
     const values = value.map(displayFieldValue).filter((item): item is string => Boolean(item));
     return values.length > 0 ? values.join(", ") : null;
   }
+  return null;
+}
+
+function findSerializedFieldValue(
+  fields: Record<string, unknown>,
+  key: string,
+): unknown {
+  if (key in fields) return fields[key];
+  const bracketedKey = key.endsWith("[]") ? key : `${key}[]`;
+  if (bracketedKey in fields) return fields[bracketedKey];
+  const plainKey = key.endsWith("[]") ? key.slice(0, -2) : key;
+  return fields[plainKey];
+}
+
+function parseInstallationValue(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const parsed = parseInstallationValue(item);
+      if (parsed !== null) return parsed;
+    }
+    return null;
+  }
+  if (typeof value !== "string") return null;
+
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!normalized) return null;
+  if (
+    /^(no|false|0)\b/.test(normalized)
+    || /\b(without|decline) installation\b/.test(normalized)
+    || /\b(no installation|self install|diy)\b/.test(normalized)
+  ) return false;
+  if (
+    /^(yes|true|1)\b/.test(normalized)
+    || /\b(with installation|installation required|professional installation)\b/.test(normalized)
+    || /\bneed(s|ed)? installation\b/.test(normalized)
+  ) return true;
   return null;
 }

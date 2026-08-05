@@ -92,50 +92,67 @@ function toSubmission(lead: Lead): LeadSubmission {
     email: lead.email,
     phone: lead.phone,
     message: lead.message,
+    installation_requested: lead.installation_requested,
     raw_payload: lead.raw_payload,
     submitted_at: lead.submitted_at,
+    attachments: lead.attachments,
   };
+}
+
+function isHistoricalImport(lead: Lead): boolean {
+  const marker = lead.raw_payload?.historical_import;
+  return typeof marker === "object" && marker !== null && !Array.isArray(marker);
 }
 
 function mergeGroup(group: Lead[]): ConsolidatedLead {
   const chronological = [...group].sort(
     (left, right) => new Date(left.submitted_at).getTime() - new Date(right.submitted_at).getTime(),
   );
-  const canonical = [...group].sort((left, right) => {
+  const operational = group.filter((lead) => !isHistoricalImport(lead));
+  const workflowGroup = operational.length > 0 ? operational : group;
+  const workflowChronological = [...workflowGroup].sort(
+    (left, right) => new Date(left.submitted_at).getTime() - new Date(right.submitted_at).getTime(),
+  );
+  const canonical = [...workflowGroup].sort((left, right) => {
     const scoreDifference = workflowScore(right) - workflowScore(left);
     if (scoreDifference !== 0) return scoreDifference;
     return new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime();
   })[0];
-  const quoteLead = [...group]
+  const quoteLead = [...workflowGroup]
     .filter((lead) => lead.quote_number)
     .sort((left, right) => workflowScore(right) - workflowScore(left))[0];
-  const latestCallAt = latestDate(group, (lead) => lead.last_call_at);
+  const latestCallAt = latestDate(workflowGroup, (lead) => lead.last_call_at);
   const latestCallLead = latestCallAt
-    ? group.find((lead) => lead.last_call_at === latestCallAt)
+    ? workflowGroup.find((lead) => lead.last_call_at === latestCallAt)
     : undefined;
 
   return {
     ...canonical,
-    source: chronological[0].source,
-    source_detail: chronological[0].source_detail,
-    form_id: chronological[0].form_id,
-    page_url: chronological[0].page_url,
-    raw_payload: chronological[0].raw_payload,
+    source: workflowChronological[0].source,
+    source_detail: workflowChronological[0].source_detail,
+    form_id: workflowChronological[0].form_id,
+    page_url: workflowChronological[0].page_url,
+    raw_payload: workflowChronological[0].raw_payload,
     name: canonical.name || latestNonEmpty(chronological, (lead) => lead.name),
     email: canonical.email || latestNonEmpty(chronological, (lead) => lead.email),
     phone: canonical.phone || latestNonEmpty(chronological, (lead) => lead.phone),
     message: canonical.message || latestNonEmpty(chronological, (lead) => lead.message),
-    submitted_at: chronological[0].submitted_at,
-    call_status: bestCallStatus(group),
-    outcome: bestOutcome(group),
+    installation_requested: group.some((lead) => lead.installation_requested === true)
+      ? true
+      : group.some((lead) => lead.installation_requested === false)
+        ? false
+        : null,
+    submitted_at: workflowChronological[0].submitted_at,
+    call_status: bestCallStatus(workflowGroup),
+    outcome: bestOutcome(workflowGroup),
     quote_number: quoteLead?.quote_number ?? canonical.quote_number,
     quote_amount: quoteLead?.quote_amount ?? canonical.quote_amount,
     quote_sent_at: quoteLead?.quote_sent_at ?? canonical.quote_sent_at,
-    first_quote_at: earliestDate(group, (lead) => lead.first_quote_at ?? lead.quote_sent_at),
+    first_quote_at: earliestDate(workflowGroup, (lead) => lead.first_quote_at ?? lead.quote_sent_at),
     assigned_to: quoteLead?.assigned_to ?? canonical.assigned_to
-      ?? latestNonEmpty(chronological, (lead) => lead.assigned_to),
-    call_attempts_count: group.reduce((sum, lead) => sum + (lead.call_attempts_count ?? 0), 0),
-    first_call_at: earliestDate(group, (lead) => lead.first_call_at),
+      ?? latestNonEmpty(workflowChronological, (lead) => lead.assigned_to),
+    call_attempts_count: workflowGroup.reduce((sum, lead) => sum + (lead.call_attempts_count ?? 0), 0),
+    first_call_at: earliestDate(workflowGroup, (lead) => lead.first_call_at),
     last_call_at: latestCallAt,
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,

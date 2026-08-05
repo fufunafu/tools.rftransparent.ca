@@ -13,6 +13,7 @@ function lead(id: string, overrides: Partial<Lead> = {}): Lead {
     email: "bev'scarpentry@hotmail.com",
     phone: "902-527-8969",
     message: null,
+    installation_requested: null,
     raw_payload: {},
     submitted_at: "2026-08-03T12:08:04.000Z",
     call_status: "not_called",
@@ -280,5 +281,53 @@ describe("consolidateDuplicateLeads", () => {
       outcome: "not_applicable",
       not_applicable_reason: "Forwarded to installer",
     });
+  });
+
+  it("keeps current workflow state when an older historical import has the same contact", () => {
+    const result = consolidateDuplicateLeads([
+      lead("historical", {
+        source_detail: "Historical PFB: Quotation Request",
+        submitted_at: "2025-06-03T12:08:04.000Z",
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        raw_payload: { historical_import: { source_key: "historical-1" } },
+      }),
+      lead("current", {
+        source_detail: "Contact Us",
+        submitted_at: "2026-08-03T12:08:04.000Z",
+        raw_payload: { fields: { email: "bev'scarpentry@hotmail.com" } },
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "current",
+      source_detail: "Contact Us",
+      submitted_at: "2026-08-03T12:08:04.000Z",
+      outcome: "new",
+      not_applicable_reason: null,
+      raw_payload: { fields: { email: "bev'scarpentry@hotmail.com" } },
+      duplicate_count: 2,
+    });
+    expect(result[0].submissions?.map((submission) => submission.id)).toEqual([
+      "historical",
+      "current",
+    ]);
+  });
+
+  it("keeps an installation request when any combined submission requested it", () => {
+    const result = consolidateDuplicateLeads([
+      lead("first", { installation_requested: false }),
+      lead("second", {
+        submitted_at: "2026-08-03T13:00:00.000Z",
+        installation_requested: true,
+      }),
+    ]);
+
+    expect(result[0].installation_requested).toBe(true);
+    expect(result[0].submissions).toEqual([
+      expect.objectContaining({ id: "first", installation_requested: false }),
+      expect.objectContaining({ id: "second", installation_requested: true }),
+    ]);
   });
 });

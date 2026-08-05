@@ -33,6 +33,7 @@ describe("sendNewLeadNotification", () => {
       email: "jane@example.com",
       phone: "514-555-1234",
       message: "I need a quote.",
+      installationRequested: true,
     });
 
     expect(sent).toBe(true);
@@ -43,7 +44,7 @@ describe("sendNewLeadNotification", () => {
         to: "info@glass-railing.com",
         subject: "New Meta lead: Jane Doe",
         text: expect.stringContaining("Email: jane@example.com"),
-        html: expect.stringContaining("Summer railing campaign"),
+        html: expect.stringContaining("Installation</td><td style=\"padding:5px 0\">Requested"),
       }),
     );
   });
@@ -58,6 +59,7 @@ describe("sendNewLeadNotification", () => {
       email: "jane@example.com",
       phone: null,
       message: "<img src=x onerror=alert(1)>",
+      installationRequested: null,
     });
 
     const payload = sendEmailMock.mock.calls[0][0] as { html: string };
@@ -84,6 +86,7 @@ describe("sendNewLeadNotification", () => {
         email: "jane@example.com",
         phone: null,
         message: null,
+        installationRequested: null,
       }),
     ).resolves.toBe(false);
     expect(consoleError).toHaveBeenCalled();
