@@ -32,3 +32,11 @@ export function formatLeadResponseTime(milliseconds: number | null): string {
   const hours = Math.floor((milliseconds % DAY_MS) / HOUR_MS);
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
+
+export function averageLeadResponseTimeMs(
+  durations: Array<number | null>,
+): number | null {
+  const available = durations.filter((duration): duration is number => duration != null);
+  if (available.length === 0) return null;
+  return available.reduce((sum, duration) => sum + duration, 0) / available.length;
+}

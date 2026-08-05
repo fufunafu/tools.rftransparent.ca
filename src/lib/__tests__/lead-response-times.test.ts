@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  averageLeadResponseTimeMs,
   formatLeadResponseTime,
   leadResponseTimeMs,
 } from "@/lib/lead-response-times";
@@ -29,5 +30,12 @@ describe("formatLeadResponseTime", () => {
     expect(formatLeadResponseTime(42 * 60_000)).toBe("42m");
     expect(formatLeadResponseTime(102 * 60_000)).toBe("1h 42m");
     expect(formatLeadResponseTime(26 * 60 * 60_000)).toBe("1d 2h");
+  });
+});
+
+describe("averageLeadResponseTimeMs", () => {
+  it("averages available durations and ignores missing values", () => {
+    expect(averageLeadResponseTimeMs([60_000, null, 180_000])).toBe(120_000);
+    expect(averageLeadResponseTimeMs([null, null])).toBeNull();
   });
 });

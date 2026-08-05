@@ -27,6 +27,7 @@ import {
 import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
 import {
+  averageLeadResponseTimeMs,
   formatLeadResponseTime,
   leadResponseTimeMs,
 } from "@/lib/lead-response-times";
@@ -172,6 +173,15 @@ interface MetaSyncSummary {
   failed: number;
   errors: string[];
 }
+
+interface SourceResponseMetrics {
+  averageCallMs: number | null;
+  callCount: number;
+  averageQuoteMs: number | null;
+  quoteCount: number;
+}
+
+type SourceResponseMetricsBySource = Record<LeadSource, SourceResponseMetrics>;
 
 async function fetcher<T>(url: string): Promise<T> {
   const response = await fetch(url);
@@ -946,6 +956,27 @@ export default function LeadsDashboard() {
     };
   }, [leads]);
   const metricsBySource = useMemo(() => calculateLeadFunnelBySource(leads), [leads]);
+  const responseMetricsBySource = useMemo<SourceResponseMetricsBySource>(() => {
+    const summarize = (source: LeadSource): SourceResponseMetrics => {
+      const applicableLeads = leads.filter((lead) => (
+        lead.source === source && lead.outcome !== "not_applicable"
+      ));
+      const callTimes = applicableLeads.map((lead) => (
+        leadResponseTimeMs(lead.submitted_at, lead.first_call_at)
+      ));
+      const quoteTimes = applicableLeads.map((lead) => leadResponseTimeMs(
+        lead.submitted_at,
+        lead.first_quote_at ?? lead.quote_sent_at,
+      ));
+      return {
+        averageCallMs: averageLeadResponseTimeMs(callTimes),
+        callCount: callTimes.filter((duration) => duration != null).length,
+        averageQuoteMs: averageLeadResponseTimeMs(quoteTimes),
+        quoteCount: quoteTimes.filter((duration) => duration != null).length,
+      };
+    };
+    return { website: summarize("website"), meta: summarize("meta") };
+  }, [leads]);
 
   const trend = useMemo(
     () => trendRange === "custom"
@@ -1064,7 +1095,7 @@ export default function LeadsDashboard() {
               }}
             />
           </div>
-          <FunnelComparison metrics={metricsBySource} />
+          <FunnelComparison metrics={metricsBySource} responseMetrics={responseMetricsBySource} />
         </div>
       </section>
 
@@ -1478,7 +1509,18 @@ const FUNNEL_COMPARISON_ROWS = [
   { label: "Order conversion", rate: "conversionRate", count: "won", denominator: "total" },
 ] as const;
 
-function FunnelComparison({ metrics }: { metrics: LeadFunnelMetricsBySource }) {
+const RESPONSE_COMPARISON_ROWS = [
+  { label: "Avg. time to call", value: "averageCallMs", count: "callCount", unit: "calls" },
+  { label: "Avg. time to quote", value: "averageQuoteMs", count: "quoteCount", unit: "quotes" },
+] as const;
+
+function FunnelComparison({
+  metrics,
+  responseMetrics,
+}: {
+  metrics: LeadFunnelMetricsBySource;
+  responseMetrics: SourceResponseMetricsBySource;
+}) {
   return (
     <div className="border-t border-sand-200/60 xl:border-t-0">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200/60">
@@ -1515,6 +1557,21 @@ function FunnelComparison({ metrics }: { metrics: LeadFunnelMetricsBySource }) {
                   <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
                   <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
                     {metrics[source][row.count]} / {metrics[source][row.denominator]}
+                  </span>
+                </td>
+              ))}
+            </tr>
+          ))}
+          {RESPONSE_COMPARISON_ROWS.map((row) => (
+            <tr key={row.value} className="border-b border-sand-100 last:border-b-0">
+              <th className="px-4 py-2 text-xs font-medium text-sand-600">{row.label}</th>
+              {(["website", "meta"] as const).map((source) => (
+                <td key={source} className="px-3 py-2">
+                  <span className="text-sm font-semibold text-sand-900">
+                    {formatLeadResponseTime(responseMetrics[source][row.value])}
+                  </span>
+                  <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
+                    {responseMetrics[source][row.count]} {row.unit}
                   </span>
                 </td>
               ))}
