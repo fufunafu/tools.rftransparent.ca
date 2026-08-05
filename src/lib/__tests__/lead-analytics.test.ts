@@ -4,6 +4,7 @@ import {
   buildLeadTrend,
   calculateLeadFunnel,
   calculateLeadFunnelBySource,
+  isLeadInCustomDateRange,
 } from "@/lib/lead-analytics";
 
 const NOW = new Date("2026-08-03T16:00:00.000Z");
@@ -217,5 +218,46 @@ describe("buildLeadTrend", () => {
 
     expect(result.points).toHaveLength(8);
     expect(result.points.find((point) => point.label === "Apr")).toMatchObject({ meta: 1 });
+  });
+});
+
+describe("isLeadInCustomDateRange", () => {
+  it("includes both endpoints using Toronto calendar dates", () => {
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-01T04:00:00.000Z" },
+      "2026-08-01",
+      "2026-08-03",
+    )).toBe(true);
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-04T03:59:59.999Z" },
+      "2026-08-01",
+      "2026-08-03",
+    )).toBe(true);
+  });
+
+  it("excludes submissions outside the selected Toronto dates", () => {
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-01T03:59:59.999Z" },
+      "2026-08-01",
+      "2026-08-03",
+    )).toBe(false);
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-04T04:00:00.000Z" },
+      "2026-08-01",
+      "2026-08-03",
+    )).toBe(false);
+  });
+
+  it("supports reversed endpoints and rejects invalid dates", () => {
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-02T12:00:00.000Z" },
+      "2026-08-03",
+      "2026-08-01",
+    )).toBe(true);
+    expect(isLeadInCustomDateRange(
+      { submitted_at: "2026-08-02T12:00:00.000Z" },
+      "",
+      "2026-08-03",
+    )).toBe(false);
   });
 });

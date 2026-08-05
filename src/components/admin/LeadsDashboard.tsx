@@ -21,6 +21,7 @@ import {
   buildLeadTrend,
   calculateLeadFunnel,
   calculateLeadFunnelBySource,
+  isLeadInCustomDateRange,
   type LeadFunnelMetricsBySource,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
@@ -88,6 +89,21 @@ function defaultCustomDates(): { from: string; to: string } {
   };
   const now = new Date();
   return { from: key(new Date(now.getTime() - 29 * 86_400_000)), to: key(now) };
+}
+
+function formatCustomDateRange(from: string, to: string): string | null {
+  if (!from || !to) return null;
+  const [start, end] = from <= to ? [from, to] : [to, from];
+  const format = (value: string) => {
+    const [year, month, day] = value.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
+      timeZone: "UTC",
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
+  return start === end ? format(start) : `${format(start)} to ${format(end)}`;
 }
 
 const OUTCOME_BADGE: Record<Outcome, string> = {
@@ -851,9 +867,18 @@ export default function LeadsDashboard() {
     }
   };
 
+  const queueLeads = useMemo(
+    () => trendRange === "custom"
+      ? leads.filter((lead) => isLeadInCustomDateRange(lead, customFrom, customTo))
+      : leads,
+    [leads, trendRange, customFrom, customTo],
+  );
+
   const sourceLeads = useMemo(
-    () => sourceFilter === "all" ? leads : leads.filter((lead) => lead.source === sourceFilter),
-    [leads, sourceFilter],
+    () => sourceFilter === "all"
+      ? queueLeads
+      : queueLeads.filter((lead) => lead.source === sourceFilter),
+    [queueLeads, sourceFilter],
   );
 
   const filtered = useMemo(() => {
@@ -990,10 +1015,13 @@ export default function LeadsDashboard() {
     ? trend.current.total > 0 ? "No leads in the previous period" : "No leads in this period"
     : `${Math.abs(trend.changePct ?? 0)}% ${Number(trend.changePct) >= 0 ? "increase" : "decrease"} vs previous ${comparisonLabel}`;
   const sourceCounts = useMemo(() => ({
-    all: leads.length,
-    website: leads.filter((lead) => lead.source === "website").length,
-    meta: leads.filter((lead) => lead.source === "meta").length,
-  }), [leads]);
+    all: queueLeads.length,
+    website: queueLeads.filter((lead) => lead.source === "website").length,
+    meta: queueLeads.filter((lead) => lead.source === "meta").length,
+  }), [queueLeads]);
+  const customQueueDateRange = trendRange === "custom"
+    ? formatCustomDateRange(customFrom, customTo)
+    : null;
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
 
@@ -1216,9 +1244,10 @@ export default function LeadsDashboard() {
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
             <p className="text-xs text-sand-500 mt-0.5">
-              {filtered.length === leads.length
-                ? `${leads.length} leads`
-                : `${filtered.length} of ${leads.length} leads`}
+              {filtered.length === queueLeads.length
+                ? `${queueLeads.length} leads`
+                : `${filtered.length} of ${queueLeads.length} leads`}
+              {customQueueDateRange ? ` | ${customQueueDateRange}` : ""}
             </p>
           </div>
           <div className="hidden sm:flex items-center gap-3 text-xs text-sand-500">
@@ -1311,7 +1340,9 @@ export default function LeadsDashboard() {
           <div className="py-12 text-center text-red-500 text-sm">Lead data is unavailable.</div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sand-400 text-sm">
-            {leads.length === 0
+            {queueLeads.length === 0 && trendRange === "custom"
+              ? "No leads were received in this date range."
+              : leads.length === 0
               ? sourceFilter === "meta"
                 ? "No Meta leads have been imported yet."
                 : sourceFilter === "website"

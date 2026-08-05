@@ -110,6 +110,24 @@ export function buildCustomLeadTrend(
   return buildDayWindow(leads, start, end, spanDays <= 45 ? 1 : 7);
 }
 
+export function isLeadInCustomDateRange(
+  lead: Pick<LeadDateSource, "submitted_at">,
+  from: string,
+  to: string,
+): boolean {
+  const parsedFrom = parseDateKey(from);
+  const parsedTo = parseDateKey(to);
+  if (parsedFrom == null || parsedTo == null) return false;
+
+  const submitted = new Date(lead.submitted_at);
+  if (Number.isNaN(submitted.getTime())) return false;
+
+  const start = Math.min(parsedFrom, parsedTo);
+  const end = Math.max(parsedFrom, parsedTo);
+  const submittedDay = torontoDayNumber(submitted);
+  return submittedDay >= start && submittedDay <= end;
+}
+
 function buildDailyTrend(
   leads: LeadDateSource[],
   range: Exclude<LeadTrendRange, "12m">,
