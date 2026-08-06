@@ -29,6 +29,10 @@ import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
 import { getAutomationDetailFailure } from "@/lib/automation-status";
 import {
+  LEAD_SPAM_REASON,
+  isLeadSpamReason,
+} from "@/lib/customer-service/lead-spam";
+import {
   averageLeadResponseTimeMs,
   formatLeadResponseTime,
   leadResponseTimeMs,
@@ -167,7 +171,7 @@ function LeadResponseSummary({ lead }: { lead: Lead }) {
 }
 
 const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }[] = [
-  { value: "all", label: "All", match: () => true },
+  { value: "all", label: "All", match: (l) => !isLeadSpamReason(l.not_applicable_reason) },
   { value: "installation", label: "Installation", match: (l) => l.installation_requested === true },
   { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" && !isClosedOutcome(l.outcome) && isCallablePhone(l.phone) },
   { value: "no_phone", label: "No Phone", match: needsPhone },
@@ -175,6 +179,7 @@ const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }
   { value: "open_quote", label: "Open Quote", match: (l) => !!l.quote_number && l.outcome === "quoted" },
   { value: "won", label: "Won", match: (l) => l.outcome === "won" },
   { value: "lost", label: "Lost", match: (l) => l.outcome === "lost" },
+  { value: "spam", label: "Spam", match: (l) => isLeadSpamReason(l.not_applicable_reason) },
   { value: "not_applicable", label: "Not Applicable", match: (l) => l.outcome === "not_applicable" },
 ];
 
@@ -372,9 +377,11 @@ function LeadDetailPanel({
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
   const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
+  const [savingSpam, setSavingSpam] = useState(false);
   const [savingInstallation, setSavingInstallation] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const phoneIsCallable = isCallablePhone(lead.phone);
+  const spamMarked = isLeadSpamReason(lead.not_applicable_reason);
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
   const submissions = useMemo(
     () => {
@@ -479,6 +486,15 @@ function LeadDetailPanel({
     setSavingOutcome(null);
   };
 
+  const handleSpamToggle = async () => {
+    if (savingSpam) return;
+    setSavingSpam(true);
+    await patchLead(spamMarked
+      ? { outcome: "new", not_applicable_reason: null }
+      : { outcome: "not_applicable", not_applicable_reason: LEAD_SPAM_REASON });
+    setSavingSpam(false);
+  };
+
   const handleSaveQuote = async () => {
     const saved = await patchLead({
       quote_number: quoteNumber.trim() || null,
@@ -528,6 +544,11 @@ function LeadDetailPanel({
                 <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
                   {OUTCOME_LABELS[lead.outcome]}
                 </span>
+                {spamMarked && (
+                  <span className="rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-[11px] font-medium text-red-700">
+                    Spam
+                  </span>
+                )}
                 {lead.outcome !== "not_applicable" && needsPhone(lead) ? (
                   <span className="rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-[11px] font-medium text-orange-700">
                     No phone
@@ -882,7 +903,21 @@ function LeadDetailPanel({
 
         {/* Outcome */}
         <section className="px-5 sm:px-6 py-6 space-y-3">
-          <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Outcome</h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xs text-sand-500 uppercase tracking-wider font-semibold">Outcome</h3>
+            <button
+              type="button"
+              onClick={handleSpamToggle}
+              disabled={savingSpam || savingOutcome !== null}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
+                spamMarked
+                  ? "border-sand-300 bg-white text-sand-600 hover:bg-sand-50"
+                  : "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+              }`}
+            >
+              {savingSpam ? "Saving..." : spamMarked ? "Restore from spam" : "Mark as spam"}
+            </button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {(Object.keys(OUTCOME_LABELS) as Outcome[]).map((o) => (
               <button

@@ -30,6 +30,7 @@ const state: {
     message?: string | null;
     installation_requested?: boolean | null;
     raw_payload?: Record<string, unknown>;
+    outcome?: string;
   } | null;
   insertResult: { data: { id: string } | null; error: { message: string } | null };
 } = {
@@ -468,6 +469,33 @@ describe("findOrInsertLead", () => {
 
     expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
     expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("closes obvious marketing spam without sending a notification", async () => {
+    const result = await findOrInsertLead(leadInput({
+      message: "We can improve your Google ranking with high authority backlinks",
+    }));
+
+    expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
+    expect(state.inserts[0]).toMatchObject({
+      outcome: "not_applicable",
+      not_applicable_reason: "Spam: marketing solicitation",
+    });
+    expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
+  });
+
+  it("does not overwrite a completed workflow when a duplicate looks like spam", async () => {
+    state.dedupResult = {
+      id: "existing-lead",
+      outcome: "won",
+    };
+
+    await findOrInsertLead(leadInput({
+      message: "We provide guest posts and backlinks",
+    }));
+
+    expect(state.updates[0]).not.toHaveProperty("outcome");
+    expect(state.updates[0]).not.toHaveProperty("not_applicable_reason");
   });
 
   it("keeps a saved lead successful when notification delivery throws", async () => {

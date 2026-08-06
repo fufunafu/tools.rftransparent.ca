@@ -3,6 +3,10 @@
 import { getSupabase } from "@/lib/supabase";
 import { sendNewLeadNotification } from "@/lib/lead-notifications";
 import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
+import {
+  LEAD_SPAM_REASON,
+  assessLeadSpam,
+} from "@/lib/customer-service/lead-spam";
 
 export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
@@ -314,6 +318,12 @@ export type UpsertLeadResult =
 export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLeadResult> {
   const email = input.email ? input.email.replace(/\s+/g, "") || null : null;
   const phone = input.phone?.trim() || null;
+  const spam = assessLeadSpam({
+    source: input.source,
+    name: input.name,
+    email,
+    message: input.message,
+  });
 
   if (!email && !phone) {
     return { ok: true, skipped: "no_contact" };
@@ -341,7 +351,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   if (phone) orFilters.push(`phone.eq.${phone}`);
   let duplicateQuery = supabase
     .from("leads")
-    .select("id,name,email,phone,message,installation_requested,raw_payload")
+    .select("id,name,email,phone,message,installation_requested,raw_payload,outcome")
     .eq("source", input.source)
     .gte("submitted_at", duplicateWindowStart);
   if (input.form_id) duplicateQuery = duplicateQuery.eq("form_id", input.form_id);
@@ -352,6 +362,8 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     .maybeSingle();
 
   if (existing) {
+    const canAutoExclude = spam.isSpam
+      && (!existing.outcome || ["new", "contacted", "not_applicable"].includes(existing.outcome));
     const { error: updateError } = await supabase
       .from("leads")
       .update({
@@ -362,6 +374,10 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
         installation_requested:
           input.installation_requested ?? existing.installation_requested ?? null,
         raw_payload: input.raw_payload,
+        ...(canAutoExclude ? {
+          outcome: "not_applicable",
+          not_applicable_reason: LEAD_SPAM_REASON,
+        } : {}),
       })
       .eq("id", existing.id)
       .select("id")
@@ -383,6 +399,10 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
       message: input.message,
       installation_requested: input.installation_requested ?? null,
       raw_payload: input.raw_payload,
+      ...(spam.isSpam ? {
+        outcome: "not_applicable",
+        not_applicable_reason: LEAD_SPAM_REASON,
+      } : {}),
       ...(input.submitted_at ? { submitted_at: input.submitted_at } : {}),
     })
     .select("id")
@@ -392,7 +412,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     return { ok: false, error: error.message };
   }
 
-  if (input.send_notification !== false) {
+  if (input.send_notification !== false && !spam.isSpam) {
     try {
       await sendNewLeadNotification({
         leadId: data.id,
