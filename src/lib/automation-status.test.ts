@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getAutomationHealth } from "@/lib/automation-status";
+import { getAutomationDetailFailure, getAutomationHealth } from "@/lib/automation-status";
 
 const NOW = new Date("2026-08-03T16:00:00.000Z").getTime();
 
@@ -43,5 +43,31 @@ describe("automation health", () => {
         NOW,
       ),
     ).toBe("stale");
+  });
+});
+
+describe("automation detail failures", () => {
+  it("accepts successful phone and Shopify result formats", () => {
+    expect(getAutomationDetailFailure(JSON.stringify({
+      results: [
+        { scraper: "cik", status: "success" },
+        { scraper: "grasshopper", status: "success" },
+        { label: "Lead quote matching", status: "ok" },
+      ],
+    }))).toBeNull();
+  });
+
+  it("summarizes errors and non-success states", () => {
+    expect(getAutomationDetailFailure(JSON.stringify({
+      results: [
+        { scraper: "grasshopper", status: "2fa_required" },
+        { label: "BC Transparent", status: "error", detail: "Shopify timed out" },
+      ],
+    }))).toBe("grasshopper: 2fa_required; BC Transparent: Shopify timed out");
+  });
+
+  it("ignores malformed or unrelated detail", () => {
+    expect(getAutomationDetailFailure("not json")).toBeNull();
+    expect(getAutomationDetailFailure(JSON.stringify({ ok: true }))).toBeNull();
   });
 });

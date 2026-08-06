@@ -27,6 +27,7 @@ import {
 } from "@/lib/lead-analytics";
 import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
+import { getAutomationDetailFailure } from "@/lib/automation-status";
 import {
   averageLeadResponseTimeMs,
   formatLeadResponseTime,
@@ -196,6 +197,13 @@ interface MetaSyncSummary {
   errors: string[];
 }
 
+interface SyncAllResult {
+  completed: string[];
+  errors: string[];
+}
+
+type SyncAutomationJob = "sync-calls" | "sync-followup";
+
 interface SourceResponseMetrics {
   averageCallMs: number | null;
   callCount: number;
@@ -212,6 +220,25 @@ async function fetcher<T>(url: string): Promise<T> {
     throw new Error(body.error ?? `Request failed with status ${response.status}`);
   }
   return body as T;
+}
+
+async function triggerSyncAutomation(job: SyncAutomationJob, label: string): Promise<void> {
+  const response = await fetch("/api/settings/automations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ job }),
+  });
+  const body = await response.json().catch(() => ({})) as {
+    ok?: boolean;
+    error?: string;
+    detail?: string;
+  };
+  if (!response.ok || !body.ok) {
+    throw new Error(body.error ?? `${label} sync failed with status ${response.status}`);
+  }
+
+  const detailFailure = getAutomationDetailFailure(body.detail);
+  if (detailFailure) throw new Error(detailFailure);
 }
 
 // ─── Lead detail panel ───────────────────────────────────────────────────────
@@ -917,7 +944,7 @@ function LeadDetailPanel({
 
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
-export default function LeadsDashboard() {
+export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[] | null }) {
   const [filter, setFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
   const [search, setSearch] = useState("");
@@ -927,9 +954,8 @@ export default function LeadsDashboard() {
   const [customTo, setCustomTo] = useState("");
   const [chartSources, setChartSources] = useState({ website: true, meta: true });
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [syncingMeta, setSyncingMeta] = useState(false);
-  const [syncResult, setSyncResult] = useState<MetaSyncSummary | null>(null);
-  const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
 
   // Background refresh: SWR pauses polling while the tab is hidden
   // (refreshWhenHidden defaults to false) and revalidateOnFocus catches up
@@ -942,7 +968,10 @@ export default function LeadsDashboard() {
   const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
     "/api/customer-service/leads",
     fetcher,
-    autoRefreshOpts
+    {
+      ...autoRefreshOpts,
+      fallbackData: initialLeads ? { leads: initialLeads } : undefined,
+    },
   );
   const {
     data: metaStatus,
@@ -956,25 +985,59 @@ export default function LeadsDashboard() {
     mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"))
   );
 
-  const syncMeta = async () => {
-    setSyncingMeta(true);
-    setSyncResult(null);
-    setSyncError(null);
+  const syncAll = async () => {
+    setSyncingAll(true);
+    setSyncAllResult(null);
+    const completed: string[] = [];
+    const errors: string[] = [];
+
     try {
-      const response = await fetch("/api/customer-service/leads?action=sync_meta", {
-        method: "POST",
-      });
-      const body = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(body.error ?? `Meta sync failed with status ${response.status}`);
+      if (metaStatus?.connected) {
+        try {
+          const response = await fetch("/api/customer-service/leads?action=sync_meta", {
+            method: "POST",
+          });
+          const body = await response.json().catch(() => ({})) as {
+            error?: string;
+            summary?: MetaSyncSummary;
+          };
+          if (!response.ok || !body.summary) {
+            throw new Error(body.error ?? `Meta sync failed with status ${response.status}`);
+          }
+          completed.push(`Meta (${body.summary.inserted} imported)`);
+          if (body.summary.failed > 0) {
+            errors.push(`Meta: ${body.summary.failed} lead${body.summary.failed === 1 ? "" : "s"} failed`);
+          }
+        } catch (error) {
+          errors.push(`Meta: ${error instanceof Error ? error.message : "sync failed"}`);
+        }
+      } else {
+        errors.push("Meta: not connected");
       }
-      setSyncResult(body.summary as MetaSyncSummary);
-      refresh();
-      await refreshMetaStatus();
+
+      const automationResults = await Promise.allSettled([
+        triggerSyncAutomation("sync-calls", "Phone"),
+        triggerSyncAutomation("sync-followup", "Shopify"),
+      ]);
+      for (const [index, result] of automationResults.entries()) {
+        const label = index === 0 ? "Phone" : "Shopify";
+        if (result.status === "fulfilled") {
+          completed.push(label);
+        } else {
+          const message = result.reason instanceof Error ? result.reason.message : "sync failed";
+          errors.push(`${label}: ${message}`);
+        }
+      }
+
+      const refreshResults = await Promise.allSettled([refresh(), refreshMetaStatus()]);
+      if (refreshResults.some((result) => result.status === "rejected")) {
+        errors.push("Lead data could not be refreshed after syncing");
+      }
     } catch (error) {
-      setSyncError(error instanceof Error ? error.message : "Meta sync failed");
+      errors.push(error instanceof Error ? error.message : "Sync failed");
     } finally {
-      setSyncingMeta(false);
+      setSyncAllResult({ completed, errors });
+      setSyncingAll(false);
     }
   };
 
@@ -1047,16 +1110,34 @@ export default function LeadsDashboard() {
     return result;
   }, [sourceLeads]);
 
+  const analysis = useMemo(() => {
+    const selectedTrend = trendRange === "custom"
+      ? buildCustomLeadTrend(leads, customFrom, customTo)
+      : buildLeadTrend(leads, trendRange);
+    const firstPoint = selectedTrend.points[0];
+    const lastPoint = selectedTrend.points.at(-1);
+    const periodLeads = firstPoint && lastPoint
+      ? leads.filter((lead) => isLeadInCustomDateRange(
+          lead,
+          firstPoint.rangeStart,
+          lastPoint.rangeEnd,
+        ))
+      : [];
+    return { trend: selectedTrend, leads: periodLeads };
+  }, [leads, trendRange, customFrom, customTo]);
+  const trend = analysis.trend;
+  const analysisLeads = analysis.leads;
+
   const metrics = useMemo(() => {
-    const funnel = calculateLeadFunnel(leads);
-    const openLeads = leads.filter((l) => !isClosedOutcome(l.outcome));
+    const funnel = calculateLeadFunnel(analysisLeads);
+    const openLeads = analysisLeads.filter((l) => !isClosedOutcome(l.outcome));
     const uncalledLeads = openLeads.filter((l) => (
       l.call_status === "not_called" && isCallablePhone(l.phone)
     ));
     const overdueUncalled = uncalledLeads.filter(
       (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
     );
-    const pipelineLeads = leads.filter((l) => l.outcome === "quoted");
+    const pipelineLeads = analysisLeads.filter((l) => l.outcome === "quoted");
     const pipelineValue = pipelineLeads
       .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
     const uncalledBySource = {
@@ -1090,11 +1171,14 @@ export default function LeadsDashboard() {
       openQuoteCount: pipelineLeads.length,
       openQuoteCountBySource,
     };
-  }, [leads]);
-  const metricsBySource = useMemo(() => calculateLeadFunnelBySource(leads), [leads]);
+  }, [analysisLeads]);
+  const metricsBySource = useMemo(
+    () => calculateLeadFunnelBySource(analysisLeads),
+    [analysisLeads],
+  );
   const responseMetricsBySource = useMemo<SourceResponseMetricsBySource>(() => {
     const summarize = (source: LeadSource): SourceResponseMetrics => {
-      const applicableLeads = leads.filter((lead) => (
+      const applicableLeads = analysisLeads.filter((lead) => (
         lead.source === source && lead.outcome !== "not_applicable"
       ));
       const callTimes = applicableLeads.map((lead) => (
@@ -1112,14 +1196,8 @@ export default function LeadsDashboard() {
       };
     };
     return { website: summarize("website"), meta: summarize("meta") };
-  }, [leads]);
+  }, [analysisLeads]);
 
-  const trend = useMemo(
-    () => trendRange === "custom"
-      ? buildCustomLeadTrend(leads, customFrom, customTo)
-      : buildLeadTrend(leads, trendRange),
-    [leads, trendRange, customFrom, customTo],
-  );
   const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
   const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
   const trendComparison = trend.previous.total === 0
@@ -1175,22 +1253,23 @@ export default function LeadsDashboard() {
               <span>{metaStatus.page_name ? `Meta: ${metaStatus.page_name}` : "Meta connected"}</span>
             </div>
           )}
-          {metaStatus?.connected && metaStatus.can_sync && (
+          {metaStatus?.can_sync && (
             <button
               type="button"
-              onClick={syncMeta}
-              disabled={syncingMeta}
-              className="px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50 disabled:opacity-60"
+              onClick={syncAll}
+              disabled={syncingAll}
+              className="min-w-[88px] px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50 disabled:cursor-wait disabled:opacity-60"
             >
-              {syncingMeta ? "Syncing" : "Sync Meta"}
+              {syncingAll ? "Syncing..." : "Sync All"}
             </button>
           )}
         </div>
       </div>
 
-      <section className="bg-white rounded-lg border border-sand-200/60 overflow-hidden">
-        <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(560px,1fr)]">
-          <div className="grid sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-sand-200/60 xl:border-r xl:border-sand-200/60">
+      <div className="grid items-start gap-4 xl:grid-cols-[minmax(420px,440px)_minmax(0,1fr)]">
+        <div className="flex min-w-0 flex-col gap-5">
+          <section className="order-2 overflow-hidden rounded-lg border border-sand-200/60 bg-white">
+            <div className="grid divide-y divide-sand-200/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             <SummaryMetric
               label={`New Leads (${trendLabel})`}
               value={trend.current.total}
@@ -1239,18 +1318,21 @@ export default function LeadsDashboard() {
                 },
               }}
             />
-          </div>
-          <FunnelComparison metrics={metricsBySource} responseMetrics={responseMetricsBySource} />
-        </div>
-      </section>
+            </div>
+            <FunnelComparison
+              metrics={metricsBySource}
+              responseMetrics={responseMetricsBySource}
+              periodLabel={customQueueDateRange ?? trendLabel}
+            />
+          </section>
 
-      <section className="bg-white border border-sand-200 rounded-lg overflow-hidden">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 border-b border-sand-200">
+          <section className="order-1 overflow-hidden rounded-lg border border-sand-200 bg-white">
+        <div className="flex flex-col justify-between gap-2.5 border-b border-sand-200 px-4 py-2.5 lg:flex-row lg:items-center xl:items-stretch xl:flex-col">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
             <p className="text-xs text-sand-500 mt-0.5">Website and Meta submissions over time</p>
           </div>
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center xl:items-start xl:flex-col">
             <div className="flex items-center gap-3 text-xs">
               <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
                 <input
@@ -1275,14 +1357,14 @@ export default function LeadsDashboard() {
                 Meta
               </label>
             </div>
-            <div className="inline-flex self-start flex-wrap rounded-md border border-sand-200 bg-sand-50 p-0.5 text-[11px] font-medium">
+            <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-md border border-sand-200 bg-sand-50 p-0.5 text-[11px] font-medium">
               {TREND_RANGES.map((range) => (
                 <button
                   key={range.value}
                   type="button"
                   aria-pressed={trendRange === range.value}
                   onClick={() => selectTrendRange(range.value)}
-                  className={`px-2.5 py-1 rounded transition-colors ${
+                    className={`shrink-0 px-2.5 py-1 rounded transition-colors ${
                     trendRange === range.value
                       ? "bg-white text-sand-900 shadow-sm"
                       : "text-sand-500 hover:text-sand-800"
@@ -1318,46 +1400,61 @@ export default function LeadsDashboard() {
             </label>
           </div>
         )}
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_240px]">
-          <div className="h-[210px] px-3 pt-3 pb-1 sm:px-4">
-            <LeadTrendChart
-              data={trend.points}
-              showWebsite={chartSources.website}
-              showMeta={chartSources.meta}
-              onSelectRange={selectChartRange}
-            />
-          </div>
-          <div className="border-t lg:border-t-0 lg:border-l border-sand-200 px-4 py-3 flex flex-col justify-center gap-3">
-            <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
-            <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
-            <div className="pt-3 border-t border-sand-200">
-              <p className="text-xs text-sand-500">All sources</p>
-              <p className="text-xl font-semibold text-sand-900 mt-0.5">{trend.current.total}</p>
-              <p className="text-[11px] text-sand-500 mt-0.5">{trendComparison}</p>
+            <div className="h-[150px] px-3 pb-1 pt-2.5 sm:px-4">
+              <LeadTrendChart
+                data={trend.points}
+                showWebsite={chartSources.website}
+                showMeta={chartSources.meta}
+                onSelectRange={selectChartRange}
+              />
             </div>
-          </div>
-        </div>
-      </section>
+            <div className="grid gap-3 border-t border-sand-200 px-3 py-2.5 sm:grid-cols-3">
+              <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
+              <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
+              <div className="border-t border-sand-200 pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+                <p className="text-xs text-sand-500">All sources</p>
+                <p className="mt-0.5 text-xl font-semibold text-sand-900">{trend.current.total}</p>
+                <p className="mt-0.5 text-[11px] text-sand-500">{trendComparison}</p>
+              </div>
+            </div>
+          </section>
 
-      {(metaStatusError || metaStatus?.error || syncError) && (
-        <div className="border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
-          <span className="font-medium">Meta sync needs attention. </span>
-          {metaStatusError?.message ?? metaStatus?.error ?? syncError}
+      {(metaStatusError || metaStatus?.error) && (
+        <div className="order-3 border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
+          <span className="font-medium">Meta connection needs attention. </span>
+          {metaStatusError?.message ?? metaStatus?.error}
         </div>
       )}
-      {syncResult && !syncError && (
-        <div className="border border-emerald-200 bg-emerald-50 px-4 py-3 rounded-lg text-sm text-emerald-800">
-          Meta sync finished: {syncResult.inserted} imported, {syncResult.deduped} already present, {syncResult.failed} failed.
+      {syncAllResult && (
+        <div
+          role={syncAllResult.errors.length > 0 ? "alert" : "status"}
+          aria-live="polite"
+          className={`order-3 border px-4 py-3 rounded-lg text-sm ${
+          syncAllResult.errors.length > 0
+            ? "border-amber-200 bg-amber-50 text-amber-900"
+            : "border-emerald-200 bg-emerald-50 text-emerald-800"
+          }`}
+        >
+          {syncAllResult.errors.length > 0 ? (
+            <>
+              <span className="font-medium">Sync finished with issues. </span>
+              {syncAllResult.errors.join(". ")}.
+              {syncAllResult.completed.length > 0 && ` Refreshed: ${syncAllResult.completed.join(", ")}.`}
+            </>
+          ) : (
+            <>Sync finished: {syncAllResult.completed.join(", ")}.</>
+          )}
         </div>
       )}
 
       {leadsError && (
-        <div className="border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
+        <div className="order-3 border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
           Could not load leads: {leadsError.message}
         </div>
       )}
+        </div>
 
-      <section className="bg-white rounded-lg border border-sand-200 overflow-hidden">
+        <section className="min-w-0 overflow-hidden rounded-lg border border-sand-200 bg-white xl:sticky xl:top-6">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
@@ -1378,21 +1475,33 @@ export default function LeadsDashboard() {
             </span>
           </div>
         </div>
-        <div className="px-4 py-3 border-b border-sand-200 bg-sand-50 space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2">
+        <div className="border-b border-sand-200 bg-sand-50 px-3 py-3">
+          <div className="flex flex-wrap gap-2">
             <input
               type="search"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search name, email, phone, or staff"
               aria-label="Search leads"
-              className="w-full min-w-0 sm:flex-1 px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="h-9 min-w-[220px] flex-[1_1_260px] rounded-md border border-sand-200 bg-white px-3 text-xs text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
+            <select
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              aria-label="Filter leads by status"
+              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[180px]"
+            >
+              {FILTER_TABS.map((tab) => (
+                <option key={tab.value} value={tab.value}>
+                  {tab.label} ({filterCounts[tab.value] ?? 0})
+                </option>
+              ))}
+            </select>
             <select
               value={sourceFilter}
               onChange={(event) => setSourceFilter(event.target.value as "all" | LeadSource)}
               aria-label="Filter leads by source"
-              className="w-full sm:w-auto px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[150px]"
             >
               <option value="all">All sources ({sourceCounts.all})</option>
               <option value="website">Website ({sourceCounts.website})</option>
@@ -1402,40 +1511,11 @@ export default function LeadsDashboard() {
               value={sortOrder}
               onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
               aria-label="Sort leads"
-              className="w-full sm:w-auto px-3 py-2 text-sm border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
+              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[130px]"
             >
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
-          </div>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="hidden sm:block shrink-0 text-[11px] font-medium uppercase tracking-wider text-sand-400">
-              View
-            </span>
-            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto pb-0.5">
-              {FILTER_TABS.map((tab) => {
-                const count = filterCounts[tab.value] ?? 0;
-                const active = filter === tab.value;
-                return (
-                  <button
-                    key={tab.value}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setFilter(tab.value)}
-                    className={`shrink-0 rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
-                      active
-                        ? "border-sand-800 bg-sand-800 text-white"
-                        : "border-sand-200 bg-white text-sand-600 hover:border-sand-300 hover:text-sand-900"
-                    }`}
-                  >
-                    {tab.label}
-                    <span className={`ml-1.5 ${active ? "text-sand-200" : "text-sand-400"}`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
             {(filter !== "all" || sourceFilter !== "all" || search.trim()) && (
               <button
                 type="button"
@@ -1444,7 +1524,7 @@ export default function LeadsDashboard() {
                   setSourceFilter("all");
                   setSearch("");
                 }}
-                className="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-800"
+                className="h-9 whitespace-nowrap px-2 text-[11px] font-medium text-blue-600 hover:text-blue-800"
               >
                 Reset
               </button>
@@ -1452,7 +1532,7 @@ export default function LeadsDashboard() {
           </div>
         </div>
 
-        {isLoading ? (
+        {isLoading && data == null ? (
           <div className="py-12 text-center text-sand-400 text-sm">Loading leads…</div>
         ) : leadsError ? (
           <div className="py-12 text-center text-red-500 text-sm">Lead data is unavailable.</div>
@@ -1470,19 +1550,16 @@ export default function LeadsDashboard() {
           </div>
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full min-w-[1280px] text-sm">
+            <table className="w-full min-w-[880px] table-fixed text-sm">
               <thead className="sticky top-0 z-20 bg-white">
                 <tr className="border-b border-sand-200/60">
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Lead</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Source</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Received</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Response</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Contact</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Installation</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Quote</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Staff</th>
-                  <th className="text-left px-4 py-3 text-[11px] text-sand-400 uppercase tracking-wider font-medium">Stage</th>
-                  <th className="px-4 py-3"></th>
+                  <th className="w-[23%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Lead</th>
+                  <th className="w-[9%] px-3 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Received</th>
+                  <th className="w-[16%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Response</th>
+                  <th className="w-[14%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Contact</th>
+                  <th className="w-[18%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Quote / Staff</th>
+                  <th className="w-[12%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Stage</th>
+                  <th className="w-[8%] px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody>
@@ -1497,7 +1574,15 @@ export default function LeadsDashboard() {
                     }`}
                   >
                     <td className="px-4 py-3">
-                      <div className="font-medium text-sand-900">{lead.name || "Unnamed"}</div>
+                      <div className="flex items-center gap-2 font-medium text-sand-900">
+                        <span className="truncate">{lead.name || "Unnamed"}</span>
+                        <span
+                          role="img"
+                          aria-label={`${SOURCE_BADGE[lead.source].label} lead`}
+                          title={`${SOURCE_BADGE[lead.source].label}${lead.source_detail ? `: ${lead.source_detail}` : ""}`}
+                          className={`h-2.5 w-2.5 shrink-0 rounded-sm ${lead.source === "website" ? "bg-blue-600" : "bg-pink-600"}`}
+                        />
+                      </div>
                       <div className="text-[11px] text-sand-400 truncate max-w-[220px]">
                         {[lead.email, lead.phone].filter(Boolean).join(" · ")}
                       </div>
@@ -1507,19 +1592,7 @@ export default function LeadsDashboard() {
                         </div>
                       )}
                     </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${SOURCE_BADGE[lead.source].className}`}>
-                        {SOURCE_BADGE[lead.source].label}
-                      </span>
-                      {((lead.duplicate_count ?? 1) > 1 || lead.source_detail) && (
-                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
-                          {(lead.duplicate_count ?? 1) > 1
-                            ? `${lead.duplicate_count} form submissions`
-                            : lead.source_detail}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-sand-600">
+                    <td className="px-3 py-3 text-sand-600">
                       <div>{formatDate(lead.submitted_at)}</div>
                       <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at)}</div>
                     </td>
@@ -1547,17 +1620,6 @@ export default function LeadsDashboard() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {lead.installation_requested === true ? (
-                        <span className="inline-block rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-xs font-medium text-teal-700">
-                          Requested
-                        </span>
-                      ) : lead.installation_requested === false ? (
-                        <span className="text-xs text-sand-400">Not requested</span>
-                      ) : (
-                        <span className="text-xs text-sand-300">Not recorded</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
                       {lead.quote_number ? (
                         <>
                           <div className="font-medium text-sand-900">{lead.quote_number}</div>
@@ -1568,15 +1630,9 @@ export default function LeadsDashboard() {
                       ) : (
                         <span className="text-sand-300">-</span>
                       )}
-                    </td>
-                    <td className="px-4 py-3 text-sand-600">
-                      {lead.assigned_to ? (
-                        <span className="block max-w-[160px] truncate" title={lead.assigned_to}>
-                          {lead.assigned_to}
-                        </span>
-                      ) : (
-                        <span className="text-sand-300">-</span>
-                      )}
+                      <div className="mt-1 truncate text-[11px] text-sand-400" title={lead.assigned_to || "Unassigned"}>
+                        Staff: <span className="text-sand-600">{lead.assigned_to || "Unassigned"}</span>
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
@@ -1603,7 +1659,8 @@ export default function LeadsDashboard() {
             </table>
           </div>
         )}
-      </section>
+        </section>
+      </div>
 
       {selectedLead && (
         <LeadDetailPanel
@@ -1637,18 +1694,20 @@ function SummaryMetric({
   sourceDetails: Record<LeadSource, SourceMetricDetail>;
 }) {
   return (
-    <div className="flex min-h-40 flex-col p-4">
-      <div className="flex items-center gap-2 mb-1">
-        <span className={`w-2 h-2 rounded-full ${color}`} />
-        <p className="text-[11px] text-sand-400 uppercase tracking-wider">{label}</p>
+    <div className="flex min-h-32 flex-col p-3">
+      <div>
+        <div className="mb-0.5 flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${color}`} />
+          <p className="text-[11px] text-sand-400 uppercase tracking-wider">{label}</p>
+        </div>
+        <p className="text-xl font-semibold leading-6 text-sand-900">{value}</p>
+        {subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{subtitle}</p>}
       </div>
-      <p className="text-xl font-semibold text-sand-900">{value}</p>
-      {subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{subtitle}</p>}
-      <div className="mt-auto grid grid-cols-2 gap-3 border-t border-sand-100 pt-3">
+      <div className="mt-auto grid grid-cols-2 gap-2 border-t border-sand-100 pt-2">
         {(["website", "meta"] as const).map((source) => (
           <div key={source} className="min-w-0">
             <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
-              <span className={`w-2 h-2 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
+              <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
               <span className="capitalize">{source}</span>
             </div>
             <p className="mt-0.5 truncate text-sm font-semibold text-sand-800" title={String(sourceDetails[source].value)}>
@@ -1678,18 +1737,20 @@ const RESPONSE_COMPARISON_ROWS = [
 function FunnelComparison({
   metrics,
   responseMetrics,
+  periodLabel,
 }: {
   metrics: LeadFunnelMetricsBySource;
   responseMetrics: SourceResponseMetricsBySource;
+  periodLabel: string;
 }) {
   return (
-    <div className="border-t border-sand-200/60 xl:border-t-0">
-      <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200/60">
+    <div className="border-t border-sand-200/60">
+      <div className="flex items-center justify-between gap-3 border-b border-sand-200/60 px-4 py-2.5">
         <div className="flex items-center gap-2">
           <span className="w-2 h-2 rounded-full bg-indigo-500" />
           <p className="text-[11px] text-sand-500 uppercase tracking-wider">Performance by source</p>
         </div>
-        <span className="text-[10px] text-sand-400 uppercase tracking-wider">All-time</span>
+        <span className="text-[10px] text-sand-400 uppercase tracking-wider">{periodLabel}</span>
       </div>
       <table className="w-full table-fixed text-left">
         <thead>
@@ -1712,11 +1773,11 @@ function FunnelComparison({
         <tbody>
           {FUNNEL_COMPARISON_ROWS.map((row) => (
             <tr key={row.rate} className="border-b border-sand-100 last:border-b-0">
-              <th className="px-4 py-2 text-xs font-medium text-sand-600">{row.label}</th>
+              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">{row.label}</th>
               {(["website", "meta"] as const).map((source) => (
-                <td key={source} className="px-3 py-2">
+                <td key={source} className="px-3 py-1.5">
                   <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
-                  <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
+                  <span className="ml-2 whitespace-nowrap text-[10px] text-sand-400">
                     {metrics[source][row.count]} / {metrics[source][row.denominator]}
                   </span>
                 </td>
@@ -1725,13 +1786,13 @@ function FunnelComparison({
           ))}
           {RESPONSE_COMPARISON_ROWS.map((row) => (
             <tr key={row.value} className="border-b border-sand-100 last:border-b-0">
-              <th className="px-4 py-2 text-xs font-medium text-sand-600">{row.label}</th>
+              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">{row.label}</th>
               {(["website", "meta"] as const).map((source) => (
-                <td key={source} className="px-3 py-2">
+                <td key={source} className="px-3 py-1.5">
                   <span className="text-sm font-semibold text-sand-900">
                     {formatLeadResponseTime(responseMetrics[source][row.value])}
                   </span>
-                  <span className="ml-2 text-[10px] text-sand-400 whitespace-nowrap">
+                  <span className="ml-2 whitespace-nowrap text-[10px] text-sand-400">
                     {responseMetrics[source][row.count]} {row.unit}
                   </span>
                 </td>

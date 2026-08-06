@@ -1,6 +1,6 @@
 # Phone Metrics System - How Everything Works
 
-Last updated: April 8, 2026
+Last updated: August 5, 2026
 
 ---
 
@@ -11,11 +11,12 @@ Two phone systems feed into one database:
 | Source | What it is | How it syncs |
 |--------|-----------|--------------|
 | **CIK** | Office phone system. Each store (BC Transparent, RF Transparent) has its own CIK portal. | Scraper logs into each store's QCWS portal, downloads CSV for last 3 months. |
-| **Grasshopper** | VoIP service. Single account, two virtual numbers (VPS). Calls come in on GH, then forward to CIK phones. | Scraper logs into GH portal, downloads one CSV report (last 90 days), splits by VPS number to determine which store. |
+| **Grasshopper** | VoIP service. Single account, three virtual numbers (VPS). Calls come in on GH, then forward to CIK phones. | Scraper logs into GH portal, downloads one CSV report (last 90 days), splits by VPS number to determine which store. |
 
 **VPS-to-store mapping:**
 - `855-452-7715` -> RF Transparent
 - `800-549-0162` -> BC Transparent
+- `450-489-3377` -> Glass Railing Store (stored under `rf_transparent`, the combined RF/GRS phone store)
 
 All records end up in the `call_records` table in Supabase.
 

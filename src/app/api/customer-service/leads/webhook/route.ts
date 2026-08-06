@@ -27,6 +27,7 @@ import {
   validateAttachmentMetadata,
   type PendingLeadAttachment,
 } from "@/lib/customer-service/lead-attachments";
+import { markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -137,10 +138,12 @@ export async function POST(req: NextRequest) {
   if (pendingAttachments.length > 0) {
     const attachmentResult = await attachFilesToLead(result.lead_id, pendingAttachments);
     if (!attachmentResult.ok) {
+      markLeadsCacheStale();
       return jsonResponse({ error: attachmentResult.error, lead_id: result.lead_id }, 503);
     }
   }
 
+  markLeadsCacheStale();
   return jsonResponse({ ...result, attachment_count: pendingAttachments.length });
 }
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getLatestCronRuns } from "@/lib/cron-monitor";
 import { AUTOMATION_JOBS, findJob, TRIGGERED_BY_HEADER } from "@/lib/automations";
+import { getAutomationDetailFailure } from "@/lib/automation-status";
 
 export const dynamic = "force-dynamic";
 // A manual sync can take a while; give it the same room the cron gets.
@@ -49,6 +50,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json(
         { error: `${job.label} failed (HTTP ${res.status})`, detail: detail.slice(0, 500) },
         { status: 502 }
+      );
+    }
+    const detailFailure = getAutomationDetailFailure(detail);
+    if (detailFailure) {
+      return NextResponse.json(
+        { error: `${job.label} finished with issues: ${detailFailure}`, detail: detail.slice(0, 500) },
+        { status: 502 },
       );
     }
     return NextResponse.json({ ok: true, detail: detail.slice(0, 500) });

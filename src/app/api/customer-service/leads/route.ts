@@ -5,13 +5,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated, getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import {
-  extractContactFields,
-  type Lead,
   type CallStatus,
+  type LeadSource,
   type Outcome,
 } from "@/lib/customer-service/leads";
-import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
-import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
+import { loadLeads, markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
 import { isCallablePhone } from "@/lib/call-metrics";
 import {
   getMetaConnectionStatus,
@@ -31,30 +29,6 @@ const ALLOWED_OUTCOMES: Outcome[] = [
   "lost",
   "not_applicable",
 ];
-
-// PostgREST caps every response at the project's max-rows — 1000 here — and
-// does it silently: a plain select just returns fewer rows than exist. The
-// Leads page showed "1000 total" while the table held 1066, and .range()
-// can't be used to ask for more than the cap in one request. So page through
-// it. Anything reading a whole table must go through this.
-const PAGE_SIZE = 1000;
-
-async function fetchAllPages<T>(
-  page: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<{ rows: T[]; error: string | null }> {
-  const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await page(from, from + PAGE_SIZE - 1);
-    if (error) return { rows, error: error.message };
-    rows.push(...(data ?? []));
-    // A short page means we've reached the end.
-    if (!data || data.length < PAGE_SIZE) return { rows, error: null };
-  }
-}
-
-type LeadRow = { id: string; [key: string]: unknown };
-type AttemptRow = { lead_id: string; staff: string; called_at: string };
-type AttachmentRow = LeadAttachment;
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
 
@@ -94,101 +68,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ attempts: data ?? [] });
   }
 
-  // Default: list of leads, newest first, optionally filtered by source.
-  const source = req.nextUrl.searchParams.get("source"); // null | 'website' | 'meta'
-
-  const { rows: leads, error } = await fetchAllPages<LeadRow>((from, to) => {
-    let query = supabase
-      .from("leads")
-      .select("*")
-      .order("submitted_at", { ascending: false })
-      .range(from, to);
-    if (source === "website" || source === "meta") query = query.eq("source", source);
-    return query;
-  });
-  if (error) return NextResponse.json({ error }, { status: 500 });
-
-  const attachmentsByLead = new Map<string, LeadAttachment[]>();
-  const { rows: attachments, error: attachmentsError } = await fetchAllPages<AttachmentRow>((from, to) =>
-    supabase
-      .from("lead_attachments")
-      .select("id, lead_id, field_name, filename, content_type, size_bytes, created_at")
-      .order("created_at", { ascending: true })
-      .range(from, to),
-  );
-  const attachmentsTableMissing = attachmentsError
-    ? /lead_attachments|schema cache|relation/i.test(attachmentsError)
-    : false;
-  if (attachmentsError && !attachmentsTableMissing) {
-    return NextResponse.json({ error: attachmentsError }, { status: 500 });
-  }
-  for (const attachment of attachments) {
-    const current = attachmentsByLead.get(attachment.lead_id) ?? [];
-    current.push(attachment);
-    attachmentsByLead.set(attachment.lead_id, current);
-  }
-
-  // Fetch call attempt aggregates so the table can show "last called by X".
-  // Paged for the same reason — one busy week of calls would otherwise push
-  // this past the cap and quietly drop the aggregate for some leads.
-  const attemptAgg: Map<string, {
-    count: number;
-    first_at: string;
-    last_at: string;
-    last_staff: string;
-  }> = new Map();
-  if (leads.length > 0) {
-    // Read the linked attempt table directly. Sending every lead ID through
-    // one .in() filter creates a URL that PostgREST rejects once the queue is
-    // large, which previously made every timing value disappear.
-    const { rows: attempts, error: attemptsError } = await fetchAllPages<AttemptRow>((from, to) =>
-      supabase
-        .from("lead_call_attempts")
-        .select("lead_id, staff, called_at")
-        .order("called_at", { ascending: false })
-        .range(from, to),
+  const sourceParam = req.nextUrl.searchParams.get("source");
+  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
+    ? sourceParam
+    : undefined;
+  try {
+    return NextResponse.json({ leads: await loadLeads(source) });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Could not load leads" },
+      { status: 500 },
     );
-    if (attemptsError) {
-      return NextResponse.json({ error: attemptsError }, { status: 500 });
-    }
-    for (const a of attempts) {
-      const prev = attemptAgg.get(a.lead_id);
-      if (!prev) {
-        attemptAgg.set(a.lead_id, {
-          count: 1,
-          first_at: a.called_at,
-          last_at: a.called_at,
-          last_staff: a.staff,
-        });
-      } else {
-        prev.count += 1;
-        // Rows are newest-first, so each later row is an older attempt.
-        prev.first_at = a.called_at;
-      }
-    }
   }
-
-  const enriched: Lead[] = leads.map((l) => {
-    const agg = attemptAgg.get(l.id);
-    const recovered = l.raw_payload && typeof l.raw_payload === "object" && !Array.isArray(l.raw_payload)
-      ? extractContactFields(l.raw_payload as Record<string, unknown>)
-      : { name: null, email: null, phone: null, message: null };
-    const present = (value: unknown) => typeof value === "string" && value.trim() ? value : null;
-    return {
-      ...l,
-      name: present(l.name) ?? recovered.name,
-      email: present(l.email) ?? recovered.email,
-      phone: present(l.phone) ?? recovered.phone,
-      message: present(l.message) ?? recovered.message,
-      attachments: attachmentsByLead.get(l.id) ?? [],
-      call_attempts_count: agg?.count ?? 0,
-      first_call_at: agg?.first_at ?? null,
-      last_call_at: agg?.last_at ?? null,
-      last_called_by: agg?.last_staff ?? null,
-    } as unknown as Lead;
-  });
-
-  return NextResponse.json({ leads: consolidateDuplicateLeads(enriched) });
 }
 
 // ─── POST ────────────────────────────────────────────────────────────────────
@@ -206,6 +97,7 @@ export async function POST(req: NextRequest) {
     }
     try {
       const summary = await syncRecentMetaLeads();
+      markLeadsCacheStale();
       return NextResponse.json({ ok: true, summary });
     } catch (error) {
       return NextResponse.json({ error: metaErrorMessage(error) }, { status: 502 });
@@ -245,6 +137,7 @@ export async function POST(req: NextRequest) {
     const { error: updErr } = await supabase.from("leads").update(update).eq("id", lead_id);
     if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
 
+    markLeadsCacheStale();
     return NextResponse.json({ ok: true });
   }
 
@@ -316,5 +209,6 @@ export async function PATCH(req: NextRequest) {
     const { error } = await supabase.from("leads").update(update).in("id", chunk);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
+  markLeadsCacheStale();
   return NextResponse.json({ ok: true, updated: targetIds.length });
 }

@@ -23,6 +23,7 @@ import {
   extractMetaLeadFields,
   findOrInsertLead,
 } from "@/lib/customer-service/leads";
+import { markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -96,6 +97,10 @@ export async function POST(req: NextRequest) {
       const processed = await processLead(leadgenId, value, pageAccessToken);
       results.push({ leadgen_id: leadgenId, ...processed });
     }
+  }
+
+  if (results.some((result) => result.ok && result.lead_id)) {
+    markLeadsCacheStale();
   }
 
   const failed = results.filter((result) => !result.ok);

@@ -57,6 +57,8 @@ next-env.d.ts
 followup-revert-backup-*.pdf
 followup-revert-backup-*.xlsx
 /scripts/
+/tmp/
+/output/
 
 # Supabase CLI cache
 supabase/.temp/
