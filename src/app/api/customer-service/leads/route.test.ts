@@ -31,7 +31,7 @@ vi.mock("@/lib/customer-service/meta-leads", () => ({
   syncRecentMetaLeads: vi.fn(),
 }));
 
-import { GET, PATCH } from "@/app/api/customer-service/leads/route";
+import { GET, PATCH, POST } from "@/app/api/customer-service/leads/route";
 
 function queryBuilder(range: ReturnType<typeof vi.fn>) {
   const builder = {
@@ -200,5 +200,25 @@ describe("PATCH /api/customer-service/leads", () => {
     await expect(response.json()).resolves.toEqual({
       error: "quote_amount must be a non-negative number",
     });
+  });
+});
+
+describe("POST /api/customer-service/leads", () => {
+  it("does not accept manual call logging", async () => {
+    const response = await POST(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?action=log_call",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_id: "lead-1",
+          result: "Called",
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "unknown action" });
+    expect(getSupabaseMock).not.toHaveBeenCalled();
   });
 });

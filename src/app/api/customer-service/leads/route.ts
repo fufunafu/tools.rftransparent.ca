@@ -1,8 +1,8 @@
-// Auth-gated API for the Leads dashboard: list leads, list call attempts for
-// a lead, log a call, update a lead's outcome / quote / notes.
+// Auth-gated API for the Leads dashboard: list leads, list synchronized call
+// attempts for a lead, and update a lead's outcome / quote / notes.
 
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
+import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import {
   type CallStatus,
@@ -140,12 +140,11 @@ export async function GET(req: NextRequest) {
 // ─── POST ────────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const user = await getAuthenticatedUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!(await isAuthenticated())) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const action = req.nextUrl.searchParams.get("action");
-  const supabase = getSupabase();
-
   if (action === "sync_meta") {
     if (!(await isAdminUser())) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -157,43 +156,6 @@ export async function POST(req: NextRequest) {
     } catch (error) {
       return NextResponse.json({ error: metaErrorMessage(error) }, { status: 502 });
     }
-  }
-
-  if (action === "log_call") {
-    const body = await req.json().catch(() => ({}));
-    const { lead_id, result, notes } = body as { lead_id?: string; result?: string; notes?: string };
-    if (!lead_id || !result) {
-      return NextResponse.json({ error: "lead_id and result are required" }, { status: 400 });
-    }
-    const staff = user.email ?? "Unknown";
-
-    // Insert the attempt
-    const { error: attemptErr } = await supabase.from("lead_call_attempts").insert({
-      lead_id,
-      staff,
-      result,
-      notes: notes ?? null,
-    });
-    if (attemptErr) return NextResponse.json({ error: attemptErr.message }, { status: 500 });
-
-    // Bump the lead's call_status. "no_answer" / "no answer" stays no_answer;
-    // anything else means we actually spoke to them.
-    const isNoAnswer = /no.?answer|voicemail|bad.?number|wrong.?number/i.test(result);
-    const newStatus: CallStatus = isNoAnswer ? "no_answer" : "called";
-    // Only bump outcome from 'new' → 'contacted'; never downgrade.
-    const { data: cur } = await supabase
-      .from("leads")
-      .select("outcome")
-      .eq("id", lead_id)
-      .single();
-    const update: Record<string, unknown> = { call_status: newStatus };
-    if (cur?.outcome === "new") update.outcome = "contacted";
-
-    const { error: updErr } = await supabase.from("leads").update(update).eq("id", lead_id);
-    if (updErr) return NextResponse.json({ error: updErr.message }, { status: 500 });
-
-    markLeadsCacheStale();
-    return NextResponse.json({ ok: true });
   }
 
   return NextResponse.json({ error: "unknown action" }, { status: 400 });

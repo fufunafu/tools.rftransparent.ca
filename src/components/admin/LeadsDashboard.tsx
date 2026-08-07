@@ -26,6 +26,11 @@ import {
   type LeadFunnelMetricsBySource,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
+import {
+  buildLeadPerformanceTrend,
+  type LeadPerformanceMetricKey,
+  type LeadPerformanceTrendPoint,
+} from "@/lib/lead-performance-trends";
 import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
 import { getAutomationDetailFailure } from "@/lib/automation-status";
@@ -43,6 +48,14 @@ const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart")
   ssr: false,
   loading: () => <div className="h-full animate-pulse bg-sand-50 rounded-md" />,
 });
+
+const LeadPerformanceTrendChart = dynamic(
+  () => import("@/components/admin/LeadPerformanceTrendChart"),
+  {
+    ssr: false,
+    loading: () => <div className="h-full animate-pulse rounded-md bg-sand-50" />,
+  },
+);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -418,11 +431,6 @@ function LeadDetailPanel({
   );
   const attempts = attemptsData?.attempts ?? [];
 
-  const [logging, setLogging] = useState(false);
-  const [callResult, setCallResult] = useState("");
-  const [callNotes, setCallNotes] = useState("");
-  const [logError, setLogError] = useState<string | null>(null);
-
   const [editingQuote, setEditingQuote] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
@@ -476,32 +484,6 @@ function LeadDetailPanel({
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [onClose]);
-
-  const handleLogCall = async () => {
-    setLogging(true);
-    setLogError(null);
-    // Blank result is fine — default to "Called" so a one-click log works.
-    const result = callResult.trim() || "Called";
-    try {
-      const res = await fetch("/api/customer-service/leads?action=log_call", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_id: lead.id, result, notes: callNotes.trim() || undefined }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setLogError(body.error ?? `Failed to log call (${res.status})`);
-        return;
-      }
-      setCallResult("");
-      setCallNotes("");
-      onChanged();
-    } catch (err) {
-      setLogError(err instanceof Error ? err.message : "Network error");
-    } finally {
-      setLogging(false);
-    }
-  };
 
   const patchLead = async (
     update: Record<string, unknown>,
@@ -799,10 +781,19 @@ function LeadDetailPanel({
           </dl>
           <div className="space-y-3">
             {detailsLoading ? (
-              <div className="space-y-3" role="status" aria-label="Loading submission details">
-                {submissions.map((submission) => (
-                  <div key={submission.id} className="h-36 animate-pulse rounded-lg border border-sand-200 bg-sand-50" />
-                ))}
+              <div
+                className="flex items-center gap-3 rounded-xl border border-sand-200 bg-sand-50 px-4 py-3"
+                role="status"
+                aria-live="polite"
+              >
+                <span
+                  className="h-5 w-5 shrink-0 animate-spin rounded-full border-2 border-sand-300 border-t-blue-600"
+                  aria-hidden="true"
+                />
+                <div>
+                  <p className="text-sm font-medium text-sand-700">Loading submission details...</p>
+                  <p className="mt-0.5 text-xs text-sand-500">Fetching form answers and attachments.</p>
+                </div>
               </div>
             ) : detailError ? (
               <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -872,42 +863,6 @@ function LeadDetailPanel({
             </div>
           )}
 
-          {lead.outcome !== "not_applicable" && phoneIsCallable && (
-            <div className="rounded-xl border border-sand-200 p-4 space-y-3">
-              <p className="text-sm font-semibold text-sand-800">Log a call manually</p>
-              <label className="block text-xs font-medium text-sand-500">
-                Result
-                <input
-                  type="text"
-                  value={callResult}
-                  onChange={(e) => setCallResult(e.target.value)}
-                  placeholder="For example, spoke and interested"
-                  className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-              </label>
-              <label className="block text-xs font-medium text-sand-500">
-                Notes <span className="font-normal text-sand-400">(optional)</span>
-                <textarea
-                  value={callNotes}
-                  onChange={(e) => setCallNotes(e.target.value)}
-                  rows={2}
-                  placeholder="Add context for the next person"
-                  className="mt-1.5 w-full px-3 py-2 text-sm border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-                />
-              </label>
-              <button
-                type="button"
-                onClick={handleLogCall}
-                disabled={logging}
-                className="w-full px-3 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {logging ? "Logging..." : "+ Log Call"}
-              </button>
-              {logError && (
-                <p className="text-xs text-red-600">{logError}</p>
-              )}
-            </div>
-          )}
         </section>
 
         {/* Quote */}
@@ -1068,6 +1023,7 @@ export default function LeadsDashboard({
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [chartSources, setChartSources] = useState({ website: true, meta: true });
+  const [selectedPerformanceMetric, setSelectedPerformanceMetric] = useState<LeadPerformanceMetricKey | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
@@ -1320,6 +1276,10 @@ export default function LeadsDashboard({
     };
     return { website: summarize("website"), meta: summarize("meta") };
   }, [analysisLeads]);
+  const performanceTrend = useMemo(
+    () => buildLeadPerformanceTrend(leads, trend.points),
+    [leads, trend.points],
+  );
 
   const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
   const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
@@ -1442,6 +1402,7 @@ export default function LeadsDashboard({
               metrics={metricsBySource}
               responseMetrics={responseMetricsBySource}
               periodLabel={selectedDateRange ?? trendLabel}
+              onSelectMetric={setSelectedPerformanceMetric}
             />
           </section>
 
@@ -1767,7 +1728,7 @@ export default function LeadsDashboard({
                         onClick={(e) => { e.stopPropagation(); setSelectedLeadId(lead.id); }}
                         className="text-xs font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
                       >
-                        {lead.call_status === "not_called" && !isClosedOutcome(lead.outcome) && isCallablePhone(lead.phone) ? "Log Call" : "View"}
+                        View
                       </button>
                     </td>
                   </tr>
@@ -1784,6 +1745,22 @@ export default function LeadsDashboard({
           lead={selectedLead}
           onClose={() => setSelectedLeadId(null)}
           onChanged={refresh}
+        />
+      )}
+      {selectedPerformanceMetric && (
+        <PerformanceTrendDialog
+          metric={selectedPerformanceMetric}
+          data={performanceTrend}
+          periodLabel={selectedDateRange ?? trendLabel}
+          trendRange={trendRange}
+          onSelectRange={selectTrendRange}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomFromChange={setCustomFrom}
+          onCustomToChange={setCustomTo}
+          chartSources={chartSources}
+          onToggleSource={toggleChartSource}
+          onClose={() => setSelectedPerformanceMetric(null)}
         />
       )}
     </>
@@ -1847,14 +1824,42 @@ const RESPONSE_COMPARISON_ROWS = [
   { label: "Median elapsed to quote", value: "medianQuoteMs", count: "quoteCount", denominator: "applicableCount" },
 ] as const;
 
+const PERFORMANCE_METRIC_DETAILS: Record<LeadPerformanceMetricKey, {
+  title: string;
+  description: string;
+}> = {
+  callRate: {
+    title: "Call attempt rate",
+    description: "Share of callable leads with at least one call attempt. Higher is better.",
+  },
+  quoteRate: {
+    title: "Quote rate",
+    description: "Share of included leads that received a quote. Higher is better.",
+  },
+  conversionRate: {
+    title: "Lead-to-order rate",
+    description: "Share of included leads that became an order. Higher is better.",
+  },
+  medianCallMs: {
+    title: "Median elapsed to call",
+    description: "Median elapsed time among leads with a completed first call. Lower is better.",
+  },
+  medianQuoteMs: {
+    title: "Median elapsed to quote",
+    description: "Median elapsed time among leads with a completed first quote. Lower is better.",
+  },
+};
+
 function FunnelComparison({
   metrics,
   responseMetrics,
   periodLabel,
+  onSelectMetric,
 }: {
   metrics: LeadFunnelMetricsBySource;
   responseMetrics: SourceResponseMetricsBySource;
   periodLabel: string;
+  onSelectMetric: (metric: LeadPerformanceMetricKey) => void;
 }) {
   return (
     <div className="border-t border-sand-200/60">
@@ -1885,8 +1890,17 @@ function FunnelComparison({
         </thead>
         <tbody>
           {FUNNEL_COMPARISON_ROWS.map((row) => (
-            <tr key={row.rate} className="border-b border-sand-100 last:border-b-0">
-              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">{row.label}</th>
+            <tr
+              key={row.rate}
+              onClick={() => onSelectMetric(row.rate)}
+              className="group cursor-pointer border-b border-sand-100 transition-colors last:border-b-0 hover:bg-indigo-50/50 focus-within:bg-indigo-50/50"
+            >
+              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">
+                <MetricTrendButton
+                  label={row.label}
+                  onClick={() => onSelectMetric(row.rate)}
+                />
+              </th>
               {(["website", "meta"] as const).map((source) => (
                 <td key={source} className="px-3 py-1.5">
                   <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
@@ -1898,8 +1912,17 @@ function FunnelComparison({
             </tr>
           ))}
           {RESPONSE_COMPARISON_ROWS.map((row) => (
-            <tr key={row.value} className="border-b border-sand-100 last:border-b-0">
-              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">{row.label}</th>
+            <tr
+              key={row.value}
+              onClick={() => onSelectMetric(row.value)}
+              className="group cursor-pointer border-b border-sand-100 transition-colors last:border-b-0 hover:bg-indigo-50/50 focus-within:bg-indigo-50/50"
+            >
+              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">
+                <MetricTrendButton
+                  label={row.label}
+                  onClick={() => onSelectMetric(row.value)}
+                />
+              </th>
               {(["website", "meta"] as const).map((source) => (
                 <td key={source} className="px-3 py-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -1921,6 +1944,219 @@ function FunnelComparison({
         Rates use the current stage of leads first submitted in this period, so recent cohorts are still maturing.
         Response medians include completed responses only and measure elapsed time, including nights and weekends.
       </p>
+    </div>
+  );
+}
+
+function MetricTrendButton({
+  label,
+  onClick,
+}: {
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={`View ${label} trend`}
+      title={`View ${label} trend`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className="flex w-full items-center justify-between gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
+    >
+      <span>{label}</span>
+      <svg
+        viewBox="0 0 20 20"
+        aria-hidden="true"
+        className="h-3.5 w-3.5 shrink-0 text-sand-300 transition-colors group-hover:text-indigo-500 group-focus-within:text-indigo-500"
+      >
+        <path
+          d="M3 14.5 7.25 10l3 2.5L17 5.75M13 5.75h4v4"
+          fill="none"
+          stroke="currentColor"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          strokeWidth="1.6"
+        />
+      </svg>
+    </button>
+  );
+}
+
+function PerformanceTrendDialog({
+  metric,
+  data,
+  periodLabel,
+  trendRange,
+  customFrom,
+  customTo,
+  onSelectRange,
+  onCustomFromChange,
+  onCustomToChange,
+  chartSources,
+  onToggleSource,
+  onClose,
+}: {
+  metric: LeadPerformanceMetricKey;
+  data: LeadPerformanceTrendPoint[];
+  periodLabel: string;
+  trendRange: TrendSelection;
+  customFrom: string;
+  customTo: string;
+  onSelectRange: (range: TrendSelection) => void;
+  onCustomFromChange: (value: string) => void;
+  onCustomToChange: (value: string) => void;
+  chartSources: Record<LeadSource, boolean>;
+  onToggleSource: (source: LeadSource) => void;
+  onClose: () => void;
+}) {
+  const details = PERFORMANCE_METRIC_DETAILS[metric];
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-3 backdrop-blur-[1px] sm:p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="performance-trend-title"
+        aria-describedby="performance-trend-description"
+        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-sand-200 bg-white shadow-2xl"
+      >
+        <header className="flex items-start justify-between gap-5 border-b border-sand-200 px-5 py-4 sm:px-6">
+          <div>
+            <div className="mb-1 flex items-center gap-2">
+              <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
+              <p className="text-[10px] font-medium uppercase tracking-wider text-sand-400">
+                Performance trend
+              </p>
+            </div>
+            <h2 id="performance-trend-title" className="text-xl font-semibold text-sand-900">
+              {details.title}
+            </h2>
+            <p id="performance-trend-description" className="mt-1 text-sm text-sand-500">
+              {details.description}
+            </p>
+          </div>
+          <button
+            type="button"
+            autoFocus
+            onClick={onClose}
+            aria-label="Close performance trend"
+            className="rounded-md p-2 text-sand-400 transition-colors hover:bg-sand-100 hover:text-sand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true" className="h-5 w-5">
+              <path d="m5 5 10 10M15 5 5 15" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+            </svg>
+          </button>
+        </header>
+
+        <div className="overflow-y-auto">
+          <div className="flex flex-col gap-3 border-b border-sand-100 bg-sand-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+            <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-md border border-sand-200 bg-white p-0.5 text-[11px] font-medium">
+              {TREND_RANGES.map((range) => (
+                <button
+                  key={range.value}
+                  type="button"
+                  aria-pressed={trendRange === range.value}
+                  onClick={() => onSelectRange(range.value)}
+                  className={`shrink-0 rounded px-2.5 py-1 transition-colors ${
+                    trendRange === range.value
+                      ? "bg-indigo-50 text-indigo-700 shadow-sm"
+                      : "text-sand-500 hover:text-sand-800"
+                  }`}
+                >
+                  {range.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] uppercase tracking-wider text-sand-400">{periodLabel}</p>
+          </div>
+
+          {trendRange === "custom" && (
+            <div className="flex flex-wrap items-end gap-3 border-b border-sand-100 px-5 py-3 sm:px-6">
+              <label className="text-xs font-medium text-sand-600">
+                From
+                <input
+                  type="date"
+                  value={customFrom}
+                  max={customTo || undefined}
+                  onChange={(event) => onCustomFromChange(event.target.value)}
+                  className="mt-1 block rounded-md border border-sand-200 bg-white px-3 py-2 text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </label>
+              <label className="text-xs font-medium text-sand-600">
+                To
+                <input
+                  type="date"
+                  value={customTo}
+                  min={customFrom || undefined}
+                  onChange={(event) => onCustomToChange(event.target.value)}
+                  className="mt-1 block rounded-md border border-sand-200 bg-white px-3 py-2 text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+              </label>
+            </div>
+          )}
+
+          <div className="px-3 pb-3 pt-5 sm:px-6 sm:pb-5">
+            <div className="mb-3 flex items-center gap-5 px-2 text-xs text-sand-600">
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={chartSources.website}
+                  disabled={chartSources.website && !chartSources.meta}
+                  onChange={() => onToggleSource("website")}
+                  className="h-3.5 w-3.5 accent-blue-600"
+                />
+                <span className="h-0.5 w-5 bg-blue-600" />
+                Website
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={chartSources.meta}
+                  disabled={chartSources.meta && !chartSources.website}
+                  onChange={() => onToggleSource("meta")}
+                  className="h-3.5 w-3.5 accent-pink-600"
+                />
+                <span className="h-0.5 w-5 bg-pink-600" />
+                Meta
+              </label>
+            </div>
+            <div className="h-[330px] w-full">
+              <LeadPerformanceTrendChart
+                data={data}
+                metric={metric}
+                showWebsite={chartSources.website}
+                showMeta={chartSources.meta}
+              />
+            </div>
+          </div>
+
+          <p className="border-t border-sand-100 px-5 py-3 text-[11px] leading-5 text-sand-400 sm:px-6">
+            Each point groups leads by the date they were first submitted. Recent groups may improve as calls,
+            quotes, and orders are completed. Hover or tap a point to see its exact value.
+          </p>
+        </div>
+      </section>
     </div>
   );
 }
