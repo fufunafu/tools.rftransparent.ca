@@ -306,26 +306,6 @@ function formatResponseTime(mins: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
-const METRIC_CARDS: {
-  key: keyof Metrics;
-  label: string;
-  format: (v: number) => string;
-  invert?: boolean;
-  tooltip?: string;
-}[] = [
-  { key: "total_calls", label: "Total Calls", format: formatNumber, tooltip: "Total number of inbound + outbound calls in the selected period." },
-  { key: "inbound_calls", label: "Inbound", format: formatNumber, tooltip: "Calls received from customers." },
-  { key: "outbound_calls", label: "Outbound", format: formatNumber, tooltip: "Calls made by your team to customers." },
-  { key: "missed_calls", label: "Unanswered", format: formatNumber, invert: true, tooltip: "Inbound calls where nobody picked up \u2014 includes calls that rang out and voicemails." },
-  { key: "miss_rate", label: "Miss Rate", format: (v) => `${v}%`, invert: true, tooltip: "Percentage of inbound calls that went unanswered. Calculated as: unanswered calls \u00f7 inbound calls \u00d7 100. Industry average is 10\u201320%." },
-  { key: "vm_calls", label: "Voicemails", format: formatNumber, tooltip: "Calls that went to voicemail." },
-  { key: "avg_response_time", label: "Avg Response", format: formatResponseTime, tooltip: "Average time (in minutes) between an unanswered call and the first outbound callback to that number." },
-  { key: "avg_duration_inbound", label: "Avg Inbound", format: (v) => `${v} min`, tooltip: "Average duration of answered inbound calls (excludes unanswered and voicemail)." },
-  { key: "avg_duration_outbound", label: "Avg Outbound", format: (v) => `${v} min`, tooltip: "Average duration of outbound calls." },
-  { key: "first_time_callers", label: "New Callers", format: formatNumber, tooltip: "Unique phone numbers calling for the first time in this period." },
-  { key: "returning_callers", label: "Returning", format: formatNumber, tooltip: "Phone numbers that have called more than once in this period." },
-];
-
 const STORE_OPTIONS = [
   { id: "bc_transparent", label: "BC Transparent" },
   { id: "rf_transparent", label: "RF Transparent" },
@@ -935,30 +915,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
         </nav>
       )}
 
-      {mode === "admin" && data?.current && (
-        <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4 flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
-          <div className="flex items-baseline gap-3 flex-wrap">
-            <span className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-              Total Time on the Phone
-            </span>
-            <span className="text-2xl font-semibold text-sand-900">
-              {formatNumber(data.current.total_minutes)}
-              <span className="text-sm font-normal text-sand-400 ml-1">min</span>
-            </span>
-            <span className="text-sm text-sand-500">
-              {formatMinutesLong(data.current.total_minutes)}
-            </span>
-            {data.change?.total_minutes != null && (
-              <ChangeBadge value={data.change.total_minutes} />
-            )}
-          </div>
-          <div className="text-xs text-sand-400">
-            Inbound {formatNumber(data.current.inbound_minutes)} min &middot;{" "}
-            Outbound {formatNumber(data.current.outbound_minutes)} min
-          </div>
-        </div>
-      )}
-
       {/* Sync progress & status (admin only) */}
       {mounted && mode === "admin" && syncAllRunning && <SyncInProgress label="Syncing All (CIK + Grasshopper)" elapsed={syncAllElapsed} color="sand" />}
       {mounted && mode === "admin" && !syncAllRunning && syncAllStatus && (
@@ -1296,27 +1252,35 @@ function InsightsPanel({ metrics, daily }: { metrics: Metrics; daily?: DailyPoin
   }
 
   if (insights.length === 0) return null;
+  const prioritizedInsights = [
+    ...insights.filter((insight) => insight.type === "improvement"),
+    ...insights.filter((insight) => insight.type === "positive"),
+  ].slice(0, 5);
 
   return (
-    <div className="bg-white rounded-xl border border-sand-200/60 p-5 space-y-3">
-      <p className="text-xs text-sand-400 uppercase tracking-wider">
-        Insights & Recommendations
-      </p>
-      <div className="space-y-2.5">
-        {insights.map((insight, i) => (
-          <div key={i} className="flex gap-2">
-            <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
+    <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="management-focus-heading">
+      <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h2 id="management-focus-heading" className="text-sm font-semibold text-slate-900">Management focus</h2>
+          <p className="mt-0.5 text-xs text-slate-400">Prioritized actions and positive signals from this period.</p>
+        </div>
+        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-500">Top {prioritizedInsights.length}</span>
+      </div>
+      <div className="space-y-3">
+        {prioritizedInsights.map((insight, index) => (
+          <div key={index} className="flex gap-2.5 rounded-lg bg-slate-50/70 p-3">
+            <span className={`mt-0.5 flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${
               insight.type === "positive"
-                ? "bg-green-100 text-green-600"
-                : "bg-amber-100 text-amber-600"
+                ? "bg-emerald-100 text-emerald-700"
+                : "bg-amber-100 text-amber-700"
             }`}>
               {insight.type === "positive" ? "\u2713" : "!"}
             </span>
-            <p className="text-[12px] text-sand-600 leading-relaxed">{insight.text}</p>
+            <p className="text-[12px] leading-relaxed text-slate-600">{insight.text}</p>
           </div>
         ))}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -1380,10 +1344,11 @@ function SyncLogDisplay({ logs, color = "sand" }: { logs: string[]; color?: "san
 
 function BenchmarkPanel({ metrics, previous }: { metrics: Metrics; previous?: Metrics }) {
   return (
-    <div className="bg-white rounded-xl border border-sand-200/60 p-5 space-y-4">
-      <p className="text-xs text-sand-400 uppercase tracking-wider">
-        Industry Benchmarks
-      </p>
+    <section className="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="benchmark-position-heading">
+      <div>
+        <h2 id="benchmark-position-heading" className="text-sm font-semibold text-slate-900">Benchmark position</h2>
+        <p className="mt-0.5 text-xs text-slate-400">How current service performance compares with common industry ranges.</p>
+      </div>
       {BENCHMARKS.map((b) => {
         const value = b.getValue(metrics);
         const prevValue = previous ? b.getValue(previous) : null;
@@ -1440,7 +1405,7 @@ function BenchmarkPanel({ metrics, previous }: { metrics: Metrics; previous?: Me
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -1749,114 +1714,228 @@ function OverviewTab({
 }) {
   if (!data) return null;
 
+  const metrics = data.current;
   const maxDaily = Math.max(...daily.map((d) => d.total_calls), 1);
+  const missOnTrack = metrics.miss_rate <= 15;
+  const callbackOnTrack = metrics.outbound_callback_rate >= 90;
+  const responseOnTrack = metrics.avg_response_time != null && metrics.avg_response_time <= 60;
+
+  const operationalDetails = [
+    {
+      label: "Phone time",
+      value: formatMinutesLong(metrics.total_minutes),
+      detail: `${formatNumber(metrics.total_minutes)} minutes`,
+    },
+    {
+      label: "Avg inbound",
+      value: `${metrics.avg_duration_inbound} min`,
+      detail: "Answered calls",
+    },
+    {
+      label: "Avg outbound",
+      value: `${metrics.avg_duration_outbound} min`,
+      detail: "Outbound calls",
+    },
+    {
+      label: "Voicemails",
+      value: formatNumber(metrics.vm_calls),
+      detail: "Received this period",
+    },
+    {
+      label: "New callers",
+      value: formatNumber(metrics.first_time_callers),
+      detail: "First-time numbers",
+    },
+    {
+      label: "Returning",
+      value: formatNumber(metrics.returning_callers),
+      detail: "Repeat callers",
+    },
+  ];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-      {/* Main content — 3/4 width */}
-      <div className="lg:col-span-3 space-y-5">
-        {/* Metric cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          {METRIC_CARDS.map((m) => (
-            <div
-              key={m.key}
-              className="bg-white rounded-xl border border-sand-200/60 p-4"
-            >
-              <div className="flex items-center gap-1 mb-1">
-                <p className="text-[11px] text-sand-400 uppercase tracking-wider">
-                  {m.label}
-                </p>
-                {m.tooltip && <InfoTip text={m.tooltip} />}
-              </div>
-              <p className="text-xl font-semibold text-sand-900">
-                {m.format((data.current[m.key] as number) ?? 0)}
-              </p>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="text-xs text-sand-400">
-                  prev: {m.format((data.previous[m.key] as number) ?? 0)}
-                </span>
-                <ChangeBadge value={data.change[m.key]} invert={m.invert} />
-              </div>
+    <div className="space-y-5">
+      <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" aria-labelledby="admin-snapshot-heading">
+        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 id="admin-snapshot-heading" className="text-sm font-semibold text-slate-950">Performance snapshot</h2>
+            <p className="mt-0.5 text-xs text-slate-400">The service-level measures that need an administrator&apos;s attention first.</p>
+          </div>
+          <div className="flex items-center gap-2 text-[11px] font-semibold">
+            <span className={`rounded-full px-2.5 py-1 ${missOnTrack ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+              Miss rate {missOnTrack ? "on target" : "above target"}
+            </span>
+            <span className={`rounded-full px-2.5 py-1 ${callbackOnTrack ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+              Callbacks {callbackOnTrack ? "on target" : "below target"}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid gap-px bg-slate-100 sm:grid-cols-2 xl:grid-cols-4">
+          <AdminPrimaryMetric
+            label="Total calls"
+            value={formatNumber(metrics.total_calls)}
+            detail={`${formatNumber(metrics.inbound_calls)} inbound · ${formatNumber(metrics.outbound_calls)} outbound`}
+            previous={formatNumber(data.previous.total_calls)}
+            change={data.change.total_calls}
+            tone="blue"
+          />
+          <AdminPrimaryMetric
+            label="Miss rate"
+            value={`${metrics.miss_rate}%`}
+            detail={`${formatNumber(metrics.missed_calls)} unanswered · target ≤15%`}
+            previous={`${data.previous.miss_rate}%`}
+            change={data.change.miss_rate}
+            invert
+            tone={missOnTrack ? "green" : "amber"}
+          />
+          <AdminPrimaryMetric
+            label="Callback coverage"
+            value={`${metrics.outbound_callback_rate}%`}
+            detail={`${formatNumber(metrics.outbound_callbacks_made)} recovered · target ≥90%`}
+            previous={`${data.previous.outbound_callback_rate}%`}
+            change={data.change.outbound_callback_rate}
+            tone={callbackOnTrack ? "green" : "amber"}
+          />
+          <AdminPrimaryMetric
+            label="Avg callback time"
+            value={formatResponseTime(metrics.avg_response_time ?? 0)}
+            detail="Industry range 15 to 60 min"
+            previous={formatResponseTime(data.previous.avg_response_time ?? 0)}
+            change={data.change.avg_response_time}
+            invert
+            tone={metrics.avg_response_time == null ? "blue" : responseOnTrack ? "green" : "amber"}
+          />
+        </div>
+
+        <div className="grid grid-cols-2 border-t border-slate-100 bg-slate-50/70 md:grid-cols-3 xl:grid-cols-6">
+          {operationalDetails.map((detail) => (
+            <div key={detail.label} className="border-b border-r border-slate-100 px-4 py-3 last:border-r-0 md:border-b-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">{detail.label}</p>
+              <p className="mt-1 text-sm font-semibold text-slate-800">{detail.value}</p>
+              <p className="mt-0.5 text-[10px] text-slate-400">{detail.detail}</p>
             </div>
           ))}
         </div>
+      </section>
 
-        {/* Trend charts */}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(320px,1fr)]">
         {history.length > 1 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {/* Call volume chart */}
-            <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-              <p className="text-xs text-sand-400 uppercase tracking-wider mb-4">
-                Call Volume
-              </p>
-              <div className="h-52">
-                <CallVolumeChart history={history} />
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="admin-volume-heading">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="admin-volume-heading" className="text-sm font-semibold text-slate-900">Call volume trend</h2>
+                <p className="mt-0.5 text-xs text-slate-400">Inbound and outbound demand across the selected period.</p>
               </div>
+              <span className="shrink-0 text-xs font-medium text-slate-400">{formatNumber(metrics.total_calls)} total</span>
             </div>
-
-            {/* Miss rate chart */}
-            <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-              <p className="text-xs text-sand-400 uppercase tracking-wider mb-4">
-                Miss Rate %
-              </p>
-              <div className="h-52">
-                <MissRateChart history={history} />
-              </div>
+            <div className="h-64">
+              <CallVolumeChart history={history} />
             </div>
-          </div>
+          </section>
         )}
-
-        {/* Peak hours chart */}
-        {hourly.some((h) => h.total_calls > 0) && (
-          <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-            <p className="text-xs text-sand-400 uppercase tracking-wider mb-4">
-              Calls by Hour of Day
-            </p>
-            <div className="h-52">
-              <PeakHoursChart hourly={hourly} />
-            </div>
-          </div>
-        )}
-
-        {/* Busiest days of week */}
-        {daily.some((d) => d.total_calls > 0) && (
-          <div className="bg-white rounded-xl border border-sand-200/60 p-5">
-            <p className="text-xs text-sand-400 uppercase tracking-wider mb-4">
-              Busiest Days of Week
-            </p>
-            <div className="grid grid-cols-7 gap-2">
-              {daily.map((d) => {
-                const pct = maxDaily > 0 ? (d.total_calls / maxDaily) * 100 : 0;
-                const avgPerDay = d.dayCount > 0 ? Math.round(d.total_calls / d.dayCount) : 0;
-                return (
-                  <div key={d.label} className="text-center space-y-1.5">
-                    <p className="text-[11px] font-medium text-sand-600">{d.label}</p>
-                    <div className="mx-auto w-full h-16 bg-sand-50 rounded-md relative overflow-hidden">
-                      <div
-                        className="absolute bottom-0 left-0 right-0 bg-sand-300 rounded-t-sm transition-all"
-                        style={{ height: `${pct}%` }}
-                      />
-                    </div>
-                    <p className="text-xs font-semibold text-sand-800">{avgPerDay}</p>
-                    <p className="text-[10px] text-sand-400">avg/day</p>
-                    {d.miss_rate > 0 && (
-                      <p className={`text-[10px] ${d.miss_rate > 20 ? "text-red-500" : "text-sand-400"}`}>
-                        {d.miss_rate}% missed
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
+        <InsightsPanel metrics={metrics} daily={daily} />
       </div>
 
-      {/* Right sidebar — benchmarks + insights */}
-      <div className="lg:col-span-1 space-y-5">
-        <BenchmarkPanel metrics={data.current} previous={data.previous} />
-        <InsightsPanel metrics={data.current} daily={daily} />
+      <div className="grid items-start gap-5 xl:grid-cols-2">
+        {history.length > 1 && (
+          <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="admin-miss-trend-heading">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="admin-miss-trend-heading" className="text-sm font-semibold text-slate-900">Service level trend</h2>
+                <p className="mt-0.5 text-xs text-slate-400">Daily miss rate with a 15% internal target.</p>
+              </div>
+              <span className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ${missOnTrack ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                {metrics.miss_rate}% current
+              </span>
+            </div>
+            <div className="h-64">
+              <MissRateChart history={history} />
+            </div>
+          </section>
+        )}
+        <BenchmarkPanel metrics={metrics} previous={data.previous} />
       </div>
+
+      {(hourly.some((hour) => hour.total_calls > 0) || daily.some((day) => day.total_calls > 0)) && (
+        <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="admin-coverage-heading">
+          <div className="mb-5">
+            <h2 id="admin-coverage-heading" className="text-sm font-semibold text-slate-900">Coverage patterns</h2>
+            <p className="mt-0.5 text-xs text-slate-400">Use demand by hour and weekday to plan staffing and breaks.</p>
+          </div>
+          <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,1fr)]">
+            {hourly.some((hour) => hour.total_calls > 0) && (
+              <div>
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Calls by hour</p>
+                <div className="h-56">
+                  <PeakHoursChart hourly={hourly} />
+                </div>
+              </div>
+            )}
+            {daily.some((day) => day.total_calls > 0) && (
+              <div>
+                <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Weekday load</p>
+                <div className="grid grid-cols-7 gap-2">
+                  {daily.map((day) => {
+                    const height = maxDaily > 0 ? Math.max((day.total_calls / maxDaily) * 100, 4) : 4;
+                    const average = day.dayCount > 0 ? Math.round(day.total_calls / day.dayCount) : 0;
+                    return (
+                      <div key={day.label} className="text-center">
+                        <div className="flex h-28 items-end overflow-hidden rounded-md bg-slate-50">
+                          <div
+                            className={`w-full rounded-t-sm ${day.miss_rate > 20 ? "bg-amber-300" : "bg-blue-300"}`}
+                            style={{ height: `${height}%` }}
+                          />
+                        </div>
+                        <p className="mt-2 text-[11px] font-semibold text-slate-700">{day.label}</p>
+                        <p className="text-xs font-semibold text-slate-900">{average}</p>
+                        <p className={`text-[9px] ${day.miss_rate > 20 ? "text-amber-600" : "text-slate-400"}`}>{day.miss_rate}% miss</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function AdminPrimaryMetric({
+  label,
+  value,
+  detail,
+  previous,
+  change,
+  invert,
+  tone,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  previous: string;
+  change: number | null | undefined;
+  invert?: boolean;
+  tone: "blue" | "green" | "amber";
+}) {
+  const toneStyle = {
+    blue: "bg-blue-500",
+    green: "bg-emerald-500",
+    amber: "bg-amber-400",
+  }[tone];
+
+  return (
+    <div className="relative bg-white px-5 py-4">
+      <span className={`absolute inset-x-0 top-0 h-0.5 ${toneStyle}`} />
+      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
+      <div className="mt-2 flex items-baseline gap-2">
+        <p className="text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
+        <ChangeBadge value={change ?? null} invert={invert} />
+      </div>
+      <p className="mt-1 text-[11px] text-slate-500">{detail}</p>
+      <p className="mt-2 text-[10px] text-slate-400">Previous: {previous}</p>
     </div>
   );
 }
