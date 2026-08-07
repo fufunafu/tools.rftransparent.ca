@@ -20,8 +20,6 @@ const PeakHoursChart = dynamic(
 );
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "90d" | "custom";
-type Tab = "overview" | "callbacks" | "call-log";
-
 interface Metrics {
   total_calls: number;
   inbound_calls: number;
@@ -241,29 +239,6 @@ function PhoneLink({
   );
 }
 
-function exportCallbacksCsv(callbacks: CallbackGroup[]) {
-  const header = "Phone Number,Attempts,Priority,Last Call,First Call,Total Duration (min),Status,Note\n";
-  const rows = callbacks.map((cb) =>
-    [
-      formatPhoneNumber(cb.from_number),
-      cb.attempts,
-      cb.priority,
-      cb.last_call,
-      cb.first_call,
-      cb.total_duration,
-      cb.note_status || "pending",
-      `"${(cb.note || "").replace(/"/g, '""')}"`,
-    ].join(",")
-  );
-  const blob = new Blob([header + rows.join("\n")], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `callbacks-${new Date().toISOString().split("T")[0]}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
 function ChangeBadge({
   value,
   invert,
@@ -437,7 +412,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   const [range, setRange] = useState<Range>("7d");
   const [customFrom, setCustomFrom] = useState(daysAgoStr(30));
   const [customTo, setCustomTo] = useState(todayStr());
-  const [tab, setTab] = useState<Tab>("overview");
   const [data, setData] = useState<SummaryResponse | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [callbackData, setCallbackData] = useState<CallbacksResponse | null>(null);
@@ -728,8 +702,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
     }
   };
 
-  const callbacks = callbackData?.callbacks ?? [];
-
   // Empty state
   if (!loading && !data?.current?.total_calls && !error) {
     return (
@@ -897,23 +869,6 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
           )}
         </div>
       </section>
-
-      {mounted && mode === "admin" && (
-        <nav className="flex gap-5 border-b border-slate-200" aria-label="Phone admin views">
-          {(["overview", "call-log", "callbacks"] as Tab[]).map((adminTab) => (
-            <button
-              key={adminTab}
-              type="button"
-              onClick={() => setTab(adminTab)}
-              className={`relative pb-3 text-sm font-semibold transition-colors ${tab === adminTab ? "text-blue-700" : "text-slate-500 hover:text-slate-800"}`}
-            >
-              {adminTab === "call-log" ? "Call log" : adminTab.charAt(0).toUpperCase() + adminTab.slice(1)}
-              {adminTab === "callbacks" && callbacks.length > 0 && <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">{callbacks.length}</span>}
-              {tab === adminTab && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
-            </button>
-          ))}
-        </nav>
-      )}
 
       {/* Sync progress & status (admin only) */}
       {mounted && mode === "admin" && syncAllRunning && <SyncInProgress label="Syncing All (CIK + Grasshopper)" elapsed={syncAllElapsed} color="sand" />}
@@ -1119,12 +1074,8 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
           setSelectedNumber={setSelectedNumber}
           syncKey={syncKey}
         />
-      ) : tab === "overview" ? (
-        <OverviewTab data={data} history={history} hourly={hourly} daily={daily} />
-      ) : tab === "callbacks" ? (
-        <CallbacksTab data={callbackData} store={store} loadCallbacks={loadCallbacks} setSelectedNumber={setSelectedNumber} />
       ) : (
-        <CallLogTab store={store} source={source} from={from} to={to} onNumberClick={setSelectedNumber} syncKey={syncKey} />
+        <OverviewTab data={data} history={history} hourly={hourly} daily={daily} />
       )}
 
       {/* Customer lookup slide-over */}
@@ -1937,296 +1888,6 @@ function AdminPrimaryMetric({
       <p className="mt-1 text-[11px] text-slate-500">{detail}</p>
       <p className="mt-2 text-[10px] text-slate-400">Previous: {previous}</p>
     </div>
-  );
-}
-
-function CallbacksTab({
-  data,
-  store,
-  loadCallbacks,
-  setSelectedNumber,
-}: {
-  data: CallbacksResponse | null;
-  store: string;
-  loadCallbacks: () => Promise<void>;
-  setSelectedNumber: (n: string | null) => void;
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [callbackSort, setCallbackSort] = useState<"priority" | "recent">("recent");
-
-  const callbacks = useMemo(() => {
-    const sorted = [...(data?.callbacks ?? [])];
-    if (callbackSort === "recent") {
-      sorted.sort((a, b) => new Date(b.last_call).getTime() - new Date(a.last_call).getTime());
-    }
-    return sorted;
-  }, [data?.callbacks, callbackSort]);
-
-  if (callbacks.length === 0) {
-    return (
-      <div className="bg-white rounded-xl border border-sand-200/60 p-10 text-center">
-        <p className="text-sand-500 text-sm">
-          No callbacks needed — all calls have been handled.
-        </p>
-      </div>
-    );
-  }
-
-  const toggleExpand = (number: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(number)) next.delete(number);
-      else next.add(number);
-      return next;
-    });
-  };
-
-  const priorityDot: Record<string, string> = {
-    high: "bg-red-500",
-    medium: "bg-yellow-500",
-    low: "bg-sand-300",
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-      {/* Summary bar */}
-      <div className="p-4 border-b border-sand-100 flex items-center gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-sand-900">{data?.uniqueCallers ?? 0}</span>
-          <span className="text-xs text-sand-500">unique callers need callbacks</span>
-        </div>
-        {(data?.highPriority ?? 0) > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
-            <span className="text-xs text-red-600 font-medium">
-              {data?.highPriority} called 3+ times
-            </span>
-          </div>
-        )}
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-sand-400">
-            {data?.totalMissed ?? 0} unresolved calls
-          </span>
-        </div>
-        <div className="ml-auto flex items-center gap-2">
-          <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
-            {(["priority", "recent"] as const).map((opt) => (
-              <button
-                key={opt}
-                onClick={() => setCallbackSort(opt)}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  callbackSort === opt
-                    ? "bg-white text-sand-900 shadow-sm"
-                    : "text-sand-500 hover:text-sand-700"
-                }`}
-              >
-                {opt === "priority" ? "Priority" : "Latest"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <button
-          onClick={() => exportCallbacksCsv(callbacks)}
-          className="px-3 py-1.5 text-xs font-medium text-sand-600 border border-sand-200 rounded-lg hover:bg-sand-50 transition-colors"
-        >
-          Export CSV
-        </button>
-      </div>
-
-      {/* Callback table */}
-      <div>
-        <div className="overflow-auto max-h-[calc(100vh-260px)]">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-20 bg-white">
-              <tr className="border-b border-sand-100 text-left">
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium w-8" />
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-                  Phone Number
-                </th>
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-                  Attempts
-                </th>
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-                  Last Call
-                </th>
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-                  Duration
-                </th>
-                <th className="px-5 py-2.5 text-[11px] text-sand-400 uppercase tracking-wider font-medium">
-                  Response
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {callbacks.map((cb) => {
-                const isExpanded = expanded.has(cb.from_number);
-                return (
-                  <CallbackRow
-                    key={cb.from_number}
-                    cb={cb}
-                    isExpanded={isExpanded}
-                    onToggle={() => toggleExpand(cb.from_number)}
-                    priorityDot={priorityDot}
-                    store={store}
-                    loadCallbacks={loadCallbacks}
-                    onNumberClick={() => setSelectedNumber(cb.from_number)}
-                  />
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CallbackRow({
-  cb,
-  isExpanded,
-  onToggle,
-  priorityDot,
-  store,
-  loadCallbacks,
-  onNumberClick,
-}: {
-  cb: CallbackGroup;
-  isExpanded: boolean;
-  onToggle: () => void;
-  priorityDot: Record<string, string>;
-  store: string;
-  loadCallbacks: () => Promise<void>;
-  onNumberClick: () => void;
-}) {
-  const [note, setNote] = useState(cb.note || "");
-  const [saving, setSaving] = useState(false);
-
-  const saveNote = async (status: string) => {
-    setSaving(true);
-    try {
-      await fetch(`/api/customer-service?view=note`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          store_id: store,
-          from_number: cb.from_number,
-          note,
-          status,
-        }),
-      });
-      await loadCallbacks();
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <>
-      <tr
-        className="border-b border-sand-50 hover:bg-sand-50/50 transition-colors cursor-pointer"
-        onClick={onToggle}
-      >
-        <td className="pl-5 py-3">
-          <span className={`inline-block w-2.5 h-2.5 rounded-full ${priorityDot[cb.priority] ?? "bg-sand-300"}`} />
-        </td>
-        <td className="px-5 py-3">
-          <PhoneLink number={cb.from_number} onClick={onNumberClick} />
-          {cb.is_first_time && (
-            <span className="ml-2 px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-[10px] font-medium">
-              New
-            </span>
-          )}
-          {cb.note_status === "done" && (
-            <span className="ml-2 px-1.5 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-medium">
-              Done
-            </span>
-          )}
-        </td>
-        <td className="px-5 py-3">
-          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-            cb.priority === "high"
-              ? "bg-red-100 text-red-700"
-              : cb.priority === "medium"
-                ? "bg-yellow-100 text-yellow-700"
-                : "bg-sand-100 text-sand-600"
-          }`}>
-            {cb.attempts}x
-          </span>
-        </td>
-        <td className="px-5 py-3 text-sand-600">
-          <span>{formatDateTime(cb.last_call)}</span>
-          <span className="text-sand-400 text-xs ml-1.5">({timeAgo(cb.last_call)})</span>
-        </td>
-        <td className="px-5 py-3 text-sand-600">
-          {cb.total_duration} min
-        </td>
-        <td className="px-5 py-3">
-          {cb.response_time_min != null ? (
-            <span className="text-xs text-green-600">{formatResponseTime(cb.response_time_min)}</span>
-          ) : (
-            <span className="text-xs text-sand-400">No callback</span>
-          )}
-        </td>
-      </tr>
-      {isExpanded && (
-        <>
-          {cb.calls.length > 1 && cb.calls.map((call) => (
-            <tr key={call.id} className="bg-sand-50/40">
-              <td />
-              <td className="px-5 py-2 text-xs text-sand-400 pl-12">
-                &mdash;
-                {call.source && (
-                  <span className={`ml-2 px-1.5 py-0.5 rounded text-[10px] font-medium ${
-                    call.source === "grasshopper" ? "bg-emerald-100 text-emerald-700" : "bg-blue-100 text-blue-700"
-                  }`}>
-                    {call.source === "grasshopper" ? "GH" : "CIK"}
-                  </span>
-                )}
-              </td>
-              <td />
-              <td className="px-5 py-2 text-xs text-sand-500">
-                {formatDateTime(call.call_start)}
-              </td>
-              <td className="px-5 py-2 text-xs text-sand-500">
-                {call.duration_min} min
-              </td>
-              <td />
-            </tr>
-          ))}
-          {/* Notes section */}
-          <tr className="bg-sand-50/30">
-            <td colSpan={6} className="px-5 py-3">
-              <div className="flex items-start gap-3">
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                  placeholder="Add a note..."
-                  rows={2}
-                  className="flex-1 text-xs text-sand-700 bg-white border border-sand-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-sand-400 resize-none"
-                />
-                <div className="flex flex-col gap-1.5">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); saveNote("done"); }}
-                    disabled={saving}
-                    className="px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
-                  >
-                    {saving ? "..." : "Mark Done"}
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); saveNote("pending"); }}
-                    disabled={saving}
-                    className="px-3 py-1.5 text-xs font-medium text-sand-600 border border-sand-200 rounded-lg hover:bg-sand-50 disabled:opacity-50 transition-colors"
-                  >
-                    Save Note
-                  </button>
-                </div>
-              </div>
-            </td>
-          </tr>
-        </>
-      )}
-    </>
   );
 }
 
