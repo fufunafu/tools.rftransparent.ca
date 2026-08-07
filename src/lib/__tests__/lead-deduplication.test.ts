@@ -355,6 +355,27 @@ describe("consolidateDuplicateLeads", () => {
     ]);
   });
 
+  it("keeps tracked historical cohorts separate for response analytics", () => {
+    const result = consolidateDuplicateLeads([
+      lead("historical", {
+        submitted_at: "2025-12-23T12:08:04.000Z",
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        raw_payload: { historical_import: { source_key: "historical-1" } },
+        first_call_at: "2025-12-23T13:08:04.000Z",
+      }),
+      lead("current", {
+        submitted_at: "2026-04-03T12:08:04.000Z",
+      }),
+    ], { mergeHistoricalAcrossTime: false });
+
+    expect(result).toHaveLength(2);
+    expect(result.find((item) => item.id === "historical")).toMatchObject({
+      submitted_at: "2025-12-23T12:08:04.000Z",
+      first_call_at: "2025-12-23T13:08:04.000Z",
+    });
+  });
+
   it("keeps an installation request when any combined submission requested it", () => {
     const result = consolidateDuplicateLeads([
       lead("first", { installation_requested: false }),

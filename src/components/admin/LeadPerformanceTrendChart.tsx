@@ -54,6 +54,7 @@ function formatRangeDate(value: string): string {
 
 interface MetricChartPoint {
   label: string;
+  rangeStart: string;
   fullLabel: string;
   website: number | null;
   meta: number | null;
@@ -126,6 +127,7 @@ export default function LeadPerformanceTrendChart({
   const chartData: MetricChartPoint[] = rateMetric
     ? buildRollingLeadPerformanceRateTrend(data, metric, rollingWindowSize).map((point) => ({
         label: point.label,
+        rangeStart: point.rangeStart,
         fullLabel: point.rangeStart === point.rangeEnd
           ? formatRangeDate(point.rangeEnd)
           : `${formatRangeDate(point.rangeStart)} to ${formatRangeDate(point.rangeEnd)}`,
@@ -138,6 +140,7 @@ export default function LeadPerformanceTrendChart({
       }))
     : data.map((point) => ({
         label: point.label,
+        rangeStart: point.rangeStart,
         fullLabel: point.fullLabel,
         website: metricValue(point.website, metric),
         meta: metricValue(point.meta, metric),
@@ -171,11 +174,12 @@ export default function LeadPerformanceTrendChart({
       <LineChart data={chartData} margin={{ top: 12, right: 18, bottom: 4, left: 8 }}>
         <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />
         <XAxis
-          dataKey="label"
+          dataKey="rangeStart"
           axisLine={false}
           tickLine={false}
           minTickGap={26}
           tick={{ fill: "#64748b", fontSize: 11 }}
+          tickFormatter={(_value: string, index: number) => chartData[index]?.label ?? ""}
         />
         <YAxis
           axisLine={false}

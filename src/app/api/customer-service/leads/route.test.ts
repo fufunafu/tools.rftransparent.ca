@@ -143,6 +143,43 @@ describe("GET /api/customer-service/leads", () => {
     expect(body.leads[0].duplicate_ids).toBeUndefined();
   });
 
+  it("returns unconsolidated historical cohorts for response performance", async () => {
+    const trackingQuery = {
+      select: vi.fn(),
+      order: vi.fn(),
+      limit: vi.fn(),
+    };
+    trackingQuery.select.mockReturnValue(trackingQuery);
+    trackingQuery.order.mockReturnValue(trackingQuery);
+    trackingQuery.limit.mockResolvedValue({
+      data: [{ called_at: "2025-12-22T16:17:35.000Z" }],
+      error: null,
+    });
+    const leadsQuery = queryBuilder(leadRangeMock);
+    const attemptsQuery = queryBuilder(attemptRangeMock);
+    let attemptQueryCount = 0;
+    getSupabaseMock.mockReturnValueOnce({
+      from: vi.fn((table: string) => {
+        if (table === "leads") return leadsQuery;
+        attemptQueryCount += 1;
+        return attemptQueryCount === 1 ? trackingQuery : attemptsQuery;
+      }),
+    });
+
+    const response = await GET(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?view=response_performance&from=2025-09-01&to=2026-08-07",
+    ));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.tracking_started_at).toBe("2025-12-22T16:17:35.000Z");
+    expect(body.leads[0]).toMatchObject({
+      id: "lead-1",
+      submitted_at: "2026-08-05T12:00:00.000Z",
+      first_call_at: "2026-08-05T12:30:00.000Z",
+    });
+  });
+
   it("loads raw submissions only for the requested lead details", async () => {
     const leadDetailsQuery = {
       select: vi.fn(),

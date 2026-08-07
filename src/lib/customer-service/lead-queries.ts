@@ -23,6 +23,11 @@ interface LoadLeadsOptions {
   to?: string | null;
 }
 
+export interface LeadResponsePerformanceData {
+  leads: Lead[];
+  trackingStartedAt: string | null;
+}
+
 // These conservative UTC bounds include the complete Toronto calendar days.
 // The analytics layer applies the exact local-date filter after loading.
 function startOfQueryWindow(dateKey: string): string {
@@ -53,6 +58,41 @@ async function fetchAllPages<T>(
   }
 }
 
+function enrichLeadRows(leads: LeadRow[], attempts: AttemptRow[]): Lead[] {
+  const attemptAgg = new Map<string, {
+    count: number;
+    first_at: string;
+    last_at: string;
+    last_staff: string;
+  }>();
+  for (const attempt of attempts) {
+    const previous = attemptAgg.get(attempt.lead_id);
+    if (!previous) {
+      attemptAgg.set(attempt.lead_id, {
+        count: 1,
+        first_at: attempt.called_at,
+        last_at: attempt.called_at,
+        last_staff: attempt.staff,
+      });
+    } else {
+      previous.count += 1;
+      previous.first_at = attempt.called_at;
+    }
+  }
+
+  return leads.map((lead) => {
+    const aggregate = attemptAgg.get(lead.id);
+    return {
+      ...lead,
+      raw_payload: {},
+      call_attempts_count: aggregate?.count ?? 0,
+      first_call_at: aggregate?.first_at ?? null,
+      last_call_at: aggregate?.last_at ?? null,
+      last_called_by: aggregate?.last_staff ?? null,
+    } as unknown as Lead;
+  });
+}
+
 export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]> {
   const supabase = getSupabase();
   const leadsPromise = fetchAllPages<LeadRow>((from, to) => {
@@ -81,38 +121,7 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     attemptsPromise,
   ]);
 
-  const attemptAgg = new Map<string, {
-    count: number;
-    first_at: string;
-    last_at: string;
-    last_staff: string;
-  }>();
-  for (const attempt of attempts) {
-    const previous = attemptAgg.get(attempt.lead_id);
-    if (!previous) {
-      attemptAgg.set(attempt.lead_id, {
-        count: 1,
-        first_at: attempt.called_at,
-        last_at: attempt.called_at,
-        last_staff: attempt.staff,
-      });
-    } else {
-      previous.count += 1;
-      previous.first_at = attempt.called_at;
-    }
-  }
-
-  const enriched: Lead[] = leads.map((lead) => {
-    const aggregate = attemptAgg.get(lead.id);
-    return {
-      ...lead,
-      raw_payload: {},
-      call_attempts_count: aggregate?.count ?? 0,
-      first_call_at: aggregate?.first_at ?? null,
-      last_call_at: aggregate?.last_at ?? null,
-      last_called_by: aggregate?.last_staff ?? null,
-    } as unknown as Lead;
-  });
+  const enriched = enrichLeadRows(leads, attempts);
 
   const consolidated = consolidateDuplicateLeads(enriched).map((lead) => {
     const summary: Partial<typeof lead> = { ...lead };
@@ -152,6 +161,53 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     );
   }
   return consolidated;
+}
+
+export async function loadLeadResponsePerformance(
+  options: Pick<LoadLeadsOptions, "from" | "to"> = {},
+): Promise<LeadResponsePerformanceData> {
+  const supabase = getSupabase();
+  const { data: trackingRows, error: trackingError } = await supabase
+    .from("lead_call_attempts")
+    .select("called_at")
+    .order("called_at", { ascending: true })
+    .limit(1);
+  if (trackingError) throw new Error(trackingError.message);
+
+  const trackingStartedAt = trackingRows?.[0]?.called_at ?? null;
+  if (!trackingStartedAt) return { leads: [], trackingStartedAt: null };
+  const requestedStart = options.from ? startOfQueryWindow(options.from) : null;
+  const effectiveStart = requestedStart && requestedStart > trackingStartedAt
+    ? requestedStart
+    : trackingStartedAt;
+
+  const leadsPromise = fetchAllPages<LeadRow>((from, to) => {
+    let query = supabase
+      .from("leads")
+      .select(LEAD_LIST_COLUMNS)
+      .gte("submitted_at", effectiveStart)
+      .order("submitted_at", { ascending: false });
+    if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
+    return query.range(from, to);
+  });
+  const attemptsPromise = fetchAllPages<AttemptRow>((from, to) => (
+    supabase
+      .from("lead_call_attempts")
+      .select("lead_id, staff, called_at")
+      .gte("called_at", effectiveStart)
+      .order("called_at", { ascending: false })
+      .range(from, to)
+  ));
+  const [leads, attempts] = await Promise.all([leadsPromise, attemptsPromise]);
+  const performanceLeads = consolidateDuplicateLeads(
+    enrichLeadRows(leads, attempts),
+    { mergeHistoricalAcrossTime: false },
+  );
+
+  return {
+    leads: performanceLeads,
+    trackingStartedAt,
+  };
 }
 
 export async function loadLeadGroupIds(leadId: string): Promise<string[]> {

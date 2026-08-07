@@ -111,18 +111,23 @@ function isHistoricalImport(lead: Lead): boolean {
   return typeof marker === "object" && marker !== null && !Array.isArray(marker);
 }
 
-function canJoinGroup(group: Lead[], lead: Lead): boolean {
+function canJoinGroup(
+  group: Lead[],
+  lead: Lead,
+  mergeHistoricalAcrossTime: boolean,
+): boolean {
   const matching = group.filter((member) => sameContact(member, lead));
   if (matching.length === 0) return false;
 
   // Historical imports are supporting records for a real operational lead,
   // even when the imported submission date is much older.
-  if (isHistoricalImport(lead)) return true;
+  if (mergeHistoricalAcrossTime && isHistoricalImport(lead)) return true;
   const operationalMatches = matching.filter((member) => !isHistoricalImport(member));
-  if (operationalMatches.length === 0) return true;
+  if (mergeHistoricalAcrossTime && operationalMatches.length === 0) return true;
 
   const leadTime = new Date(lead.submitted_at).getTime();
-  const latestMatchingTime = Math.max(...operationalMatches.map(
+  const comparisonMatches = operationalMatches.length > 0 ? operationalMatches : matching;
+  const latestMatchingTime = Math.max(...comparisonMatches.map(
     (member) => new Date(member.submitted_at).getTime(),
   ));
   if (!Number.isFinite(leadTime) || !Number.isFinite(latestMatchingTime)) return false;
@@ -192,14 +197,21 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
  * lead so returning customers remain visible in recent queues and analytics.
  * Historical imports may still attach to their matching operational lead.
  */
-export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
+export function consolidateDuplicateLeads(
+  leads: Lead[],
+  options: { mergeHistoricalAcrossTime?: boolean } = {},
+): ConsolidatedLead[] {
   const chronological = [...leads].sort(
     (left, right) => new Date(left.submitted_at).getTime() - new Date(right.submitted_at).getTime(),
   );
   const groups: Lead[][] = [];
 
   for (const lead of chronological) {
-    const matchingGroups = groups.filter((group) => canJoinGroup(group, lead));
+    const matchingGroups = groups.filter((group) => canJoinGroup(
+      group,
+      lead,
+      options.mergeHistoricalAcrossTime !== false,
+    ));
     if (matchingGroups.length === 0) {
       groups.push([lead]);
       continue;

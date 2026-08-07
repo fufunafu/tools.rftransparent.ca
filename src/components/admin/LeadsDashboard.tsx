@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type {
@@ -265,6 +266,13 @@ async function fetcher<T>(url: string): Promise<T> {
 function leadListUrl(bounds: LeadTrendQueryBounds | null): string | null {
   if (!bounds) return null;
   const params = new URLSearchParams({ to: bounds.to });
+  if (bounds.from) params.set("from", bounds.from);
+  return `/api/customer-service/leads?${params.toString()}`;
+}
+
+function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null): string | null {
+  if (!bounds) return null;
+  const params = new URLSearchParams({ view: "response_performance", to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
 }
@@ -1084,6 +1092,19 @@ export default function LeadsDashboard({
     () => (hydrated ? data?.leads : leadsUrl === initialLeadsUrl ? initialLeads : null) ?? [],
     [data?.leads, hydrated, initialLeads, initialLeadsUrl, leadsUrl],
   );
+  const rawCallPerformanceSelected = selectedPerformanceMetric === "medianCallMs";
+  const {
+    data: responsePerformanceData,
+    error: responsePerformanceError,
+    isLoading: responsePerformanceLoading,
+  } = useSWR<{
+    leads: Lead[];
+    tracking_started_at: string | null;
+  }>(
+    rawCallPerformanceSelected ? leadResponsePerformanceUrl(requestedBounds) : null,
+    fetcher,
+    autoRefreshOpts,
+  );
   const { mutate } = useSWRConfig();
 
   const refresh = () => (
@@ -1297,8 +1318,11 @@ export default function LeadsDashboard({
     return { website: summarize("website"), meta: summarize("meta") };
   }, [analysisLeads]);
   const performanceTrend = useMemo(
-    () => buildLeadPerformanceTrend(leads, trend.points),
-    [leads, trend.points],
+    () => buildLeadPerformanceTrend(
+      rawCallPerformanceSelected ? responsePerformanceData?.leads ?? [] : leads,
+      trend.points,
+    ),
+    [leads, rawCallPerformanceSelected, responsePerformanceData?.leads, trend.points],
   );
 
   const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
@@ -1358,6 +1382,15 @@ export default function LeadsDashboard({
               <span>{metaStatus.page_name ? `Meta: ${metaStatus.page_name}` : "Meta connected"}</span>
             </div>
           )}
+          <Link
+            href="/customer-service/leads/analysis"
+            className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-4 w-4" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 15.5V11m4.5 4.5V7.5m4.5 8V4m4.5 11.5V9" />
+            </svg>
+            Analysis
+          </Link>
           {metaStatus?.can_sync && (
             <button
               type="button"
@@ -1780,6 +1813,9 @@ export default function LeadsDashboard({
           onCustomToChange={setCustomTo}
           chartSources={chartSources}
           onToggleSource={toggleChartSource}
+          responseTrackingStartedAt={responsePerformanceData?.tracking_started_at ?? null}
+          responseDataLoading={responsePerformanceLoading}
+          responseDataError={responsePerformanceError?.message ?? null}
           onClose={() => setSelectedPerformanceMetric(null)}
         />
       )}
@@ -2049,6 +2085,9 @@ function PerformanceTrendDialog({
   onCustomToChange,
   chartSources,
   onToggleSource,
+  responseTrackingStartedAt,
+  responseDataLoading,
+  responseDataError,
   onClose,
 }: {
   metric: LeadPerformanceMetricKey;
@@ -2062,6 +2101,9 @@ function PerformanceTrendDialog({
   onCustomToChange: (value: string) => void;
   chartSources: Record<LeadSource, boolean>;
   onToggleSource: (source: LeadSource) => void;
+  responseTrackingStartedAt: string | null;
+  responseDataLoading: boolean;
+  responseDataError: string | null;
   onClose: () => void;
 }) {
   const details = PERFORMANCE_METRIC_DETAILS[metric];
@@ -2205,26 +2247,38 @@ function PerformanceTrendDialog({
               <span className="rounded-full bg-sand-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
                 {rateMetric
                   ? rollingWindow.label
+                  : responseDataLoading
+                    ? "Loading recorded responses"
                   : responseStarts.length > 0
                     ? `Recorded data: ${responseStarts.join(" · ")}`
                     : "No recorded response data"}
               </span>
             </div>
             <div className="h-[330px] w-full">
-              <LeadPerformanceTrendChart
-                data={data}
-                metric={metric}
-                showWebsite={chartSources.website}
-                showMeta={chartSources.meta}
-                rollingWindowSize={rollingWindow.size}
-              />
+              {responseDataLoading && !rateMetric ? (
+                <div className="h-full animate-pulse rounded-lg bg-sand-50" />
+              ) : responseDataError && !rateMetric ? (
+                <div className="flex h-full items-center justify-center rounded-lg bg-red-50 px-5 text-center text-sm text-red-700">
+                  Recorded response data could not be loaded: {responseDataError}
+                </div>
+              ) : (
+                <LeadPerformanceTrendChart
+                  data={data}
+                  metric={metric}
+                  showWebsite={chartSources.website}
+                  showMeta={chartSources.meta}
+                  rollingWindowSize={rollingWindow.size}
+                />
+              )}
             </div>
           </div>
 
           <p className="border-t border-sand-100 px-5 py-3 text-[11px] leading-5 text-sand-400 sm:px-6">
             {rateMetric
               ? `Each point recomputes the rate from all leads in the preceding ${rollingWindow.label.replace(" rolling rate", "")} window. This reduces misleading daily jumps caused by small samples.`
-              : "Earlier imported leads do not have reliable first-response timestamps and are not plotted. Each point is the median for leads first submitted in that period."}
+              : responseTrackingStartedAt
+                ? `Phone response tracking begins ${formatDateTime(responseTrackingStartedAt)}. Earlier lead cohorts are omitted because phone history before that point is unavailable. Each point is the median for leads first submitted in that period.`
+                : "Each point is the median for leads first submitted in that period."}
             {" "}Recent groups may improve as calls, quotes, and orders are completed. Hover or tap a point to see the exact value and sample size.
           </p>
         </div>

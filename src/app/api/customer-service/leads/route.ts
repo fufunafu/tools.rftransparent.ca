@@ -11,6 +11,7 @@ import {
 } from "@/lib/customer-service/leads";
 import {
   loadLeadGroupIds,
+  loadLeadResponsePerformance,
   loadLeads,
   markLeadsCacheStale,
 } from "@/lib/customer-service/lead-queries";
@@ -134,10 +135,6 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const sourceParam = req.nextUrl.searchParams.get("source");
-  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
-    ? sourceParam
-    : undefined;
   const fromParam = req.nextUrl.searchParams.get("from");
   const toParam = req.nextUrl.searchParams.get("to");
   if (
@@ -147,6 +144,28 @@ export async function GET(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Invalid lead date range" }, { status: 400 });
   }
+  if (view === "response_performance") {
+    try {
+      const performance = await loadLeadResponsePerformance({
+        from: fromParam,
+        to: toParam,
+      });
+      return NextResponse.json({
+        leads: performance.leads,
+        tracking_started_at: performance.trackingStartedAt,
+      });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Could not load response performance" },
+        { status: 500 },
+      );
+    }
+  }
+
+  const sourceParam = req.nextUrl.searchParams.get("source");
+  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
+    ? sourceParam
+    : undefined;
   try {
     return NextResponse.json({
       leads: await loadLeads({
