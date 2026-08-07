@@ -323,6 +323,96 @@ export async function listAssistantKnowledgeGaps(
   };
 }
 
+export interface AssistantActivityQuery {
+  id: string;
+  message: string;
+  rewritten_query: string;
+  employee_name: string | null;
+  department: string | null;
+  location: string | null;
+  matched: boolean;
+  knowledge_ids: string[];
+  created_at: string;
+}
+
+export interface AssistantKnowledgeUsage {
+  knowledgeId: string;
+  title: string;
+  count: number;
+}
+
+/**
+ * Everything employees asked the WhatsApp assistant recently, plus which
+ * approved answers were used most. Reads the same query log the Gaps tab uses,
+ * but includes answered questions too.
+ */
+export async function listAssistantActivity(filters: {
+  days?: number;
+  department?: string | null;
+  matched?: boolean | null;
+} = {}): Promise<{ queries: AssistantActivityQuery[]; usage: AssistantKnowledgeUsage[] }> {
+  const days = Math.min(Math.max(filters.days ?? 30, 1), 365);
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const supabase = getSupabase();
+  let query = supabase
+    .from("assistant_knowledge_queries")
+    .select("id, message, rewritten_query, department, location, matched, knowledge_ids, created_at, employees(name)")
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (filters.department) query = query.eq("department", filters.department);
+  if (filters.matched !== null && filters.matched !== undefined) {
+    query = query.eq("matched", filters.matched);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(`Could not load assistant activity: ${error.message}`);
+
+  const rows = (data ?? []).map((item) => {
+    const employee = item.employees as { name?: string | null } | null;
+    return {
+      id: item.id as string,
+      message: item.message as string,
+      rewritten_query: item.rewritten_query as string,
+      employee_name: employee?.name ?? null,
+      department: item.department as string | null,
+      location: item.location as string | null,
+      matched: Boolean(item.matched),
+      knowledge_ids: (item.knowledge_ids ?? []) as string[],
+      created_at: item.created_at as string,
+    };
+  });
+
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    for (const id of row.knowledge_ids) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+  }
+  const topIds = [...counts.entries()]
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 10)
+    .map(([id]) => id);
+
+  let usage: AssistantKnowledgeUsage[] = [];
+  if (topIds.length > 0) {
+    const { data: titles, error: titleError } = await supabase
+      .from("assistant_knowledge")
+      .select("id, title")
+      .in("id", topIds);
+    if (titleError) throw new Error(`Could not load answer titles: ${titleError.message}`);
+    const titleById = new Map((titles ?? []).map((item) => [item.id as string, item.title as string]));
+    usage = topIds.map((id) => ({
+      knowledgeId: id,
+      title: titleById.get(id) ?? "(deleted answer)",
+      count: counts.get(id) ?? 0,
+    }));
+  }
+
+  return { queries: rows.slice(0, 200), usage };
+}
+
 export async function updateAssistantKnowledgeGapStatus(input: {
   ids: string[];
   status: AssistantKnowledgeGapStatus;

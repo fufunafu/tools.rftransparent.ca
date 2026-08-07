@@ -6,6 +6,7 @@ const getAssistantInitialPromptMock = vi.fn();
 const recordAssistantKnowledgeQueryMock = vi.fn();
 const rewriteAssistantRetrievalQueryMock = vi.fn();
 const listAssistantKnowledgeForContextMock = vi.fn();
+const isSmalltalkMessageMock = vi.fn();
 
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => getSupabaseMock(),
@@ -20,6 +21,7 @@ vi.mock("@/lib/assistant-prompt", () => ({
 }));
 vi.mock("@/lib/assistant-retrieval", () => ({
   rewriteAssistantRetrievalQuery: (...args: unknown[]) => rewriteAssistantRetrievalQueryMock(...args),
+  isSmalltalkMessage: (...args: unknown[]) => isSmalltalkMessageMock(...args),
   formatAssistantKnowledgeContext: (entries: Array<{ title: string; content: string }>) =>
     entries.map((entry) => `${entry.title}: ${entry.content}`).join("\n"),
 }));
@@ -81,6 +83,7 @@ beforeEach(() => {
   recordAssistantKnowledgeQueryMock.mockResolvedValue(undefined);
   rewriteAssistantRetrievalQueryMock.mockImplementation(({ message }) => Promise.resolve(message));
   listAssistantKnowledgeForContextMock.mockResolvedValue([]);
+  isSmalltalkMessageMock.mockReturnValue(false);
 });
 
 describe("POST /api/internal/whatsapp/employee-context", () => {
@@ -315,6 +318,38 @@ describe("POST /api/internal/whatsapp/employee-context", () => {
     });
     expect(body.contractVersion).toBe(2);
     expect(body.initialPrompt).toBe("Custom initial prompt");
+  });
+
+  it("skips retrieval and gap logging for smalltalk messages", async () => {
+    isSmalltalkMessageMock.mockReturnValue(true);
+    employeeResultMock.mockResolvedValueOnce({
+      data: [
+        {
+          id: "employee-1",
+          name: "Alex",
+          department: "Sales",
+          phone: "+1 416 555 0100",
+          locations: { name: "Toronto" },
+        },
+      ],
+      error: null,
+    });
+
+    const response = await POST(createRequest({ phone: "+1 416 555 0100", message: "hey" }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(isSmalltalkMessageMock).toHaveBeenCalledWith("hey");
+    expect(rewriteAssistantRetrievalQueryMock).not.toHaveBeenCalled();
+    expect(searchAssistantKnowledgeMock).not.toHaveBeenCalled();
+    expect(recordAssistantKnowledgeQueryMock).not.toHaveBeenCalled();
+    expect(body.retrieval).toEqual({
+      query: "",
+      mode: "smalltalk",
+      matched: false,
+      citations: [],
+    });
+    expect(body.knowledge).toEqual([]);
   });
 
   it("returns a controlled error when employee lookup fails", async () => {

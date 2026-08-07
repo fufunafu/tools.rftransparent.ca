@@ -14,6 +14,7 @@ import {
 import { getAssistantInitialPrompt } from "@/lib/assistant-prompt";
 import {
   formatAssistantKnowledgeContext,
+  isSmalltalkMessage,
   rewriteAssistantRetrievalQuery,
   type AssistantConversationMessage,
 } from "@/lib/assistant-retrieval";
@@ -137,11 +138,12 @@ async function retrieveKnowledge({
   department: string | null;
   location: string | null;
   safetyIdentifier: string;
-}): Promise<{ query: string; knowledge: AssistantKnowledgeMatch[] }> {
+}): Promise<{ query: string; knowledge: AssistantKnowledgeMatch[]; mode: "hybrid" | "compatibility" | "smalltalk" }> {
   if (!message) {
     try {
       return {
         query: "",
+        mode: "compatibility",
         knowledge: await listAssistantKnowledgeForContext({ department, location }),
       };
     } catch (error) {
@@ -149,8 +151,13 @@ async function retrieveKnowledge({
         "[whatsapp-assistant] Compatibility knowledge load failed:",
         error instanceof Error ? error.message : error,
       );
-      return { query: "", knowledge: [] };
+      return { query: "", mode: "compatibility", knowledge: [] };
     }
+  }
+  // Greetings and acknowledgements are conversation, not knowledge questions:
+  // no search, and no gap-log entry that would clutter the Gaps tab.
+  if (isSmalltalkMessage(message)) {
+    return { query: "", mode: "smalltalk", knowledge: [] };
   }
   const query = await rewriteAssistantRetrievalQuery({ message, history, safetyIdentifier });
   let knowledge: AssistantKnowledgeMatch[] = [];
@@ -177,16 +184,20 @@ async function retrieveKnowledge({
       error instanceof Error ? error.message : error,
     );
   }
-  return { query, knowledge };
+  return { query, mode: "hybrid" as const, knowledge };
 }
 
-function retrievalResponse(retrieval: { query: string; knowledge: AssistantKnowledgeMatch[] }) {
+function retrievalResponse(retrieval: {
+  query: string;
+  knowledge: AssistantKnowledgeMatch[];
+  mode: "hybrid" | "compatibility" | "smalltalk";
+}) {
   return {
     knowledge: retrieval.knowledge,
     knowledgeContext: formatAssistantKnowledgeContext(retrieval.knowledge),
     retrieval: {
       query: retrieval.query,
-      mode: retrieval.query ? "hybrid" : "compatibility",
+      mode: retrieval.mode,
       matched: retrieval.knowledge.length > 0,
       citations: retrieval.knowledge.map((entry) => ({
         knowledgeId: entry.id,

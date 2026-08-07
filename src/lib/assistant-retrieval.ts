@@ -5,6 +5,34 @@ export interface AssistantConversationMessage {
   content: string;
 }
 
+// Greetings and acknowledgements in English and French. A message made up
+// entirely of these words is conversation, not a knowledge question — it
+// should be answered from the prompt, never searched or logged as a gap.
+const SMALLTALK_WORDS = new Set([
+  "hey", "hi", "hello", "yo", "hiya", "howdy", "sup",
+  "ok", "okay", "k", "kk", "okk", "sure", "fine", "alright",
+  "yes", "yep", "yeah", "ya", "yup", "no", "nope", "nah",
+  "thanks", "thank", "you", "thx", "ty", "please", "pls",
+  "cool", "good", "great", "nice", "perfect", "awesome", "sounds",
+  "lol", "haha", "hehe",
+  "bye", "goodbye", "night", "morning", "afternoon", "evening", "gm", "gn",
+  "bonjour", "salut", "allo", "allô", "bonsoir", "coucou",
+  "merci", "beaucoup", "oui", "non", "ouais",
+  "parfait", "super", "excellent", "daccord", "dac", "bien", "ca", "ça", "va",
+  "bonne", "nuit", "journée", "journee", "soirée", "soiree", "plus", "bientôt", "bientot",
+]);
+
+export function isSmalltalkMessage(message: string): boolean {
+  const words = message
+    .toLocaleLowerCase("en-CA")
+    .replace(/[’']/g, "")
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Nothing but punctuation or emoji counts as smalltalk too (e.g. "👍").
+  if (words.length === 0) return true;
+  if (words.length > 4) return false;
+  return words.every((word) => SMALLTALK_WORDS.has(word));
+}
+
 export async function rewriteAssistantRetrievalQuery({
   message,
   history,

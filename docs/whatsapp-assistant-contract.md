@@ -40,6 +40,16 @@ allowed for that employee's department and location. These responses use
 `retrieval.mode: "compatibility"`. This fallback is bounded and should not
 replace per-message retrieval.
 
+## Smalltalk (since 2026-08)
+
+Greetings and acknowledgements ("hey", "ok", "thanks", "merci", emoji-only
+messages) are detected server-side. These responses use
+`retrieval.mode: "smalltalk"` with empty `knowledge`/`knowledgeContext` and
+`matched: false`, and they are not logged as knowledge gaps. InvoiceBox should
+treat `mode: "smalltalk"` as conversation: reply naturally from `initialPrompt`
+instead of using the unanswered-question fallback. Until InvoiceBox adopts this
+check, behavior is unchanged (fallback fires as before).
+
 ## Evaluation request (reverse direction)
 
 Running quality checks from the settings page calls

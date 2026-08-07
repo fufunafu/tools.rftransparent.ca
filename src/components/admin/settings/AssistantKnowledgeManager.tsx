@@ -6,14 +6,16 @@ import {
   ASSISTANT_CATEGORIES,
   ASSISTANT_INITIAL_PROMPT_MAX_LENGTH,
   ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH,
+  type AssistantActivityQuery,
   type AssistantCategory,
   type AssistantEvaluationCase,
   type AssistantKnowledgeEntry,
   type AssistantKnowledgeGap,
+  type AssistantKnowledgeUsage,
 } from "@/lib/assistant-knowledge";
 import type { AssistantPromptVersion } from "@/lib/assistant-prompt-versions";
 
-type Tab = "prompt" | "knowledge" | "gaps" | "tests";
+type Tab = "prompt" | "knowledge" | "gaps" | "activity" | "tests";
 type CollectionTab = "knowledge" | "tests";
 
 interface KnowledgeDraft {
@@ -360,6 +362,14 @@ export default function AssistantKnowledgeManager({
   const [promptVersionsMissing, setPromptVersionsMissing] = useState(false);
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activity, setActivity] = useState<{
+    queries: AssistantActivityQuery[];
+    usage: AssistantKnowledgeUsage[];
+  } | null>(null);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityDays, setActivityDays] = useState(30);
+  const [activityDepartment, setActivityDepartment] = useState("");
+  const [activityMatched, setActivityMatched] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<{
     type: CollectionTab;
     id: string;
@@ -426,6 +436,30 @@ export default function AssistantKnowledgeManager({
     if (tab !== "prompt" || promptVersionsLoaded) return;
     void loadPromptVersions();
   }, [tab, promptVersionsLoaded]);
+
+  useEffect(() => {
+    if (tab !== "activity") return;
+    let cancelled = false;
+    setActivityLoading(true);
+    const params = new URLSearchParams({ days: String(activityDays) });
+    if (activityDepartment) params.set("department", activityDepartment);
+    if (activityMatched) params.set("matched", activityMatched);
+    fetch(`/api/settings/assistant-activity?${params}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "Could not load activity");
+        if (!cancelled) setActivity({ queries: payload.queries ?? [], usage: payload.usage ?? [] });
+      })
+      .catch((cause) => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : "Could not load activity");
+      })
+      .finally(() => {
+        if (!cancelled) setActivityLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, activityDays, activityDepartment, activityMatched]);
 
   async function loadPromptVersions() {
     try {
@@ -819,7 +853,7 @@ export default function AssistantKnowledgeManager({
         <div className="min-w-0 space-y-4">
           <div className="flex flex-col gap-3 border-b border-slate-200 sm:flex-row sm:items-end sm:justify-between">
             <div role="tablist" aria-label="Assistant settings" className="-mb-px flex min-w-0 overflow-x-auto">
-              {(["knowledge", "gaps", "prompt", "tests"] as const).map((value) => (
+              {(["knowledge", "gaps", "activity", "prompt", "tests"] as const).map((value) => (
                 <button
                   key={value}
                   id={`assistant-${value}-tab`}
@@ -834,6 +868,8 @@ export default function AssistantKnowledgeManager({
                     ? `Answers (${knowledge.length})`
                     : value === "gaps"
                       ? deferredLoaded ? `Gaps (${gaps.length})` : "Gaps"
+                    : value === "activity"
+                      ? "Activity"
                     : value === "prompt"
                       ? "Prompt"
                       : deferredLoaded ? `Checks (${evaluations.length})` : "Checks"}
@@ -875,7 +911,7 @@ export default function AssistantKnowledgeManager({
           </div>
 
           <div id={`assistant-${tab}-panel`} role="tabpanel" aria-labelledby={`assistant-${tab}-tab`}>
-            {tab !== "knowledge" && !deferredLoaded ? (
+            {tab !== "knowledge" && tab !== "activity" && !deferredLoaded ? (
               <div className="border-y border-slate-200 py-12 text-center" aria-live="polite">
                 {deferredLoading ? (
                   <p className="text-sm font-medium text-slate-500">Loading assistant settings...</p>
@@ -1066,6 +1102,67 @@ export default function AssistantKnowledgeManager({
                   ))}
                 </div>
               )
+            ) : tab === "activity" ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select value={activityDays} onChange={(event) => setActivityDays(Number(event.target.value))} aria-label="Time range" className={`${INPUT_CLASS} h-9 w-auto`}>
+                    <option value={7}>Last 7 days</option>
+                    <option value={30}>Last 30 days</option>
+                    <option value={90}>Last 90 days</option>
+                  </select>
+                  <select value={activityDepartment} onChange={(event) => setActivityDepartment(event.target.value)} aria-label="Department" className={`${INPUT_CLASS} h-9 w-auto`}>
+                    <option value="">All departments</option>
+                    {departments.map((department) => <option key={department} value={department}>{department}</option>)}
+                  </select>
+                  <select value={activityMatched} onChange={(event) => setActivityMatched(event.target.value)} aria-label="Answered filter" className={`${INPUT_CLASS} h-9 w-auto`}>
+                    <option value="">Answered and unanswered</option>
+                    <option value="yes">Answered only</option>
+                    <option value="no">Unanswered only</option>
+                  </select>
+                </div>
+
+                {activity && activity.usage.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Most used answers</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {activity.usage.map((entry) => (
+                        <span key={entry.knowledgeId} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] text-slate-700">
+                          {entry.title}
+                          <span className="font-semibold text-blue-700">×{entry.count}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activityLoading && !activity ? (
+                  <div className="border-y border-slate-200 py-12 text-center">
+                    <p className="text-sm font-medium text-slate-500">Loading activity...</p>
+                  </div>
+                ) : !activity || activity.queries.length === 0 ? (
+                  <div className="border-y border-slate-200 py-12 text-center">
+                    <p className="text-sm font-medium text-slate-600">No questions in this period</p>
+                  </div>
+                ) : (
+                  <div className={`divide-y divide-slate-200 border-y border-slate-200 ${activityLoading ? "opacity-60" : ""}`}>
+                    {activity.queries.map((item) => (
+                      <div key={item.id} className="py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <p className="min-w-0 break-words text-sm font-medium text-slate-900">{item.message}</p>
+                          <span className="shrink-0 text-[10px] text-slate-400">{formatTime(item.created_at)}</span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] font-medium text-slate-400">
+                          <span className={`rounded-full border px-1.5 py-0.5 font-semibold ${item.matched ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                            {item.matched ? "Answered" : "No answer found"}
+                          </span>
+                          <span>{item.employee_name ?? "Unknown sender"}</span>
+                          <span>Audience: {scopeLabel(item.department, item.location)}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="space-y-4">
                 <dl className="grid grid-cols-4 border-y border-slate-200">

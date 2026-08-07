@@ -10,6 +10,7 @@ vi.mock("openai", () => ({
 
 import {
   formatAssistantKnowledgeContext,
+  isSmalltalkMessage,
   rewriteAssistantRetrievalQuery,
 } from "@/lib/assistant-retrieval";
 
@@ -49,5 +50,23 @@ describe("assistant retrieval", () => {
       content: "Operations began around 2015.",
       source_title: "Founder interview",
     }])).toContain("Reference: Founder interview (knowledge-1)");
+  });
+
+  it("recognizes greetings and acknowledgements as smalltalk", () => {
+    for (const message of ["hey", "Hi!", "ok", "OK.", "thanks", "Thank you!", "merci beaucoup", "Bonjour", "ça va", "👍", "ok merci"]) {
+      expect(isSmalltalkMessage(message), message).toBe(true);
+    }
+  });
+
+  it("treats real questions as not smalltalk", () => {
+    for (const message of [
+      "hey how do I submit an invoice",
+      "Where is the Toronto warehouse?",
+      "ok what about vacation days",
+      "vacation",
+      "Est-ce que je peux prendre congé demain?",
+    ]) {
+      expect(isSmalltalkMessage(message), message).toBe(false);
+    }
   });
 });
