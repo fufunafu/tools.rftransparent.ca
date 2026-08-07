@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
+import { calculateCallbackCompletion } from "@/lib/call-metrics";
 
 // Charts are split out so recharts loads on demand instead of in the
 // route's initial bundle (same pattern as ShopifyCharts).
@@ -1388,9 +1389,23 @@ function StaffView({
   const CALLBACK_RATE_TARGET = 90;
 
   const missRate = metrics?.miss_rate ?? 0;
-  const callbackRate = metrics?.outbound_callback_rate ?? 0;
   const missedCount = metrics?.missed_calls ?? 0;
   const pendingCallbacks = (callbackData?.callbacks ?? []).filter((c) => c.note_status !== "done").length;
+  const manuallyResolvedCalls = (callbackData?.callbacks ?? [])
+    .filter((callback) => callback.note_status === "done")
+    .reduce((total, callback) => total + callback.calls.length, 0);
+  const callbackCompletion = calculateCallbackCompletion(
+    missedCount,
+    metrics?.recovery_rate ?? 0,
+    manuallyResolvedCalls,
+  );
+  const callbackRate = callbackCompletion.rate;
+  const previousCallbackRate = data?.previous?.missed_calls
+    ? data.previous.recovery_rate
+    : 100;
+  const callbackRateChange = previousCallbackRate > 0
+    ? Math.round(((callbackRate - previousCallbackRate) / previousCallbackRate) * 100)
+    : null;
 
   const missOnTrack = missRate <= MISS_RATE_TARGET;
   const callbackOnTrack = callbackRate >= CALLBACK_RATE_TARGET;
@@ -1400,13 +1415,13 @@ function StaffView({
     { label: "Inbound", value: inboundCount, prev: data?.previous?.inbound_calls ?? 0, change: change?.inbound_calls, format: formatNumber },
     { label: "Outbound", value: metrics?.outbound_calls ?? 0, prev: data?.previous?.outbound_calls ?? 0, change: change?.outbound_calls, format: formatNumber },
     { label: "Miss Rate", value: missRate, prev: data?.previous?.miss_rate ?? 0, change: change?.miss_rate, format: (n: number) => `${n}%`, target: MISS_RATE_TARGET, invert: true, tooltip: "Unanswered calls (no pickup + voicemail) \u00f7 total inbound \u00d7 100.", subtitle: `${missedCount} unanswered out of ${inboundCount} inbound` },
-    { label: "Callback Rate", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Unanswered calls your team called back \u00f7 total unanswered \u00d7 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} unanswered` },
+    { label: "Callback Rate", value: callbackRate, prev: previousCallbackRate, change: callbackRateChange, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Unanswered calls resolved by an outbound callback, an answered return call, or a completed callback note \u00f7 total unanswered calls \u00d7 100.", subtitle: `${callbackCompletion.resolved} resolved out of ${missedCount} unanswered` },
   ];
 
   return (
     <div className="space-y-6">
-      <div className="grid items-stretch gap-4 lg:grid-cols-2">
-        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[390px]" aria-labelledby="staff-analysis-heading">
+      <div className="grid items-stretch gap-4 lg:grid-cols-[minmax(340px,0.8fr)_minmax(0,1.35fr)]">
+        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[410px]" aria-labelledby="staff-analysis-heading">
           <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-3.5">
             <div>
               <h2 id="staff-analysis-heading" className="text-sm font-semibold text-slate-900">Analysis</h2>
@@ -1421,35 +1436,48 @@ function StaffView({
             </span>
           </div>
 
-          <div className="grid flex-1 grid-cols-2 gap-px bg-slate-100">
-            {staffCards.map((card) => {
-              const hasTarget = card.target != null;
-              const onTrack = !hasTarget || (card.higherIsBetter
-                ? card.value >= (card.target ?? 0)
-                : card.value <= (card.target ?? 0));
-              return (
-                <div key={card.label} className="flex min-h-0 flex-col justify-center bg-white px-4 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
-                      {card.tooltip && <InfoTip text={card.tooltip} />}
-                    </div>
-                    {hasTarget && (
-                      <span className={`text-[10px] font-semibold ${onTrack ? "text-emerald-600" : "text-amber-600"}`}>
-                        Target {card.higherIsBetter ? "≥" : "≤"}{card.target}%
-                      </span>
-                    )}
-                  </div>
+          <div className="flex flex-1 flex-col gap-3 p-4">
+            <div className="grid grid-cols-2 gap-3">
+              {staffCards.slice(0, 2).map((card) => (
+                <div key={card.label} className="rounded-lg bg-slate-50 px-3.5 py-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
                   <div className="mt-1 flex items-baseline gap-2">
                     <p className="text-2xl font-semibold tracking-tight text-slate-950">{card.format(card.value)}</p>
                     <ChangeBadge value={card.change ?? null} invert={card.invert} />
                   </div>
-                  <p className="mt-1 min-h-4 text-[11px] text-slate-400">
-                    {card.subtitle ?? `Previous period: ${card.format(card.prev)}`}
-                  </p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">Previous: {card.format(card.prev)}</p>
                 </div>
-              );
-            })}
+              ))}
+            </div>
+
+            <div className="overflow-hidden rounded-lg border border-slate-200">
+              {staffCards.slice(2).map((card, index) => {
+                const onTrack = card.higherIsBetter
+                  ? card.value >= (card.target ?? 0)
+                  : card.value <= (card.target ?? 0);
+                return (
+                  <div key={card.label} className={`relative px-3.5 py-3 ${index > 0 ? "border-t border-slate-100" : ""}`}>
+                    <span className={`absolute inset-y-0 left-0 w-0.5 ${onTrack ? "bg-emerald-400" : "bg-amber-400"}`} />
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="flex items-center gap-1">
+                          <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
+                          {card.tooltip && <InfoTip text={card.tooltip} />}
+                        </div>
+                        <div className="mt-0.5 flex items-baseline gap-2">
+                          <p className="text-xl font-semibold tracking-tight text-slate-950">{card.format(card.value)}</p>
+                          <ChangeBadge value={card.change ?? null} invert={card.invert} />
+                        </div>
+                      </div>
+                      <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${onTrack ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
+                        {onTrack ? "On target" : `Target ${card.higherIsBetter ? "≥" : "≤"}${card.target}%`}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-400">{card.subtitle}</p>
+                  </div>
+                );
+              })}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-xs">
@@ -1517,7 +1545,7 @@ function StaffCallbacksPanel({
   const highPriorityCount = callbacks.filter((callback) => callback.priority === "high").length;
 
   return (
-    <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[390px]" aria-labelledby="staff-callbacks-heading">
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[410px]" aria-labelledby="staff-callbacks-heading">
       <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-3.5">
         <div>
           <div className="flex items-center gap-2">

@@ -36,6 +36,27 @@ export function pctChange(cur: number, prev: number): number | null {
   return prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
 }
 
+export function calculateCallbackCompletion(
+  missedCalls: number,
+  recoveryRate: number,
+  manuallyResolvedCalls = 0,
+): { rate: number; resolved: number } {
+  const total = Math.max(0, Math.floor(missedCalls));
+  if (total === 0) return { rate: 100, resolved: 0 };
+
+  const normalizedRecoveryRate = Math.min(100, Math.max(0, recoveryRate));
+  const recoveredByCall = Math.round((normalizedRecoveryRate / 100) * total);
+  const resolved = Math.min(
+    total,
+    recoveredByCall + Math.max(0, Math.floor(manuallyResolvedCalls)),
+  );
+
+  return {
+    rate: Math.round((resolved / total) * 1000) / 10,
+    resolved,
+  };
+}
+
 /** 48-hour callback window in milliseconds */
 const CALLBACK_WINDOW_MS = 48 * 60 * 60 * 1000;
 

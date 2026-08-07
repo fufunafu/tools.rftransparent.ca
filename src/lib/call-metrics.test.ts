@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   sanitizePhone,
   pctChange,
+  calculateCallbackCompletion,
   computeMetrics,
   deduplicateRecords,
   CallRecord,
@@ -265,6 +266,22 @@ describe("computeMetrics — outbound callback rate", () => {
     ];
     const m = computeMetrics(records);
     expect(m.outbound_callback_rate).toBe(50); // 1 out of 2
+  });
+});
+
+describe("calculateCallbackCompletion", () => {
+  it("counts call recoveries and manually completed callbacks together", () => {
+    expect(calculateCallbackCompletion(3, 33.3, 2)).toEqual({
+      rate: 100,
+      resolved: 3,
+    });
+  });
+
+  it("shows complete when no unanswered calls required follow-up", () => {
+    expect(calculateCallbackCompletion(0, 0)).toEqual({
+      rate: 100,
+      resolved: 0,
+    });
   });
 });
 
