@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   searchKnowledge: vi.fn(),
   getInitialPrompt: vi.fn(),
   insertRun: vi.fn(),
+  recordSettingChange: vi.fn(),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
@@ -20,6 +21,9 @@ vi.mock("@/lib/assistant-knowledge", () => ({
 }));
 vi.mock("@/lib/assistant-prompt", () => ({
   getAssistantInitialPrompt: mocks.getInitialPrompt,
+}));
+vi.mock("@/lib/settings-audit", () => ({
+  recordSettingChange: mocks.recordSettingChange,
 }));
 vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({
@@ -107,7 +111,96 @@ describe("assistant evaluation runner", () => {
     expect(mocks.insertRun).toHaveBeenCalledWith(expect.objectContaining({
       case_id: evaluationCase.id,
       passed: true,
+      status: "completed",
       run_by: "admin@example.com",
     }));
+    expect(mocks.recordSettingChange).not.toHaveBeenCalled();
+  });
+
+  it("sends the same knowledge context production injects", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      answer: "Send a photo in WhatsApp.",
+      passed: true,
+      reason: "Matches.",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.searchKnowledge.mockResolvedValue([
+      { id: "knowledge-1", title: "Invoices", content: "Send a photo.", source_title: "Handbook" },
+    ]);
+
+    await POST(request({ id: evaluationCase.id }));
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body));
+    expect(body.knowledgeContext).toContain("[Knowledge 1: Invoices]");
+    expect(body.knowledgeContext).toContain("Send a photo.");
+  });
+
+  it("stores an infrastructure failure as an error run, not a failed answer", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("fetch failed")));
+
+    const response = await POST(request({ id: evaluationCase.id }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.results[0]).toMatchObject({ passed: false, status: "error", reason: "fetch failed" });
+    expect(mocks.insertRun).toHaveBeenCalledWith(expect.objectContaining({
+      case_id: evaluationCase.id,
+      status: "error",
+      reason: "fetch failed",
+    }));
+  });
+
+  it("retries the insert without status when the column is missing", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(Response.json({
+      answer: "Send a photo in WhatsApp.",
+      passed: true,
+      reason: "Matches.",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    mocks.insertRun
+      .mockResolvedValueOnce({
+        error: { code: "PGRST204", message: "Could not find the 'status' column" },
+      })
+      .mockResolvedValueOnce({ error: null });
+
+    const response = await POST(request({ id: evaluationCase.id }));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.results[0].passed).toBe(true);
+    expect(mocks.insertRun).toHaveBeenCalledTimes(2);
+    expect(mocks.insertRun.mock.calls[1]?.[0]).not.toHaveProperty("status");
+  });
+
+  it("runs every active case and records an audit summary for full runs", async () => {
+    const secondCase = { ...evaluationCase, id: "00000000-0000-4000-8000-000000000202" };
+    const thirdCase = { ...evaluationCase, id: "00000000-0000-4000-8000-000000000203" };
+    mocks.listCases.mockResolvedValue([evaluationCase, secondCase, thirdCase]);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return Response.json({
+        answer: "Send a photo in WhatsApp.",
+        passed: true,
+        reason: "Matches.",
+      });
+    }));
+
+    const response = await POST(request({}));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.results).toHaveLength(3);
+    expect(maxInFlight).toBe(3);
+    expect(mocks.insertRun).toHaveBeenCalledTimes(3);
+    expect(mocks.recordSettingChange).toHaveBeenCalledWith({
+      area: "assistant",
+      actor: "admin@example.com",
+      summary: "Ran 3 assistant quality checks: 3 passed, 0 failed, 0 errors",
+    });
   });
 });

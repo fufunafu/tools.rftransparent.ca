@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
 import {
   ASSISTANT_CATEGORIES,
@@ -11,6 +11,7 @@ import {
   type AssistantKnowledgeEntry,
   type AssistantKnowledgeGap,
 } from "@/lib/assistant-knowledge";
+import type { AssistantPromptVersion } from "@/lib/assistant-prompt-versions";
 
 type Tab = "prompt" | "knowledge" | "gaps" | "tests";
 type CollectionTab = "knowledge" | "tests";
@@ -220,6 +221,13 @@ function CheckResultBadge({ item }: { item: AssistantEvaluationCase }) {
       </span>
     );
   }
+  if (item.latest_run.status === "error") {
+    return (
+      <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+        Error
+      </span>
+    );
+  }
   return (
     <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${item.latest_run.passed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-rose-200 bg-rose-50 text-rose-700"}`}>
       {item.latest_run.passed ? "Passed" : "Failed"}
@@ -303,26 +311,29 @@ function Modal({
 }
 
 export default function AssistantKnowledgeManager({
-  initialPrompt,
   initialKnowledge,
-  initialEvaluations,
-  initialGaps,
   departments,
   locations,
 }: {
-  initialPrompt: string;
   initialKnowledge: AssistantKnowledgeEntry[];
-  initialEvaluations: AssistantEvaluationCase[];
-  initialGaps: AssistantKnowledgeGap[];
   departments: string[];
   locations: string[];
 }) {
   const [tab, setTab] = useState<Tab>("knowledge");
-  const [prompt, setPrompt] = useState(initialPrompt);
-  const [savedPrompt, setSavedPrompt] = useState(initialPrompt);
+  const [prompt, setPrompt] = useState("");
+  const [savedPrompt, setSavedPrompt] = useState("");
   const [knowledge, setKnowledge] = useState(initialKnowledge);
-  const [evaluations, setEvaluations] = useState(initialEvaluations);
-  const [gaps] = useState(initialGaps);
+  const [evaluations, setEvaluations] = useState<AssistantEvaluationCase[]>([]);
+  const [gaps, setGaps] = useState<AssistantKnowledgeGap[]>([]);
+  const [gapStatusSupported, setGapStatusSupported] = useState(false);
+  const [deferredLoading, setDeferredLoading] = useState(true);
+  const [deferredLoaded, setDeferredLoaded] = useState(false);
+  const [gapsRefreshing, setGapsRefreshing] = useState(false);
+  const [gapBusyIds, setGapBusyIds] = useState<string[]>([]);
+  const [pendingGapResolution, setPendingGapResolution] = useState<{
+    ids: string[];
+    message: string;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const [knowledgeDraft, setKnowledgeDraft] = useState<KnowledgeDraft | null>(null);
   const [chatInput, setChatInput] = useState("");
@@ -335,6 +346,7 @@ export default function AssistantKnowledgeManager({
     INITIAL_CHAT_MESSAGE,
   ]);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const [aiDraftNote, setAiDraftNote] = useState<string | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
   const [evaluationDraft, setEvaluationDraft] = useState<EvaluationDraft | null>(null);
@@ -344,6 +356,9 @@ export default function AssistantKnowledgeManager({
   const [drafting, setDrafting] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [promptSaved, setPromptSaved] = useState(false);
+  const [promptVersions, setPromptVersions] = useState<AssistantPromptVersion[] | null>(null);
+  const [promptVersionsMissing, setPromptVersionsMissing] = useState(false);
+  const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     type: CollectionTab;
@@ -364,7 +379,10 @@ export default function AssistantKnowledgeManager({
   const publishedAnswers = knowledge.filter((entry) => entry.active).length;
   const activeChecks = evaluations.filter((item) => item.active);
   const passingChecks = activeChecks.filter((item) => item.latest_run?.passed).length;
-  const failingChecks = activeChecks.filter((item) => item.latest_run?.passed === false).length;
+  const errorChecks = activeChecks.filter((item) => item.latest_run?.status === "error").length;
+  const failingChecks = activeChecks.filter(
+    (item) => item.latest_run?.passed === false && item.latest_run.status !== "error",
+  ).length;
   const notRunChecks = activeChecks.filter((item) => !item.latest_run).length;
   const orderedEvaluations = useMemo(
     () => [...evaluations].sort((left, right) => {
@@ -378,6 +396,49 @@ export default function AssistantKnowledgeManager({
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ block: "nearest" });
   }, [chatMessages, drafting]);
+
+  const loadDeferredData = useCallback(async () => {
+    setDeferredLoading(true);
+    try {
+      const response = await fetch("/api/settings/assistant-bootstrap", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Could not load assistant settings");
+      setPrompt(payload.initialPrompt);
+      setSavedPrompt(payload.initialPrompt);
+      setEvaluations(payload.evaluations ?? []);
+      setGaps(payload.gaps ?? []);
+      setGapStatusSupported(Boolean(payload.gapStatusSupported));
+      setDeferredLoaded(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not load assistant settings");
+    } finally {
+      setDeferredLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadDeferredData();
+  }, [loadDeferredData]);
+
+  const promptVersionsLoaded = promptVersions !== null;
+  useEffect(() => {
+    if (tab !== "prompt" || promptVersionsLoaded) return;
+    void loadPromptVersions();
+  }, [tab, promptVersionsLoaded]);
+
+  async function loadPromptVersions() {
+    try {
+      const response = await fetch("/api/settings/assistant-prompt/versions", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Could not load prompt history");
+      setPromptVersions(payload.versions ?? []);
+      setPromptVersionsMissing(Boolean(payload.tableMissing));
+    } catch {
+      // History is a convenience; the prompt editor works without it.
+      setPromptVersions([]);
+      setPromptVersionsMissing(true);
+    }
+  }
 
   async function savePrompt(event: React.FormEvent) {
     event.preventDefault();
@@ -395,6 +456,7 @@ export default function AssistantKnowledgeManager({
       setPrompt(payload.initialPrompt);
       setSavedPrompt(payload.initialPrompt);
       setPromptSaved(true);
+      void loadPromptVersions();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not save initial prompt");
     } finally {
@@ -432,6 +494,10 @@ export default function AssistantKnowledgeManager({
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error ?? "Could not save answer");
       await reload();
+      if (pendingGapResolution) {
+        void resolveGapAfterPublish(pendingGapResolution, payload.entry?.id ?? null);
+        setPendingGapResolution(null);
+      }
       setKnowledgeDraft(null);
       if (reviewingDraftIndex !== null) {
         setChatDrafts((current) => current.filter((_, index) => index !== reviewingDraftIndex));
@@ -526,6 +592,83 @@ export default function AssistantKnowledgeManager({
     setChatMessages([INITIAL_CHAT_MESSAGE]);
     setAiDraftNote(null);
     setDraftError(null);
+    setPendingGapResolution(null);
+  }
+
+  async function refreshGaps() {
+    setGapsRefreshing(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/assistant-gaps", { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Could not refresh gaps");
+      setGaps(payload.gaps ?? []);
+      setGapStatusSupported(Boolean(payload.statusSupported));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not refresh gaps");
+    } finally {
+      setGapsRefreshing(false);
+    }
+  }
+
+  async function dismissGap(gap: AssistantKnowledgeGap) {
+    setGapBusyIds((current) => [...current, gap.id]);
+    setError(null);
+    try {
+      const response = await fetch("/api/settings/assistant-gaps", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: gap.ids, status: "dismissed", message: gap.message }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error ?? "Could not dismiss gap");
+      setGaps((current) => current.filter((item) => item.id !== gap.id));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not dismiss gap");
+    } finally {
+      setGapBusyIds((current) => current.filter((id) => id !== gap.id));
+    }
+  }
+
+  function draftAnswerFromGap(gap: AssistantKnowledgeGap) {
+    resetKnowledgeChat();
+    setPendingGapResolution({ ids: gap.ids, message: gap.message });
+    setChatInput(`Employees asked: "${gap.message}"\n\nDraft an approved knowledge answer for this. Facts to use:\n`);
+    setChatMessages([
+      INITIAL_CHAT_MESSAGE,
+      {
+        id: `knowledge-assistant-gap-${gap.id}`,
+        role: "assistant",
+        content: "Add the facts that answer this question below, then send. When the answer is published, the gap is marked resolved.",
+      },
+    ]);
+    chatInputRef.current?.focus();
+  }
+
+  // Best effort: the answer is already published, so a failed gap update just
+  // leaves the gap in the list to dismiss by hand.
+  async function resolveGapAfterPublish(
+    resolution: { ids: string[]; message: string },
+    knowledgeId: string | null,
+  ) {
+    if (!gapStatusSupported) return;
+    try {
+      const response = await fetch("/api/settings/assistant-gaps", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ids: resolution.ids,
+          status: "resolved",
+          message: resolution.message,
+          ...(knowledgeId ? { knowledgeId } : {}),
+        }),
+      });
+      if (response.ok) {
+        setGaps((current) => current.filter((item) => !resolution.ids.includes(item.id)));
+      }
+    } catch {
+      // Ignore: dismiss by hand covers this.
+    }
   }
 
   async function saveEvaluation(event: React.FormEvent) {
@@ -652,7 +795,11 @@ export default function AssistantKnowledgeManager({
           <div className="pl-5">
             <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Checks active</dt>
             <dd className="mt-1 text-sm font-semibold text-slate-800">
-              {activeChecks.length} <span className="font-normal text-slate-400">of {evaluations.length}</span>
+              {deferredLoaded ? (
+                <>{activeChecks.length} <span className="font-normal text-slate-400">of {evaluations.length}</span></>
+              ) : (
+                <span className="font-normal text-slate-400">Loading</span>
+              )}
             </dd>
           </div>
         </dl>
@@ -685,10 +832,10 @@ export default function AssistantKnowledgeManager({
                   {value === "knowledge"
                     ? `Answers (${knowledge.length})`
                     : value === "gaps"
-                      ? `Gaps (${gaps.length})`
+                      ? deferredLoaded ? `Gaps (${gaps.length})` : "Gaps"
                     : value === "prompt"
                       ? "Prompt"
-                      : `Checks (${evaluations.length})`}
+                      : deferredLoaded ? `Checks (${evaluations.length})` : "Checks"}
                 </button>
               ))}
             </div>
@@ -708,7 +855,7 @@ export default function AssistantKnowledgeManager({
                   <PlusIcon /> New answer
                 </button>
               </div>
-            ) : tab === "tests" ? (
+            ) : tab === "tests" && deferredLoaded ? (
               <div className="flex flex-wrap items-center justify-end gap-2 pb-3">
                 <button type="button" onClick={() => void runTests()} disabled={running !== null || evaluations.every((item) => !item.active)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:opacity-40">
                   <PlayIcon /> {running === "all" ? "Running..." : "Run active checks"}
@@ -717,11 +864,28 @@ export default function AssistantKnowledgeManager({
                   <PlusIcon /> New check
                 </button>
               </div>
+            ) : tab === "gaps" && deferredLoaded ? (
+              <div className="flex flex-wrap items-center justify-end gap-2 pb-3">
+                <button type="button" onClick={() => void refreshGaps()} disabled={gapsRefreshing} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">
+                  {gapsRefreshing ? "Refreshing..." : "Refresh"}
+                </button>
+              </div>
             ) : null}
           </div>
 
           <div id={`assistant-${tab}-panel`} role="tabpanel" aria-labelledby={`assistant-${tab}-tab`}>
-            {tab === "prompt" ? (
+            {tab !== "knowledge" && !deferredLoaded ? (
+              <div className="border-y border-slate-200 py-12 text-center" aria-live="polite">
+                {deferredLoading ? (
+                  <p className="text-sm font-medium text-slate-500">Loading assistant settings...</p>
+                ) : (
+                  <button type="button" onClick={() => void loadDeferredData()} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                    Retry loading
+                  </button>
+                )}
+              </div>
+            ) : tab === "prompt" ? (
+              <div className="space-y-6">
               <form onSubmit={savePrompt} className="space-y-3">
                 <label htmlFor="assistant-initial-prompt" className="block text-sm font-semibold text-slate-800">
                   Initial prompt
@@ -750,6 +914,60 @@ export default function AssistantKnowledgeManager({
                   </div>
                 </div>
               </form>
+
+              <section aria-labelledby="prompt-history-heading" className="space-y-2">
+                <h2 id="prompt-history-heading" className="text-sm font-semibold text-slate-800">History</h2>
+                {promptVersionsMissing ? (
+                  <p className="text-xs text-slate-400">
+                    Version history is unavailable until the assistant_prompt_versions migration is applied.
+                  </p>
+                ) : promptVersions === null ? (
+                  <p className="text-xs text-slate-400">Loading history...</p>
+                ) : promptVersions.length === 0 ? (
+                  <p className="text-xs text-slate-400">No saved versions yet. Every save from now on is kept here.</p>
+                ) : (
+                  <ul className="divide-y divide-slate-200 border-y border-slate-200">
+                    {promptVersions.map((version) => (
+                      <li key={version.id} className="py-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0 text-xs text-slate-600">
+                            <span className="font-medium text-slate-800">{formatTime(version.created_at)}</span>
+                            <span className="mx-1.5 text-slate-300">·</span>
+                            <span>{version.created_by}</span>
+                            <span className="mx-1.5 text-slate-300">·</span>
+                            <span>{version.prompt.length.toLocaleString()} characters</span>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedVersionId(expandedVersionId === version.id ? null : version.id)}
+                              className="h-7 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50"
+                            >
+                              {expandedVersionId === version.id ? "Hide" : "View"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPrompt(version.prompt);
+                                setPromptSaved(false);
+                              }}
+                              disabled={version.prompt === prompt}
+                              className="h-7 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-40"
+                              title="Copy this version into the editor. Nothing changes until you save."
+                            >
+                              Restore
+                            </button>
+                          </div>
+                        </div>
+                        {expandedVersionId === version.id && (
+                          <pre className="mt-2 max-h-72 overflow-y-auto whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] leading-4 text-slate-700">{version.prompt}</pre>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+              </div>
             ) : tab === "knowledge" ? (
               visibleKnowledge.length === 0 ? (
                 <div className="border-y border-slate-200 py-12 text-center">
@@ -806,22 +1024,50 @@ export default function AssistantKnowledgeManager({
                   {gaps.map((gap) => (
                     <div key={gap.id} className="py-3">
                       <div className="flex flex-wrap items-start justify-between gap-2">
-                        <p className="min-w-0 break-words text-sm font-semibold text-slate-900">{gap.message}</p>
+                        <p className="min-w-0 break-words text-sm font-semibold text-slate-900">
+                          {gap.message}
+                          {gap.count > 1 && (
+                            <span className="ml-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 align-middle text-[10px] font-semibold text-amber-700">
+                              Asked {gap.count} times
+                            </span>
+                          )}
+                        </p>
                         <span className="shrink-0 text-[10px] text-slate-400">{formatTime(gap.created_at)}</span>
                       </div>
                       {gap.rewritten_query !== gap.message && (
                         <p className="mt-1 text-xs text-slate-500">Searched for: {gap.rewritten_query}</p>
                       )}
-                      <p className="mt-1 text-[10px] font-medium text-slate-400">
-                        Audience: {scopeLabel(gap.department, gap.location)}
-                      </p>
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-[10px] font-medium text-slate-400">
+                          Audience: {scopeLabel(gap.department, gap.location)}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => draftAnswerFromGap(gap)}
+                            className="h-7 rounded-lg border border-blue-200 bg-blue-50 px-2.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                          >
+                            Draft answer
+                          </button>
+                          {gapStatusSupported && (
+                            <button
+                              type="button"
+                              onClick={() => void dismissGap(gap)}
+                              disabled={gapBusyIds.includes(gap.id)}
+                              className="h-7 rounded-lg border border-slate-200 bg-white px-2.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                            >
+                              {gapBusyIds.includes(gap.id) ? "Dismissing..." : "Dismiss"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   ))}
                 </div>
               )
             ) : (
               <div className="space-y-4">
-                <dl className="grid grid-cols-3 border-y border-slate-200">
+                <dl className="grid grid-cols-4 border-y border-slate-200">
                   <div className="border-r border-slate-200 px-3 py-3">
                     <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Passing</dt>
                     <dd className="mt-1 text-xl font-semibold text-emerald-700">{passingChecks}</dd>
@@ -829,6 +1075,10 @@ export default function AssistantKnowledgeManager({
                   <div className="border-r border-slate-200 px-3 py-3">
                     <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Failing</dt>
                     <dd className={`mt-1 text-xl font-semibold ${failingChecks ? "text-rose-700" : "text-slate-700"}`}>{failingChecks}</dd>
+                  </div>
+                  <div className="border-r border-slate-200 px-3 py-3">
+                    <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Errors</dt>
+                    <dd className={`mt-1 text-xl font-semibold ${errorChecks ? "text-slate-700" : "text-slate-400"}`}>{errorChecks}</dd>
                   </div>
                   <div className="px-3 py-3">
                     <dt className="text-[10px] font-semibold uppercase tracking-[0.1em] text-slate-400">Not run</dt>
@@ -867,6 +1117,16 @@ export default function AssistantKnowledgeManager({
                           </div>
                         </div>
                         {item.latest_run && (
+                          item.latest_run.status === "error" ? (
+                            <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-3">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-[10px] font-semibold uppercase text-slate-600">Check error</span>
+                                <span className="text-[10px] text-slate-400">{formatTime(item.latest_run.created_at)}</span>
+                              </div>
+                              <p className="mt-2 text-xs leading-5 text-slate-600">{item.latest_run.reason}</p>
+                              <p className="mt-1 text-[10px] text-slate-400">The check itself could not run. This is not an answer failure. Run it again.</p>
+                            </div>
+                          ) : (
                           <div className={`mt-4 rounded-lg border p-3 ${item.latest_run.passed ? "border-emerald-200 bg-emerald-50/60" : "border-rose-200 bg-rose-50/60"}`}>
                             <div className="flex flex-wrap items-center gap-2">
                               <span className={`text-[10px] font-semibold uppercase ${item.latest_run.passed ? "text-emerald-700" : "text-rose-700"}`}>{item.latest_run.passed ? "Passed" : "Failed"}</span>
@@ -883,6 +1143,7 @@ export default function AssistantKnowledgeManager({
                               </div>
                             </div>
                           </div>
+                          )
                         )}
                       </article>
                     ))}
@@ -955,6 +1216,7 @@ export default function AssistantKnowledgeManager({
               <label>
                 <span className="sr-only">Message knowledge assistant</span>
                 <textarea
+                  ref={chatInputRef}
                   required
                   maxLength={chatSource ? 4000 : ASSISTANT_KNOWLEDGE_SOURCE_MAX_LENGTH}
                   rows={4}

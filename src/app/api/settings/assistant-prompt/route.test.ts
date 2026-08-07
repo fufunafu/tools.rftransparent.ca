@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => ({
   getSetting: vi.fn(),
   putSetting: vi.fn(),
   recordSettingChange: vi.fn(),
+  listVersions: vi.fn(),
+  recordVersion: vi.fn(),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
@@ -19,6 +21,10 @@ vi.mock("@/lib/settings", () => ({
 }));
 vi.mock("@/lib/settings-audit", () => ({
   recordSettingChange: mocks.recordSettingChange,
+}));
+vi.mock("@/lib/assistant-prompt-versions", () => ({
+  listAssistantPromptVersions: mocks.listVersions,
+  recordAssistantPromptVersion: mocks.recordVersion,
 }));
 
 import { GET, PUT } from "@/app/api/settings/assistant-prompt/route";
@@ -38,6 +44,11 @@ beforeEach(() => {
   mocks.getSetting.mockResolvedValue("Stored prompt");
   mocks.putSetting.mockResolvedValue(undefined);
   mocks.recordSettingChange.mockResolvedValue(undefined);
+  mocks.listVersions.mockResolvedValue({
+    versions: [{ id: "v1", prompt: "Old", created_by: "a@b.c", created_at: "2026-08-01T00:00:00Z" }],
+    tableMissing: false,
+  });
+  mocks.recordVersion.mockResolvedValue(undefined);
 });
 
 describe("assistant prompt settings route", () => {
@@ -78,6 +89,38 @@ describe("assistant prompt settings route", () => {
       area: "assistant",
       actor: "admin@example.com",
       summary: "Updated the assistant initial prompt",
+    });
+    expect(mocks.recordVersion).toHaveBeenCalledWith({
+      prompt: "Keep answers concise.",
+      actor: "admin@example.com",
+    });
+  });
+
+  it("captures the replaced prompt as the first version", async () => {
+    mocks.listVersions.mockResolvedValue({ versions: [], tableMissing: false });
+
+    await PUT(request({ initialPrompt: "New prompt" }));
+
+    expect(mocks.recordVersion).toHaveBeenNthCalledWith(1, {
+      prompt: "Stored prompt",
+      actor: "system (pre-history)",
+    });
+    expect(mocks.recordVersion).toHaveBeenNthCalledWith(2, {
+      prompt: "New prompt",
+      actor: "admin@example.com",
+    });
+  });
+
+  it("skips the bootstrap version when the table is missing", async () => {
+    mocks.listVersions.mockResolvedValue({ versions: [], tableMissing: true });
+
+    const response = await PUT(request({ initialPrompt: "New prompt" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordVersion).toHaveBeenCalledTimes(1);
+    expect(mocks.recordVersion).toHaveBeenCalledWith({
+      prompt: "New prompt",
+      actor: "admin@example.com",
     });
   });
 });

@@ -51,6 +51,8 @@ export interface AssistantKnowledgeMatch {
   rank: number;
 }
 
+export type AssistantKnowledgeGapStatus = "open" | "dismissed" | "resolved";
+
 export interface AssistantKnowledgeGap {
   id: string;
   message: string;
@@ -58,6 +60,11 @@ export interface AssistantKnowledgeGap {
   department: string | null;
   location: string | null;
   created_at: string;
+  status: AssistantKnowledgeGapStatus;
+  /** How many logged questions this gap groups together. */
+  count: number;
+  /** Row ids of every grouped question, for status updates. */
+  ids: string[];
 }
 
 export interface AssistantEvaluationRun {
@@ -69,6 +76,7 @@ export interface AssistantEvaluationRun {
   model: string | null;
   run_by: string;
   created_at: string;
+  status: "completed" | "error";
 }
 
 export interface AssistantEvaluationCase {
@@ -240,15 +248,105 @@ export async function recordAssistantKnowledgeQuery(input: {
   if (error) throw new Error(`Could not record knowledge query: ${error.message}`);
 }
 
-export async function listAssistantKnowledgeGaps(limit = 50): Promise<AssistantKnowledgeGap[]> {
-  const { data, error } = await getSupabase()
+type RawGapRow = {
+  id: string;
+  message: string;
+  rewritten_query: string;
+  department: string | null;
+  location: string | null;
+  created_at: string;
+  status?: string;
+};
+
+function isMissingStatusColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === "42703" || error.code === "PGRST204") return true;
+  return typeof error.message === "string" && error.message.includes("status");
+}
+
+export async function listAssistantKnowledgeGaps(
+  limit = 50,
+): Promise<{ gaps: AssistantKnowledgeGap[]; statusSupported: boolean }> {
+  const supabase = getSupabase();
+  // The status column arrives with a hand-applied migration; fall back to the
+  // legacy select (every unmatched query, treated as open) until it exists.
+  let statusSupported = true;
+  const first = await supabase
     .from("assistant_knowledge_queries")
-    .select("id, message, rewritten_query, department, location, created_at")
+    .select("id, message, rewritten_query, department, location, created_at, status")
     .eq("matched", false)
+    .eq("status", "open")
     .order("created_at", { ascending: false })
-    .limit(Math.min(Math.max(limit, 1), 100));
-  if (error) throw new Error(`Could not load knowledge gaps: ${error.message}`);
-  return (data ?? []) as AssistantKnowledgeGap[];
+    .limit(200);
+  let rows = first.data as RawGapRow[] | null;
+  let queryError = first.error;
+
+  if (queryError) {
+    statusSupported = false;
+    const fallback = await supabase
+      .from("assistant_knowledge_queries")
+      .select("id, message, rewritten_query, department, location, created_at")
+      .eq("matched", false)
+      .order("created_at", { ascending: false })
+      .limit(200);
+    rows = fallback.data as RawGapRow[] | null;
+    queryError = fallback.error;
+  }
+
+  if (queryError) throw new Error(`Could not load knowledge gaps: ${queryError.message}`);
+
+  // Group repeats of the same question so ten identical asks read as one gap.
+  const grouped = new Map<string, AssistantKnowledgeGap>();
+  for (const row of rows ?? []) {
+    const key = (row.rewritten_query || row.message).trim().toLowerCase();
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.ids.push(row.id);
+    } else {
+      grouped.set(key, {
+        id: row.id,
+        message: row.message,
+        rewritten_query: row.rewritten_query,
+        department: row.department,
+        location: row.location,
+        created_at: row.created_at,
+        status: row.status === "dismissed" || row.status === "resolved" ? row.status : "open",
+        count: 1,
+        ids: [row.id],
+      });
+    }
+  }
+  return {
+    gaps: [...grouped.values()].slice(0, Math.min(Math.max(limit, 1), 100)),
+    statusSupported,
+  };
+}
+
+export async function updateAssistantKnowledgeGapStatus(input: {
+  ids: string[];
+  status: AssistantKnowledgeGapStatus;
+  actor: string;
+  knowledgeId?: string | null;
+}): Promise<void> {
+  const update = input.status === "open"
+    ? { status: "open", resolved_by: null, resolved_at: null, resolution_knowledge_id: null }
+    : {
+        status: input.status,
+        resolved_by: input.actor,
+        resolved_at: new Date().toISOString(),
+        resolution_knowledge_id: input.knowledgeId ?? null,
+      };
+  const { error } = await getSupabase()
+    .from("assistant_knowledge_queries")
+    .update(update)
+    .in("id", input.ids);
+  if (error) {
+    if (isMissingStatusColumn(error)) {
+      throw new Error("Gap status requires the assistant_gap_status migration to be applied");
+    }
+    throw new Error(`Could not update knowledge gap: ${error.message}`);
+  }
 }
 
 export function buildAssistantSearchQuery(query: string): string {
@@ -267,36 +365,49 @@ function scopeMatches(required: string | null, actual: string | null): boolean {
 
 export async function listAssistantEvaluationCases(): Promise<AssistantEvaluationCase[]> {
   const supabase = getSupabase();
-  const { data: cases, error: casesError } = await supabase
+  type EvaluationRunRow = Omit<AssistantEvaluationRun, "status"> & { status?: string };
+  type EvaluationCaseRow = Omit<AssistantEvaluationCase, "latest_run"> & {
+    assistant_evaluation_runs: EvaluationRunRow[] | null;
+  };
+  const caseColumns = "id, question, expected_answer, department, location, active, created_by, updated_by, created_at, updated_at";
+  const runColumns = "id, case_id, answer, passed, reason, model, run_by, created_at";
+
+  const casesWithStatus = await supabase
     .from("assistant_evaluation_cases")
-    .select("id, question, expected_answer, department, location, active, created_by, updated_by, created_at, updated_at")
+    .select(`${caseColumns}, assistant_evaluation_runs (${runColumns}, status)`)
     .order("active", { ascending: false })
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })
+    .order("created_at", { referencedTable: "assistant_evaluation_runs", ascending: false })
+    .limit(1, { referencedTable: "assistant_evaluation_runs" });
+  let cases = casesWithStatus.data as unknown as EvaluationCaseRow[] | null;
+  let casesError = casesWithStatus.error;
 
-  if (casesError) {
-    throw new Error(`Could not load assistant evaluations: ${casesError.message}`);
+  // The status column arrives with a hand-applied migration. Retry the same
+  // bounded relationship query without it until that migration is applied.
+  if (casesError && isMissingStatusColumn(casesError)) {
+    const legacyCases = await supabase
+      .from("assistant_evaluation_cases")
+      .select(`${caseColumns}, assistant_evaluation_runs (${runColumns})`)
+      .order("active", { ascending: false })
+      .order("updated_at", { ascending: false })
+      .order("created_at", { referencedTable: "assistant_evaluation_runs", ascending: false })
+      .limit(1, { referencedTable: "assistant_evaluation_runs" });
+    cases = legacyCases.data as unknown as EvaluationCaseRow[] | null;
+    casesError = legacyCases.error;
   }
 
-  const ids = (cases ?? []).map((item) => item.id as string);
-  if (ids.length === 0) return [];
+  if (casesError) throw new Error(`Could not load assistant evaluations: ${casesError.message}`);
 
-  const { data: runs, error: runsError } = await supabase
-    .from("assistant_evaluation_runs")
-    .select("id, case_id, answer, passed, reason, model, run_by, created_at")
-    .in("case_id", ids)
-    .order("created_at", { ascending: false });
-
-  if (runsError) {
-    throw new Error(`Could not load assistant evaluation runs: ${runsError.message}`);
-  }
-
-  const latestByCase = new Map<string, AssistantEvaluationRun>();
-  for (const run of (runs ?? []) as AssistantEvaluationRun[]) {
-    if (!latestByCase.has(run.case_id)) latestByCase.set(run.case_id, run);
-  }
-
-  return (cases ?? []).map((item) => ({
-    ...(item as Omit<AssistantEvaluationCase, "latest_run">),
-    latest_run: latestByCase.get(item.id as string) ?? null,
-  }));
+  return (cases ?? []).map(({ assistant_evaluation_runs: runs, ...item }) => {
+    const rawRun = runs?.[0];
+    return {
+      ...item,
+      latest_run: rawRun
+        ? {
+            ...rawRun,
+            status: rawRun.status === "error" ? "error" : "completed",
+          }
+        : null,
+    };
+  });
 }

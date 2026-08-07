@@ -5,6 +5,10 @@ import {
   getAssistantInitialPrompt,
   putAssistantInitialPrompt,
 } from "@/lib/assistant-prompt";
+import {
+  listAssistantPromptVersions,
+  recordAssistantPromptVersion,
+} from "@/lib/assistant-prompt-versions";
 import { recordSettingChange } from "@/lib/settings-audit";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +42,21 @@ export async function PUT(request: NextRequest) {
   }
 
   try {
+    // On the very first save after history exists, capture the prompt being
+    // replaced too, so it stays recoverable.
+    const { versions, tableMissing } = await listAssistantPromptVersions(1);
+    if (!tableMissing && versions.length === 0) {
+      await recordAssistantPromptVersion({
+        prompt: await getAssistantInitialPrompt(),
+        actor: "system (pre-history)",
+      });
+    }
+
     const initialPrompt = await putAssistantInitialPrompt(parsed.data.initialPrompt);
+    await recordAssistantPromptVersion({
+      prompt: initialPrompt,
+      actor: gate.user.email ?? "unknown",
+    });
     await recordSettingChange({
       area: "assistant",
       actor: gate.user.email ?? "unknown",
