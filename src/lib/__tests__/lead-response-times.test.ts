@@ -3,6 +3,7 @@ import {
   averageLeadResponseTimeMs,
   formatLeadResponseTime,
   leadResponseTimeMs,
+  medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
 
 describe("leadResponseTimeMs", () => {
@@ -37,5 +38,13 @@ describe("averageLeadResponseTimeMs", () => {
   it("averages available durations and ignores missing values", () => {
     expect(averageLeadResponseTimeMs([60_000, null, 180_000])).toBe(120_000);
     expect(averageLeadResponseTimeMs([null, null])).toBeNull();
+  });
+});
+
+describe("medianLeadResponseTimeMs", () => {
+  it("uses the middle completed response and ignores pending responses", () => {
+    expect(medianLeadResponseTimeMs([60_000, null, 120_000, 3_600_000])).toBe(120_000);
+    expect(medianLeadResponseTimeMs([60_000, 180_000])).toBe(120_000);
+    expect(medianLeadResponseTimeMs([null, null])).toBeNull();
   });
 });

@@ -144,6 +144,35 @@ describe("calculateLeadFunnelBySource", () => {
 });
 
 describe("buildLeadTrend", () => {
+  it("builds seven daily buckets and compares them with the preceding seven days", () => {
+    const result = buildLeadTrend(
+      [
+        { source: "website", submitted_at: "2026-08-03T13:00:00.000Z" },
+        { source: "meta", submitted_at: "2026-07-28T13:00:00.000Z" },
+        { source: "website", submitted_at: "2026-07-27T13:00:00.000Z" },
+        { source: "meta", submitted_at: "2026-07-21T13:00:00.000Z" },
+        { source: "website", submitted_at: "2026-07-27T17:00:00.000Z" },
+      ],
+      "7d",
+      NOW,
+    );
+
+    expect(result.points).toHaveLength(7);
+    expect(result.points[0]).toMatchObject({
+      rangeStart: "2026-07-28",
+      rangeEnd: "2026-07-28",
+      meta: 1,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      rangeStart: "2026-08-03",
+      rangeEnd: "2026-08-03",
+      website: 1,
+    });
+    expect(result.current).toEqual({ total: 2, website: 1, meta: 1 });
+    expect(result.previous).toEqual({ total: 2, website: 1, meta: 1 });
+    expect(result.changePct).toBe(0);
+  });
+
   it("separates website and Meta leads into daily Toronto buckets", () => {
     const result = buildLeadTrend(
       [
@@ -208,6 +237,19 @@ describe("buildLeadTrend", () => {
     });
   });
 
+  it("cuts the previous monthly period off at the same Toronto date and time", () => {
+    const result = buildLeadTrend(
+      [
+        { source: "website", submitted_at: "2025-08-03T15:00:00.000Z" },
+        { source: "meta", submitted_at: "2025-08-03T17:00:00.000Z" },
+      ],
+      "12m",
+      NOW,
+    );
+
+    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
+  });
+
   it("supports an exact custom date range", () => {
     const result = buildCustomLeadTrend(
       [
@@ -227,6 +269,20 @@ describe("buildLeadTrend", () => {
       rangeEnd: "2026-08-01",
     });
     expect(result.changePct).toBe(100);
+  });
+
+  it("uses the same time-of-day cutoff when a custom range ends today", () => {
+    const result = buildCustomLeadTrend(
+      [
+        { source: "website", submitted_at: "2026-07-31T15:00:00.000Z" },
+        { source: "meta", submitted_at: "2026-07-31T17:00:00.000Z" },
+      ],
+      "2026-08-01",
+      "2026-08-03",
+      NOW,
+    );
+
+    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
   });
 
   it("uses monthly buckets for long custom ranges", () => {

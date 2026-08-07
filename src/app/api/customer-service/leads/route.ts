@@ -178,7 +178,14 @@ export async function PATCH(req: NextRequest) {
     update.call_status = rest.call_status;
   }
   if (rest.quote_number === null || typeof rest.quote_number === "string") update.quote_number = rest.quote_number;
-  if (rest.quote_amount === null || typeof rest.quote_amount === "number") update.quote_amount = rest.quote_amount;
+  if (rest.quote_amount === null) {
+    update.quote_amount = null;
+  } else if (typeof rest.quote_amount === "number") {
+    if (!Number.isFinite(rest.quote_amount) || rest.quote_amount < 0) {
+      return NextResponse.json({ error: "quote_amount must be a non-negative number" }, { status: 400 });
+    }
+    update.quote_amount = rest.quote_amount;
+  }
   if (rest.quote_sent_at === null || typeof rest.quote_sent_at === "string") update.quote_sent_at = rest.quote_sent_at;
   if (rest.phone === null) {
     update.phone = null;

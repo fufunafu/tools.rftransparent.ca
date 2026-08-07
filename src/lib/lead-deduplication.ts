@@ -1,6 +1,8 @@
 import { sanitizePhone } from "@/lib/call-metrics";
 import type { Lead, LeadSubmission } from "@/lib/customer-service/leads";
 
+const CONSOLIDATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
 export interface ConsolidatedLead extends Lead {
   duplicate_count: number;
   duplicate_ids: string[];
@@ -104,6 +106,24 @@ function isHistoricalImport(lead: Lead): boolean {
   return typeof marker === "object" && marker !== null && !Array.isArray(marker);
 }
 
+function canJoinGroup(group: Lead[], lead: Lead): boolean {
+  const matching = group.filter((member) => sameContact(member, lead));
+  if (matching.length === 0) return false;
+
+  // Historical imports are supporting records for a real operational lead,
+  // even when the imported submission date is much older.
+  if (isHistoricalImport(lead)) return true;
+  const operationalMatches = matching.filter((member) => !isHistoricalImport(member));
+  if (operationalMatches.length === 0) return true;
+
+  const leadTime = new Date(lead.submitted_at).getTime();
+  const latestMatchingTime = Math.max(...operationalMatches.map(
+    (member) => new Date(member.submitted_at).getTime(),
+  ));
+  if (!Number.isFinite(leadTime) || !Number.isFinite(latestMatchingTime)) return false;
+  return leadTime - latestMatchingTime <= CONSOLIDATION_WINDOW_MS;
+}
+
 function mergeGroup(group: Lead[]): ConsolidatedLead {
   const chronological = [...group].sort(
     (left, right) => new Date(left.submitted_at).getTime() - new Date(right.submitted_at).getTime(),
@@ -162,10 +182,10 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
 }
 
 /**
- * Combine submissions sharing either a normalized phone number or email into
- * one customer-level lead, regardless of source or form. The strongest
- * workflow row remains canonical while every original submission stays
- * available in the detail panel.
+ * Combine likely duplicate submissions sharing a normalized phone number or
+ * email within one seven-day lead lifecycle. A later inquiry starts a new
+ * lead so returning customers remain visible in recent queues and analytics.
+ * Historical imports may still attach to their matching operational lead.
  */
 export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const chronological = [...leads].sort(
@@ -174,10 +194,18 @@ export function consolidateDuplicateLeads(leads: Lead[]): ConsolidatedLead[] {
   const groups: Lead[][] = [];
 
   for (const lead of chronological) {
-    const group = groups.find((candidate) => candidate.some((member) => sameContact(member, lead)));
+    const matchingGroups = groups.filter((group) => canJoinGroup(group, lead));
+    if (matchingGroups.length === 0) {
+      groups.push([lead]);
+      continue;
+    }
 
-    if (group) group.push(lead);
-    else groups.push([lead]);
+    const primary = matchingGroups[0];
+    primary.push(lead);
+    for (const matchingGroup of matchingGroups.slice(1)) {
+      primary.push(...matchingGroup);
+      groups.splice(groups.indexOf(matchingGroup), 1);
+    }
   }
 
   return groups

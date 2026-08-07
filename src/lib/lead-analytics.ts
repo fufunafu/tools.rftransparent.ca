@@ -1,7 +1,7 @@
 import type { LeadSource } from "@/lib/customer-service/leads";
 import { isCallablePhone } from "@/lib/call-metrics";
 
-export type LeadTrendRange = "30d" | "90d" | "12m";
+export type LeadTrendRange = "7d" | "30d" | "90d" | "12m";
 
 export interface LeadTrendPoint {
   label: string;
@@ -100,6 +100,7 @@ export function buildCustomLeadTrend(
   leads: LeadDateSource[],
   from: string,
   to: string,
+  now = new Date(),
 ): LeadTrendSummary {
   const parsedFrom = parseDateKey(from);
   const parsedTo = parseDateKey(to);
@@ -108,8 +109,13 @@ export function buildCustomLeadTrend(
   const start = Math.min(parsedFrom, parsedTo);
   const end = Math.max(parsedFrom, parsedTo);
   const spanDays = end - start + 1;
-  if (spanDays > 180) return buildCustomMonthlyTrend(leads, start, end);
-  return buildDayWindow(leads, start, end, spanDays <= 45 ? 1 : 7);
+  const previousEndTimeOfDayMs = end === torontoDayNumber(now)
+    ? torontoTimeOfDayMs(now)
+    : undefined;
+  if (spanDays > 180) {
+    return buildCustomMonthlyTrend(leads, start, end, previousEndTimeOfDayMs);
+  }
+  return buildDayWindow(leads, start, end, spanDays <= 45 ? 1 : 7, previousEndTimeOfDayMs);
 }
 
 export function isLeadInCustomDateRange(
@@ -135,11 +141,11 @@ function buildDailyTrend(
   range: Exclude<LeadTrendRange, "12m">,
   now: Date,
 ): LeadTrendSummary {
-  const days = range === "30d" ? 30 : 90;
-  const bucketDays = range === "30d" ? 1 : 7;
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  const bucketDays = range === "90d" ? 7 : 1;
   const today = torontoDayNumber(now);
   const currentStart = today - days + 1;
-  return buildDayWindow(leads, currentStart, today, bucketDays);
+  return buildDayWindow(leads, currentStart, today, bucketDays, torontoTimeOfDayMs(now));
 }
 
 function buildDayWindow(
@@ -147,6 +153,7 @@ function buildDayWindow(
   currentStart: number,
   currentEnd: number,
   bucketDays: number,
+  previousEndTimeOfDayMs?: number,
 ): LeadTrendSummary {
   const days = currentEnd - currentStart + 1;
   const previousStart = currentStart - days;
@@ -176,7 +183,15 @@ function buildDayWindow(
       addSource(current, lead.source);
       const bucket = Math.floor((day - currentStart) / bucketDays);
       addSource(points[bucket], lead.source);
-    } else if (day >= previousStart && day <= previousEnd) {
+    } else if (
+      day >= previousStart
+      && day <= previousEnd
+      && (
+        previousEndTimeOfDayMs == null
+        || day < previousEnd
+        || torontoTimeOfDayMs(submitted) <= previousEndTimeOfDayMs
+      )
+    ) {
       addSource(previous, lead.source);
     }
   }
@@ -188,6 +203,7 @@ function buildCustomMonthlyTrend(
   leads: LeadDateSource[],
   currentStartDay: number,
   currentEndDay: number,
+  previousEndTimeOfDayMs?: number,
 ): LeadTrendSummary {
   const spanDays = currentEndDay - currentStartDay + 1;
   const previousStartDay = currentStartDay - spanDays;
@@ -219,7 +235,15 @@ function buildCustomMonthlyTrend(
     if (day >= currentStartDay && day <= currentEndDay) {
       addSource(current, lead.source);
       addSource(points[torontoMonthNumber(submitted) - firstMonth], lead.source);
-    } else if (day >= previousStartDay && day <= previousEndDay) {
+    } else if (
+      day >= previousStartDay
+      && day <= previousEndDay
+      && (
+        previousEndTimeOfDayMs == null
+        || day < previousEndDay
+        || torontoTimeOfDayMs(submitted) <= previousEndTimeOfDayMs
+      )
+    ) {
       addSource(previous, lead.source);
     }
   }
@@ -228,13 +252,14 @@ function buildCustomMonthlyTrend(
 }
 
 function buildMonthlyTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary {
-  const currentMonth = torontoMonthNumber(now);
-  const currentStart = currentMonth - 11;
+  const currentEnd = torontoMonthNumber(now);
+  const currentStart = currentEnd - 11;
   const previousStart = currentStart - 12;
   const previousEnd = currentStart - 1;
+  const previousEndPosition = torontoMonthPositionMs(now);
   const points: LeadTrendPoint[] = [];
 
-  for (let month = currentStart; month <= currentMonth; month += 1) {
+  for (let month = currentStart; month <= currentEnd; month += 1) {
     const monthStart = dayNumberFromMonth(month);
     const monthEnd = dayNumberFromMonth(month + 1) - 1;
     points.push({
@@ -254,10 +279,14 @@ function buildMonthlyTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary
     const submitted = new Date(lead.submitted_at);
     if (Number.isNaN(submitted.getTime())) continue;
     const month = torontoMonthNumber(submitted);
-    if (month >= currentStart && month <= currentMonth) {
+    if (month >= currentStart && month <= currentEnd) {
       addSource(current, lead.source);
       addSource(points[month - currentStart], lead.source);
-    } else if (month >= previousStart && month <= previousEnd) {
+    } else if (
+      month >= previousStart
+      && month <= previousEnd
+      && (month < previousEnd || torontoMonthPositionMs(submitted) <= previousEndPosition)
+    ) {
       addSource(previous, lead.source);
     }
   }
@@ -296,6 +325,24 @@ function torontoDayNumber(date: Date): number {
 function torontoMonthNumber(date: Date): number {
   const { year, month } = torontoParts(date);
   return year * 12 + month - 1;
+}
+
+function torontoTimeOfDayMs(date: Date): number {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TORONTO_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return ((value("hour") * 60 + value("minute")) * 60 + value("second")) * 1000
+    + date.getUTCMilliseconds();
+}
+
+function torontoMonthPositionMs(date: Date): number {
+  return (torontoParts(date).day - 1) * DAY_MS + torontoTimeOfDayMs(date);
 }
 
 function monthNumberFromDay(dayNumber: number): number {

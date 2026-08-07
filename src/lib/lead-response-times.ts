@@ -40,3 +40,16 @@ export function averageLeadResponseTimeMs(
   if (available.length === 0) return null;
   return available.reduce((sum, duration) => sum + duration, 0) / available.length;
 }
+
+export function medianLeadResponseTimeMs(
+  durations: Array<number | null>,
+): number | null {
+  const available = durations
+    .filter((duration): duration is number => duration != null)
+    .sort((left, right) => left - right);
+  if (available.length === 0) return null;
+  const middle = Math.floor(available.length / 2);
+  return available.length % 2 === 1
+    ? available[middle]
+    : (available[middle - 1] + available[middle]) / 2;
+}

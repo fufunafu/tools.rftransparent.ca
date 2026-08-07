@@ -103,6 +103,46 @@ describe("consolidateDuplicateLeads", () => {
     ]);
   });
 
+  it("keeps a returning inquiry after seven days as a new lead lifecycle", () => {
+    const result = consolidateDuplicateLeads([
+      lead("original", {
+        submitted_at: "2026-06-01T12:00:00.000Z",
+        outcome: "lost",
+        lost_reason: "Project delayed",
+      }),
+      lead("returning", {
+        submitted_at: "2026-06-10T12:00:00.000Z",
+        outcome: "new",
+      }),
+    ]);
+
+    expect(result).toHaveLength(2);
+    expect(result.map((item) => item.id)).toEqual(["returning", "original"]);
+    expect(result[0]).toMatchObject({ outcome: "new", duplicate_count: 1 });
+  });
+
+  it("merges overlapping identity groups when a submission connects both", () => {
+    const result = consolidateDuplicateLeads([
+      lead("email-match", {
+        email: "shared@example.com",
+        phone: "+1 780 555 0101",
+      }),
+      lead("phone-match", {
+        email: "other@example.com",
+        phone: "+1 780 555 0102",
+        submitted_at: "2026-08-03T12:10:00.000Z",
+      }),
+      lead("bridge", {
+        email: "shared@example.com",
+        phone: "+1 780 555 0102",
+        submitted_at: "2026-08-03T12:20:00.000Z",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].duplicate_ids).toEqual(["email-match", "bridge", "phone-match"]);
+  });
+
   it("shows a combined Meta lead like Larry as No answer when either submission has no answer", () => {
     const result = consolidateDuplicateLeads([
       lead("larry-first", {

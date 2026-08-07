@@ -33,9 +33,9 @@ import {
   isLeadSpamReason,
 } from "@/lib/customer-service/lead-spam";
 import {
-  averageLeadResponseTimeMs,
   formatLeadResponseTime,
   leadResponseTimeMs,
+  medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
@@ -78,6 +78,7 @@ const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
 type TrendSelection = LeadTrendRange | "custom";
 
 const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string }[] = [
+  { value: "7d", label: "7 days", metricLabel: "7 days" },
   { value: "30d", label: "30 days", metricLabel: "30 days" },
   { value: "90d", label: "90 days", metricLabel: "90 days" },
   { value: "12m", label: "12 months", metricLabel: "12 months" },
@@ -210,10 +211,11 @@ interface SyncAllResult {
 type SyncAutomationJob = "sync-calls" | "sync-followup";
 
 interface SourceResponseMetrics {
-  averageCallMs: number | null;
+  medianCallMs: number | null;
   callCount: number;
-  averageQuoteMs: number | null;
+  medianQuoteMs: number | null;
   quoteCount: number;
+  eligibleCount: number;
 }
 
 type SourceResponseMetricsBySource = Record<LeadSource, SourceResponseMetrics>;
@@ -482,7 +484,7 @@ function LeadDetailPanel({
   const handleOutcomeChange = async (outcome: Outcome) => {
     if (outcome === lead.outcome || savingOutcome) return;
     setSavingOutcome(outcome);
-    await patchLead({ outcome });
+    await patchLead({ outcome }, true);
     setSavingOutcome(null);
   };
 
@@ -491,24 +493,32 @@ function LeadDetailPanel({
     setSavingSpam(true);
     await patchLead(spamMarked
       ? { outcome: "new", not_applicable_reason: null }
-      : { outcome: "not_applicable", not_applicable_reason: LEAD_SPAM_REASON });
+      : { outcome: "not_applicable", not_applicable_reason: LEAD_SPAM_REASON }, true);
     setSavingSpam(false);
   };
 
   const handleSaveQuote = async () => {
+    const savedQuoteNumber = quoteNumber.trim();
+    const savedQuoteAmount = quoteAmount.trim() ? Number(quoteAmount) : null;
+    if (savedQuoteAmount != null && (!Number.isFinite(savedQuoteAmount) || savedQuoteAmount < 0)) {
+      setSaveError("Enter a valid non-negative quote amount");
+      return;
+    }
     const saved = await patchLead({
-      quote_number: quoteNumber.trim() || null,
-      quote_amount: quoteAmount.trim() ? Number(quoteAmount) : null,
-      quote_sent_at: quoteNumber.trim() ? new Date().toISOString() : null,
-      outcome: quoteNumber.trim() && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
-    });
+      quote_number: savedQuoteNumber || null,
+      quote_amount: savedQuoteAmount,
+      quote_sent_at: savedQuoteNumber
+        ? lead.first_quote_at ?? lead.quote_sent_at ?? new Date().toISOString()
+        : null,
+      outcome: savedQuoteNumber && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
+    }, true);
     if (saved) setEditingQuote(false);
   };
 
   const handleSavePhone = async () => {
     const phone = phoneNumber.trim();
     if (!isCallablePhone(phone)) return;
-    const saved = await patchLead({ phone });
+    const saved = await patchLead({ phone }, true);
     if (saved) setEditingPhone(false);
   };
 
@@ -859,6 +869,8 @@ function LeadDetailPanel({
               />
               <input
                 type="number"
+                min="0"
+                step="0.01"
                 value={quoteAmount}
                 onChange={(e) => setQuoteAmount(e.target.value)}
                 placeholder="Amount (CAD)"
@@ -955,7 +967,7 @@ function LeadDetailPanel({
                 if (val === savedValue) return;
                 patchLead(lead.outcome === "lost"
                   ? { lost_reason: val || null }
-                  : { not_applicable_reason: val || null });
+                  : { not_applicable_reason: val || null }, true);
               }}
               placeholder={lead.outcome === "lost" ? "Lost reason" : "Reason, such as spam, forwarded, or unquotable"}
               className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
@@ -965,7 +977,7 @@ function LeadDetailPanel({
             defaultValue={lead.notes ?? ""}
             onBlur={(e) => {
               const val = e.target.value.trim();
-              if (val !== (lead.notes ?? "")) patchLead({ notes: val || null });
+              if (val !== (lead.notes ?? "")) patchLead({ notes: val || null }, true);
             }}
             placeholder="Internal notes"
             rows={3}
@@ -1076,12 +1088,24 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
     }
   };
 
-  const queueLeads = useMemo(
+  const trend = useMemo(
     () => trendRange === "custom"
-      ? leads.filter((lead) => isLeadInCustomDateRange(lead, customFrom, customTo))
-      : leads,
+      ? buildCustomLeadTrend(leads, customFrom, customTo)
+      : buildLeadTrend(leads, trendRange),
     [leads, trendRange, customFrom, customTo],
   );
+  const analysisLeads = useMemo(() => {
+    const firstPoint = trend.points[0];
+    const lastPoint = trend.points.at(-1);
+    return firstPoint && lastPoint
+      ? leads.filter((lead) => isLeadInCustomDateRange(
+          lead,
+          firstPoint.rangeStart,
+          lastPoint.rangeEnd,
+        ))
+      : [];
+  }, [leads, trend]);
+  const queueLeads = analysisLeads;
 
   const sourceLeads = useMemo(
     () => sourceFilter === "all"
@@ -1128,12 +1152,8 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
       ))
       .filter((duration): duration is number => duration != null);
     return {
-      averageCallMs: callTimes.length > 0
-        ? callTimes.reduce((sum, duration) => sum + duration, 0) / callTimes.length
-        : null,
-      averageQuoteMs: quoteTimes.length > 0
-        ? quoteTimes.reduce((sum, duration) => sum + duration, 0) / quoteTimes.length
-        : null,
+      medianCallMs: medianLeadResponseTimeMs(callTimes),
+      medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
     };
   }, [filtered]);
 
@@ -1144,24 +1164,6 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
     }
     return result;
   }, [sourceLeads]);
-
-  const analysis = useMemo(() => {
-    const selectedTrend = trendRange === "custom"
-      ? buildCustomLeadTrend(leads, customFrom, customTo)
-      : buildLeadTrend(leads, trendRange);
-    const firstPoint = selectedTrend.points[0];
-    const lastPoint = selectedTrend.points.at(-1);
-    const periodLeads = firstPoint && lastPoint
-      ? leads.filter((lead) => isLeadInCustomDateRange(
-          lead,
-          firstPoint.rangeStart,
-          lastPoint.rangeEnd,
-        ))
-      : [];
-    return { trend: selectedTrend, leads: periodLeads };
-  }, [leads, trendRange, customFrom, customTo]);
-  const trend = analysis.trend;
-  const analysisLeads = analysis.leads;
 
   const metrics = useMemo(() => {
     const funnel = calculateLeadFunnel(analysisLeads);
@@ -1224,10 +1226,11 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
         lead.first_quote_at ?? lead.quote_sent_at,
       ));
       return {
-        averageCallMs: averageLeadResponseTimeMs(callTimes),
+        medianCallMs: medianLeadResponseTimeMs(callTimes),
         callCount: callTimes.filter((duration) => duration != null).length,
-        averageQuoteMs: averageLeadResponseTimeMs(quoteTimes),
+        medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
         quoteCount: quoteTimes.filter((duration) => duration != null).length,
+        eligibleCount: applicableLeads.length,
       };
     };
     return { website: summarize("website"), meta: summarize("meta") };
@@ -1243,8 +1246,8 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
     website: queueLeads.filter((lead) => lead.source === "website").length,
     meta: queueLeads.filter((lead) => lead.source === "meta").length,
   }), [queueLeads]);
-  const customQueueDateRange = trendRange === "custom"
-    ? formatCustomDateRange(customFrom, customTo)
+  const selectedDateRange = trend.points[0] && trend.points.at(-1)
+    ? formatCustomDateRange(trend.points[0].rangeStart, trend.points.at(-1)!.rangeEnd)
     : null;
 
   const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
@@ -1357,7 +1360,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
             <FunnelComparison
               metrics={metricsBySource}
               responseMetrics={responseMetricsBySource}
-              periodLabel={customQueueDateRange ?? trendLabel}
+              periodLabel={selectedDateRange ?? trendLabel}
             />
           </section>
 
@@ -1365,7 +1368,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
         <div className="flex flex-col justify-between gap-2.5 border-b border-sand-200 px-4 py-2.5 lg:flex-row lg:items-center xl:items-stretch xl:flex-col">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
-            <p className="text-xs text-sand-500 mt-0.5">Website and Meta submissions over time</p>
+            <p className="text-xs text-sand-500 mt-0.5">Website and Meta leads; matching submissions within 7 days count once</p>
           </div>
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center xl:items-start xl:flex-col">
             <div className="flex items-center gap-3 text-xs">
@@ -1497,16 +1500,16 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
               {filtered.length === queueLeads.length
                 ? `${queueLeads.length} leads`
                 : `${filtered.length} of ${queueLeads.length} leads`}
-              {customQueueDateRange ? ` | ${customQueueDateRange}` : ""}
+              {selectedDateRange ? ` | ${selectedDateRange}` : ""}
             </p>
           </div>
           <div className="hidden sm:flex items-center gap-3 text-xs text-sand-500">
             <span>
-              Avg. call <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.averageCallMs)}</strong>
+              Median call <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.medianCallMs)}</strong>
             </span>
             <span className="h-4 w-px bg-sand-200" aria-hidden="true" />
             <span>
-              Avg. quote <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.averageQuoteMs)}</strong>
+              Median quote <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.medianQuoteMs)}</strong>
             </span>
           </div>
         </div>
@@ -1573,15 +1576,13 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
           <div className="py-12 text-center text-red-500 text-sm">Lead data is unavailable.</div>
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sand-400 text-sm">
-            {queueLeads.length === 0 && trendRange === "custom"
-              ? "No leads were received in this date range."
-              : leads.length === 0
-              ? sourceFilter === "meta"
-                ? "No Meta leads have been imported yet."
-                : sourceFilter === "website"
-                  ? "No website leads have been received yet."
-                  : "No leads have been received yet."
-              : "No leads match this filter."}
+            {leads.length === 0
+              ? "No leads have been received yet."
+              : queueLeads.length === 0
+                ? "No leads were received in this date range."
+                : sourceLeads.length === 0
+                  ? `No ${sourceFilter === "meta" ? "Meta" : "website"} leads were received in this date range.`
+                  : "No leads match this filter."}
           </div>
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-220px)]">
@@ -1761,12 +1762,12 @@ function SummaryMetric({
 const FUNNEL_COMPARISON_ROWS = [
   { label: "Call attempt", rate: "callRate", count: "attempted", denominator: "callEligible" },
   { label: "Quote rate", rate: "quoteRate", count: "quoted", denominator: "total" },
-  { label: "Order conversion", rate: "conversionRate", count: "won", denominator: "total" },
+  { label: "Lead-to-order (current)", rate: "conversionRate", count: "won", denominator: "total" },
 ] as const;
 
 const RESPONSE_COMPARISON_ROWS = [
-  { label: "Avg. time to call", value: "averageCallMs", count: "callCount", unit: "calls" },
-  { label: "Avg. time to quote", value: "averageQuoteMs", count: "quoteCount", unit: "quotes" },
+  { label: "Median elapsed to call", value: "medianCallMs", count: "callCount" },
+  { label: "Median elapsed to quote", value: "medianQuoteMs", count: "quoteCount" },
 ] as const;
 
 function FunnelComparison({
@@ -1824,18 +1825,24 @@ function FunnelComparison({
               <th className="px-4 py-1.5 text-xs font-medium text-sand-600">{row.label}</th>
               {(["website", "meta"] as const).map((source) => (
                 <td key={source} className="px-3 py-1.5">
-                  <span className="text-sm font-semibold text-sand-900">
-                    {formatLeadResponseTime(responseMetrics[source][row.value])}
-                  </span>
-                  <span className="ml-2 whitespace-nowrap text-[10px] text-sand-400">
-                    {responseMetrics[source][row.count]} {row.unit}
-                  </span>
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                    <span className="whitespace-nowrap text-sm font-semibold text-sand-900">
+                      {formatLeadResponseTime(responseMetrics[source][row.value])}
+                    </span>
+                    <span className="whitespace-nowrap text-[10px] text-sand-400">
+                      {responseMetrics[source][row.count]} / {responseMetrics[source].eligibleCount} completed
+                    </span>
+                  </div>
                 </td>
               ))}
             </tr>
           ))}
         </tbody>
       </table>
+      <p className="border-t border-sand-100 px-4 py-2 text-[10px] leading-4 text-sand-400">
+        Rates follow leads first submitted in this period and use their current stage. Recent cohorts are still maturing.
+        Response medians include completed responses only and measure elapsed time, including nights and weekends.
+      </p>
     </div>
   );
 }

@@ -23,11 +23,15 @@ async function fetchAllPages<T>(
   }>,
 ): Promise<T[]> {
   const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
+  for (let from = 0; ;) {
     const { data, error } = await page(from, from + PAGE_SIZE - 1);
     if (error) throw new Error(error.message);
-    rows.push(...(data ?? []));
-    if (!data || data.length < PAGE_SIZE) return rows;
+    if (!data || data.length === 0) return rows;
+    rows.push(...data);
+    // Supabase can cap a requested page below PAGE_SIZE. Advance by the
+    // number actually returned and continue until the first empty page so a
+    // project-level response limit cannot silently truncate lead analytics.
+    from += data.length;
   }
 }
 

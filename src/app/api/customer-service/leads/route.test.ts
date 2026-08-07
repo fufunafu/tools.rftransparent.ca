@@ -31,7 +31,7 @@ vi.mock("@/lib/customer-service/meta-leads", () => ({
   syncRecentMetaLeads: vi.fn(),
 }));
 
-import { GET } from "@/app/api/customer-service/leads/route";
+import { GET, PATCH } from "@/app/api/customer-service/leads/route";
 
 function queryBuilder(range: ReturnType<typeof vi.fn>) {
   const builder = {
@@ -48,7 +48,7 @@ function queryBuilder(range: ReturnType<typeof vi.fn>) {
 beforeEach(() => {
   vi.clearAllMocks();
   isAuthenticatedMock.mockResolvedValue(true);
-  leadRangeMock.mockResolvedValue({
+  leadRangeMock.mockResolvedValueOnce({
     data: [{
       id: "lead-1",
       source: "website",
@@ -75,16 +75,16 @@ beforeEach(() => {
       updated_at: "2026-08-05T13:00:00.000Z",
     }],
     error: null,
-  });
-  attemptRangeMock.mockResolvedValue({
+  }).mockResolvedValue({ data: [], error: null });
+  attemptRangeMock.mockResolvedValueOnce({
     data: [{
       lead_id: "lead-1",
       staff: "Extension 212",
       called_at: "2026-08-05T12:30:00.000Z",
     }],
     error: null,
-  });
-  attachmentRangeMock.mockResolvedValue({
+  }).mockResolvedValue({ data: [], error: null });
+  attachmentRangeMock.mockResolvedValueOnce({
     data: [{
       id: "attachment-1",
       lead_id: "lead-1",
@@ -95,7 +95,7 @@ beforeEach(() => {
       created_at: "2026-08-05T12:00:01.000Z",
     }],
     error: null,
-  });
+  }).mockResolvedValue({ data: [], error: null });
 
   const leadsQuery = queryBuilder(leadRangeMock);
   const attachmentsQuery = queryBuilder(attachmentRangeMock);
@@ -110,12 +110,16 @@ beforeEach(() => {
 });
 
 describe("GET /api/customer-service/leads", () => {
-  it("pages linked attempts without sending every lead ID in one filter", async () => {
+  it("continues pagination after a server-capped partial page", async () => {
     const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
     expect(attemptInMock).not.toHaveBeenCalled();
+    expect(leadRangeMock).toHaveBeenNthCalledWith(1, 0, 999);
+    expect(leadRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
+    expect(attachmentRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
+    expect(attemptRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
     expect(body.leads[0]).toMatchObject({
       first_call_at: "2026-08-05T12:30:00.000Z",
       last_call_at: "2026-08-05T12:30:00.000Z",
@@ -125,6 +129,24 @@ describe("GET /api/customer-service/leads", () => {
         id: "attachment-1",
         filename: "drawing.pdf",
       })],
+    });
+  });
+});
+
+describe("PATCH /api/customer-service/leads", () => {
+  it("rejects a negative quote amount", async () => {
+    const response = await PATCH(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads",
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "lead-1", quote_amount: -1 }),
+      },
+    ));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: "quote_amount must be a non-negative number",
     });
   });
 });
