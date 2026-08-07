@@ -72,6 +72,35 @@ describe("calculateLeadFunnel", () => {
     });
   });
 
+  it("includes historical imports whose workflow status was unknown", () => {
+    const result = calculateLeadFunnel([
+      {
+        call_status: "not_called",
+        phone: "5145551234",
+        quote_number: null,
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        raw_payload: { historical_import: { source_key: "historical-1" } },
+      },
+      {
+        call_status: "not_called",
+        phone: "5145555678",
+        quote_number: null,
+        outcome: "not_applicable",
+        not_applicable_reason: "Spam: marketing solicitation",
+      },
+    ]);
+
+    expect(result).toMatchObject({
+      total: 1,
+      callEligible: 1,
+      attempted: 0,
+      quoted: 0,
+      won: 0,
+      callRate: 0,
+    });
+  });
+
   it("does not penalize call rate when an uncalled lead has no phone", () => {
     const result = calculateLeadFunnel([
       {
@@ -248,6 +277,34 @@ describe("buildLeadTrend", () => {
     );
 
     expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
+  });
+
+  it("groups the full lead history into monthly buckets", () => {
+    const result = buildLeadTrend(
+      [
+        { source: "website", submitted_at: "2024-03-10T12:00:00.000Z" },
+        { source: "meta", submitted_at: "2025-11-15T12:00:00.000Z" },
+        { source: "website", submitted_at: "2026-08-01T12:00:00.000Z" },
+        { source: "meta", submitted_at: "2026-08-10T12:00:00.000Z" },
+      ],
+      "all",
+      NOW,
+    );
+
+    expect(result.points[0]).toMatchObject({
+      label: "Mar",
+      rangeStart: "2024-03-10",
+      website: 1,
+    });
+    expect(result.points.at(-1)).toMatchObject({
+      label: "Aug",
+      rangeEnd: "2026-08-03",
+      website: 1,
+      meta: 0,
+    });
+    expect(result.current).toEqual({ total: 3, website: 2, meta: 1 });
+    expect(result.previous.total).toBe(0);
+    expect(result.changePct).toBeNull();
   });
 
   it("supports an exact custom date range", () => {

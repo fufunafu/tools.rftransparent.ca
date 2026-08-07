@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type {
   CallStatus,
@@ -22,6 +22,7 @@ import {
   calculateLeadFunnel,
   calculateLeadFunnelBySource,
   isLeadInCustomDateRange,
+  isLeadIncludedInPerformance,
   type LeadFunnelMetricsBySource,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
@@ -46,11 +47,21 @@ const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart")
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", {
+    timeZone: "America/Toronto",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return new Date(iso).toLocaleString("en-US", {
+    timeZone: "America/Toronto",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 function formatFileSize(bytes: number): string {
@@ -58,8 +69,8 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function timeAgo(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
+function timeAgo(iso: string, now: number): string {
+  const diffMs = now - new Date(iso).getTime();
   const minutes = Math.floor(diffMs / (1000 * 60));
   if (minutes < 1) return "Just now";
   if (minutes < 60) return `${minutes}m ago`;
@@ -82,8 +93,13 @@ const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string 
   { value: "30d", label: "30 days", metricLabel: "30 days" },
   { value: "90d", label: "90 days", metricLabel: "90 days" },
   { value: "12m", label: "12 months", metricLabel: "12 months" },
+  { value: "all", label: "All time", metricLabel: "all time" },
   { value: "custom", label: "Custom", metricLabel: "custom" },
 ];
+
+const subscribeToHydration = () => () => {};
+const hydratedSnapshot = () => true;
+const serverSnapshot = () => false;
 
 function defaultCustomDates(): { from: string; to: string } {
   const formatter = new Intl.DateTimeFormat("en-CA", {
@@ -215,7 +231,8 @@ interface SourceResponseMetrics {
   callCount: number;
   medianQuoteMs: number | null;
   quoteCount: number;
-  eligibleCount: number;
+  applicableCount: number;
+  callEligibleCount: number;
 }
 
 type SourceResponseMetricsBySource = Record<LeadSource, SourceResponseMetrics>;
@@ -316,20 +333,47 @@ function SubmissionCard({
           <div>
             <p className="text-[11px] font-medium text-sand-400 mb-2">Project drawing</p>
             <div className="space-y-2">
-              {submission.attachments.map((attachment) => (
-                <a
-                  key={attachment.id}
-                  href={`/api/customer-service/leads/attachments/${attachment.id}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 text-sm text-blue-800 transition-colors hover:bg-blue-100"
-                >
-                  <span className="min-w-0 truncate font-medium">{attachment.filename}</span>
-                  <span className="shrink-0 text-xs text-blue-600">
-                    {formatFileSize(attachment.size_bytes)} · Open
-                  </span>
-                </a>
-              ))}
+              {submission.attachments.map((attachment) => {
+                const attachmentUrl = `/api/customer-service/leads/attachments/${attachment.id}`;
+                return (
+                  <div
+                    key={attachment.id}
+                    className="flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <a
+                        href={attachmentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block truncate text-sm font-medium text-blue-800 hover:underline"
+                        title={attachment.filename}
+                      >
+                        {attachment.filename}
+                      </a>
+                      <p className="mt-0.5 text-xs text-blue-600">
+                        {formatFileSize(attachment.size_bytes)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <a
+                        href={attachmentUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-md border border-blue-200 bg-white px-2.5 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        View
+                      </a>
+                      <a
+                        href={`${attachmentUrl}?download=1`}
+                        download={attachment.filename}
+                        className="rounded-md bg-blue-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+                      >
+                        Download
+                      </a>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
@@ -361,7 +405,13 @@ function LeadDetailPanel({
   onClose: () => void;
   onChanged: () => void | Promise<unknown>;
 }) {
-  const callAttemptLeadIds = lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id];
+  const detailUrl = `/api/customer-service/leads?view=details&lead_id=${encodeURIComponent(lead.id)}`;
+  const {
+    data: detailData,
+    error: detailError,
+    isLoading: detailsLoading,
+  } = useSWR<{ details: LeadSubmission[]; lead_ids: string[] }>(detailUrl, fetcher);
+  const callAttemptLeadIds = detailData?.lead_ids?.length ? detailData.lead_ids : [lead.id];
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
     `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}`,
     fetcher
@@ -387,8 +437,8 @@ function LeadDetailPanel({
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
   const submissions = useMemo(
     () => {
-      const values = lead.submissions?.length
-        ? lead.submissions
+      const values = detailData?.details?.length
+        ? detailData.details
         : [{
             id: lead.id,
             source: lead.source,
@@ -408,7 +458,7 @@ function LeadDetailPanel({
         (left, right) => new Date(right.submitted_at).getTime() - new Date(left.submitted_at).getTime(),
       );
     },
-    [lead],
+    [detailData?.details, lead],
   );
   const firstQuoteAt = lead.first_quote_at ?? lead.quote_sent_at;
   const timeToFirstCall = leadResponseTimeMs(lead.submitted_at, lead.first_call_at);
@@ -464,7 +514,7 @@ function LeadDetailPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(allSubmissions
-            ? { ids: lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id] }
+            ? { ids: callAttemptLeadIds }
             : { id: lead.id }),
           ...update,
         }),
@@ -748,14 +798,26 @@ function LeadDetailPanel({
             )}
           </dl>
           <div className="space-y-3">
-            {submissions.map((submission, index) => (
-              <SubmissionCard
-                key={submission.id}
-                submission={submission}
-                position={index + 1}
-                total={submissions.length}
-              />
-            ))}
+            {detailsLoading ? (
+              <div className="space-y-3" role="status" aria-label="Loading submission details">
+                {submissions.map((submission) => (
+                  <div key={submission.id} className="h-36 animate-pulse rounded-lg border border-sand-200 bg-sand-50" />
+                ))}
+              </div>
+            ) : detailError ? (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                Submission details could not be loaded.
+              </p>
+            ) : (
+              submissions.map((submission, index) => (
+                <SubmissionCard
+                  key={submission.id}
+                  submission={submission}
+                  position={index + 1}
+                  total={submissions.length}
+                />
+              ))
+            )}
           </div>
         </section>
 
@@ -991,7 +1053,13 @@ function LeadDetailPanel({
 
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
-export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[] | null }) {
+export default function LeadsDashboard({
+  initialLeads,
+  initialNow,
+}: {
+  initialLeads?: Lead[] | null;
+  initialNow: number;
+}) {
   const [filter, setFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
   const [search, setSearch] = useState("");
@@ -1003,6 +1071,17 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
+  const [now, setNow] = useState(initialNow);
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    hydratedSnapshot,
+    serverSnapshot,
+  );
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
   // Background refresh: SWR pauses polling while the tab is hidden
   // (refreshWhenHidden defaults to false) and revalidateOnFocus catches up
@@ -1025,7 +1104,10 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
     error: metaStatusError,
     mutate: refreshMetaStatus,
   } = useSWR<MetaStatus>("/api/customer-service/leads?view=meta_status", fetcher, autoRefreshOpts);
-  const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
+  const leads = useMemo(
+    () => (hydrated ? data?.leads : initialLeads) ?? [],
+    [data?.leads, hydrated, initialLeads],
+  );
   const { mutate } = useSWRConfig();
 
   const refresh = () => (
@@ -1090,9 +1172,9 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
 
   const trend = useMemo(
     () => trendRange === "custom"
-      ? buildCustomLeadTrend(leads, customFrom, customTo)
-      : buildLeadTrend(leads, trendRange),
-    [leads, trendRange, customFrom, customTo],
+      ? buildCustomLeadTrend(leads, customFrom, customTo, new Date(now))
+      : buildLeadTrend(leads, trendRange, new Date(now)),
+    [leads, trendRange, customFrom, customTo, now],
   );
   const analysisLeads = useMemo(() => {
     const firstPoint = trend.points[0];
@@ -1141,7 +1223,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
   }, [sourceLeads, filter, search, sortOrder]);
 
   const queueResponseMetrics = useMemo(() => {
-    const visibleLeads = filtered.filter((lead) => lead.outcome !== "not_applicable");
+    const visibleLeads = filtered.filter(isLeadIncludedInPerformance);
     const callTimes = visibleLeads
       .map((lead) => leadResponseTimeMs(lead.submitted_at, lead.first_call_at))
       .filter((duration): duration is number => duration != null);
@@ -1172,7 +1254,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
       l.call_status === "not_called" && isCallablePhone(l.phone)
     ));
     const overdueUncalled = uncalledLeads.filter(
-      (l) => Date.now() - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
+      (l) => now - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
     );
     const pipelineLeads = analysisLeads.filter((l) => l.outcome === "quoted");
     const pipelineValue = pipelineLeads
@@ -1208,7 +1290,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
       openQuoteCount: pipelineLeads.length,
       openQuoteCountBySource,
     };
-  }, [analysisLeads]);
+  }, [analysisLeads, now]);
   const metricsBySource = useMemo(
     () => calculateLeadFunnelBySource(analysisLeads),
     [analysisLeads],
@@ -1216,7 +1298,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
   const responseMetricsBySource = useMemo<SourceResponseMetricsBySource>(() => {
     const summarize = (source: LeadSource): SourceResponseMetrics => {
       const applicableLeads = analysisLeads.filter((lead) => (
-        lead.source === source && lead.outcome !== "not_applicable"
+        lead.source === source && isLeadIncludedInPerformance(lead)
       ));
       const callTimes = applicableLeads.map((lead) => (
         leadResponseTimeMs(lead.submitted_at, lead.first_call_at)
@@ -1230,7 +1312,10 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
         callCount: callTimes.filter((duration) => duration != null).length,
         medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
         quoteCount: quoteTimes.filter((duration) => duration != null).length,
-        eligibleCount: applicableLeads.length,
+        applicableCount: applicableLeads.length,
+        callEligibleCount: applicableLeads.filter((lead) => (
+          lead.call_status !== "not_called" || isCallablePhone(lead.phone)
+        )).length,
       };
     };
     return { website: summarize("website"), meta: summarize("meta") };
@@ -1238,7 +1323,9 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
 
   const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
   const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
-  const trendComparison = trend.previous.total === 0
+  const trendComparison = trendRange === "all"
+    ? "All recorded leads"
+    : trend.previous.total === 0
     ? trend.current.total > 0 ? "No leads in the previous period" : "No leads in this period"
     : `${Math.abs(trend.changePct ?? 0)}% ${Number(trend.changePct) >= 0 ? "increase" : "decrease"} vs previous ${comparisonLabel}`;
   const sourceCounts = useMemo(() => ({
@@ -1316,11 +1403,9 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
               sourceDetails={{
                 website: {
                   value: trend.current.website,
-                  detail: `${trend.current.total > 0 ? Math.round((trend.current.website / trend.current.total) * 100) : 0}% of period`,
                 },
                 meta: {
                   value: trend.current.meta,
-                  detail: `${trend.current.total > 0 ? Math.round((trend.current.meta / trend.current.total) * 100) : 0}% of period`,
                 },
               }}
             />
@@ -1332,11 +1417,9 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
               sourceDetails={{
                 website: {
                   value: metrics.uncalledBySource.website,
-                  detail: `${metrics.overdueUncalledBySource.website} overdue`,
                 },
                 meta: {
                   value: metrics.uncalledBySource.meta,
-                  detail: `${metrics.overdueUncalledBySource.meta} overdue`,
                 },
               }}
             />
@@ -1348,11 +1431,9 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
               sourceDetails={{
                 website: {
                   value: formatCADShort(metrics.pipelineBySource.website),
-                  detail: `${metrics.openQuoteCountBySource.website} quotes`,
                 },
                 meta: {
                   value: formatCADShort(metrics.pipelineBySource.meta),
-                  detail: `${metrics.openQuoteCountBySource.meta} quotes`,
                 },
               }}
             />
@@ -1630,7 +1711,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
                     </td>
                     <td className="px-3 py-3 text-sand-600">
                       <div>{formatDate(lead.submitted_at)}</div>
-                      <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at)}</div>
+                      <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at, now)}</div>
                     </td>
                     <td className="px-4 py-3">
                       <LeadResponseSummary lead={lead} />
@@ -1651,7 +1732,7 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
                       )}
                       {lead.last_called_by && lead.last_call_at && (
                         <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
-                          {lead.last_called_by} · {timeAgo(lead.last_call_at)}
+                          {lead.last_called_by} · {timeAgo(lead.last_call_at, now)}
                         </div>
                       )}
                     </td>
@@ -1713,7 +1794,6 @@ export default function LeadsDashboard({ initialLeads }: { initialLeads?: Lead[]
 
 interface SourceMetricDetail {
   value: string | number;
-  detail: string;
 }
 
 function SummaryMetric({
@@ -1730,27 +1810,24 @@ function SummaryMetric({
   sourceDetails: Record<LeadSource, SourceMetricDetail>;
 }) {
   return (
-    <div className="flex min-h-32 flex-col p-3">
+    <div className="flex min-w-0 flex-col p-2.5">
       <div>
-        <div className="mb-0.5 flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${color}`} />
-          <p className="text-[11px] text-sand-400 uppercase tracking-wider">{label}</p>
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
+          <p className="truncate text-[10px] uppercase tracking-wider text-sand-400" title={label}>{label}</p>
         </div>
-        <p className="text-xl font-semibold leading-6 text-sand-900">{value}</p>
-        {subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{subtitle}</p>}
+        <p className="text-lg font-semibold leading-5 text-sand-900">{value}</p>
+        {subtitle && <p className="mt-0.5 truncate text-[10px] leading-4 text-sand-400" title={subtitle}>{subtitle}</p>}
       </div>
-      <div className="mt-auto grid grid-cols-2 gap-2 border-t border-sand-100 pt-2">
+      <div className="mt-2 grid grid-cols-2 gap-2 border-t border-sand-100 pt-1.5">
         {(["website", "meta"] as const).map((source) => (
           <div key={source} className="min-w-0">
             <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
               <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
-              <span className="capitalize">{source}</span>
+              <span className="truncate capitalize">{source}</span>
             </div>
-            <p className="mt-0.5 truncate text-sm font-semibold text-sand-800" title={String(sourceDetails[source].value)}>
+            <p className="truncate text-xs font-semibold leading-4 text-sand-800" title={String(sourceDetails[source].value)}>
               {sourceDetails[source].value}
-            </p>
-            <p className="truncate text-[10px] text-sand-400" title={sourceDetails[source].detail}>
-              {sourceDetails[source].detail}
             </p>
           </div>
         ))}
@@ -1760,14 +1837,14 @@ function SummaryMetric({
 }
 
 const FUNNEL_COMPARISON_ROWS = [
-  { label: "Call attempt", rate: "callRate", count: "attempted", denominator: "callEligible" },
-  { label: "Quote rate", rate: "quoteRate", count: "quoted", denominator: "total" },
-  { label: "Lead-to-order (current)", rate: "conversionRate", count: "won", denominator: "total" },
+  { label: "Call attempt (callable)", rate: "callRate", count: "attempted", denominator: "callEligible" },
+  { label: "Quote rate (included)", rate: "quoteRate", count: "quoted", denominator: "total" },
+  { label: "Lead-to-order (included)", rate: "conversionRate", count: "won", denominator: "total" },
 ] as const;
 
 const RESPONSE_COMPARISON_ROWS = [
-  { label: "Median elapsed to call", value: "medianCallMs", count: "callCount" },
-  { label: "Median elapsed to quote", value: "medianQuoteMs", count: "quoteCount" },
+  { label: "Median elapsed to call", value: "medianCallMs", count: "callCount", denominator: "callEligibleCount" },
+  { label: "Median elapsed to quote", value: "medianQuoteMs", count: "quoteCount", denominator: "applicableCount" },
 ] as const;
 
 function FunnelComparison({
@@ -1830,7 +1907,7 @@ function FunnelComparison({
                       {formatLeadResponseTime(responseMetrics[source][row.value])}
                     </span>
                     <span className="whitespace-nowrap text-[10px] text-sand-400">
-                      {responseMetrics[source][row.count]} / {responseMetrics[source].eligibleCount} completed
+                      {responseMetrics[source][row.count]} / {responseMetrics[source][row.denominator]} completed
                     </span>
                   </div>
                 </td>
@@ -1840,7 +1917,8 @@ function FunnelComparison({
         </tbody>
       </table>
       <p className="border-t border-sand-100 px-4 py-2 text-[10px] leading-4 text-sand-400">
-        Rates follow leads first submitted in this period and use their current stage. Recent cohorts are still maturing.
+        Historical imports are included in performance rates. Spam, forwarded, and unquotable leads remain excluded.
+        Rates use the current stage of leads first submitted in this period, so recent cohorts are still maturing.
         Response medians include completed responses only and measure elapsed time, including nights and weekends.
       </p>
     </div>

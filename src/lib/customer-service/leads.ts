@@ -12,6 +12,9 @@ export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
 export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
+export const HISTORICAL_UNKNOWN_REASON =
+  "Historical Powerful Form Builder record; workflow status unknown";
+
 export interface LeadCallAttempt {
   id: string;
   lead_id: string;

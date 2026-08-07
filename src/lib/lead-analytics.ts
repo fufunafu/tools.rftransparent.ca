@@ -1,7 +1,10 @@
-import type { LeadSource } from "@/lib/customer-service/leads";
+import {
+  HISTORICAL_UNKNOWN_REASON,
+  type LeadSource,
+} from "@/lib/customer-service/leads";
 import { isCallablePhone } from "@/lib/call-metrics";
 
-export type LeadTrendRange = "7d" | "30d" | "90d" | "12m";
+export type LeadTrendRange = "7d" | "30d" | "90d" | "12m" | "all";
 
 export interface LeadTrendPoint {
   label: string;
@@ -30,6 +33,8 @@ interface LeadFunnelRow {
   phone?: string | null;
   quote_number: string | null;
   outcome: "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
+  not_applicable_reason?: string | null;
+  raw_payload?: Record<string, unknown> | null;
 }
 
 interface LeadFunnelSourceRow extends LeadFunnelRow {
@@ -51,9 +56,18 @@ export type LeadFunnelMetricsBySource = Record<LeadSource, LeadFunnelMetrics>;
 
 const DAY_MS = 86_400_000;
 const TORONTO_TIME_ZONE = "America/Toronto";
+export function isLeadIncludedInPerformance(lead: Pick<
+  LeadFunnelRow,
+  "outcome" | "not_applicable_reason" | "raw_payload"
+>): boolean {
+  if (lead.outcome !== "not_applicable") return true;
+  if (lead.not_applicable_reason === HISTORICAL_UNKNOWN_REASON) return true;
+  const marker = lead.raw_payload?.historical_import;
+  return typeof marker === "object" && marker !== null && !Array.isArray(marker);
+}
 
 export function calculateLeadFunnel(leads: LeadFunnelRow[]): LeadFunnelMetrics {
-  const applicableLeads = leads.filter((lead) => lead.outcome !== "not_applicable");
+  const applicableLeads = leads.filter(isLeadIncludedInPerformance);
   const total = applicableLeads.length;
   const callEligible = applicableLeads.filter((lead) => (
     lead.call_status !== "not_called"
@@ -93,6 +107,7 @@ export function buildLeadTrend(
   range: LeadTrendRange,
   now = new Date(),
 ): LeadTrendSummary {
+  if (range === "all") return buildAllTimeTrend(leads, now);
   return range === "12m" ? buildMonthlyTrend(leads, now) : buildDailyTrend(leads, range, now);
 }
 
@@ -138,7 +153,7 @@ export function isLeadInCustomDateRange(
 
 function buildDailyTrend(
   leads: LeadDateSource[],
-  range: Exclude<LeadTrendRange, "12m">,
+  range: Exclude<LeadTrendRange, "12m" | "all">,
   now: Date,
 ): LeadTrendSummary {
   const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
@@ -146,6 +161,24 @@ function buildDailyTrend(
   const today = torontoDayNumber(now);
   const currentStart = today - days + 1;
   return buildDayWindow(leads, currentStart, today, bucketDays, torontoTimeOfDayMs(now));
+}
+
+function buildAllTimeTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary {
+  const currentEnd = torontoDayNumber(now);
+  let currentStart = currentEnd;
+
+  for (const lead of leads) {
+    const submitted = new Date(lead.submitted_at);
+    if (Number.isNaN(submitted.getTime())) continue;
+    const day = torontoDayNumber(submitted);
+    if (day <= currentEnd && day < currentStart) currentStart = day;
+  }
+
+  const spanDays = currentEnd - currentStart + 1;
+  if (spanDays > 180) {
+    return buildCustomMonthlyTrend(leads, currentStart, currentEnd, torontoTimeOfDayMs(now));
+  }
+  return buildDayWindow(leads, currentStart, currentEnd, spanDays <= 45 ? 1 : 7, torontoTimeOfDayMs(now));
 }
 
 function buildDayWindow(

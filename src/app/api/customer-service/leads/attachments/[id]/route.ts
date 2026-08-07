@@ -9,7 +9,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   if (!(await getAuthenticatedUser())) {
@@ -37,12 +37,14 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
+  const shouldDownload = req.nextUrl.searchParams.get("download") === "1";
+
   return new NextResponse(file, {
     headers: {
       "Content-Type": attachment.content_type || "application/octet-stream",
       "Content-Disposition": attachmentContentDisposition(
         attachment.filename,
-        attachment.content_type === "image/svg+xml" ? "attachment" : "inline",
+        shouldDownload || attachment.content_type === "image/svg+xml" ? "attachment" : "inline",
       ),
       "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",

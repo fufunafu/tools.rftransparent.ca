@@ -1,20 +1,21 @@
 import { revalidateTag, unstable_cache } from "next/cache";
 import { getSupabase } from "@/lib/supabase";
 import {
-  extractContactFields,
+  HISTORICAL_UNKNOWN_REASON,
   type Lead,
   type LeadSource,
 } from "@/lib/customer-service/leads";
-import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
 import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
 
 const PAGE_SIZE = 1000;
 const REVALIDATE_SECONDS = 60;
 const LEADS_CACHE_TAG = "customer-service:leads";
+const LEAD_LIST_COLUMNS =
+  "id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to";
+const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 
 type LeadRow = { id: string; [key: string]: unknown };
 type AttemptRow = { lead_id: string; staff: string; called_at: string };
-type AttachmentRow = LeadAttachment;
 
 async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{
@@ -37,35 +38,29 @@ async function fetchAllPages<T>(
 
 export async function loadLeads(source?: LeadSource): Promise<Lead[]> {
   const supabase = getSupabase();
-  const leads = await fetchAllPages<LeadRow>((from, to) => {
+  const leadsPromise = fetchAllPages<LeadRow>((from, to) => {
     let query = supabase
       .from("leads")
-      .select("*")
+      .select(LEAD_LIST_COLUMNS)
       .order("submitted_at", { ascending: false })
       .range(from, to);
     if (source) query = query.eq("source", source);
     return query;
   });
+  const attemptsPromise = fetchAllPages<AttemptRow>((from, to) =>
+    supabase
+      .from("lead_call_attempts")
+      .select("lead_id, staff, called_at")
+      .order("called_at", { ascending: false })
+      .range(from, to),
+  );
 
-  const attachmentsByLead = new Map<string, LeadAttachment[]>();
-  let attachments: AttachmentRow[] = [];
-  try {
-    attachments = await fetchAllPages<AttachmentRow>((from, to) =>
-      supabase
-        .from("lead_attachments")
-        .select("id, lead_id, field_name, filename, content_type, size_bytes, created_at")
-        .order("created_at", { ascending: true })
-        .range(from, to),
-    );
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/lead_attachments|schema cache|relation/i.test(message)) throw error;
-  }
-  for (const attachment of attachments) {
-    const current = attachmentsByLead.get(attachment.lead_id) ?? [];
-    current.push(attachment);
-    attachmentsByLead.set(attachment.lead_id, current);
-  }
+  // These tables are independent. Keeping their pagination concurrent makes
+  // a cold cache cost one scan duration instead of the sum of both.
+  const [leads, attempts] = await Promise.all([
+    leadsPromise,
+    attemptsPromise,
+  ]);
 
   const attemptAgg = new Map<string, {
     count: number;
@@ -73,45 +68,26 @@ export async function loadLeads(source?: LeadSource): Promise<Lead[]> {
     last_at: string;
     last_staff: string;
   }>();
-  if (leads.length > 0) {
-    const attempts = await fetchAllPages<AttemptRow>((from, to) =>
-      supabase
-        .from("lead_call_attempts")
-        .select("lead_id, staff, called_at")
-        .order("called_at", { ascending: false })
-        .range(from, to),
-    );
-    for (const attempt of attempts) {
-      const previous = attemptAgg.get(attempt.lead_id);
-      if (!previous) {
-        attemptAgg.set(attempt.lead_id, {
-          count: 1,
-          first_at: attempt.called_at,
-          last_at: attempt.called_at,
-          last_staff: attempt.staff,
-        });
-      } else {
-        previous.count += 1;
-        previous.first_at = attempt.called_at;
-      }
+  for (const attempt of attempts) {
+    const previous = attemptAgg.get(attempt.lead_id);
+    if (!previous) {
+      attemptAgg.set(attempt.lead_id, {
+        count: 1,
+        first_at: attempt.called_at,
+        last_at: attempt.called_at,
+        last_staff: attempt.staff,
+      });
+    } else {
+      previous.count += 1;
+      previous.first_at = attempt.called_at;
     }
   }
 
   const enriched: Lead[] = leads.map((lead) => {
     const aggregate = attemptAgg.get(lead.id);
-    const recovered = lead.raw_payload
-      && typeof lead.raw_payload === "object"
-      && !Array.isArray(lead.raw_payload)
-      ? extractContactFields(lead.raw_payload as Record<string, unknown>)
-      : { name: null, email: null, phone: null, message: null };
-    const present = (value: unknown) => typeof value === "string" && value.trim() ? value : null;
     return {
       ...lead,
-      name: present(lead.name) ?? recovered.name,
-      email: present(lead.email) ?? recovered.email,
-      phone: present(lead.phone) ?? recovered.phone,
-      message: present(lead.message) ?? recovered.message,
-      attachments: attachmentsByLead.get(lead.id) ?? [],
+      raw_payload: {},
       call_attempts_count: aggregate?.count ?? 0,
       first_call_at: aggregate?.first_at ?? null,
       last_call_at: aggregate?.last_at ?? null,
@@ -119,7 +95,88 @@ export async function loadLeads(source?: LeadSource): Promise<Lead[]> {
     } as unknown as Lead;
   });
 
-  return consolidateDuplicateLeads(enriched);
+  const consolidated = consolidateDuplicateLeads(enriched).map((lead) => {
+    const summary: Partial<typeof lead> = { ...lead };
+    delete summary.submissions;
+    delete summary.attachments;
+    delete summary.form_id;
+    delete summary.page_url;
+    delete summary.message;
+    if (summary.not_applicable_reason === HISTORICAL_UNKNOWN_REASON) {
+      summary.not_applicable_reason = null;
+      summary.raw_payload = { historical_import: true };
+    } else {
+      delete summary.raw_payload;
+    }
+    delete summary.source_detail;
+    delete summary.call_attempts_count;
+    delete summary.duplicate_ids;
+    if ((summary.duplicate_count ?? 1) <= 1) {
+      delete summary.duplicate_count;
+    }
+    return summary as Lead;
+  });
+  if (process.env.NODE_ENV === "development") {
+    const fieldBytes = new Map<string, number>();
+    for (const lead of consolidated) {
+      for (const [key, value] of Object.entries(lead)) {
+        fieldBytes.set(key, (fieldBytes.get(key) ?? 0) + Buffer.byteLength(JSON.stringify(value)));
+      }
+    }
+    const largest = [...fieldBytes.entries()]
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 8)
+      .map(([key, bytes]) => `${key}=${bytes}`)
+      .join(", ");
+    console.info(
+      `[leads] lightweight list: ${Buffer.byteLength(JSON.stringify(consolidated))} bytes; ${largest}`,
+    );
+  }
+  return consolidated;
+}
+
+export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
+  const supabase = getSupabase();
+  const rows = await fetchAllPages<LeadRow>((from, to) => (
+    supabase
+      .from("leads")
+      .select(LEAD_GROUP_COLUMNS)
+      .order("submitted_at", { ascending: false })
+      .range(from, to)
+  ));
+  const leads = rows.map((row) => ({
+    id: row.id,
+    source: "website",
+    source_detail: null,
+    form_id: null,
+    page_url: null,
+    name: null,
+    email: typeof row.email === "string" ? row.email : null,
+    phone: typeof row.phone === "string" ? row.phone : null,
+    message: null,
+    installation_requested: null,
+    raw_payload: {},
+    submitted_at: String(row.submitted_at ?? ""),
+    call_status: "not_called",
+    outcome: row.not_applicable_reason === HISTORICAL_UNKNOWN_REASON
+      ? "not_applicable"
+      : "new",
+    quote_number: null,
+    quote_amount: null,
+    quote_sent_at: null,
+    lost_reason: null,
+    not_applicable_reason: typeof row.not_applicable_reason === "string"
+      ? row.not_applicable_reason
+      : null,
+    notes: null,
+    assigned_to: null,
+    created_at: "",
+    updated_at: "",
+  } satisfies Lead));
+  const group = consolidateDuplicateLeads(leads).find((lead) => (
+    lead.id === leadId || lead.duplicate_ids.includes(leadId)
+  ));
+  return group?.duplicate_ids ?? [leadId];
 }
 
 export const getCachedLeads = unstable_cache(

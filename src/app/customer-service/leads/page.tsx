@@ -14,10 +14,13 @@ export default async function LeadsPage() {
   if (!authenticated) redirect("/login");
 
   const initialLeads = await getCachedLeads().catch(() => null);
+  // Server snapshot used to keep relative dates stable through hydration.
+  // eslint-disable-next-line react-hooks/purity
+  const renderedAt = Date.now();
 
   return (
     <div className="mx-auto max-w-[1900px] space-y-6">
-      <LeadsDashboard initialLeads={initialLeads} />
+      <LeadsDashboard initialLeads={initialLeads} initialNow={renderedAt} />
     </div>
   );
 }

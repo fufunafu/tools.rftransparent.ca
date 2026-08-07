@@ -13,6 +13,59 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 const STORES = ["bc_transparent", "rf_transparent"];
+const SCRAPER_TIMEOUT_MS = 210_000;
+
+interface ScraperTarget {
+  scraper: "cik" | "grasshopper";
+  path: string;
+  store?: string;
+}
+
+interface ScraperResult {
+  [key: string]: unknown;
+  scraper: string;
+  store?: string;
+  status: string;
+  detail?: string;
+}
+
+async function runScraper(
+  scraperUrl: string,
+  headers: Record<string, string>,
+  target: ScraperTarget,
+): Promise<ScraperResult> {
+  try {
+    const res = await fetch(`${scraperUrl}${target.path}`, {
+      method: "POST",
+      headers,
+      signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS),
+    });
+    const json = await res.json().catch(() => null) as {
+      status?: string;
+      records_inserted?: number;
+      error?: string;
+    } | null;
+    return {
+      scraper: target.scraper,
+      ...(target.store ? { store: target.store } : {}),
+      status: json?.status || (res.ok ? "ok" : "error"),
+      detail: json?.records_inserted != null
+        ? `${json.records_inserted} records`
+        : json?.error || (!res.ok ? `HTTP ${res.status}` : undefined),
+    };
+  } catch (error) {
+    const timedOut = error instanceof Error
+      && (error.name === "TimeoutError" || error.name === "AbortError");
+    return {
+      scraper: target.scraper,
+      ...(target.store ? { store: target.store } : {}),
+      status: "error",
+      detail: timedOut
+        ? `Timed out after ${Math.round(SCRAPER_TIMEOUT_MS / 1000)} seconds`
+        : error instanceof Error ? error.message : "fetch failed",
+    };
+  }
+}
 
 async function handler(req: NextRequest) {
   if (!isAuthorizedCronRequest(req)) {
@@ -72,45 +125,15 @@ async function handler(req: NextRequest) {
     headers["Authorization"] = `Bearer ${scraperKey}`;
   }
 
-  const results: { scraper: string; store?: string; status: string; detail?: string }[] = [];
-
-  // CIK scraper — one call per store
-  for (const store of STORES) {
-    try {
-      const res = await fetch(`${scraperUrl}/scrape?store=${store}`, { method: "POST", headers });
-      const json = await res.json();
-      results.push({
-        scraper: "cik",
-        store,
-        status: json.status || (res.ok ? "ok" : "error"),
-        detail: json.records_inserted != null ? `${json.records_inserted} records` : json.error,
-      });
-    } catch (err) {
-      results.push({
-        scraper: "cik",
-        store,
-        status: "error",
-        detail: err instanceof Error ? err.message : "fetch failed",
-      });
-    }
-  }
-
-  // Grasshopper scraper — single call covers all stores
-  try {
-    const res = await fetch(`${scraperUrl}/scrape-grasshopper`, { method: "POST", headers });
-    const json = await res.json();
-    results.push({
-      scraper: "grasshopper",
-      status: json.status || (res.ok ? "ok" : "error"),
-      detail: json.records_inserted != null ? `${json.records_inserted} records` : json.error,
-    });
-  } catch (err) {
-    results.push({
-      scraper: "grasshopper",
-      status: "error",
-      detail: err instanceof Error ? err.message : "fetch failed",
-    });
-  }
+  // These imports are independent. Running them together keeps the manual
+  // sync within the route duration even when Grasshopper takes 2-3 minutes.
+  const targets: ScraperTarget[] = [
+    ...STORES.map((store) => ({ scraper: "cik" as const, store, path: `/scrape?store=${store}` })),
+    { scraper: "grasshopper", path: "/scrape-grasshopper" },
+  ];
+  const results = await Promise.all(
+    targets.map((target) => runScraper(scraperUrl, headers, target)),
+  );
 
   let leadCallSync: LeadCallSyncSummary | null = null;
   try {

@@ -60,7 +60,7 @@ beforeEach(() => {
       phone: "+15145551234",
       message: null,
       installation_requested: true,
-      raw_payload: {},
+      raw_payload: { fields: { internal_form_data: "large private payload" } },
       submitted_at: "2026-08-05T12:00:00.000Z",
       call_status: "called",
       outcome: "contacted",
@@ -118,17 +118,69 @@ describe("GET /api/customer-service/leads", () => {
     expect(attemptInMock).not.toHaveBeenCalled();
     expect(leadRangeMock).toHaveBeenNthCalledWith(1, 0, 999);
     expect(leadRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
-    expect(attachmentRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
+    expect(attachmentRangeMock).not.toHaveBeenCalled();
     expect(attemptRangeMock).toHaveBeenNthCalledWith(2, 1, 1000);
     expect(body.leads[0]).toMatchObject({
       first_call_at: "2026-08-05T12:30:00.000Z",
       last_call_at: "2026-08-05T12:30:00.000Z",
       last_called_by: "Extension 212",
-      call_attempts_count: 1,
-      attachments: [expect.objectContaining({
+    });
+    expect(body.leads[0].attachments).toBeUndefined();
+    expect(body.leads[0].raw_payload).toBeUndefined();
+    expect(body.leads[0].call_attempts_count).toBeUndefined();
+    expect(body.leads[0].duplicate_ids).toBeUndefined();
+  });
+
+  it("loads raw submissions only for the requested lead details", async () => {
+    const leadDetailsQuery = {
+      select: vi.fn(),
+      in: vi.fn(),
+    };
+    leadDetailsQuery.select.mockReturnValue(leadDetailsQuery);
+    leadDetailsQuery.in.mockResolvedValue({
+      data: [{ id: "lead-1", raw_payload: { fields: { project: "Railing" } } }],
+      error: null,
+    });
+    const attachmentDetailsQuery = {
+      select: vi.fn(),
+      in: vi.fn(),
+      order: vi.fn(),
+    };
+    attachmentDetailsQuery.select.mockReturnValue(attachmentDetailsQuery);
+    attachmentDetailsQuery.in.mockReturnValue(attachmentDetailsQuery);
+    attachmentDetailsQuery.order.mockResolvedValue({
+      data: [{
         id: "attachment-1",
+        lead_id: "lead-1",
+        field_name: "file-1",
         filename: "drawing.pdf",
-      })],
+        content_type: "application/pdf",
+        size_bytes: 1024,
+        created_at: "2026-08-05T12:00:01.000Z",
+      }],
+      error: null,
+    });
+    getSupabaseMock.mockReturnValueOnce({
+      from: vi.fn((table: string) => (
+        table === "leads" ? leadDetailsQuery : attachmentDetailsQuery
+      )),
+    });
+
+    const response = await GET(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?view=details&lead_ids=lead-1",
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      lead_ids: ["lead-1"],
+      details: [{
+        id: "lead-1",
+        raw_payload: { fields: { project: "Railing" } },
+        attachments: [expect.objectContaining({
+          id: "attachment-1",
+          filename: "drawing.pdf",
+        })],
+      }],
     });
   });
 });

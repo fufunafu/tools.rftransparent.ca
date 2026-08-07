@@ -1,5 +1,9 @@
 import { sanitizePhone } from "@/lib/call-metrics";
-import type { Lead, LeadSubmission } from "@/lib/customer-service/leads";
+import {
+  HISTORICAL_UNKNOWN_REASON,
+  type Lead,
+  type LeadSubmission,
+} from "@/lib/customer-service/leads";
 
 const CONSOLIDATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -102,6 +106,7 @@ function toSubmission(lead: Lead): LeadSubmission {
 }
 
 function isHistoricalImport(lead: Lead): boolean {
+  if (lead.not_applicable_reason === HISTORICAL_UNKNOWN_REASON) return true;
   const marker = lead.raw_payload?.historical_import;
   return typeof marker === "object" && marker !== null && !Array.isArray(marker);
 }

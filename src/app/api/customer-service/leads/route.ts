@@ -9,7 +9,11 @@ import {
   type LeadSource,
   type Outcome,
 } from "@/lib/customer-service/leads";
-import { loadLeads, markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
+import {
+  loadLeadGroupIds,
+  loadLeads,
+  markLeadsCacheStale,
+} from "@/lib/customer-service/lead-queries";
 import { isCallablePhone } from "@/lib/call-metrics";
 import {
   getMetaConnectionStatus,
@@ -66,6 +70,57 @@ export async function GET(req: NextRequest) {
       .order("called_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ attempts: data ?? [] });
+  }
+
+  if (view === "details") {
+    const suppliedIds = (req.nextUrl.searchParams.get("lead_ids") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+    const leadId = req.nextUrl.searchParams.get("lead_id")?.trim();
+    if (suppliedIds.length === 0 && !leadId) {
+      return NextResponse.json({ error: "lead_id required" }, { status: 400 });
+    }
+    const leadIds = suppliedIds.length > 0
+      ? suppliedIds
+      : await loadLeadGroupIds(leadId!);
+
+    const [leadResult, attachmentResult] = await Promise.all([
+      supabase
+        .from("leads")
+        .select("id, source, source_detail, form_id, page_url, name, email, phone, message, installation_requested, raw_payload, submitted_at")
+        .in("id", leadIds),
+      supabase
+        .from("lead_attachments")
+        .select("id, lead_id, field_name, filename, content_type, size_bytes, created_at")
+        .in("lead_id", leadIds)
+        .order("created_at", { ascending: true }),
+    ]);
+    if (leadResult.error) {
+      return NextResponse.json({ error: leadResult.error.message }, { status: 500 });
+    }
+    const attachmentsMissing = attachmentResult.error
+      ? /lead_attachments|schema cache|relation/i.test(attachmentResult.error.message)
+      : false;
+    if (attachmentResult.error && !attachmentsMissing) {
+      return NextResponse.json({ error: attachmentResult.error.message }, { status: 500 });
+    }
+
+    const attachmentsByLead = new Map<string, unknown[]>();
+    for (const attachment of attachmentResult.data ?? []) {
+      const current = attachmentsByLead.get(attachment.lead_id) ?? [];
+      current.push(attachment);
+      attachmentsByLead.set(attachment.lead_id, current);
+    }
+    return NextResponse.json({
+      lead_ids: leadIds,
+      details: (leadResult.data ?? []).map((lead) => ({
+        ...lead,
+        raw_payload: lead.raw_payload ?? {},
+        attachments: attachmentsByLead.get(lead.id) ?? [],
+      })),
+    });
   }
 
   const sourceParam = req.nextUrl.searchParams.get("source");
