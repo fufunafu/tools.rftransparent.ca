@@ -19,6 +19,11 @@ export type LeadPerformanceMetricKey =
   | "medianCallMs"
   | "medianQuoteMs";
 
+export type LeadPerformanceRateMetricKey = Extract<
+  LeadPerformanceMetricKey,
+  "callRate" | "quoteRate" | "conversionRate"
+>;
+
 export interface LeadPerformanceTrendSourceMetrics extends LeadFunnelMetrics {
   medianCallMs: number | null;
   callResponseCount: number;
@@ -33,6 +38,14 @@ export interface LeadPerformanceTrendPoint {
   rangeEnd: string;
   website: LeadPerformanceTrendSourceMetrics;
   meta: LeadPerformanceTrendSourceMetrics;
+}
+
+export interface LeadPerformanceRateTrendPoint {
+  label: string;
+  rangeStart: string;
+  rangeEnd: string;
+  website: { value: number | null; count: number; denominator: number };
+  meta: { value: number | null; count: number; denominator: number };
 }
 
 type PerformanceLead = Pick<
@@ -95,6 +108,57 @@ export function buildLeadPerformanceTrend(
       rangeEnd: bucket.rangeEnd,
       website: summarizeSource(bucketLeads, "website"),
       meta: summarizeSource(bucketLeads, "meta"),
+    };
+  });
+}
+
+function rateCounts(
+  source: LeadPerformanceTrendSourceMetrics,
+  metric: LeadPerformanceRateMetricKey,
+): { count: number; denominator: number } {
+  if (metric === "callRate") {
+    return { count: source.attempted, denominator: source.callEligible };
+  }
+  if (metric === "quoteRate") {
+    return { count: source.quoted, denominator: source.total };
+  }
+  return { count: source.won, denominator: source.total };
+}
+
+export function buildRollingLeadPerformanceRateTrend(
+  points: LeadPerformanceTrendPoint[],
+  metric: LeadPerformanceRateMetricKey,
+  windowSize: number,
+): LeadPerformanceRateTrendPoint[] {
+  const size = Math.min(points.length || 1, Math.max(1, Math.floor(windowSize)));
+
+  return points.map((point, index) => {
+    const hasFullWindow = index >= size - 1;
+    const startIndex = Math.max(0, index - size + 1);
+    const window = points.slice(startIndex, index + 1);
+    const summarize = (source: LeadSource) => {
+      const totals = window.reduce((result, current) => {
+        const counts = rateCounts(current[source], metric);
+        return {
+          count: result.count + counts.count,
+          denominator: result.denominator + counts.denominator,
+        };
+      }, { count: 0, denominator: 0 });
+
+      return {
+        ...totals,
+        value: hasFullWindow && totals.denominator > 0
+          ? Math.round((totals.count / totals.denominator) * 1000) / 10
+          : null,
+      };
+    };
+
+    return {
+      label: point.label,
+      rangeStart: points[startIndex]?.rangeStart ?? point.rangeStart,
+      rangeEnd: point.rangeEnd,
+      website: summarize("website"),
+      meta: summarize("meta"),
     };
   });
 }

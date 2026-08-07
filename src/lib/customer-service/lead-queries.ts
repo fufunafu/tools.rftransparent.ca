@@ -17,6 +17,23 @@ const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 type LeadRow = { id: string; [key: string]: unknown };
 type AttemptRow = { lead_id: string; staff: string; called_at: string };
 
+interface LoadLeadsOptions {
+  source?: LeadSource;
+  from?: string | null;
+  to?: string | null;
+}
+
+// These conservative UTC bounds include the complete Toronto calendar days.
+// The analytics layer applies the exact local-date filter after loading.
+function startOfQueryWindow(dateKey: string): string {
+  return `${dateKey}T00:00:00.000Z`;
+}
+
+function endOfQueryWindow(dateKey: string): string {
+  const start = Date.parse(`${dateKey}T00:00:00.000Z`);
+  return new Date(start + 30 * 60 * 60 * 1000).toISOString();
+}
+
 async function fetchAllPages<T>(
   page: (from: number, to: number) => PromiseLike<{
     data: T[] | null;
@@ -36,24 +53,26 @@ async function fetchAllPages<T>(
   }
 }
 
-export async function loadLeads(source?: LeadSource): Promise<Lead[]> {
+export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]> {
   const supabase = getSupabase();
   const leadsPromise = fetchAllPages<LeadRow>((from, to) => {
     let query = supabase
       .from("leads")
       .select(LEAD_LIST_COLUMNS)
-      .order("submitted_at", { ascending: false })
-      .range(from, to);
-    if (source) query = query.eq("source", source);
-    return query;
+      .order("submitted_at", { ascending: false });
+    if (options.source) query = query.eq("source", options.source);
+    if (options.from) query = query.gte("submitted_at", startOfQueryWindow(options.from));
+    if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
+    return query.range(from, to);
   });
-  const attemptsPromise = fetchAllPages<AttemptRow>((from, to) =>
-    supabase
+  const attemptsPromise = fetchAllPages<AttemptRow>((from, to) => {
+    let query = supabase
       .from("lead_call_attempts")
       .select("lead_id, staff, called_at")
-      .order("called_at", { ascending: false })
-      .range(from, to),
-  );
+      .order("called_at", { ascending: false });
+    if (options.from) query = query.gte("called_at", startOfQueryWindow(options.from));
+    return query.range(from, to);
+  });
 
   // These tables are independent. Keeping their pagination concurrent makes
   // a cold cache cost one scan duration instead of the sum of both.
@@ -180,7 +199,7 @@ export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
 }
 
 export const getCachedLeads = unstable_cache(
-  () => loadLeads(),
+  (from?: string | null, to?: string | null) => loadLeads({ from, to }),
   ["customer-service:leads:list"],
   { tags: [LEADS_CACHE_TAG], revalidate: REVALIDATE_SECONDS },
 );

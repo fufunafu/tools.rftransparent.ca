@@ -5,9 +5,41 @@ import {
   calculateLeadFunnel,
   calculateLeadFunnelBySource,
   isLeadInCustomDateRange,
+  leadTrendQueryBounds,
 } from "@/lib/lead-analytics";
 
 const NOW = new Date("2026-08-03T16:00:00.000Z");
+
+describe("leadTrendQueryBounds", () => {
+  it("loads the current and previous 30-day periods with a deduplication buffer", () => {
+    expect(leadTrendQueryBounds("30d", NOW)).toEqual({
+      from: "2026-05-29",
+      to: "2026-08-03",
+    });
+  });
+
+  it("loads only the history required by a custom comparison", () => {
+    expect(leadTrendQueryBounds("custom", NOW, "2026-08-01", "2026-08-03")).toEqual({
+      from: "2026-07-22",
+      to: "2026-08-03",
+    });
+  });
+
+  it("loads two years for the current and previous 12-month periods", () => {
+    expect(leadTrendQueryBounds("12m", NOW)).toEqual({
+      from: "2024-08-25",
+      to: "2026-08-03",
+    });
+  });
+
+  it("keeps all-time unbounded and rejects incomplete custom dates", () => {
+    expect(leadTrendQueryBounds("all", NOW)).toEqual({
+      from: null,
+      to: "2026-08-03",
+    });
+    expect(leadTrendQueryBounds("custom", NOW, "", "2026-08-03")).toBeNull();
+  });
+});
 
 describe("calculateLeadFunnel", () => {
   it("uses all leads as the denominator for call, quote, and order rates", () => {

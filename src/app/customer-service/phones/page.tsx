@@ -13,7 +13,7 @@ export default async function PhonesPage() {
   const defaultStore = region === "QC" ? "bc_transparent" : "rf_transparent";
 
   return (
-    <div className="max-w-[1400px] mx-auto space-y-6">
+    <div className="mx-auto max-w-[1600px]">
       <CustomerServiceDashboard defaultStore={defaultStore} />
     </div>
   );

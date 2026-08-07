@@ -786,201 +786,155 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
   }
 
   return (
-    <div className="mt-6 space-y-5">
-      {/* Controls bar */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          {/* Store selector */}
-          <select
-            value={store}
-            onChange={(e) => { setStore(e.target.value); localStorage.setItem("cs_store", e.target.value); }}
-            className="px-3 py-1.5 text-xs font-medium bg-white border border-sand-200 rounded-lg text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-          >
-            {STORE_OPTIONS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-
-          {/* Range selector */}
-          <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
-          {RANGE_OPTIONS.map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => setRange(opt.value)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                range === opt.value
-                  ? "bg-white text-sand-900 shadow-sm"
-                  : "text-sand-500 hover:text-sand-700"
-              }`}
-            >
-              {opt.label}
-            </button>
-          ))}
-            <button
-              onClick={() => setRange("custom")}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                range === "custom"
-                  ? "bg-white text-sand-900 shadow-sm"
-                  : "text-sand-500 hover:text-sand-700"
-              }`}
-            >
-              Custom
-            </button>
-          </div>
-          {range === "custom" && (
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="px-2 py-1 text-xs border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-              />
-              <span className="text-xs text-sand-400">to</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="px-2 py-1 text-xs border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-              />
+    <div className="space-y-5 pb-8">
+      <header className="flex flex-col gap-4 pt-1 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.12em] text-blue-600">Customer service</p>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-950">Phones</h1>
+          {(data?.lastSync?.cik || data?.lastSync?.grasshopper) && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+              {data.lastSync.cik && <span title={data.lastSync.cik}>CIK updated {formatSyncTime(data.lastSync.cik)}</span>}
+              {data.lastSync.grasshopper && <span title={data.lastSync.grasshopper}>Grasshopper updated {formatSyncTime(data.lastSync.grasshopper)}</span>}
             </div>
           )}
+        </div>
 
-          {/* Source filter (admin only) */}
-          {mounted && mode === "admin" && (
-            <select
-              value={source}
-              onChange={(e) => setSource(e.target.value as Source)}
-              className="px-3 py-1.5 text-xs font-medium bg-white border border-sand-200 rounded-lg text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-            >
-              {SOURCE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
-          )}
-
-          {/* Admin tabs */}
-          {mounted && mode === "admin" && (
-            <div className="flex items-center gap-1 bg-sand-100/60 rounded-lg p-0.5">
-              {(["overview", "call-log", "callbacks"] as Tab[]).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setTab(t)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
-                    tab === t
-                      ? "bg-white text-sand-900 shadow-sm"
-                      : "text-sand-500 hover:text-sand-700"
-                  }`}
-                >
-                  {t === "call-log" ? "Call Log" : t.charAt(0).toUpperCase() + t.slice(1)}
-                  {t === "callbacks" && callbacks.length > 0 && (
-                    <span className="ml-1 px-1.5 py-0.5 bg-red-100 text-red-700 rounded-full text-[10px]">
-                      {callbacks.length}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Sync & actions (admin only) */}
-          {mounted && mode === "admin" && <div className="flex items-center gap-2">
-            <button
-              onClick={() => window.print()}
-              className="px-3 py-1.5 text-xs font-medium text-sand-500 border border-sand-200 rounded-lg hover:bg-sand-50 transition-colors print:hidden"
-              title="Save as PDF from the print dialog"
-            >
-              Download Report
-            </button>
-            <div className="text-center">
+        {mounted && (
+          <div className="inline-flex w-fit rounded-lg border border-slate-200 bg-slate-100 p-1" role="group" aria-label="Phone dashboard view">
+            {(["staff", "admin"] as Mode[]).map((viewMode) => (
               <button
-                onClick={handleSyncAll}
-                disabled={syncAllRunning || ghScraping}
-                className="px-4 py-1.5 text-xs font-medium text-white bg-sand-900 rounded-lg hover:bg-sand-800 disabled:opacity-50 transition-colors"
+                key={viewMode}
+                type="button"
+                onClick={() => handleModeChange(viewMode)}
+                className={`min-h-8 rounded-md px-3 text-xs font-semibold transition-colors ${
+                  mode === viewMode
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
               >
-                {syncAllRunning ? "Syncing..." : "Sync All"}
+                {viewMode === "staff" ? "Team view" : "Admin tools"}
               </button>
-              <div className="flex gap-3 mt-0.5 justify-center">
-                {data?.lastSync?.cik && (
-                  <p className="text-[10px] text-sand-400" title={data.lastSync.cik}>CIK: {formatSyncTime(data.lastSync.cik)}</p>
-                )}
-                {data?.lastSync?.grasshopper && (
-                  <p className="text-[10px] text-emerald-400" title={data.lastSync.grasshopper}>GH: {formatSyncTime(data.lastSync.grasshopper)}</p>
+            ))}
+          </div>
+        )}
+      </header>
+
+      <section className="border-y border-slate-200 py-4" aria-label="Phone dashboard filters">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Store</span>
+              <select
+                value={store}
+                onChange={(e) => { setStore(e.target.value); localStorage.setItem("cs_store", e.target.value); }}
+                className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+              >
+                {STORE_OPTIONS.map((storeOption) => (
+                  <option key={storeOption.id} value={storeOption.id}>{storeOption.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <div className="flex flex-col gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Period</span>
+              <div className="flex max-w-full overflow-x-auto rounded-lg border border-slate-200 bg-slate-100 p-1" role="group" aria-label="Reporting period">
+                {[...RANGE_OPTIONS, { value: "custom" as const, label: "Custom", days: 0 }].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setRange(option.value)}
+                    className={`min-h-7 whitespace-nowrap rounded-md px-2.5 text-xs font-semibold transition-colors ${
+                      range === option.value
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {range === "custom" && (
+              <div className="flex items-end gap-2">
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">From</span>
+                  <input type="date" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
+                </label>
+                <label className="flex flex-col gap-1.5">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">To</span>
+                  <input type="date" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" />
+                </label>
+              </div>
+            )}
+
+            {mounted && mode === "admin" && (
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Source</span>
+                <select value={source} onChange={(e) => setSource(e.target.value as Source)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10">
+                  {SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+              </label>
+            )}
+          </div>
+
+          {mounted && mode === "admin" && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button type="button" onClick={() => window.print()} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 print:hidden" title="Save as PDF from the print dialog">Download report</button>
+              <button type="button" onClick={handleSyncAll} disabled={syncAllRunning || ghScraping} className="h-9 rounded-lg bg-slate-950 px-4 text-xs font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50">
+                {syncAllRunning ? "Syncing..." : "Sync all"}
+              </button>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setShowSchedule(!showSchedule)}
+                  className={`h-9 rounded-lg border px-3 text-xs font-semibold transition ${syncSchedule?.enabled ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}
+                  title="Auto-sync schedule"
+                >
+                  {syncSchedule?.enabled ? `Auto: ${syncSchedule.hours.map((h) => `${h % 12 || 12}${h < 12 ? "a" : "p"}`).join(", ")}` : "Auto: Off"}
+                </button>
+                {showSchedule && syncSchedule && (
+                  <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-slate-200 bg-white p-4 shadow-lg">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-xs font-semibold text-slate-700">Auto-sync schedule</p>
+                      <label className="flex cursor-pointer items-center gap-1.5">
+                        <input type="checkbox" checked={syncSchedule.enabled} onChange={() => saveSyncSchedule({ ...syncSchedule, enabled: !syncSchedule.enabled })} className="rounded border-slate-300" />
+                        <span className="text-xs text-slate-600">{syncSchedule.enabled ? "On" : "Off"}</span>
+                      </label>
+                    </div>
+                    <div className="grid grid-cols-6 gap-1">
+                      {Array.from({ length: 24 }, (_, hour) => (
+                        <button key={hour} type="button" onClick={() => toggleScheduleHour(hour)} className={`rounded px-1 py-1 text-[10px] transition-colors ${syncSchedule.hours.includes(hour) ? "bg-slate-950 text-white" : "bg-slate-50 text-slate-400 hover:bg-slate-100"}`}>
+                          {hour % 12 || 12}{hour < 12 ? "a" : "p"}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => setShowSchedule(false)} className="mt-3 w-full text-xs font-medium text-slate-500 hover:text-slate-700">Done</button>
+                  </div>
                 )}
               </div>
             </div>
-            <div className="relative">
-              <button
-                onClick={() => setShowSchedule(!showSchedule)}
-                className={`px-2 py-1.5 text-xs font-medium border rounded-lg transition-colors ${
-                  syncSchedule?.enabled
-                    ? "text-emerald-600 border-emerald-200 bg-emerald-50 hover:bg-emerald-100"
-                    : "text-sand-400 border-sand-200 hover:bg-sand-50"
-                }`}
-                title="Auto-sync schedule"
-              >
-                {syncSchedule?.enabled ? `Auto: ${syncSchedule.hours.map((h) => `${h % 12 || 12}${h < 12 ? "a" : "p"}`).join(", ")}` : "Auto: Off"}
-              </button>
-              {showSchedule && syncSchedule && (
-                <div className="absolute right-0 top-full mt-1 z-50 bg-white border border-sand-200 rounded-xl shadow-lg p-4 w-72">
-                  <div className="flex items-center justify-between mb-3">
-                    <p className="text-xs font-semibold text-sand-700">Auto-Sync Schedule</p>
-                    <label className="flex items-center gap-1.5 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={syncSchedule.enabled}
-                        onChange={() => saveSyncSchedule({ ...syncSchedule, enabled: !syncSchedule.enabled })}
-                        className="rounded border-sand-300"
-                      />
-                      <span className="text-xs text-sand-600">{syncSchedule.enabled ? "On" : "Off"}</span>
-                    </label>
-                  </div>
-                  <p className="text-[10px] text-sand-400 mb-2">Tap hours to toggle (Eastern Time)</p>
-                  <div className="grid grid-cols-6 gap-1">
-                    {Array.from({ length: 24 }, (_, h) => (
-                      <button
-                        key={h}
-                        onClick={() => toggleScheduleHour(h)}
-                        className={`px-1 py-1 text-[10px] rounded transition-colors ${
-                          syncSchedule.hours.includes(h)
-                            ? "bg-sand-900 text-white"
-                            : "bg-sand-50 text-sand-400 hover:bg-sand-100"
-                        }`}
-                      >
-                        {h % 12 || 12}{h < 12 ? "a" : "p"}
-                      </button>
-                    ))}
-                  </div>
-                  <button onClick={() => setShowSchedule(false)} className="mt-3 w-full text-xs text-sand-500 hover:text-sand-700">Done</button>
-                </div>
-              )}
-            </div>
-          </div>}
-
-          {/* Last sync timestamps (always visible) */}
-          {mounted && (data?.lastSync?.cik || data?.lastSync?.grasshopper) && (
-            <div className="flex gap-3">
-              {data?.lastSync?.cik && (
-                <p className="text-[10px] text-sand-400" title={data.lastSync.cik}>CIK: {formatSyncTime(data.lastSync.cik)}</p>
-              )}
-              {data?.lastSync?.grasshopper && (
-                <p className="text-[10px] text-emerald-400" title={data.lastSync.grasshopper}>GH: {formatSyncTime(data.lastSync.grasshopper)}</p>
-              )}
-            </div>
           )}
-
-          {/* Mode toggle */}
-          <button
-            onClick={() => handleModeChange(mode === "staff" ? "admin" : "staff")}
-            className="px-2.5 py-1 text-[11px] text-sand-400 hover:text-sand-600 border border-sand-200 rounded-md hover:bg-sand-50 transition-colors"
-          >
-            {mode === "staff" ? "Admin" : "Staff"} view
-          </button>
         </div>
-      </div>
+      </section>
 
-      {/* Total time on the phone — for the currently filtered period */}
+      {mounted && mode === "admin" && (
+        <nav className="flex gap-5 border-b border-slate-200" aria-label="Phone admin views">
+          {(["overview", "call-log", "callbacks"] as Tab[]).map((adminTab) => (
+            <button
+              key={adminTab}
+              type="button"
+              onClick={() => setTab(adminTab)}
+              className={`relative pb-3 text-sm font-semibold transition-colors ${tab === adminTab ? "text-blue-700" : "text-slate-500 hover:text-slate-800"}`}
+            >
+              {adminTab === "call-log" ? "Call log" : adminTab.charAt(0).toUpperCase() + adminTab.slice(1)}
+              {adminTab === "callbacks" && callbacks.length > 0 && <span className="ml-1.5 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] text-red-700">{callbacks.length}</span>}
+              {tab === adminTab && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-blue-600" />}
+            </button>
+          ))}
+        </nav>
+      )}
+
       {data?.current && (
         <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4 flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
           <div className="flex items-baseline gap-3 flex-wrap">
@@ -1616,7 +1570,6 @@ function StaffView({
         })}
       </div>
 
-      {/* Callbacks */}
       <div>
         <h2 className="text-sm font-semibold text-sand-700 mb-2">Needs Callback</h2>
         <CallbacksTab
@@ -1627,18 +1580,18 @@ function StaffView({
         />
       </div>
 
-      {/* Call log */}
       <div>
         <h2 className="text-sm font-semibold text-sand-700 mb-2">Call Log</h2>
         <CallLogTab
-        store={store}
-        source={source}
-        from={from}
-        to={to}
-        onNumberClick={setSelectedNumber}
-        syncKey={syncKey}
-      />
+          store={store}
+          source={source}
+          from={from}
+          to={to}
+          onNumberClick={setSelectedNumber}
+          syncKey={syncKey}
+        />
       </div>
+
     </div>
   );
 }
@@ -2088,8 +2041,10 @@ function CallLogTab({
   const [minDuration, setMinDuration] = useState("");
   const [maxDuration, setMaxDuration] = useState("");
   const [phone, setPhone] = useState("");
+  const [extension, setExtension] = useState("");
+  const [availableExtensions, setAvailableExtensions] = useState<string[]>([]);
 
-  const hasFilters = direction !== "all" || status !== "all" || localSource !== source || minDuration !== "" || maxDuration !== "" || phone !== "";
+  const hasFilters = direction !== "all" || status !== "all" || localSource !== source || minDuration !== "" || maxDuration !== "" || phone !== "" || extension !== "";
 
   const clearFilters = () => {
     setDirection("all");
@@ -2098,6 +2053,7 @@ function CallLogTab({
     setMinDuration("");
     setMaxDuration("");
     setPhone("");
+    setExtension("");
   };
 
   const buildFilterParams = () => {
@@ -2107,8 +2063,37 @@ function CallLogTab({
     if (minDuration) params.set("minDuration", minDuration);
     if (maxDuration) params.set("maxDuration", maxDuration);
     if (phone) params.set("phone", phone);
+    if (extension) params.set("extension", extension);
     return params.toString();
   };
+
+  useEffect(() => {
+    setLocalSource(source);
+  }, [source]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      view: "extensions",
+      store,
+      source: localSource,
+      from,
+      to,
+    });
+
+    fetch(`/api/customer-service?${params.toString()}`, { signal: controller.signal })
+      .then((response) => response.ok ? response.json() : { extensions: [] })
+      .then((result) => {
+        const extensions = Array.isArray(result.extensions) ? result.extensions : [];
+        setAvailableExtensions(extensions);
+        setExtension((current) => current && !extensions.includes(current) ? "" : current);
+      })
+      .catch((err) => {
+        if (err instanceof Error && err.name !== "AbortError") setAvailableExtensions([]);
+      });
+
+    return () => controller.abort();
+  }, [store, localSource, from, to, syncKey]);
 
   const fetchPage = useCallback(async (p: number) => {
     setLoading(true);
@@ -2126,7 +2111,7 @@ function CallLogTab({
       setLoading(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [store, localSource, from, to, direction, status, minDuration, maxDuration, phone, syncKey]);
+  }, [store, localSource, from, to, direction, status, minDuration, maxDuration, phone, extension, syncKey]);
 
   useEffect(() => {
     fetchPage(1);
@@ -2140,7 +2125,6 @@ function CallLogTab({
     const epLower = ep.toLowerCase();
     if (epLower === "vm" || epLower.includes("vm")) return { label: "Voicemail", color: "text-amber-600", bg: "bg-amber-50" };
     if (epLower === "answered") return { label: "Answered", color: "text-green-600", bg: "bg-green-50" };
-    // Extension number = answered on that extension
     if (/^\d{2,4}$/.test(ep)) return { label: `Ext. ${ep}`, color: "text-green-600", bg: "bg-green-50" };
     return { label: ep, color: "text-sand-500", bg: "" };
   };
@@ -2163,7 +2147,7 @@ function CallLogTab({
       while (true) {
         const filterStr = buildFilterParams();
         const res = await fetch(
-          `/api/customer-service?view=call-log&store=${store}&source=${source}&from=${from}&to=${to}&page=${p}${filterStr ? `&${filterStr}` : ""}`
+          `/api/customer-service?view=call-log&store=${store}&source=${localSource}&from=${from}&to=${to}&page=${p}${filterStr ? `&${filterStr}` : ""}`
         );
         const data = await res.json();
         allRecords.push(...(data.records ?? []));
@@ -2196,113 +2180,81 @@ function CallLogTab({
   };
 
   return (
-    <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-      {/* Filter bar */}
-      <div className="p-4 space-y-3 border-b border-sand-100">
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Direction */}
-          <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-            {(["all", "inbound", "outbound"] as const).map((d) => (
-              <button
-                key={d}
-                onClick={() => setDirection(d)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  direction === d
-                    ? "bg-sand-900 text-sand-50"
-                    : "bg-white text-sand-600 hover:bg-sand-50"
-                }`}
-              >
-                {d === "all" ? "All" : d === "inbound" ? "Inbound" : "Outbound"}
-              </button>
-            ))}
-          </div>
-
-          {/* Status */}
-          <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-            {(["all", "answered", "missed", "voicemail"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  status === s
-                    ? "bg-sand-900 text-sand-50"
-                    : "bg-white text-sand-600 hover:bg-sand-50"
-                }`}
-              >
-                {s === "all" ? "All Status" : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
-
-          {/* Source */}
-          <div className="flex rounded-lg border border-sand-200 overflow-hidden">
-            {SOURCE_OPTIONS.map((opt) => (
-              <button
-                key={opt.value}
-                onClick={() => setLocalSource(opt.value)}
-                className={`px-3 py-1.5 text-xs font-medium transition-colors ${
-                  localSource === opt.value
-                    ? "bg-sand-900 text-sand-50"
-                    : "bg-white text-sand-600 hover:bg-sand-50"
-                }`}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Duration range */}
-          <div className="flex items-center gap-1.5">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+      <div className="space-y-3 border-b border-slate-200 bg-slate-50/60 p-4">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_160px_160px_220px_auto]">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Phone number</span>
             <input
-              type="number"
-              placeholder="Min"
-              value={minDuration}
-              onChange={(e) => setMinDuration(e.target.value)}
-              className="w-16 rounded-lg border border-sand-200 px-2 py-1.5 text-xs text-sand-700 bg-white placeholder:text-sand-300"
-              min="0"
-              step="0.5"
+              type="search"
+              placeholder="Search caller or destination"
+              value={phone}
+              onChange={(e) => setPhone(e.target.value)}
+              className="h-9 min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
             />
-            <span className="text-xs text-sand-400">-</span>
-            <input
-              type="number"
-              placeholder="Max"
-              value={maxDuration}
-              onChange={(e) => setMaxDuration(e.target.value)}
-              className="w-16 rounded-lg border border-sand-200 px-2 py-1.5 text-xs text-sand-700 bg-white placeholder:text-sand-300"
-              min="0"
-              step="0.5"
-            />
-            <span className="text-xs text-sand-400">min</span>
-          </div>
+          </label>
 
-          {/* Phone search */}
-          <input
-            type="text"
-            placeholder="Search phone..."
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-            className="w-36 rounded-lg border border-sand-200 px-3 py-1.5 text-xs text-sand-700 bg-white placeholder:text-sand-300"
-          />
-
-          {/* Clear */}
-          {hasFilters && (
-            <button
-              onClick={clearFilters}
-              className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 transition-colors"
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Extension</span>
+            <select
+              value={extension}
+              onChange={(e) => setExtension(e.target.value)}
+              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
             >
-              Clear filters
-            </button>
-          )}
+              <option value="">All extensions</option>
+              {availableExtensions.map((value) => <option key={value} value={value}>Ext. {value}</option>)}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Source</span>
+            <select value={localSource} onChange={(e) => setLocalSource(e.target.value as Source)} className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10">
+              {SOURCE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </label>
+
+          <fieldset className="flex flex-col gap-1.5">
+            <legend className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">Duration in minutes</legend>
+            <div className="flex items-center gap-2">
+              <input type="number" aria-label="Minimum duration" placeholder="Min" value={minDuration} onChange={(e) => setMinDuration(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" min="0" step="0.5" />
+              <span className="text-slate-300">to</span>
+              <input type="number" aria-label="Maximum duration" placeholder="Max" value={maxDuration} onChange={(e) => setMaxDuration(e.target.value)} className="h-9 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10" min="0" step="0.5" />
+            </div>
+          </fieldset>
+
+          <div className="flex items-end">
+            <button type="button" onClick={clearFilters} disabled={!hasFilters} className="h-9 rounded-lg px-3 text-xs font-semibold text-slate-500 transition hover:bg-white hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-40">Reset</button>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1" role="group" aria-label="Call direction">
+            {(["all", "inbound", "outbound"] as const).map((value) => (
+              <button key={value} type="button" onClick={() => setDirection(value)} className={`min-h-7 rounded-md px-3 text-xs font-semibold transition-colors ${direction === value ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"}`}>
+                {value === "all" ? "All calls" : value.charAt(0).toUpperCase() + value.slice(1)}
+              </button>
+            ))}
+          </div>
+
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+            Status
+            <select value={status} onChange={(e) => setStatus(e.target.value as typeof status)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10">
+              <option value="all">All statuses</option>
+              <option value="answered">Answered</option>
+              <option value="missed">Missed</option>
+              <option value="voicemail">Voicemail</option>
+            </select>
+          </label>
         </div>
       </div>
 
       {/* Summary & pagination */}
-      <div className="px-4 py-3 border-b border-sand-100 flex items-center justify-between">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <span className="text-sm text-sand-600">
           {total.toLocaleString()} calls
           {hasFilters && <span className="ml-1.5 px-1.5 py-0.5 bg-sand-100 text-sand-500 rounded text-[10px] font-medium">filtered</span>}
         </span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={exportCsv}
             disabled={exporting || loading}
@@ -2350,7 +2302,13 @@ function CallLogTab({
                 </tr>
               </thead>
               <tbody>
-                {records.map((r) => (
+                {records.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="px-4 py-12 text-center text-sm text-slate-400">
+                      No calls match these filters.
+                    </td>
+                  </tr>
+                ) : records.map((r) => (
                   <tr key={r.id} className="border-b border-sand-50 hover:bg-sand-50/50 transition-colors">
                     <td className="px-4 py-2.5 text-sand-700 whitespace-nowrap">{formatDateTime(r.call_start)}</td>
                     <td className="px-4 py-2.5">

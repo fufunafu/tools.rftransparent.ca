@@ -51,6 +51,7 @@ const CORE_TABLES = [
   "followup_leads",
   "leads",
   "lead_attachments",
+  "lead_ingestion_rate_limits",
   "problem_tickets",
   "bug_reports",
 ];
@@ -129,6 +130,32 @@ function shopifyEnvCheck(): CheckResult {
     return { name: "Shopify Env", status: "error", latency_ms: 0, detail: problems.join("; ") };
   }
   return { name: "Shopify Env", status: "ok", latency_ms: 0, detail: "3 stores configured" };
+}
+
+function leadProxyEnvCheck(): CheckResult {
+  const configuredStores: string[] = [];
+  for (let index = 1; index <= 3; index++) {
+    if (
+      process.env[`SHOPIFY_STORE_${index}`] &&
+      process.env[`SHOPIFY_CLIENT_SECRET_${index}`]
+    ) {
+      configuredStores.push(String(index));
+    }
+  }
+  if (configuredStores.length === 0) {
+    return {
+      name: "Lead App Proxy",
+      status: "unconfigured",
+      latency_ms: 0,
+      detail: "No Shopify store has an app client secret",
+    };
+  }
+  return {
+    name: "Lead App Proxy",
+    status: "ok",
+    latency_ms: 0,
+    detail: `Configured for store ${configuredStores.join(", ")}`,
+  };
 }
 
 // Define all service checks
@@ -333,6 +360,7 @@ export async function GET(req: NextRequest) {
       "NEXT_PUBLIC_SUPABASE_ANON_KEY",
     ]),
     shopifyEnvCheck(),
+    leadProxyEnvCheck(),
     envCheck("Google Ads Env", ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN"]),
     envCheck("GA4 Env", ["GOOGLE_GA4_PROPERTY_ID"]),
     envCheck("Resend Env", ["RESEND_API_KEY"]),
@@ -346,7 +374,7 @@ export async function GET(req: NextRequest) {
     ]),
     // CRON_SECRET missing means every scheduled job 401s — and those 401s are
     // deliberately not recorded, so cron_runs just goes quiet.
-    envCheck("Cron & Webhook Secrets", ["CRON_SECRET", "LEADS_WEBHOOK_SECRET"]),
+    envCheck("Cron Secret", ["CRON_SECRET"]),
     envCheck("App URLs", ["NEXT_PUBLIC_APP_URL", "NEXT_PUBLIC_SITE_URL"]),
   ];
 

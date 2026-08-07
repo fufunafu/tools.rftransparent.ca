@@ -33,6 +33,16 @@ const ALLOWED_OUTCOMES: Outcome[] = [
   "lost",
   "not_applicable",
 ];
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+function isDateKey(value: string): boolean {
+  if (!DATE_KEY_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day;
+}
 
 // ─── GET ─────────────────────────────────────────────────────────────────────
 
@@ -42,7 +52,6 @@ export async function GET(req: NextRequest) {
   }
 
   const view = req.nextUrl.searchParams.get("view") ?? "list";
-  const supabase = getSupabase();
 
   if (view === "meta_status") {
     const [status, canSync] = await Promise.all([
@@ -53,6 +62,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (view === "call_attempts") {
+    const supabase = getSupabase();
     const leadIds = (req.nextUrl.searchParams.get("lead_ids")
       ?? req.nextUrl.searchParams.get("lead_id")
       ?? "")
@@ -73,6 +83,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (view === "details") {
+    const supabase = getSupabase();
     const suppliedIds = (req.nextUrl.searchParams.get("lead_ids") ?? "")
       .split(",")
       .map((id) => id.trim())
@@ -127,8 +138,23 @@ export async function GET(req: NextRequest) {
   const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
     ? sourceParam
     : undefined;
+  const fromParam = req.nextUrl.searchParams.get("from");
+  const toParam = req.nextUrl.searchParams.get("to");
+  if (
+    (fromParam && !isDateKey(fromParam))
+    || (toParam && !isDateKey(toParam))
+    || (fromParam && toParam && fromParam > toParam)
+  ) {
+    return NextResponse.json({ error: "Invalid lead date range" }, { status: 400 });
+  }
   try {
-    return NextResponse.json({ leads: await loadLeads(source) });
+    return NextResponse.json({
+      leads: await loadLeads({
+        source,
+        from: fromParam,
+        to: toParam,
+      }),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Could not load leads" },

@@ -4,6 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 import { sanitizePhone, pctChange, computeMetrics, deduplicateRecords } from "@/lib/call-metrics";
 import type { CallRecord } from "@/lib/call-metrics";
 import { syncLeadCallStatuses } from "@/lib/lead-call-sync";
+import { listExtensions, normalizeExtension } from "@/lib/call-extensions";
 
 // Grasshopper scraping takes 2-3 min via Playwright
 export const maxDuration = 300;
@@ -87,6 +88,43 @@ export async function GET(req: NextRequest) {
   const today = toDateStr(new Date());
   const from = req.nextUrl.searchParams.get("from") || today;
   const to = req.nextUrl.searchParams.get("to") || today;
+
+  if (view === "extensions") {
+    try {
+      const supabase = getSupabase();
+      const rows: { endpoint: string | null }[] = [];
+      const pageSize = 1000;
+      let offset = 0;
+
+      while (true) {
+        let query = supabase
+          .from("call_records")
+          .select("endpoint")
+          .eq("store_id", storeId)
+          .gte("call_start", dayStartUTC(from))
+          .lt("call_start", dayEndUTC(to))
+          .not("endpoint", "is", null)
+          .range(offset, offset + pageSize - 1);
+
+        if (source !== "all") query = query.eq("source", source);
+
+        const { data, error } = await query;
+        if (error) throw new Error(error.message);
+        if (!data?.length) break;
+
+        rows.push(...data);
+        if (data.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      return NextResponse.json({ extensions: listExtensions(rows) });
+    } catch (err) {
+      return NextResponse.json(
+        { error: err instanceof Error ? err.message : "Failed to fetch extensions" },
+        { status: 500 },
+      );
+    }
+  }
 
   // Return available stores list
   if (view === "stores") {
@@ -234,6 +272,9 @@ export async function GET(req: NextRequest) {
       if (phone) {
         query = query.or(`from_number.ilike.%${phone}%,to_number.ilike.%${phone}%`);
       }
+
+      const extension = normalizeExtension(req.nextUrl.searchParams.get("extension"));
+      if (extension) query = query.eq("endpoint", extension);
 
       const { data: records, count } = await query;
 

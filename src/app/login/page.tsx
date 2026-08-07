@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import LoginForm from "@/components/admin/LoginForm";
+import { safeNextPath } from "@/lib/client-auth";
 
 export const metadata: Metadata = {
   title: "Login | RF Tools",
@@ -9,11 +10,13 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; next?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, next } = await searchParams;
   const authError =
-    error === "auth_error"
+    error === "session_expired"
+      ? "Your session expired. Sign in to continue."
+      : error === "auth_error"
       ? "Sign-in failed. Please try again."
       : error === "not_authorized"
       ? "This Google account isn't authorized. Ask your manager to add it to your employee profile."
@@ -56,7 +59,7 @@ export default async function LoginPage({
             <p className="text-sm text-slate-500 mb-8">
               Use your RF Transparent Google account to continue.
             </p>
-            <LoginForm authError={authError} />
+            <LoginForm authError={authError} nextPath={safeNextPath(next)} />
             <p className="text-xs text-slate-400 text-center mt-6">
               Authorized personnel only
             </p>

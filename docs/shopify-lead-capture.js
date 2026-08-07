@@ -1,6 +1,6 @@
 (function () {
   // Paste this into Powerful Form Builder's "After form loaded" script.
-  // Replace the webhook placeholder with the current LEADS_WEBHOOK_SECRET value.
+  // Configure /apps/rf-leads as a Shopify App Proxy for the RF Tools endpoint.
   console.log("[RF Leads] Script loaded at", new Date().toISOString());
 
   var FIELD_MAP = {
@@ -10,7 +10,7 @@
     message: "textarea-1"
   };
 
-  var WEBHOOK = "https://tools.rftransparent.ca/api/customer-service/leads/webhook?source=website&secret=REPLACE_WITH_LEADS_WEBHOOK_SECRET";
+  var WEBHOOK = "/apps/rf-leads";
   var MAX_FILE_BYTES = 20 * 1024 * 1024;
   var MAX_FILES = 3;
 
@@ -85,7 +85,7 @@
       return Promise.reject(new Error(file.name + " is over 20 MB."));
     }
 
-    return fetch(WEBHOOK + "&action=create-upload", {
+    return fetch(WEBHOOK + "?action=create-upload", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"

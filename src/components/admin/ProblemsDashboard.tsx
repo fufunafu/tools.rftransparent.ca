@@ -95,6 +95,26 @@ export default function ProblemsDashboard({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const closeForm = useCallback(() => {
+    if (saving) return;
+    setShowForm(false);
+    setEditingId(null);
+  }, [saving]);
+
+  useEffect(() => {
+    if (!showForm) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeForm();
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showForm, closeForm]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -214,7 +234,6 @@ export default function ProblemsDashboard({
     setEditingId(t.id);
     setShowForm(true);
     setError(null);
-    window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -242,6 +261,8 @@ export default function ProblemsDashboard({
       // Jump the year filter to the saved ticket so it doesn't silently
       // disappear behind a different year.
       setYear(parseISO(ticket.ticket_date).year);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Save failed");
     } finally {
       setSaving(false);
     }
@@ -299,7 +320,7 @@ export default function ProblemsDashboard({
         </button>
       </div>
 
-      {error && (
+      {error && !showForm && (
         <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
@@ -307,26 +328,42 @@ export default function ProblemsDashboard({
 
       {/* Add / edit form */}
       {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-xl border border-sand-200 p-5 space-y-4"
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-3 sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeForm();
+          }}
         >
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-sand-900">
-              {editingId ? "Edit ticket" : "New ticket"}
-            </h2>
-            <button
-              type="button"
-              onClick={() => {
-                setShowForm(false);
-                setEditingId(null);
-              }}
-              className="text-sm text-sand-400 hover:text-sand-600"
-            >
-              Cancel
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <form
+            onSubmit={handleSubmit}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="problem-ticket-form-title"
+            className="max-h-[calc(100vh-1.5rem)] w-full max-w-5xl overflow-y-auto rounded-lg border border-sand-200 bg-white shadow-xl sm:max-h-[calc(100vh-3rem)]"
+          >
+            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-sand-200 bg-white px-5 py-4">
+              <h2 id="problem-ticket-form-title" className="text-base font-semibold text-sand-900">
+                {editingId ? "Edit ticket" : "New ticket"}
+              </h2>
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={saving}
+                aria-label="Close ticket editor"
+                title="Close"
+                className="flex h-8 w-8 items-center justify-center rounded-md text-sand-400 hover:bg-sand-100 hover:text-sand-700 disabled:opacity-40"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4" aria-hidden="true">
+                  <path strokeLinecap="round" d="m6 6 12 12M18 6 6 18" />
+                </svg>
+              </button>
+            </div>
+            {error && (
+              <div role="alert" className="mx-5 mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {error}
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
             <div className="lg:col-span-2">
               <label className={labelClass}>Client name *</label>
               <input
@@ -334,6 +371,7 @@ export default function ProblemsDashboard({
                 value={form.client_name}
                 onChange={(e) => setForm((f) => ({ ...f, client_name: e.target.value }))}
                 placeholder="e.g. David Hugh"
+                autoFocus
                 required
               />
             </div>
@@ -422,17 +460,26 @@ export default function ProblemsDashboard({
                 />
               </div>
             )}
-          </div>
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={saving || !form.client_name.trim()}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-              {saving ? "Saving..." : editingId ? "Save changes" : "Add ticket"}
-            </button>
-          </div>
-        </form>
+            </div>
+            <div className="sticky bottom-0 flex justify-end gap-2 border-t border-sand-200 bg-white px-5 py-3">
+              <button
+                type="button"
+                onClick={closeForm}
+                disabled={saving}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-sand-600 hover:bg-sand-100 disabled:opacity-40"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !form.client_name.trim()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? "Saving..." : editingId ? "Save changes" : "Add ticket"}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
 
       {/* Metric cards */}

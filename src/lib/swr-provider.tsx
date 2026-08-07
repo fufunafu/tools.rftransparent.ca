@@ -2,10 +2,11 @@
 
 import { SWRConfig } from "swr";
 import { fetchWithRetry } from "@/lib/fetch-retry";
+import { redirectOnUnauthorized } from "@/lib/client-auth";
 
 async function fetcher<T>(url: string): Promise<T> {
   // Retries transient network/5xx failures with backoff; 4xx pass through.
-  const res = await fetchWithRetry(url);
+  const res = redirectOnUnauthorized(await fetchWithRetry(url));
   if (!res.ok) {
     let detail = "";
     try {

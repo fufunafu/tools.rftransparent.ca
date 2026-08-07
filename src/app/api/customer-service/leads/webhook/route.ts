@@ -1,15 +1,11 @@
-// Public webhook endpoint that receives form submissions from the customer's
-// browser via the "After form loaded" script in Powerful Form Builder.
+// Public app proxy endpoint that receives form submissions from the customer's
+// browser via Shopify's signed server-to-server proxy.
 //
 // Meta lead-ad webhooks have a different shape (signed POST, then a Graph API
 // callback to fetch the data) and live at /api/customer-service/leads/meta-webhook.
 //
-// Auth: a shared secret in the ?secret=... query param. The secret is visible
-// in the browser's network tab, so it stops drive-by spam but isn't a strong
-// authorization gate — sufficient for now.
-//
-// CORS: this is invoked cross-origin from the Shopify storefront, so we accept
-// any origin. The secret is the gate.
+// Auth: Shopify signs the forwarded query parameters with the app's client
+// secret. The browser never receives that secret.
 
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
@@ -28,46 +24,48 @@ import {
   type PendingLeadAttachment,
 } from "@/lib/customer-service/lead-attachments";
 import { markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
+import { enforceLeadIngestionRateLimit } from "@/lib/customer-service/lead-rate-limit";
+import { verifyShopifyAppProxyRequest } from "@/lib/customer-service/shopify-app-proxy";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const CORS_HEADERS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
-
-function jsonResponse(body: unknown, status = 200) {
-  return new NextResponse(JSON.stringify(body), {
+function jsonResponse(body: unknown, status = 200, headers?: HeadersInit) {
+  return NextResponse.json(body, {
     status,
-    headers: { ...CORS_HEADERS, "Content-Type": "application/json" },
+    headers,
   });
 }
 
-export async function OPTIONS() {
-  return new NextResponse(null, { status: 204, headers: CORS_HEADERS });
-}
-
 export async function POST(req: NextRequest) {
-  const expected = process.env.LEADS_WEBHOOK_SECRET;
-  if (!expected) {
-    return jsonResponse({ error: "Webhook not configured (missing LEADS_WEBHOOK_SECRET)" }, 500);
-  }
-
   const url = new URL(req.url);
-  const secret = url.searchParams.get("secret");
-  if (secret !== expected) {
+  const verification = verifyShopifyAppProxyRequest(url);
+  if (!verification.ok) {
+    if (verification.reason === "missing_secret") {
+      return jsonResponse({ error: "Lead app proxy is not configured." }, 500);
+    }
     return jsonResponse({ error: "unauthorized" }, 401);
   }
 
-  if (url.searchParams.get("action") === "create-upload") {
+  const isUploadIntent = url.searchParams.get("action") === "create-upload";
+  const rateLimit = await enforceLeadIngestionRateLimit(
+    req,
+    verification.shop,
+    isUploadIntent ? "upload" : "submit",
+  );
+  if (!rateLimit.ok) {
+    return jsonResponse(
+      { error: rateLimit.error },
+      rateLimit.status,
+      { "Retry-After": String(rateLimit.retryAfter) },
+    );
+  }
+
+  if (isUploadIntent) {
     return createUploadIntent(req);
   }
 
-  const sourceParam = url.searchParams.get("source");
-  const source: LeadSource = sourceParam === "meta" ? "meta" : "website";
+  const source: LeadSource = "website";
 
   let payload: Record<string, unknown> = {};
   try {

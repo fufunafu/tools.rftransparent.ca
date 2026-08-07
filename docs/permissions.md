@@ -22,7 +22,7 @@ Authorization has three independent levels. A person may be an admin without bei
 | Settings access list | Admin | Admin |
 | Other settings and health | Authenticated | Admin where a form changes shared configuration |
 | Weekly employee survey | Public capability link | Possession of the unguessable survey token |
-| Lead webhooks | Public endpoint | Configured webhook secret or provider signature |
+| Lead webhooks | Public endpoint | Shopify App Proxy or provider signature, plus persistent rate limits |
 | Cron endpoints | Public endpoint | Configured cron authorization secret |
 
 Navigation filtering improves usability but is not a security control. Every sensitive page, route handler, and data operation must keep its own server-side authorization check.

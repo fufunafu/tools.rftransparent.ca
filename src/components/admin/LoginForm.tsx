@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
-export default function LoginForm({ authError }: { authError?: string }) {
+export default function LoginForm({
+  authError,
+  nextPath = "/",
+}: {
+  authError?: string;
+  nextPath?: string;
+}) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(authError ?? "");
 
@@ -24,7 +30,7 @@ export default function LoginForm({ authError }: { authError?: string }) {
       const { error: oauthError } = await supabase().auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/api/auth/callback`,
+          redirectTo: `${window.location.origin}/api/auth/callback?next=${encodeURIComponent(nextPath)}`,
         },
       });
       if (oauthError) {
@@ -53,7 +59,7 @@ export default function LoginForm({ authError }: { authError?: string }) {
         return;
       }
       // Full reload so the proxy re-runs and lands them on the home page.
-      window.location.href = "/";
+      window.location.href = nextPath;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
       setLoading(false);

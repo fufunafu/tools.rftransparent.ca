@@ -23,6 +23,11 @@ export interface LeadTrendSummary {
   changePct: number | null;
 }
 
+export interface LeadTrendQueryBounds {
+  from: string | null;
+  to: string;
+}
+
 interface LeadDateSource {
   source: LeadSource;
   submitted_at: string;
@@ -56,6 +61,49 @@ export type LeadFunnelMetricsBySource = Record<LeadSource, LeadFunnelMetrics>;
 
 const DAY_MS = 86_400_000;
 const TORONTO_TIME_ZONE = "America/Toronto";
+const DEDUPLICATION_BUFFER_DAYS = 7;
+
+export function leadTrendQueryBounds(
+  range: LeadTrendRange | "custom",
+  now = new Date(),
+  customFrom = "",
+  customTo = "",
+): LeadTrendQueryBounds | null {
+  const today = torontoDayNumber(now);
+  if (range === "all") {
+    return { from: null, to: dateKeyFromDay(today) };
+  }
+
+  if (range === "custom") {
+    const parsedFrom = parseDateKey(customFrom);
+    const parsedTo = parseDateKey(customTo);
+    if (parsedFrom == null || parsedTo == null) return null;
+    const start = Math.min(parsedFrom, parsedTo);
+    const end = Math.max(parsedFrom, parsedTo);
+    const spanDays = end - start + 1;
+    return {
+      from: dateKeyFromDay(start - spanDays - DEDUPLICATION_BUFFER_DAYS),
+      to: dateKeyFromDay(end),
+    };
+  }
+
+  if (range === "12m") {
+    const currentMonth = torontoMonthNumber(now);
+    const previousStart = dayNumberFromMonth(currentMonth - 23);
+    return {
+      from: dateKeyFromDay(previousStart - DEDUPLICATION_BUFFER_DAYS),
+      to: dateKeyFromDay(today),
+    };
+  }
+
+  const days = range === "7d" ? 7 : range === "30d" ? 30 : 90;
+  const previousStart = today - (days * 2) + 1;
+  return {
+    from: dateKeyFromDay(previousStart - DEDUPLICATION_BUFFER_DAYS),
+    to: dateKeyFromDay(today),
+  };
+}
+
 export function isLeadIncludedInPerformance(lead: Pick<
   LeadFunnelRow,
   "outcome" | "not_applicable_reason" | "raw_payload"

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { buildCustomLeadTrend } from "@/lib/lead-analytics";
-import { buildLeadPerformanceTrend } from "@/lib/lead-performance-trends";
+import {
+  buildLeadPerformanceTrend,
+  buildRollingLeadPerformanceRateTrend,
+} from "@/lib/lead-performance-trends";
 
 type TrendLead = Parameters<typeof buildLeadPerformanceTrend>[0][number];
 
@@ -80,5 +83,43 @@ describe("buildLeadPerformanceTrend", () => {
     });
     expect(result[1].website.medianCallMs).toBeNull();
     expect(result[1].meta.medianCallMs).toBeNull();
+  });
+});
+
+describe("buildRollingLeadPerformanceRateTrend", () => {
+  it("recomputes a rolling rate from combined counts instead of averaging percentages", () => {
+    const buckets = buildCustomLeadTrend([], "2026-08-01", "2026-08-03").points;
+    const leads = [
+      lead({
+        source: "website",
+        submitted_at: "2026-08-01T14:00:00.000Z",
+        call_status: "called",
+      }),
+      ...Array.from({ length: 9 }, (_, index) => lead({
+        source: "website",
+        submitted_at: `2026-08-02T${String(index + 10).padStart(2, "0")}:00:00.000Z`,
+      })),
+      lead({
+        source: "website",
+        submitted_at: "2026-08-03T14:00:00.000Z",
+        call_status: "called",
+      }),
+      lead({
+        source: "website",
+        submitted_at: "2026-08-03T15:00:00.000Z",
+        call_status: "called",
+      }),
+    ];
+    const daily = buildLeadPerformanceTrend(leads, buckets);
+
+    const result = buildRollingLeadPerformanceRateTrend(daily, "callRate", 2);
+
+    expect(result[0].website.value).toBeNull();
+    expect(result[1].website).toEqual({ value: 10, count: 1, denominator: 10 });
+    expect(result[2].website).toEqual({ value: 18.2, count: 2, denominator: 11 });
+    expect(result[2]).toMatchObject({
+      rangeStart: "2026-08-02",
+      rangeEnd: "2026-08-03",
+    });
   });
 });

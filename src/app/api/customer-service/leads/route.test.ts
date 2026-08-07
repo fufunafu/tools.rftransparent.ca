@@ -8,6 +8,8 @@ const {
   attachmentRangeMock,
   attemptRangeMock,
   attemptInMock,
+  gteMock,
+  ltMock,
 } = vi.hoisted(() => ({
   isAuthenticatedMock: vi.fn(),
   getSupabaseMock: vi.fn(),
@@ -15,6 +17,8 @@ const {
   attachmentRangeMock: vi.fn(),
   attemptRangeMock: vi.fn(),
   attemptInMock: vi.fn(),
+  gteMock: vi.fn(),
+  ltMock: vi.fn(),
 }));
 
 vi.mock("@/lib/admin-auth", () => ({
@@ -40,6 +44,14 @@ function queryBuilder(range: ReturnType<typeof vi.fn>) {
     range,
     eq: vi.fn(() => builder),
     in: attemptInMock,
+    gte: vi.fn((...args: unknown[]) => {
+      gteMock(...args);
+      return builder;
+    }),
+    lt: vi.fn((...args: unknown[]) => {
+      ltMock(...args);
+      return builder;
+    }),
   };
   attemptInMock.mockReturnValue(builder);
   return builder;
@@ -182,6 +194,26 @@ describe("GET /api/customer-service/leads", () => {
         })],
       }],
     });
+  });
+
+  it("bounds lead and call-attempt scans to the requested history window", async () => {
+    const response = await GET(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?from=2026-05-29&to=2026-08-03",
+    ));
+
+    expect(response.status).toBe(200);
+    expect(gteMock).toHaveBeenCalledWith("submitted_at", "2026-05-29T00:00:00.000Z");
+    expect(gteMock).toHaveBeenCalledWith("called_at", "2026-05-29T00:00:00.000Z");
+    expect(ltMock).toHaveBeenCalledWith("submitted_at", "2026-08-04T06:00:00.000Z");
+  });
+
+  it("rejects an invalid history window before querying the database", async () => {
+    const response = await GET(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?from=not-a-date&to=2026-08-03",
+    ));
+
+    expect(response.status).toBe(400);
+    expect(getSupabaseMock).not.toHaveBeenCalled();
   });
 });
 

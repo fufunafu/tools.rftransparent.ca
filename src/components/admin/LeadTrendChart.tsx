@@ -71,7 +71,7 @@ export default function LeadTrendChart({
       <BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -20 }}>
         <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />
         <XAxis
-          dataKey="label"
+          dataKey="rangeStart"
           axisLine={false}
           tickLine={false}
           tick={<SelectableTick data={data} onSelectRange={onSelectRange} />}

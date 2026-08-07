@@ -23,7 +23,9 @@ import {
   calculateLeadFunnelBySource,
   isLeadInCustomDateRange,
   isLeadIncludedInPerformance,
+  leadTrendQueryBounds,
   type LeadFunnelMetricsBySource,
+  type LeadTrendQueryBounds,
   type LeadTrendRange,
 } from "@/lib/lead-analytics";
 import {
@@ -43,6 +45,7 @@ import {
   leadResponseTimeMs,
   medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
+import { redirectOnUnauthorized } from "@/lib/client-auth";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
   ssr: false,
@@ -251,7 +254,7 @@ interface SourceResponseMetrics {
 type SourceResponseMetricsBySource = Record<LeadSource, SourceResponseMetrics>;
 
 async function fetcher<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = redirectOnUnauthorized(await fetch(url));
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(body.error ?? `Request failed with status ${response.status}`);
@@ -259,12 +262,19 @@ async function fetcher<T>(url: string): Promise<T> {
   return body as T;
 }
 
+function leadListUrl(bounds: LeadTrendQueryBounds | null): string | null {
+  if (!bounds) return null;
+  const params = new URLSearchParams({ to: bounds.to });
+  if (bounds.from) params.set("from", bounds.from);
+  return `/api/customer-service/leads?${params.toString()}`;
+}
+
 async function triggerSyncAutomation(job: SyncAutomationJob, label: string): Promise<void> {
-  const response = await fetch("/api/settings/automations", {
+  const response = redirectOnUnauthorized(await fetch("/api/settings/automations", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ job }),
-  });
+  }));
   const body = await response.json().catch(() => ({})) as {
     ok?: boolean;
     error?: string;
@@ -491,7 +501,7 @@ function LeadDetailPanel({
   ): Promise<boolean> => {
     setSaveError(null);
     try {
-      const response = await fetch("/api/customer-service/leads", {
+      const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -500,7 +510,7 @@ function LeadDetailPanel({
             : { id: lead.id }),
           ...update,
         }),
-      });
+      }));
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(body.error ?? `Could not save changes (${response.status})`);
@@ -1011,9 +1021,11 @@ function LeadDetailPanel({
 export default function LeadsDashboard({
   initialLeads,
   initialNow,
+  initialBounds,
 }: {
   initialLeads?: Lead[] | null;
   initialNow: number;
+  initialBounds: LeadTrendQueryBounds | null;
 }) {
   const [filter, setFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
@@ -1047,12 +1059,20 @@ export default function LeadsDashboard({
     revalidateOnFocus: true,
     focusThrottleInterval: 30_000,
   };
+  const requestedBounds = useMemo(
+    () => leadTrendQueryBounds(trendRange, new Date(now), customFrom, customTo),
+    [trendRange, now, customFrom, customTo],
+  );
+  const leadsUrl = leadListUrl(requestedBounds);
+  const initialLeadsUrl = leadListUrl(initialBounds);
   const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
-    "/api/customer-service/leads",
+    leadsUrl,
     fetcher,
     {
       ...autoRefreshOpts,
-      fallbackData: initialLeads ? { leads: initialLeads } : undefined,
+      fallbackData: initialLeads && leadsUrl === initialLeadsUrl
+        ? { leads: initialLeads }
+        : undefined,
     },
   );
   const {
@@ -1061,8 +1081,8 @@ export default function LeadsDashboard({
     mutate: refreshMetaStatus,
   } = useSWR<MetaStatus>("/api/customer-service/leads?view=meta_status", fetcher, autoRefreshOpts);
   const leads = useMemo(
-    () => (hydrated ? data?.leads : initialLeads) ?? [],
-    [data?.leads, hydrated, initialLeads],
+    () => (hydrated ? data?.leads : leadsUrl === initialLeadsUrl ? initialLeads : null) ?? [],
+    [data?.leads, hydrated, initialLeads, initialLeadsUrl, leadsUrl],
   );
   const { mutate } = useSWRConfig();
 
@@ -1079,9 +1099,9 @@ export default function LeadsDashboard({
     try {
       if (metaStatus?.connected) {
         try {
-          const response = await fetch("/api/customer-service/leads?action=sync_meta", {
+          const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads?action=sync_meta", {
             method: "POST",
-          });
+          }));
           const body = await response.json().catch(() => ({})) as {
             error?: string;
             summary?: MetaSyncSummary;
@@ -1850,6 +1870,38 @@ const PERFORMANCE_METRIC_DETAILS: Record<LeadPerformanceMetricKey, {
   },
 };
 
+function performanceRateWindow(
+  trendRange: TrendSelection,
+  customFrom: string,
+  customTo: string,
+): { size: number; label: string } {
+  if (trendRange === "7d") return { size: 3, label: "3-day rolling rate" };
+  if (trendRange === "30d") return { size: 7, label: "7-day rolling rate" };
+  if (trendRange === "90d") return { size: 4, label: "4-week rolling rate" };
+  if (trendRange === "12m" || trendRange === "all") {
+    return { size: 3, label: "3-month rolling rate" };
+  }
+
+  const start = Date.parse(`${customFrom}T00:00:00.000Z`);
+  const end = Date.parse(`${customTo}T00:00:00.000Z`);
+  const spanDays = Number.isFinite(start) && Number.isFinite(end)
+    ? Math.floor(Math.abs(end - start) / 86_400_000) + 1
+    : 30;
+  if (spanDays > 180) return { size: 3, label: "3-month rolling rate" };
+  if (spanDays > 45) return { size: 4, label: "4-week rolling rate" };
+  if (spanDays >= 14) return { size: 7, label: "7-day rolling rate" };
+  if (spanDays >= 5) return { size: 3, label: "3-day rolling rate" };
+  return { size: 1, label: "Daily cohort rate" };
+}
+
+function formatTrendStart(value: string): string {
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 function FunnelComparison({
   metrics,
   responseMetrics,
@@ -2013,6 +2065,14 @@ function PerformanceTrendDialog({
   onClose: () => void;
 }) {
   const details = PERFORMANCE_METRIC_DETAILS[metric];
+  const rateMetric = metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
+  const rollingWindow = performanceRateWindow(trendRange, customFrom, customTo);
+  const responseStarts = !rateMetric
+    ? (["website", "meta"] as const).flatMap((source) => {
+        const first = data.find((point) => point[source][metric] != null);
+        return first ? [`${source === "website" ? "Website" : "Meta"} ${formatTrendStart(first.rangeStart)}`] : [];
+      })
+    : [];
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow;
@@ -2117,8 +2177,9 @@ function PerformanceTrendDialog({
           )}
 
           <div className="px-3 pb-3 pt-5 sm:px-6 sm:pb-5">
-            <div className="mb-3 flex items-center gap-5 px-2 text-xs text-sand-600">
-              <label className="inline-flex cursor-pointer items-center gap-2">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-2 text-xs text-sand-600">
+              <div className="flex items-center gap-5">
+                <label className="inline-flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
                   checked={chartSources.website}
@@ -2128,8 +2189,8 @@ function PerformanceTrendDialog({
                 />
                 <span className="h-0.5 w-5 bg-blue-600" />
                 Website
-              </label>
-              <label className="inline-flex cursor-pointer items-center gap-2">
+                </label>
+                <label className="inline-flex cursor-pointer items-center gap-2">
                 <input
                   type="checkbox"
                   checked={chartSources.meta}
@@ -2139,7 +2200,15 @@ function PerformanceTrendDialog({
                 />
                 <span className="h-0.5 w-5 bg-pink-600" />
                 Meta
-              </label>
+                </label>
+              </div>
+              <span className="rounded-full bg-sand-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
+                {rateMetric
+                  ? rollingWindow.label
+                  : responseStarts.length > 0
+                    ? `Recorded data: ${responseStarts.join(" · ")}`
+                    : "No recorded response data"}
+              </span>
             </div>
             <div className="h-[330px] w-full">
               <LeadPerformanceTrendChart
@@ -2147,13 +2216,16 @@ function PerformanceTrendDialog({
                 metric={metric}
                 showWebsite={chartSources.website}
                 showMeta={chartSources.meta}
+                rollingWindowSize={rollingWindow.size}
               />
             </div>
           </div>
 
           <p className="border-t border-sand-100 px-5 py-3 text-[11px] leading-5 text-sand-400 sm:px-6">
-            Each point groups leads by the date they were first submitted. Recent groups may improve as calls,
-            quotes, and orders are completed. Hover or tap a point to see its exact value.
+            {rateMetric
+              ? `Each point recomputes the rate from all leads in the preceding ${rollingWindow.label.replace(" rolling rate", "")} window. This reduces misleading daily jumps caused by small samples.`
+              : "Earlier imported leads do not have reliable first-response timestamps and are not plotted. Each point is the median for leads first submitted in that period."}
+            {" "}Recent groups may improve as calls, quotes, and orders are completed. Hover or tap a point to see the exact value and sample size.
           </p>
         </div>
       </section>
