@@ -935,7 +935,7 @@ export default function CustomerServiceDashboard({ defaultStore }: { defaultStor
         </nav>
       )}
 
-      {data?.current && (
+      {mode === "admin" && data?.current && (
         <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4 flex items-center justify-between flex-wrap gap-x-6 gap-y-2">
           <div className="flex items-baseline gap-3 flex-wrap">
             <span className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">
@@ -1478,101 +1478,73 @@ function StaffView({
 
   const missOnTrack = missRate <= MISS_RATE_TARGET;
   const callbackOnTrack = callbackRate >= CALLBACK_RATE_TARGET;
-  const allOnTrack = missOnTrack && callbackOnTrack;
-
   const inboundCount = metrics?.inbound_calls ?? 0;
 
   const staffCards: { label: string; value: number; prev: number; change: number | null | undefined; format: (n: number) => string; target?: number; invert?: boolean; higherIsBetter?: boolean; tooltip?: string; subtitle?: string }[] = [
     { label: "Inbound", value: inboundCount, prev: data?.previous?.inbound_calls ?? 0, change: change?.inbound_calls, format: formatNumber },
     { label: "Outbound", value: metrics?.outbound_calls ?? 0, prev: data?.previous?.outbound_calls ?? 0, change: change?.outbound_calls, format: formatNumber },
     { label: "Miss Rate", value: missRate, prev: data?.previous?.miss_rate ?? 0, change: change?.miss_rate, format: (n: number) => `${n}%`, target: MISS_RATE_TARGET, invert: true, tooltip: "Unanswered calls (no pickup + voicemail) \u00f7 total inbound \u00d7 100.", subtitle: `${missedCount} unanswered out of ${inboundCount} inbound` },
-    { label: "Called Back", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Unanswered calls your team called back \u00f7 total unanswered \u00d7 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} unanswered` },
+    { label: "Callback Rate", value: callbackRate, prev: data?.previous?.outbound_callback_rate ?? 0, change: change?.outbound_callback_rate, format: (n: number) => `${n}%`, target: CALLBACK_RATE_TARGET, higherIsBetter: true, tooltip: "Unanswered calls your team called back \u00f7 total unanswered \u00d7 100.", subtitle: `${metrics?.outbound_callbacks_made ?? 0} called back out of ${missedCount} unanswered` },
   ];
 
   return (
-    <div className="space-y-4">
-      {/* Status banner */}
-      {allOnTrack ? (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex items-center gap-3">
-          <span className="text-emerald-600 text-lg">&#10003;</span>
-          <div>
-            <p className="text-sm font-medium text-emerald-800">All targets met</p>
-            <p className="text-xs text-emerald-600">Miss rate {missRate}% (target: &le;{MISS_RATE_TARGET}%) &middot; Callback rate {callbackRate}% (target: &ge;{CALLBACK_RATE_TARGET}%)</p>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
-          <div className="flex items-start gap-3">
-            <span className="text-amber-500 text-lg mt-0.5">&#9888;</span>
-            <div className="space-y-1">
-              {!missOnTrack && (
-                <p className="text-sm text-amber-800">
-                  <span className="font-medium">Miss rate is {missRate}%</span>
-                  <span className="text-amber-600"> — target is &le;{MISS_RATE_TARGET}%. {missedCount} unanswered call{missedCount !== 1 ? "s" : ""} this period.</span>
-                </p>
-              )}
-              {!callbackOnTrack && (
-                <p className="text-sm text-amber-800">
-                  <span className="font-medium">Callback rate is {callbackRate}%</span>
-                  <span className="text-amber-600"> — target is &ge;{CALLBACK_RATE_TARGET}%.{pendingCallbacks > 0 ? ` ${pendingCallbacks} caller${pendingCallbacks !== 1 ? "s" : ""} still need a callback.` : ""}</span>
-                </p>
-              )}
+    <div className="space-y-6">
+      <div className="grid items-stretch gap-4 lg:grid-cols-2">
+        <section className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[390px]" aria-labelledby="staff-analysis-heading">
+          <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-3.5">
+            <div>
+              <h2 id="staff-analysis-heading" className="text-sm font-semibold text-slate-900">Analysis</h2>
+              <p className="mt-0.5 text-xs text-slate-400">A quick read on call activity and follow-up.</p>
             </div>
+            <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+              missOnTrack && callbackOnTrack
+                ? "bg-emerald-50 text-emerald-700"
+                : "bg-amber-50 text-amber-700"
+            }`}>
+              {missOnTrack && callbackOnTrack ? "On target" : "Needs attention"}
+            </span>
           </div>
-        </div>
-      )}
 
-      {/* Key metrics with progress bars */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {staffCards.map((c) => {
-          const hasTarget = c.target != null;
-          const target = c.target ?? 0;
-          let progress = 0;
-          let onTrack = true;
-          if (hasTarget) {
-            if (c.higherIsBetter) {
-              progress = target > 0 ? Math.min(c.value / target, 1) : 0;
-              onTrack = c.value >= target;
-            } else {
-              progress = target > 0 ? Math.min(c.value / target, 1) : 0;
-              onTrack = c.value <= target;
-            }
-          }
-          return (
-            <div key={c.label} className="bg-white rounded-xl border border-sand-200/60 p-4">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-1">
-                  <p className="text-[11px] text-sand-400 uppercase tracking-wider">{c.label}</p>
-                  {c.tooltip && <InfoTip text={c.tooltip} />}
+          <div className="grid flex-1 grid-cols-2 gap-px bg-slate-100">
+            {staffCards.map((card) => {
+              const hasTarget = card.target != null;
+              const onTrack = !hasTarget || (card.higherIsBetter
+                ? card.value >= (card.target ?? 0)
+                : card.value <= (card.target ?? 0));
+              return (
+                <div key={card.label} className="flex min-h-0 flex-col justify-center bg-white px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{card.label}</p>
+                      {card.tooltip && <InfoTip text={card.tooltip} />}
+                    </div>
+                    {hasTarget && (
+                      <span className={`text-[10px] font-semibold ${onTrack ? "text-emerald-600" : "text-amber-600"}`}>
+                        Target {card.higherIsBetter ? "≥" : "≤"}{card.target}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <p className="text-2xl font-semibold tracking-tight text-slate-950">{card.format(card.value)}</p>
+                    <ChangeBadge value={card.change ?? null} invert={card.invert} />
+                  </div>
+                  <p className="mt-1 min-h-4 text-[11px] text-slate-400">
+                    {card.subtitle ?? `Previous period: ${card.format(card.prev)}`}
+                  </p>
                 </div>
-                {hasTarget && (
-                  <span className={`text-[10px] font-medium ${onTrack ? "text-emerald-500" : "text-amber-500"}`}>
-                    {onTrack ? "✓" : "!"} {c.higherIsBetter ? "≥" : "≤"}{c.target}%
-                  </span>
-                )}
-              </div>
-              <p className="text-xl font-semibold text-sand-900">{c.format(c.value)}</p>
-              {c.subtitle && <p className="text-[11px] text-sand-400 mt-0.5">{c.subtitle}</p>}
-              {hasTarget && (
-                <div className="mt-2 h-1.5 bg-sand-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all ${onTrack ? "bg-emerald-400" : "bg-amber-400"}`}
-                    style={{ width: `${Math.max(progress * 100, 4)}%` }}
-                  />
-                </div>
-              )}
-              <div className="flex items-center gap-2 mt-1.5">
-                <span className="text-xs text-sand-400">prev: {c.format(c.prev)}</span>
-                <ChangeBadge value={c.change ?? null} invert={c.invert} />
-              </div>
-            </div>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
 
-      <div>
-        <h2 className="text-sm font-semibold text-sand-700 mb-2">Needs Callback</h2>
-        <CallbacksTab
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-xs">
+            <span className="font-semibold text-slate-700">{formatMinutesLong(metrics?.total_minutes ?? 0)} on the phone</span>
+            <span className="text-slate-400">
+              {formatNumber(metrics?.inbound_minutes ?? 0)} inbound min &middot; {formatNumber(metrics?.outbound_minutes ?? 0)} outbound min
+            </span>
+          </div>
+        </section>
+
+        <StaffCallbacksPanel
           data={callbackData}
           store={store}
           loadCallbacks={loadCallbacks}
@@ -1580,8 +1552,18 @@ function StaffView({
         />
       </div>
 
-      <div>
-        <h2 className="text-sm font-semibold text-sand-700 mb-2">Call Log</h2>
+      <section aria-labelledby="staff-call-log-heading">
+        <div className="mb-2 flex items-end justify-between gap-4">
+          <div>
+            <h2 id="staff-call-log-heading" className="text-sm font-semibold text-slate-900">Call log</h2>
+            <p className="mt-0.5 text-xs text-slate-400">Search and review every call in the selected period.</p>
+          </div>
+          {pendingCallbacks > 0 && (
+            <span className="text-xs font-medium text-amber-700">
+              {pendingCallbacks} callback{pendingCallbacks === 1 ? "" : "s"} pending
+            </span>
+          )}
+        </div>
         <CallLogTab
           store={store}
           source={source}
@@ -1590,8 +1572,166 @@ function StaffView({
           onNumberClick={setSelectedNumber}
           syncKey={syncKey}
         />
+      </section>
+    </div>
+  );
+}
+
+function StaffCallbacksPanel({
+  data,
+  store,
+  loadCallbacks,
+  setSelectedNumber,
+}: {
+  data: CallbacksResponse | null;
+  store: string;
+  loadCallbacks: () => Promise<void>;
+  setSelectedNumber: (n: string | null) => void;
+}) {
+  const [expandedNumber, setExpandedNumber] = useState<string | null>(null);
+  const callbacks = useMemo(() => {
+    const priorityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    return [...(data?.callbacks ?? [])]
+      .filter((callback) => callback.note_status !== "done")
+      .sort((a, b) => {
+        const priorityDifference = (priorityRank[a.priority] ?? 3) - (priorityRank[b.priority] ?? 3);
+        return priorityDifference || new Date(b.last_call).getTime() - new Date(a.last_call).getTime();
+      });
+  }, [data?.callbacks]);
+  const highPriorityCount = callbacks.filter((callback) => callback.priority === "high").length;
+
+  return (
+    <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm lg:h-[390px]" aria-labelledby="staff-callbacks-heading">
+      <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-4 py-3.5">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 id="staff-callbacks-heading" className="text-sm font-semibold text-slate-900">Needs callback</h2>
+            {callbacks.length > 0 && (
+              <span className="rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700">{callbacks.length}</span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs text-slate-400">Call the highest priority customers first.</p>
+        </div>
+        {highPriorityCount > 0 && (
+          <span className="shrink-0 text-[11px] font-semibold text-red-600">{highPriorityCount} high priority</span>
+        )}
       </div>
 
+      {callbacks.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+          <span className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-lg text-emerald-600">&#10003;</span>
+          <p className="mt-2 text-sm font-semibold text-slate-800">Everyone has been called back</p>
+          <p className="mt-1 text-xs text-slate-400">There are no pending callbacks for this period.</p>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto">
+          {callbacks.map((callback) => (
+            <StaffCallbackItem
+              key={callback.from_number}
+              callback={callback}
+              store={store}
+              expanded={expandedNumber === callback.from_number}
+              onToggle={() => setExpandedNumber((current) => current === callback.from_number ? null : callback.from_number)}
+              loadCallbacks={loadCallbacks}
+              setSelectedNumber={setSelectedNumber}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function StaffCallbackItem({
+  callback,
+  store,
+  expanded,
+  onToggle,
+  loadCallbacks,
+  setSelectedNumber,
+}: {
+  callback: CallbackGroup;
+  store: string;
+  expanded: boolean;
+  onToggle: () => void;
+  loadCallbacks: () => Promise<void>;
+  setSelectedNumber: (n: string | null) => void;
+}) {
+  const [note, setNote] = useState(callback.note ?? "");
+  const [saving, setSaving] = useState(false);
+
+  const saveNote = async (status: "pending" | "done") => {
+    setSaving(true);
+    try {
+      await fetch("/api/customer-service?view=note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          store_id: store,
+          from_number: callback.from_number,
+          note,
+          status,
+        }),
+      });
+      await loadCallbacks();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const priorityStyle = callback.priority === "high"
+    ? "bg-red-500"
+    : callback.priority === "medium"
+      ? "bg-amber-400"
+      : "bg-slate-300";
+
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center gap-3">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${priorityStyle}`} aria-label={`${callback.priority} priority`} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <PhoneLink number={callback.from_number} onClick={() => setSelectedNumber(callback.from_number)} />
+            {callback.is_first_time && (
+              <span className="rounded bg-purple-50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700">New</span>
+            )}
+            {callback.attempts > 1 && (
+              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{callback.attempts} attempts</span>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-[11px] text-slate-400">
+            Last call {timeAgo(callback.last_call)}{callback.note ? ` · ${callback.note}` : ""}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onToggle}
+          className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+          aria-expanded={expanded}
+        >
+          {expanded ? "Close" : "Note"}
+        </button>
+      </div>
+
+      {expanded && (
+        <div className="mt-3 rounded-lg bg-slate-50 p-3">
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            placeholder="Add a callback note"
+            rows={2}
+            className="w-full resize-none rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => saveNote("pending")} disabled={saving} className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50">
+              Save note
+            </button>
+            <button type="button" onClick={() => saveNote("done")} disabled={saving} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50">
+              {saving ? "Saving..." : "Mark done"}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
