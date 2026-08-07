@@ -399,6 +399,7 @@ export default function AssistantKnowledgeManager({
 
   const loadDeferredData = useCallback(async () => {
     setDeferredLoading(true);
+    setError(null);
     try {
       const response = await fetch("/api/settings/assistant-bootstrap", { cache: "no-store" });
       const payload = await response.json();
