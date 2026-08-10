@@ -691,8 +691,9 @@ export default function LeadAnalysisDashboard({
             <p className="font-semibold text-sand-700">How to read these charts</p>
             <p className="mt-1">
               Rate charts use rolling windows to reduce noise from small daily samples. Response-time charts use
-              completed first responses only and measure elapsed time, including nights and weekends. Recent lead
-              cohorts can improve as calls, quotes, and orders are completed.
+              completed first responses only and measure elapsed time, including nights and weekends. A rolling
+              line begins only after its first complete window, so a 7-day chart leaves the first six days blank.
+              Recent lead cohorts can improve as calls, quotes, and orders are completed.
             </p>
           </section>
         </>

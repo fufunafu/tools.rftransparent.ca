@@ -168,13 +168,16 @@ export async function loadLeadResponsePerformance(
 ): Promise<LeadResponsePerformanceData> {
   const supabase = getSupabase();
   const { data: trackingRows, error: trackingError } = await supabase
-    .from("lead_call_attempts")
-    .select("called_at")
-    .order("called_at", { ascending: true })
+    .from("call_records")
+    .select("call_start")
+    .order("call_start", { ascending: true })
     .limit(1);
   if (trackingError) throw new Error(trackingError.message);
 
-  const trackingStartedAt = trackingRows?.[0]?.called_at ?? null;
+  // Use the raw phone-history boundary, not the first call that happened to
+  // match a lead. The latter can make complete historical coverage appear to
+  // start later than it actually does.
+  const trackingStartedAt = trackingRows?.[0]?.call_start ?? null;
   if (!trackingStartedAt) return { leads: [], trackingStartedAt: null };
   const requestedStart = options.from ? startOfQueryWindow(options.from) : null;
   const effectiveStart = requestedStart && requestedStart > trackingStartedAt

@@ -55,6 +55,7 @@ function formatRangeDate(value: string): string {
 interface MetricChartPoint {
   label: string;
   rangeStart: string;
+  rangeEnd: string;
   fullLabel: string;
   website: number | null;
   meta: number | null;
@@ -128,6 +129,7 @@ export default function LeadPerformanceTrendChart({
     ? buildRollingLeadPerformanceRateTrend(data, metric, rollingWindowSize).map((point) => ({
         label: point.label,
         rangeStart: point.rangeStart,
+        rangeEnd: point.rangeEnd,
         fullLabel: point.rangeStart === point.rangeEnd
           ? formatRangeDate(point.rangeEnd)
           : `${formatRangeDate(point.rangeStart)} to ${formatRangeDate(point.rangeEnd)}`,
@@ -141,6 +143,7 @@ export default function LeadPerformanceTrendChart({
     : data.map((point) => ({
         label: point.label,
         rangeStart: point.rangeStart,
+        rangeEnd: point.rangeEnd,
         fullLabel: point.fullLabel,
         website: metricValue(point.website, metric),
         meta: metricValue(point.meta, metric),
@@ -160,6 +163,7 @@ export default function LeadPerformanceTrendChart({
   const hasData = chartData.some((point) => (
     (showWebsite && point.website != null) || (showMeta && point.meta != null)
   ));
+  const labelsByDate = new Map(chartData.map((point) => [point.rangeEnd, point.label]));
 
   if (!hasData) {
     return (
@@ -174,12 +178,12 @@ export default function LeadPerformanceTrendChart({
       <LineChart data={chartData} margin={{ top: 12, right: 18, bottom: 4, left: 8 }}>
         <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />
         <XAxis
-          dataKey="rangeStart"
+          dataKey="rangeEnd"
           axisLine={false}
           tickLine={false}
           minTickGap={26}
           tick={{ fill: "#64748b", fontSize: 11 }}
-          tickFormatter={(_value: string, index: number) => chartData[index]?.label ?? ""}
+          tickFormatter={(value: string) => labelsByDate.get(value) ?? ""}
         />
         <YAxis
           axisLine={false}

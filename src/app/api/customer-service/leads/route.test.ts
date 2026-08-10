@@ -152,17 +152,16 @@ describe("GET /api/customer-service/leads", () => {
     trackingQuery.select.mockReturnValue(trackingQuery);
     trackingQuery.order.mockReturnValue(trackingQuery);
     trackingQuery.limit.mockResolvedValue({
-      data: [{ called_at: "2025-12-22T16:17:35.000Z" }],
+      data: [{ call_start: "2025-12-22T16:17:35.000Z" }],
       error: null,
     });
     const leadsQuery = queryBuilder(leadRangeMock);
     const attemptsQuery = queryBuilder(attemptRangeMock);
-    let attemptQueryCount = 0;
     getSupabaseMock.mockReturnValueOnce({
       from: vi.fn((table: string) => {
         if (table === "leads") return leadsQuery;
-        attemptQueryCount += 1;
-        return attemptQueryCount === 1 ? trackingQuery : attemptsQuery;
+        if (table === "call_records") return trackingQuery;
+        return attemptsQuery;
       }),
     });
 
@@ -173,6 +172,9 @@ describe("GET /api/customer-service/leads", () => {
 
     expect(response.status).toBe(200);
     expect(body.tracking_started_at).toBe("2025-12-22T16:17:35.000Z");
+    expect(trackingQuery.select).toHaveBeenCalledWith("call_start");
+    expect(gteMock).toHaveBeenCalledWith("submitted_at", "2025-12-22T16:17:35.000Z");
+    expect(gteMock).toHaveBeenCalledWith("called_at", "2025-12-22T16:17:35.000Z");
     expect(body.leads[0]).toMatchObject({
       id: "lead-1",
       submitted_at: "2026-08-05T12:00:00.000Z",
