@@ -9,6 +9,7 @@ const originalStore = process.env.SHOPIFY_STORE_1;
 const originalSecret = process.env.SHOPIFY_CLIENT_SECRET_1;
 const originalStore2 = process.env.SHOPIFY_STORE_2;
 const originalSecret2 = process.env.SHOPIFY_CLIENT_SECRET_2;
+const originalProxySecret2 = process.env.SHOPIFY_APP_PROXY_SECRET_2;
 
 afterEach(() => {
   if (originalStore === undefined) delete process.env.SHOPIFY_STORE_1;
@@ -19,6 +20,8 @@ afterEach(() => {
   else process.env.SHOPIFY_STORE_2 = originalStore2;
   if (originalSecret2 === undefined) delete process.env.SHOPIFY_CLIENT_SECRET_2;
   else process.env.SHOPIFY_CLIENT_SECRET_2 = originalSecret2;
+  if (originalProxySecret2 === undefined) delete process.env.SHOPIFY_APP_PROXY_SECRET_2;
+  else process.env.SHOPIFY_APP_PROXY_SECRET_2 = originalProxySecret2;
 });
 
 describe("Shopify app proxy verification", () => {
@@ -92,6 +95,27 @@ describe("Shopify app proxy verification", () => {
         shop: "example.myshopify.com",
         matchingSecretSlots: [1],
       },
+    });
+  });
+
+  it("prefers a dedicated App Proxy secret over the Admin API client secret", () => {
+    process.env.SHOPIFY_STORE_2 = "example.myshopify.com";
+    process.env.SHOPIFY_CLIENT_SECRET_2 = "admin-api-secret";
+    process.env.SHOPIFY_APP_PROXY_SECRET_2 = "proxy-app-secret";
+    const nowMs = Date.UTC(2026, 7, 7, 14, 0, 0);
+    const timestamp = Math.floor(nowMs / 1000);
+    const url = new URL(
+      `https://tools.rftransparent.ca/api/customer-service/leads/webhook` +
+        `?shop=example.myshopify.com&timestamp=${timestamp}&path_prefix=%2Fapps%2Frf-leads`,
+    );
+    const signature = createHmac("sha256", "proxy-app-secret")
+      .update(shopifyAppProxySignatureMessage(url.searchParams))
+      .digest("hex");
+    url.searchParams.set("signature", signature);
+
+    expect(verifyShopifyAppProxyRequest(url, nowMs)).toEqual({
+      ok: true,
+      shop: "example.myshopify.com",
     });
   });
 });

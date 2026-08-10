@@ -7,7 +7,7 @@ storefront JavaScript or browser network requests.
 
 ## Shopify configuration
 
-Configure the app associated with the store's `SHOPIFY_CLIENT_SECRET_N`:
+Configure the app associated with the store's `SHOPIFY_APP_PROXY_SECRET_N`:
 
 - Subpath prefix: `apps`
 - Subpath: `rf-leads`
@@ -23,9 +23,14 @@ Shopify forwards a request to the proxy root with a trailing slash. RF Tools
 handles that slash with an internal rewrite so the signed POST body is never
 redirected to the storefront domain.
 
+Set `SHOPIFY_APP_PROXY_SECRET_N` to the client secret from the same app that
+owns this App Proxy configuration. If the Admin API and App Proxy use the same
+Shopify app, RF Tools falls back to `SHOPIFY_CLIENT_SECRET_N`.
+
 ## Deployment order
 
-1. Apply `20260807135000_lead_ingestion_rate_limits.sql`.
+1. Apply `20260807135000_lead_ingestion_rate_limits.sql` and any later
+   corrective lead rate-limit migrations.
 2. Configure the Shopify App Proxy.
 3. Deploy the RF Tools application.
 4. Replace the Powerful Form Builder script with `docs/shopify-lead-capture.js`.

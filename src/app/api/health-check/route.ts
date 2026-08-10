@@ -137,7 +137,8 @@ function leadProxyEnvCheck(): CheckResult {
   for (let index = 1; index <= 3; index++) {
     if (
       process.env[`SHOPIFY_STORE_${index}`] &&
-      process.env[`SHOPIFY_CLIENT_SECRET_${index}`]
+      (process.env[`SHOPIFY_APP_PROXY_SECRET_${index}`] ||
+        process.env[`SHOPIFY_CLIENT_SECRET_${index}`])
     ) {
       configuredStores.push(String(index));
     }
@@ -147,7 +148,7 @@ function leadProxyEnvCheck(): CheckResult {
       name: "Lead App Proxy",
       status: "unconfigured",
       latency_ms: 0,
-      detail: "No Shopify store has an app client secret",
+      detail: "No Shopify store has an App Proxy signing secret",
     };
   }
   return {

@@ -30,7 +30,11 @@ function normalizeShop(value: string | null | undefined): string | null {
 function proxySecretForShop(shop: string): string | null {
   for (let index = 1; index <= 3; index++) {
     if (normalizeShop(process.env[`SHOPIFY_STORE_${index}`]) !== shop) continue;
-    return process.env[`SHOPIFY_CLIENT_SECRET_${index}`]?.trim() || null;
+    return (
+      process.env[`SHOPIFY_APP_PROXY_SECRET_${index}`]?.trim() ||
+      process.env[`SHOPIFY_CLIENT_SECRET_${index}`]?.trim() ||
+      null
+    );
   }
   return null;
 }
@@ -97,8 +101,11 @@ export function verifyShopifyAppProxyRequest(
   if (!signatureMatches(url, signature, secret)) {
     const matchingSecretSlots: number[] = [];
     for (let index = 1; index <= 3; index++) {
-      const candidate = process.env[`SHOPIFY_CLIENT_SECRET_${index}`]?.trim();
-      if (candidate && signatureMatches(url, signature, candidate)) {
+      const candidates = [
+        process.env[`SHOPIFY_APP_PROXY_SECRET_${index}`]?.trim(),
+        process.env[`SHOPIFY_CLIENT_SECRET_${index}`]?.trim(),
+      ].filter((candidate): candidate is string => Boolean(candidate));
+      if (candidates.some((candidate) => signatureMatches(url, signature, candidate))) {
         matchingSecretSlots.push(index);
       }
     }
