@@ -50,6 +50,32 @@ afterAll(() => {
 });
 
 describe("authentication proxy", () => {
+  it("internally rewrites Shopify's trailing-slash lead webhook", async () => {
+    const response = await proxy(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads/webhook/?shop=b03ab8-c8.myshopify.com&timestamp=123&signature=abc",
+      { method: "POST" },
+    ));
+    const rewritten = new URL(response.headers.get("x-middleware-rewrite")!);
+
+    expect(rewritten.pathname).toBe("/api/customer-service/leads/webhook");
+    expect(rewritten.searchParams.get("shop")).toBe("b03ab8-c8.myshopify.com");
+    expect(rewritten.searchParams.get("timestamp")).toBe("123");
+    expect(rewritten.searchParams.get("signature")).toBe("abc");
+    expect(getUserMock).not.toHaveBeenCalled();
+  });
+
+  it("preserves the default trailing-slash redirect on other routes", async () => {
+    const response = await proxy(new NextRequest(
+      "https://tools.rftransparent.ca/customer-service/leads/?source=website",
+    ));
+    const location = new URL(response.headers.get("location")!);
+
+    expect(response.status).toBe(308);
+    expect(location.pathname).toBe("/customer-service/leads");
+    expect(location.searchParams.get("source")).toBe("website");
+    expect(getUserMock).not.toHaveBeenCalled();
+  });
+
   it("returns JSON 401 for an expired private API session", async () => {
     const response = await proxy(new NextRequest(
       "https://tools.rftransparent.ca/api/customer-service/leads",

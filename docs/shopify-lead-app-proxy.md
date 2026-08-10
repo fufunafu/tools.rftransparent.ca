@@ -15,7 +15,13 @@ Configure the app associated with the store's `SHOPIFY_CLIENT_SECRET_N`:
 
 The resulting storefront URL is `/apps/rf-leads`. Paste
 `docs/shopify-lead-capture.js` into Powerful Form Builder's "After form loaded"
-script after the proxy is configured.
+script after the proxy is configured. Remove the retired capture code from
+both "After form loaded" and "After form submitted" first, then install the
+new script only in "After form loaded".
+
+Shopify forwards a request to the proxy root with a trailing slash. RF Tools
+handles that slash with an internal rewrite so the signed POST body is never
+redirected to the storefront domain.
 
 ## Deployment order
 

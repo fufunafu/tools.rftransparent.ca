@@ -1,10 +1,16 @@
 (function () {
   // Paste this into Powerful Form Builder's "After form loaded" script.
   // Configure /apps/rf-leads as a Shopify App Proxy for the RF Tools endpoint.
+  if (window.__rfLeadCaptureInstalled) {
+    return;
+  }
+  window.__rfLeadCaptureInstalled = true;
+
   console.log("[RF Leads] Script loaded at", new Date().toISOString());
 
   var FIELD_MAP = {
-    name: "text",
+    firstName: "text-5",
+    lastName: "text-6",
     email: "email",
     phone: "phone-1",
     message: "textarea-1"
@@ -32,6 +38,32 @@
 
   function firstValue(value) {
     return Array.isArray(value) ? value[0] : value;
+  }
+
+  function textValue(value) {
+    var first = firstValue(value);
+    return typeof first === "string" ? first.trim() : "";
+  }
+
+  function mapContact(fields) {
+    var mapped = {};
+    var name = [
+      textValue(fields[FIELD_MAP.firstName]),
+      textValue(fields[FIELD_MAP.lastName])
+    ].filter(Boolean).join(" ");
+
+    if (name) {
+      mapped.name = name;
+    }
+
+    ["email", "phone", "message"].forEach(function (key) {
+      var value = textValue(fields[FIELD_MAP[key]]);
+      if (value) {
+        mapped[key] = value;
+      }
+    });
+
+    return mapped;
   }
 
   function contentType(file) {
@@ -159,7 +191,7 @@
           mapped: mapped,
           uploads: uploads,
           upload_errors: uploadErrors,
-          form_id: form.id || null,
+          form_id: form.id || form.getAttribute("data-id") || null,
           page_url: window.location.href,
           source_detail: document.title
         }),
@@ -190,7 +222,12 @@
     function (event) {
       var form = event.target;
 
-      if (!form || form.tagName !== "FORM") {
+      if (
+        !form ||
+        form.tagName !== "FORM" ||
+        typeof form.closest !== "function" ||
+        !form.closest(".globo-form-app")
+      ) {
         return;
       }
 
@@ -214,24 +251,11 @@
         console.error("[RF Leads] FormData error:", error);
       }
 
-      console.log("[RF Leads] Raw fields:", fields);
       console.log("[RF Leads] Drawing files:", drawings.map(function (drawing) {
         return drawing.file.name;
       }));
 
-      var mapped = {};
-      for (var key in FIELD_MAP) {
-        if (!Object.prototype.hasOwnProperty.call(FIELD_MAP, key)) {
-          continue;
-        }
-        var sourceKey = FIELD_MAP[key];
-        var sourceValue = sourceKey ? firstValue(fields[sourceKey]) : null;
-        if (sourceValue) {
-          mapped[key] = sourceValue;
-        }
-      }
-
-      console.log("[RF Leads] Mapped contact:", mapped);
+      var mapped = mapContact(fields);
       sendLead(form, fields, mapped, drawings);
     },
     true

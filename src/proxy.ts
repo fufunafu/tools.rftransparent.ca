@@ -3,6 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedEmail } from "@/lib/authz";
 import { getAccountPreferences } from "@/lib/account-preferences";
 
+const LEAD_WEBHOOK_PATH = "/api/customer-service/leads/webhook";
+
 function copyCookies(source: NextResponse, target: NextResponse): NextResponse {
   source.cookies.getAll().forEach((cookie) => {
     target.cookies.set(cookie.name, cookie.value, cookie);
@@ -42,6 +44,24 @@ function loginRedirect(request: NextRequest, error?: string): NextResponse {
 // any other logic runs.
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Shopify app proxies append a slash when the storefront calls the proxy
+  // root. Rewriting instead of redirecting preserves the signed POST body and
+  // keeps the browser on the same-origin /apps/rf-leads URL.
+  if (pathname === `${LEAD_WEBHOOK_PATH}/`) {
+    const webhookUrl = new URL(request.url);
+    webhookUrl.pathname = LEAD_WEBHOOK_PATH;
+    return NextResponse.rewrite(webhookUrl);
+  }
+
+  // skipTrailingSlashRedirect lets the webhook exception above reach Proxy.
+  // Preserve Next.js's default canonical URL behavior everywhere else.
+  if (pathname.length > 1 && pathname.endsWith("/")) {
+    const canonicalUrl = new URL(request.url);
+    canonicalUrl.pathname = pathname.slice(0, -1);
+    return NextResponse.redirect(canonicalUrl, 308);
+  }
+
   const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/login" ||
@@ -53,7 +73,7 @@ export async function proxy(request: NextRequest) {
     // signed in; the route itself checks the token and 404s without a valid
     // one, so "public" here means "authenticated by token instead".
     pathname.startsWith("/wall/") ||
-    pathname === "/api/customer-service/leads/webhook" ||
+    pathname === LEAD_WEBHOOK_PATH ||
     pathname === "/api/customer-service/leads/meta-webhook" ||
     pathname === "/api/internal/whatsapp/employee-context";
 
