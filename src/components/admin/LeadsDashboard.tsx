@@ -2275,7 +2275,7 @@ function PerformanceTrendDialog({
 
           <p className="border-t border-sand-100 px-5 py-3 text-[11px] leading-5 text-sand-400 sm:px-6">
             {rateMetric
-              ? `Each point recomputes the rate from all leads in the preceding ${rollingWindow.label.replace(" rolling rate", "")} window. This reduces misleading daily jumps caused by small samples.`
+              ? `Each point recomputes the rate from all leads in the preceding ${rollingWindow.label.replace(" rolling rate", "")} window. The first points use the days available so far, so the chart starts immediately. This reduces misleading daily jumps caused by small samples.`
               : responseTrackingStartedAt
                 ? `Phone response tracking begins ${formatDateTime(responseTrackingStartedAt)}. Earlier lead cohorts are omitted because phone history before that point is unavailable. Each point is the median for leads first submitted in that period.`
                 : "Each point is the median for leads first submitted in that period."}

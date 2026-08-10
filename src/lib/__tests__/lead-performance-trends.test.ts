@@ -87,7 +87,7 @@ describe("buildLeadPerformanceTrend", () => {
 });
 
 describe("buildRollingLeadPerformanceRateTrend", () => {
-  it("recomputes a rolling rate from combined counts instead of averaging percentages", () => {
+  it("uses available early points, then recomputes the full rolling window from combined counts", () => {
     const buckets = buildCustomLeadTrend([], "2026-08-01", "2026-08-03").points;
     const leads = [
       lead({
@@ -114,8 +114,16 @@ describe("buildRollingLeadPerformanceRateTrend", () => {
 
     const result = buildRollingLeadPerformanceRateTrend(daily, "callRate", 2);
 
-    expect(result[0].website.value).toBeNull();
+    expect(result[0].website).toEqual({ value: 100, count: 1, denominator: 1 });
+    expect(result[0]).toMatchObject({
+      rangeStart: "2026-08-01",
+      rangeEnd: "2026-08-01",
+    });
     expect(result[1].website).toEqual({ value: 10, count: 1, denominator: 10 });
+    expect(result[1]).toMatchObject({
+      rangeStart: "2026-08-01",
+      rangeEnd: "2026-08-02",
+    });
     expect(result[2].website).toEqual({ value: 18.2, count: 2, denominator: 11 });
     expect(result[2]).toMatchObject({
       rangeStart: "2026-08-02",

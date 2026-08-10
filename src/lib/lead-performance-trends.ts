@@ -133,7 +133,6 @@ export function buildRollingLeadPerformanceRateTrend(
   const size = Math.min(points.length || 1, Math.max(1, Math.floor(windowSize)));
 
   return points.map((point, index) => {
-    const hasFullWindow = index >= size - 1;
     const startIndex = Math.max(0, index - size + 1);
     const window = points.slice(startIndex, index + 1);
     const summarize = (source: LeadSource) => {
@@ -147,7 +146,7 @@ export function buildRollingLeadPerformanceRateTrend(
 
       return {
         ...totals,
-        value: hasFullWindow && totals.denominator > 0
+        value: totals.denominator > 0
           ? Math.round((totals.count / totals.denominator) * 1000) / 10
           : null,
       };
