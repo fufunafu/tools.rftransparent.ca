@@ -41,6 +41,14 @@ export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const verification = verifyShopifyAppProxyRequest(url);
   if (!verification.ok) {
+    console.warn("[lead-ingestion] Shopify app proxy verification failed", {
+      reason: verification.reason,
+      shop: verification.diagnostic?.shop ?? null,
+      queryKeys: [...new Set(url.searchParams.keys())]
+        .filter((key) => key !== "signature")
+        .sort(),
+      matchingSecretSlots: verification.diagnostic?.matchingSecretSlots ?? [],
+    });
     if (verification.reason === "missing_secret") {
       return jsonResponse({ error: "Lead app proxy is not configured." }, 500);
     }

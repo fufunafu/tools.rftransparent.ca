@@ -12,6 +12,10 @@ export type ShopifyAppProxyVerification =
         | "expired_request"
         | "unknown_shop"
         | "missing_secret";
+      diagnostic?: {
+        shop: string;
+        matchingSecretSlots: number[];
+      };
     };
 
 function normalizeShop(value: string | null | undefined): string | null {
@@ -50,6 +54,18 @@ export function shopifyAppProxySignatureMessage(searchParams: URLSearchParams): 
     .join("");
 }
 
+function signatureMatches(
+  url: URL,
+  signature: string,
+  secret: string,
+): boolean {
+  const expected = createHmac("sha256", secret)
+    .update(shopifyAppProxySignatureMessage(url.searchParams))
+    .digest();
+  const provided = Buffer.from(signature, "hex");
+  return provided.length === expected.length && timingSafeEqual(provided, expected);
+}
+
 export function verifyShopifyAppProxyRequest(
   url: URL,
   nowMs = Date.now(),
@@ -78,12 +94,19 @@ export function verifyShopifyAppProxyRequest(
     };
   }
 
-  const expected = createHmac("sha256", secret)
-    .update(shopifyAppProxySignatureMessage(url.searchParams))
-    .digest();
-  const provided = Buffer.from(signature, "hex");
-  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
-    return { ok: false, reason: "invalid_request" };
+  if (!signatureMatches(url, signature, secret)) {
+    const matchingSecretSlots: number[] = [];
+    for (let index = 1; index <= 3; index++) {
+      const candidate = process.env[`SHOPIFY_CLIENT_SECRET_${index}`]?.trim();
+      if (candidate && signatureMatches(url, signature, candidate)) {
+        matchingSecretSlots.push(index);
+      }
+    }
+    return {
+      ok: false,
+      reason: "invalid_request",
+      diagnostic: { shop, matchingSecretSlots },
+    };
   }
 
   return { ok: true, shop };

@@ -7,12 +7,18 @@ import {
 
 const originalStore = process.env.SHOPIFY_STORE_1;
 const originalSecret = process.env.SHOPIFY_CLIENT_SECRET_1;
+const originalStore2 = process.env.SHOPIFY_STORE_2;
+const originalSecret2 = process.env.SHOPIFY_CLIENT_SECRET_2;
 
 afterEach(() => {
   if (originalStore === undefined) delete process.env.SHOPIFY_STORE_1;
   else process.env.SHOPIFY_STORE_1 = originalStore;
   if (originalSecret === undefined) delete process.env.SHOPIFY_CLIENT_SECRET_1;
   else process.env.SHOPIFY_CLIENT_SECRET_1 = originalSecret;
+  if (originalStore2 === undefined) delete process.env.SHOPIFY_STORE_2;
+  else process.env.SHOPIFY_STORE_2 = originalStore2;
+  if (originalSecret2 === undefined) delete process.env.SHOPIFY_CLIENT_SECRET_2;
+  else process.env.SHOPIFY_CLIENT_SECRET_2 = originalSecret2;
 });
 
 describe("Shopify app proxy verification", () => {
@@ -60,6 +66,32 @@ describe("Shopify app proxy verification", () => {
     expect(verifyShopifyAppProxyRequest(url, Date.UTC(2026, 7, 7))).toEqual({
       ok: false,
       reason: "expired_request",
+    });
+  });
+
+  it("identifies a configured secret slot when the shop mapping is wrong", () => {
+    process.env.SHOPIFY_STORE_1 = "different.myshopify.com";
+    process.env.SHOPIFY_CLIENT_SECRET_1 = "matching-secret";
+    process.env.SHOPIFY_STORE_2 = "example.myshopify.com";
+    process.env.SHOPIFY_CLIENT_SECRET_2 = "mapped-but-wrong-secret";
+    const nowMs = Date.UTC(2026, 7, 7, 14, 0, 0);
+    const timestamp = Math.floor(nowMs / 1000);
+    const url = new URL(
+      `https://tools.rftransparent.ca/api/customer-service/leads/webhook` +
+        `?shop=example.myshopify.com&timestamp=${timestamp}&path_prefix=%2Fapps%2Frf-leads`,
+    );
+    const signature = createHmac("sha256", "matching-secret")
+      .update(shopifyAppProxySignatureMessage(url.searchParams))
+      .digest("hex");
+    url.searchParams.set("signature", signature);
+
+    expect(verifyShopifyAppProxyRequest(url, nowMs)).toEqual({
+      ok: false,
+      reason: "invalid_request",
+      diagnostic: {
+        shop: "example.myshopify.com",
+        matchingSecretSlots: [1],
+      },
     });
   });
 });
