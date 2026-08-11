@@ -15,7 +15,6 @@ export type ShopifyAppProxyVerification =
       diagnostic?: {
         shop: string;
         matchingSecretSlots: number[];
-        matchingSignatureModes: string[];
       };
     };
 
@@ -64,100 +63,11 @@ function signatureMatches(
   signature: string,
   secret: string,
 ): boolean {
-  return signatureMatchesMessage(
-    signature,
-    secret,
-    shopifyAppProxySignatureMessage(url.searchParams),
-  );
-}
-
-function signatureMatchesMessage(
-  signature: string,
-  secret: string,
-  message: string,
-): boolean {
-  const expected = createHmac("sha256", secret).update(message).digest();
+  const expected = createHmac("sha256", secret)
+    .update(shopifyAppProxySignatureMessage(url.searchParams))
+    .digest();
   const provided = Buffer.from(signature, "hex");
   return provided.length === expected.length && timingSafeEqual(provided, expected);
-}
-
-function signatureDiagnosticModes(
-  url: URL,
-  signature: string,
-  secret: string,
-): string[] {
-  const canonicalMessage = shopifyAppProxySignatureMessage(url.searchParams);
-  const decodedAmpersandMessage = canonicalMessageFromParams(
-    url.searchParams,
-    "&",
-  );
-  const rawSortedMessage = url.search
-    .slice(1)
-    .split("&")
-    .filter((pair) => pair && decodeQueryKey(pair) !== "signature")
-    .sort()
-    .join("");
-  const withoutAction = new URLSearchParams(url.searchParams);
-  withoutAction.delete("action");
-
-  const modes = [
-    {
-      name: "raw_encoded_values",
-      key: secret,
-      message: rawSortedMessage,
-    },
-    {
-      name: "decoded_ampersand_separated",
-      key: secret,
-      message: decodedAmpersandMessage,
-    },
-    {
-      name: "action_not_signed",
-      key: secret,
-      message: shopifyAppProxySignatureMessage(withoutAction),
-    },
-    {
-      name: "secret_without_shpss_prefix",
-      key: secret.startsWith("shpss_") ? secret.slice("shpss_".length) : "",
-      message: canonicalMessage,
-    },
-  ];
-
-  return modes
-    .filter(
-      ({ key, message }) =>
-        key &&
-        (key !== secret || message !== canonicalMessage) &&
-        signatureMatchesMessage(signature, key, message),
-    )
-    .map(({ name }) => name);
-}
-
-function canonicalMessageFromParams(
-  searchParams: URLSearchParams,
-  separator: string,
-): string {
-  const grouped = new Map<string, string[]>();
-  for (const [key, value] of searchParams.entries()) {
-    if (key === "signature") continue;
-    const values = grouped.get(key) ?? [];
-    values.push(value);
-    grouped.set(key, values);
-  }
-  return [...grouped.entries()]
-    .map(([key, values]) => `${key}=${values.join(",")}`)
-    .sort()
-    .join(separator);
-}
-
-function decodeQueryKey(pair: string): string {
-  const equalsIndex = pair.indexOf("=");
-  const rawKey = equalsIndex === -1 ? pair : pair.slice(0, equalsIndex);
-  try {
-    return decodeURIComponent(rawKey.replace(/\+/g, " "));
-  } catch {
-    return rawKey;
-  }
 }
 
 export function verifyShopifyAppProxyRequest(
@@ -202,15 +112,7 @@ export function verifyShopifyAppProxyRequest(
     return {
       ok: false,
       reason: "invalid_request",
-      diagnostic: {
-        shop,
-        matchingSecretSlots,
-        matchingSignatureModes: signatureDiagnosticModes(
-          url,
-          signature,
-          secret,
-        ),
-      },
+      diagnostic: { shop, matchingSecretSlots },
     };
   }
 

@@ -94,32 +94,6 @@ describe("Shopify app proxy verification", () => {
       diagnostic: {
         shop: "example.myshopify.com",
         matchingSecretSlots: [1],
-        matchingSignatureModes: [],
-      },
-    });
-  });
-
-  it("diagnoses a signature created without the shpss prefix", () => {
-    process.env.SHOPIFY_STORE_2 = "example.myshopify.com";
-    process.env.SHOPIFY_APP_PROXY_SECRET_2 = "shpss_proxy-app-secret";
-    const nowMs = Date.UTC(2026, 7, 7, 14, 0, 0);
-    const timestamp = Math.floor(nowMs / 1000);
-    const url = new URL(
-      `https://tools.rftransparent.ca/api/customer-service/leads/webhook` +
-        `?shop=example.myshopify.com&timestamp=${timestamp}&path_prefix=%2Fapps%2Frf-leads`,
-    );
-    const signature = createHmac("sha256", "proxy-app-secret")
-      .update(shopifyAppProxySignatureMessage(url.searchParams))
-      .digest("hex");
-    url.searchParams.set("signature", signature);
-
-    expect(verifyShopifyAppProxyRequest(url, nowMs)).toEqual({
-      ok: false,
-      reason: "invalid_request",
-      diagnostic: {
-        shop: "example.myshopify.com",
-        matchingSecretSlots: [],
-        matchingSignatureModes: ["secret_without_shpss_prefix"],
       },
     });
   });
