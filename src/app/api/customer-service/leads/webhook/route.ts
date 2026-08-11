@@ -48,8 +48,6 @@ export async function POST(req: NextRequest) {
         .filter((key) => key !== "signature")
         .sort(),
       matchingSecretSlots: verification.diagnostic?.matchingSecretSlots ?? [],
-      matchingSecretEnvironmentVariables:
-        verification.diagnostic?.matchingSecretEnvironmentVariables ?? [],
     });
     if (verification.reason === "missing_secret") {
       return jsonResponse({ error: "Lead app proxy is not configured." }, 500);

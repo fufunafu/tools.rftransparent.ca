@@ -94,7 +94,6 @@ describe("Shopify app proxy verification", () => {
       diagnostic: {
         shop: "example.myshopify.com",
         matchingSecretSlots: [1],
-        matchingSecretEnvironmentVariables: ["SHOPIFY_CLIENT_SECRET_1"],
       },
     });
   });
