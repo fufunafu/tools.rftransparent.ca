@@ -15,6 +15,7 @@ export type ShopifyAppProxyVerification =
       diagnostic?: {
         shop: string;
         matchingSecretSlots: number[];
+        matchingSecretEnvironmentVariables: string[];
       };
     };
 
@@ -109,10 +110,24 @@ export function verifyShopifyAppProxyRequest(
         matchingSecretSlots.push(index);
       }
     }
+    const matchingSecretEnvironmentVariables = Object.entries(process.env)
+      .filter(
+        ([name, candidate]) =>
+          name.includes("SHOPIFY") &&
+          /(SECRET|SIGNING|HMAC)/.test(name) &&
+          Boolean(candidate?.trim()) &&
+          signatureMatches(url, signature, candidate!.trim()),
+      )
+      .map(([name]) => name)
+      .sort();
     return {
       ok: false,
       reason: "invalid_request",
-      diagnostic: { shop, matchingSecretSlots },
+      diagnostic: {
+        shop,
+        matchingSecretSlots,
+        matchingSecretEnvironmentVariables,
+      },
     };
   }
 
