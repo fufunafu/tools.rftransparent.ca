@@ -57,6 +57,33 @@ describe("Shopify app proxy verification", () => {
     });
   });
 
+  it("restores Shopify's signed empty customer parameter after URL normalization", () => {
+    process.env.SHOPIFY_STORE_1 = "example.myshopify.com";
+    process.env.SHOPIFY_CLIENT_SECRET_1 = "hush";
+    const nowMs = Date.UTC(2026, 7, 7, 14, 0, 0);
+    const timestamp = Math.floor(nowMs / 1000);
+    const signedParams = new URLSearchParams({
+      action: "create-upload",
+      logged_in_customer_id: "",
+      path_prefix: "/apps/rf-leads",
+      shop: "example.myshopify.com",
+      timestamp: String(timestamp),
+    });
+    const signature = createHmac("sha256", "hush")
+      .update(shopifyAppProxySignatureMessage(signedParams))
+      .digest("hex");
+    signedParams.delete("logged_in_customer_id");
+    signedParams.set("signature", signature);
+    const url = new URL(
+      `https://tools.rftransparent.ca/api/customer-service/leads/webhook?${signedParams}`,
+    );
+
+    expect(verifyShopifyAppProxyRequest(url, nowMs)).toEqual({
+      ok: true,
+      shop: "example.myshopify.com",
+    });
+  });
+
   it("rejects stale signed requests to limit replay", () => {
     process.env.SHOPIFY_STORE_1 = "example.myshopify.com";
     process.env.SHOPIFY_CLIENT_SECRET_1 = "hush";

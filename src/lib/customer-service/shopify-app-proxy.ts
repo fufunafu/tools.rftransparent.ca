@@ -63,8 +63,30 @@ function signatureMatches(
   signature: string,
   secret: string,
 ): boolean {
+  if (signatureMatchesSearchParams(url.searchParams, signature, secret)) {
+    return true;
+  }
+
+  // Next.js can remove Shopify's empty logged_in_customer_id query parameter
+  // while normalizing the trailing-slash rewrite. Shopify includes that empty
+  // pair in the signed message for anonymous storefront visitors, so restore it
+  // only for a second HMAC comparison when it is absent from the received URL.
+  if (!url.searchParams.has("logged_in_customer_id")) {
+    const restoredParams = new URLSearchParams(url.searchParams);
+    restoredParams.set("logged_in_customer_id", "");
+    return signatureMatchesSearchParams(restoredParams, signature, secret);
+  }
+
+  return false;
+}
+
+function signatureMatchesSearchParams(
+  searchParams: URLSearchParams,
+  signature: string,
+  secret: string,
+): boolean {
   const expected = createHmac("sha256", secret)
-    .update(shopifyAppProxySignatureMessage(url.searchParams))
+    .update(shopifyAppProxySignatureMessage(searchParams))
     .digest();
   const provided = Buffer.from(signature, "hex");
   return provided.length === expected.length && timingSafeEqual(provided, expected);
