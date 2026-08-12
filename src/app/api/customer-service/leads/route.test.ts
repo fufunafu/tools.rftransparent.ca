@@ -235,6 +235,39 @@ describe("GET /api/customer-service/leads", () => {
     });
   });
 
+  it("limits combined call activity to the current lead lifecycle", async () => {
+    const callAttemptQuery = {
+      select: vi.fn(),
+      in: vi.fn(),
+      gte: vi.fn(),
+      order: vi.fn(),
+    };
+    callAttemptQuery.select.mockReturnValue(callAttemptQuery);
+    callAttemptQuery.in.mockReturnValue(callAttemptQuery);
+    callAttemptQuery.gte.mockReturnValue(callAttemptQuery);
+    callAttemptQuery.order.mockResolvedValue({
+      data: [{ id: "call-1", lead_id: "lead-1" }],
+      error: null,
+    });
+    getSupabaseMock.mockReturnValueOnce({
+      from: vi.fn(() => callAttemptQuery),
+    });
+
+    const response = await GET(new NextRequest(
+      "https://tools.rftransparent.ca/api/customer-service/leads?view=call_attempts&lead_ids=lead-1,lead-2&since=2026-08-05T20%3A54%3A49.775Z",
+    ));
+
+    expect(response.status).toBe(200);
+    expect(callAttemptQuery.in).toHaveBeenCalledWith("lead_id", ["lead-1", "lead-2"]);
+    expect(callAttemptQuery.gte).toHaveBeenCalledWith(
+      "called_at",
+      "2026-08-05T20:54:49.775Z",
+    );
+    await expect(response.json()).resolves.toEqual({
+      attempts: [{ id: "call-1", lead_id: "lead-1" }],
+    });
+  });
+
   it("bounds lead and call-attempt scans to the requested history window", async () => {
     const response = await GET(new NextRequest(
       "https://tools.rftransparent.ca/api/customer-service/leads?from=2026-05-29&to=2026-08-03",

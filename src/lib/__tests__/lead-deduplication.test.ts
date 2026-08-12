@@ -355,6 +355,70 @@ describe("consolidateDuplicateLeads", () => {
     ]);
   });
 
+  it("merges calls linked to a historical duplicate into the current lead", () => {
+    const result = consolidateDuplicateLeads([
+      lead("current", {
+        source_detail: "Contact Us (USA)",
+        submitted_at: "2026-08-05T20:54:49.775Z",
+      }),
+      lead("historical", {
+        source_detail: "Historical PFB: Quotation Request",
+        submitted_at: "2026-08-05T20:54:52.000Z",
+        call_status: "called",
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        raw_payload: { historical_import: { source_key: "historical-1" } },
+        call_attempts_count: 2,
+        first_call_at: "2026-08-07T15:58:53.000Z",
+        last_call_at: "2026-08-07T16:50:34.000Z",
+        last_called_by: "Phone system",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "current",
+      source_detail: "Contact Us (USA)",
+      outcome: "new",
+      not_applicable_reason: null,
+      call_status: "called",
+      call_attempts_count: 2,
+      first_call_at: "2026-08-07T15:58:53.000Z",
+      last_call_at: "2026-08-07T16:50:34.000Z",
+      last_called_by: "Phone system",
+      duplicate_count: 2,
+    });
+  });
+
+  it("does not carry historical calls into a later lead lifecycle", () => {
+    const result = consolidateDuplicateLeads([
+      lead("historical", {
+        submitted_at: "2026-01-05T12:00:00.000Z",
+        call_status: "called",
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        raw_payload: { historical_import: { source_key: "historical-1" } },
+        call_attempts_count: 3,
+        first_call_at: "2026-01-06T13:00:00.000Z",
+        last_call_at: "2026-01-08T14:00:00.000Z",
+        last_called_by: "Extension 206",
+      }),
+      lead("current", {
+        submitted_at: "2026-08-05T12:00:00.000Z",
+      }),
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      id: "current",
+      call_status: "not_called",
+      call_attempts_count: 0,
+      first_call_at: null,
+      last_call_at: null,
+      outcome: "new",
+    });
+  });
+
   it("keeps tracked historical cohorts separate for response analytics", () => {
     const result = consolidateDuplicateLeads([
       lead("historical", {

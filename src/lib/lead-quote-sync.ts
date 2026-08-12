@@ -1,5 +1,6 @@
 import { sanitizePhone } from "@/lib/call-metrics";
 import { getSupabase } from "@/lib/supabase";
+import { HISTORICAL_UNKNOWN_REASON } from "@/lib/customer-service/leads";
 
 type LeadOutcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
@@ -11,6 +12,7 @@ export interface LeadForQuoteSync {
   outcome: LeadOutcome;
   quote_number: string | null;
   assigned_to: string | null;
+  not_applicable_reason: string | null;
 }
 
 export interface DraftForLeadQuoteSync {
@@ -70,6 +72,10 @@ function normalizedPhone(raw: string | null): string | null {
   return phone && phone.length >= 10 ? phone : null;
 }
 
+function isHistoricalLead(lead: LeadForQuoteSync): boolean {
+  return lead.not_applicable_reason === HISTORICAL_UNKNOWN_REASON;
+}
+
 function responsibleStaff(draft: DraftForLeadQuoteSync): string | null {
   return draft.last_invoice_sender?.trim() || draft.created_by_staff?.trim() || null;
 }
@@ -99,6 +105,7 @@ export function matchDraftOrdersToLeads(
   const leadsByPhone = new Map<string, IndexedLead[]>();
 
   for (const lead of leads) {
+    if (isHistoricalLead(lead)) continue;
     const submittedTime = new Date(lead.submitted_at).getTime();
     if (Number.isNaN(submittedTime)) continue;
 
@@ -175,7 +182,7 @@ export function matchStaffToLinkedLeads(
 
   const matches: LeadStaffMatch[] = [];
   for (const lead of leads) {
-    if (!lead.quote_number || lead.assigned_to) continue;
+    if (isHistoricalLead(lead) || !lead.quote_number || lead.assigned_to) continue;
     const candidates = draftsByNumber.get(lead.quote_number) ?? [];
     const email = normalizedEmail(lead.email);
     const phone = normalizedPhone(lead.phone);
@@ -210,7 +217,7 @@ export async function syncLeadQuotesFromFollowups(
   const leads = await fetchAllRows<LeadForQuoteSync>((from, to) =>
     supabase
       .from("leads")
-      .select("id,email,phone,submitted_at,outcome,quote_number,assigned_to")
+      .select("id,email,phone,submitted_at,outcome,quote_number,assigned_to,not_applicable_reason")
       .order("submitted_at", { ascending: true })
       .range(from, to),
   );

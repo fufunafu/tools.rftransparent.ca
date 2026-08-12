@@ -1,5 +1,6 @@
 import { deduplicateRecords, sanitizePhone, type CallRecord } from "@/lib/call-metrics";
 import { getSupabase } from "@/lib/supabase";
+import { HISTORICAL_UNKNOWN_REASON } from "@/lib/customer-service/leads";
 
 type LeadCallStatus = "not_called" | "no_answer" | "called";
 
@@ -11,6 +12,7 @@ export interface LeadForCallSync {
   submitted_at: string;
   call_status: LeadCallStatus;
   outcome: "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
+  not_applicable_reason: string | null;
 }
 
 export interface DraftContactForCallSync {
@@ -58,6 +60,10 @@ function matchablePhone(raw: string | null): string | null {
 function normalizedEmail(raw: string | null): string | null {
   const email = raw?.replace(/\s+/g, "").toLowerCase() ?? "";
   return email.includes("@") ? email : null;
+}
+
+function isHistoricalLead(lead: LeadForCallSync): boolean {
+  return lead.not_applicable_reason === HISTORICAL_UNKNOWN_REASON;
 }
 
 /**
@@ -150,6 +156,16 @@ function latestEligibleLead(
   return match;
 }
 
+function preferredEligibleLead(
+  candidates: Array<LeadForCallSync & { submittedTime: number }> | undefined,
+  callTime: number,
+): LeadForCallSync | null {
+  if (!candidates) return null;
+  const operational = candidates.filter((lead) => !isHistoricalLead(lead));
+  return latestEligibleLead(operational, callTime)
+    ?? latestEligibleLead(candidates, callTime);
+}
+
 export function matchPhoneCallsToLeads(
   leads: LeadForCallSync[],
   calls: PhoneCallForLeadSync[],
@@ -177,8 +193,7 @@ export function matchPhoneCallsToLeads(
     const callTime = new Date(call.call_start).getTime();
     if (!status || !phone || Number.isNaN(callTime)) continue;
 
-    const candidates = leadsByPhone.get(phone);
-    const lead = candidates ? latestEligibleLead(candidates, callTime) : null;
+    const lead = preferredEligibleLead(leadsByPhone.get(phone), callTime);
     if (!lead) continue;
 
     const current = matches.get(lead.id) ?? {
@@ -238,7 +253,7 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
   const leads = await fetchAllRows<LeadForCallSync>((from, to) =>
     supabase
       .from("leads")
-      .select("id,email,phone,quote_number,submitted_at,call_status,outcome")
+      .select("id,email,phone,quote_number,submitted_at,call_status,outcome,not_applicable_reason")
       .order("submitted_at", { ascending: true })
       .range(from, to),
   );

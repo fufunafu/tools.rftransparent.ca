@@ -151,9 +151,23 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
   const quoteLead = [...workflowGroup]
     .filter((lead) => lead.quote_number)
     .sort((left, right) => workflowScore(right) - workflowScore(left))[0];
-  const latestCallAt = latestDate(workflowGroup, (lead) => lead.last_call_at);
+  // Calls can be linked to a historical duplicate when it was the newest row
+  // for that phone number at sync time. Include those calls only when their
+  // activity began after the current lifecycle. Older calls belong to the
+  // customer's previous inquiry and must not mark a new lead as called.
+  const workflowStartedAt = new Date(workflowChronological[0].submitted_at).getTime();
+  const callGroup = operational.length === 0
+    ? group
+    : group.filter((lead) => {
+        if (!isHistoricalImport(lead)) return true;
+        const firstCallAt = new Date(lead.first_call_at ?? "").getTime();
+        return Number.isFinite(workflowStartedAt)
+          && Number.isFinite(firstCallAt)
+          && firstCallAt >= workflowStartedAt;
+      });
+  const latestCallAt = latestDate(callGroup, (lead) => lead.last_call_at);
   const latestCallLead = latestCallAt
-    ? workflowGroup.find((lead) => lead.last_call_at === latestCallAt)
+    ? callGroup.find((lead) => lead.last_call_at === latestCallAt)
     : undefined;
 
   return {
@@ -173,7 +187,7 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
         ? false
         : null,
     submitted_at: workflowChronological[0].submitted_at,
-    call_status: bestCallStatus(workflowGroup),
+    call_status: bestCallStatus(callGroup),
     outcome: bestOutcome(workflowGroup),
     quote_number: quoteLead?.quote_number ?? canonical.quote_number,
     quote_amount: quoteLead?.quote_amount ?? canonical.quote_amount,
@@ -181,8 +195,8 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     first_quote_at: earliestDate(workflowGroup, (lead) => lead.first_quote_at ?? lead.quote_sent_at),
     assigned_to: quoteLead?.assigned_to ?? canonical.assigned_to
       ?? latestNonEmpty(workflowChronological, (lead) => lead.assigned_to),
-    call_attempts_count: workflowGroup.reduce((sum, lead) => sum + (lead.call_attempts_count ?? 0), 0),
-    first_call_at: earliestDate(workflowGroup, (lead) => lead.first_call_at),
+    call_attempts_count: callGroup.reduce((sum, lead) => sum + (lead.call_attempts_count ?? 0), 0),
+    first_call_at: earliestDate(callGroup, (lead) => lead.first_call_at),
     last_call_at: latestCallAt,
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,

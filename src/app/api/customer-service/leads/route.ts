@@ -74,11 +74,16 @@ export async function GET(req: NextRequest) {
     if (leadIds.length === 0) {
       return NextResponse.json({ error: "lead_id or lead_ids required" }, { status: 400 });
     }
-    const { data, error } = await supabase
+    const since = req.nextUrl.searchParams.get("since");
+    if (since && Number.isNaN(new Date(since).getTime())) {
+      return NextResponse.json({ error: "Invalid call activity boundary" }, { status: 400 });
+    }
+    let query = supabase
       .from("lead_call_attempts")
       .select("*")
-      .in("lead_id", leadIds)
-      .order("called_at", { ascending: false });
+      .in("lead_id", leadIds);
+    if (since) query = query.gte("called_at", since);
+    const { data, error } = await query.order("called_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ attempts: data ?? [] });
   }

@@ -444,7 +444,7 @@ function LeadDetailPanel({
   } = useSWR<{ details: LeadSubmission[]; lead_ids: string[] }>(detailUrl, fetcher);
   const callAttemptLeadIds = detailData?.lead_ids?.length ? detailData.lead_ids : [lead.id];
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
-    `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}`,
+    `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`,
     fetcher
   );
   const attempts = attemptsData?.attempts ?? [];

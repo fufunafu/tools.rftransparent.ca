@@ -18,6 +18,7 @@ function lead(
     submitted_at: submittedAt,
     call_status: "not_called" as const,
     outcome: "new" as const,
+    not_applicable_reason: null,
   };
 }
 
@@ -105,6 +106,35 @@ describe("matchPhoneCallsToLeads", () => {
     );
 
     expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+  });
+
+  it("prefers the active lead over a newer historical duplicate", () => {
+    const matches = matchPhoneCallsToLeads(
+      [
+        lead("current", "5145551234", "2026-08-05T20:54:49.775Z"),
+        {
+          ...lead("historical", "5145551234", "2026-08-05T20:54:52.000Z"),
+          outcome: "not_applicable",
+          not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        },
+      ],
+      [call({ call_start: "2026-08-07T15:58:53.000Z" })],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["current"]);
+  });
+
+  it("still matches a historical lead when no active lead existed yet", () => {
+    const matches = matchPhoneCallsToLeads(
+      [{
+        ...lead("historical", "5145551234", "2026-08-01T12:00:00.000Z"),
+        outcome: "not_applicable",
+        not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+      }],
+      [call()],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["historical"]);
   });
 
   it("ignores malformed short phone numbers", () => {

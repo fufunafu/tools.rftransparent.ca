@@ -18,6 +18,7 @@ function lead(
     outcome: "contacted",
     quote_number: null,
     assigned_to: null,
+    not_applicable_reason: null,
     ...overrides,
   };
 }
@@ -134,6 +135,22 @@ describe("matchDraftOrdersToLeads", () => {
         [draft("D100")],
       ),
     ).toEqual([]);
+  });
+
+  it("ignores a historical duplicate when matching a quote to the active lead", () => {
+    const matches = matchDraftOrdersToLeads(
+      [
+        lead("current", { submitted_at: "2026-08-05T20:54:49.775Z" }),
+        lead("historical", {
+          submitted_at: "2026-08-05T20:54:52.000Z",
+          outcome: "not_applicable",
+          not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        }),
+      ],
+      [draft("D100", { shopify_created_at: "2026-08-07T15:58:53.000Z" })],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["current"]);
   });
 
   it("marks a completed draft as won", () => {
