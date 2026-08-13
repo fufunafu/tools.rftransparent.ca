@@ -7,11 +7,12 @@ import { SalesSection } from "@/components/admin/dashboard/SalesSection";
 import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
 import { QuotesCard } from "@/components/admin/dashboard/QuotesCard";
 import { FollowupCard } from "@/components/admin/dashboard/FollowupCard";
-import CommissionsPanel from "@/components/admin/CommissionsPanel";
 
 // The sales manager's morning view: revenue vs target, quote flow, the
-// follow-up workload, the sales leaderboard, and commissions. Pure
-// presentational — every number is server-fetched by the page.
+// follow-up workload, and the sales leaderboard. Pure presentational —
+// every number is server-fetched by the page.
+// TODO: drop CommissionsPanel back in here once the commissions feature
+// (panel + /api/kpi/commissions + its migration) has shipped.
 
 export default function SalesManagerDashboard({
   sales,
@@ -57,8 +58,6 @@ export default function SalesManagerDashboard({
       ) : (
         <Unavailable label="Top performers" error={performers.error} />
       )}
-
-      <CommissionsPanel />
     </DashboardPane>
   );
 }
