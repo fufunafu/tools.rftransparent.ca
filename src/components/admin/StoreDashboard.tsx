@@ -5,6 +5,7 @@ import type { TicketStats } from "@/lib/home-dashboard";
 import type { StoreScope } from "@/lib/store-scopes";
 import { Unavailable } from "@/components/admin/dashboard/widgets";
 import { DashboardPane } from "@/components/admin/dashboard/DashboardPane";
+import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
 import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
 import { CustomerServiceCard } from "@/components/admin/dashboard/CustomerServiceCard";
@@ -30,11 +31,14 @@ export default function StoreDashboard({
 }) {
   return (
     <DashboardPane>
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900">{scope.label} Store</h2>
-        <p className="text-[12.5px] text-slate-500 mt-0.5">
-          {today} · {scope.label} stores only
-        </p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">{scope.label} Store</h2>
+          <p className="text-[12.5px] text-slate-500 mt-0.5">
+            {today} · {scope.label} stores only
+          </p>
+        </div>
+        <DashboardSwitcher current={`/dashboards/store/${scope.slug}`} />
       </div>
 
       {data.sales.ok ? (

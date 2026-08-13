@@ -7,6 +7,7 @@ import type { Result, SalesByStore } from "@/lib/ops-dashboard";
 import { useAutoRefresh } from "@/lib/use-auto-refresh";
 import { CardShell, Stat, Unavailable, num, pct } from "@/components/admin/dashboard/widgets";
 import { DashboardPane } from "@/components/admin/dashboard/DashboardPane";
+import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
 import {
   AdSpendChart,
@@ -166,12 +167,15 @@ export default function MarketingOverviewDashboard({
           <h2 className="text-xl font-semibold text-slate-900">Marketing</h2>
           <p className="text-[12.5px] text-slate-500 mt-0.5">{today} · last 30 days</p>
         </div>
-        <Link
-          href="/marketing"
-          className="h-7 inline-flex items-center gap-1.5 px-2.5 border border-slate-200 rounded-lg bg-white text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700 transition-colors"
-        >
-          Full analysis →
-        </Link>
+        <div className="flex items-center gap-3 flex-wrap">
+          <Link
+            href="/marketing"
+            className="h-7 inline-flex items-center gap-1.5 px-2.5 border border-slate-200 rounded-lg bg-white text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700 transition-colors"
+          >
+            Full analysis →
+          </Link>
+          <DashboardSwitcher current="/dashboards/marketing" />
+        </div>
       </div>
 
       {error ? (

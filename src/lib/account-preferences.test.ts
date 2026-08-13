@@ -17,6 +17,7 @@ describe("account preferences", () => {
       getAccountPreferences({
         rf_preferences: {
           homePage: "/sales",
+          dashboard: "/dashboards/store/toronto",
           sidebarMode: "compact",
           canvasTone: "clean",
           motion: "reduced",
@@ -24,6 +25,7 @@ describe("account preferences", () => {
       }),
     ).toEqual({
       homePage: "/sales",
+      dashboard: "/dashboards/store/toronto",
       sidebarMode: "compact",
       canvasTone: "clean",
       motion: "reduced",

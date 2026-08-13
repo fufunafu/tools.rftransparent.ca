@@ -74,6 +74,15 @@ describe("resolveLandingPage", () => {
     expect(maybeSingleMock).not.toHaveBeenCalled();
   });
 
+  it("prefers the picked dashboard over the role default when home page is auto", async () => {
+    const path = await resolveLandingPage({
+      email: "rep@glass-railing.com",
+      user_metadata: { rf_preferences: { dashboard: "/dashboards/store/toronto" } },
+    });
+    expect(path).toBe("/dashboards/store/toronto");
+    expect(maybeSingleMock).not.toHaveBeenCalled();
+  });
+
   it("resolves auto via the employee's department", async () => {
     maybeSingleMock.mockResolvedValue({
       data: { department: "sales", locations: null },

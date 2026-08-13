@@ -55,26 +55,19 @@ export type NavSection = NavItem & { group: NavGroup };
 
 export const NAV_ITEMS: NavSection[] = [
   {
+    // The sidebar shows ONE dashboard entry; SidebarLayout swaps this href for
+    // the viewer's own dashboard (picked via the on-page switcher, else their
+    // role's default). `match` keeps it highlighted on every dashboard route.
     href: "/",
-    label: "Dashboards",
+    label: "Dashboard",
     status: "done",
     group: "overview",
-    // Role dashboards live under /dashboards; "/" stays the owner view. Every
-    // child is plain `authenticated` — role only decides the DEFAULT landing
-    // page, never access (docs/permissions.md).
     match: ["/", "/dashboards"],
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
       </svg>
     ),
-    children: [
-      { href: "/", label: "Fuanne's", status: "done" },
-      { href: "/dashboards/sales", label: "Sales Manager", status: "done" },
-      { href: "/dashboards/store/toronto", label: "Toronto Store", status: "done" },
-      { href: "/dashboards/store/montreal", label: "Montreal Store", status: "done" },
-      { href: "/dashboards/marketing", label: "Marketing", status: "done" },
-    ],
   },
   {
     href: "/todos",

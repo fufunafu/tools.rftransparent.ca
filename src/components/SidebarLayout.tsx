@@ -73,14 +73,16 @@ function ViewerAvatar({
   avatarUrl: string | null;
 }) {
   const label = name || email || "Signed-in user";
+  // Google-hosted avatar URLs go stale; fall back to initials when one 404s.
+  const [failed, setFailed] = useState(false);
   return (
     <span
       role="img"
       aria-label={`${label} profile`}
       className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-600"
     >
-      {avatarUrl ? (
-        <img src={avatarUrl} alt="" className="h-full w-full object-cover" />
+      {avatarUrl && !failed ? (
+        <img src={avatarUrl} alt="" onError={() => setFailed(true)} className="h-full w-full object-cover" />
       ) : (
         initialsFor(name, email)
       )}
@@ -113,9 +115,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     email: "",
     avatarUrl: null,
   });
-  // A concrete path, never the "auto" sentinel — the resolved value arrives
-  // from /api/admin/me.
+  // Concrete paths, never the "auto" sentinel — resolved values arrive from
+  // /api/admin/me. dashboardPath is where the sidebar's Dashboard entry goes.
   const [homePath, setHomePath] = useState("/");
+  const [dashboardPath, setDashboardPath] = useState("/");
   const preferencesApplied = useRef(false);
   const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
@@ -124,7 +127,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   const collapsed = !isMobile && rawCollapsed;
   const visibleNavItems = NAV_ITEMS
     .map((item) => filterNavItem(item, viewerAccess))
-    .filter((item): item is NavSection => item !== null);
+    .filter((item): item is NavSection => item !== null)
+    // The Dashboard entry opens the viewer's own dashboard; its `match` list
+    // keeps it highlighted on every dashboard route either way.
+    .map((item) => (item.href === "/" ? { ...item, href: dashboardPath } : item));
   const visibleSettings = filterNavItem(SETTINGS_ITEM, viewerAccess);
   const searchTargets = getSearchTargets(
     visibleSettings ? [...visibleNavItems, visibleSettings] : visibleNavItems,
@@ -189,6 +195,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               ? "/"
               : preferences.homePage
         );
+        setDashboardPath(typeof me.resolvedDashboard === "string" ? me.resolvedDashboard : "/");
         applyAccountPreferences(preferences);
         if (!preferencesApplied.current) {
           setCollapsed(preferences.sidebarMode === "compact");
@@ -217,16 +224,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       }
 
       const preferences = sanitizeAccountPreferences(detail.preferences);
-      if (preferences.homePage === "auto") {
+      if (preferences.dashboard !== "auto") setDashboardPath(preferences.dashboard);
+      if (preferences.homePage !== "auto") setHomePath(preferences.homePage);
+      if (preferences.homePage === "auto" || preferences.dashboard === "auto") {
         // The client can't derive the role default itself — ask the probe.
         fetch("/api/admin/me")
           .then((res) => (res.ok ? res.json() : null))
           .then((me) => {
-            setHomePath(typeof me?.resolvedHomePage === "string" ? me.resolvedHomePage : "/");
+            if (typeof me?.resolvedHomePage === "string") setHomePath(me.resolvedHomePage);
+            if (typeof me?.resolvedDashboard === "string") setDashboardPath(me.resolvedDashboard);
           })
-          .catch(() => setHomePath("/"));
-      } else {
-        setHomePath(preferences.homePage);
+          .catch(() => {});
       }
       setCollapsed(preferences.sidebarMode === "compact");
       applyAccountPreferences(preferences);

@@ -3,6 +3,7 @@
 import type { Result, SalesByStore, CustomerServiceOps, TopPerformers, FollowupOverview } from "@/lib/ops-dashboard";
 import { Unavailable } from "@/components/admin/dashboard/widgets";
 import { DashboardPane } from "@/components/admin/dashboard/DashboardPane";
+import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
 import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
 import { QuotesCard } from "@/components/admin/dashboard/QuotesCard";
@@ -29,9 +30,12 @@ export default function SalesManagerDashboard({
 }) {
   return (
     <DashboardPane>
-      <div>
-        <h2 className="text-xl font-semibold text-slate-900">Sales Manager</h2>
-        <p className="text-[12.5px] text-slate-500 mt-0.5">{today} · all stores</p>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">Sales Manager</h2>
+          <p className="text-[12.5px] text-slate-500 mt-0.5">{today} · all stores</p>
+        </div>
+        <DashboardSwitcher current="/dashboards/sales" />
       </div>
 
       {sales.ok ? (

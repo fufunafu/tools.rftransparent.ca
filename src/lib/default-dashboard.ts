@@ -43,8 +43,11 @@ export async function resolveLandingPage(user: {
   email?: string | null;
   user_metadata?: unknown;
 }): Promise<string> {
-  const preferred = getAccountPreferences(user.user_metadata).homePage;
-  if (preferred !== "auto") return preferred;
+  const preferences = getAccountPreferences(user.user_metadata);
+  if (preferences.homePage !== "auto") return preferences.homePage;
+  // "auto" home page = the user's dashboard: the one they picked from the
+  // dashboard switcher, else their role's default.
+  if (preferences.dashboard !== "auto") return preferences.dashboard;
 
   const email = user.email?.trim().toLowerCase();
   if (!email) return "/";

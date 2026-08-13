@@ -5,6 +5,7 @@ import { formatCADWhole, formatCADShort } from "@/lib/format";
 import type { OpsDashboard as OpsData } from "@/lib/ops-dashboard";
 import type { TicketStats } from "@/lib/home-dashboard";
 import { Stat, Unavailable, num } from "@/components/admin/dashboard/widgets";
+import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
 import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
 import { CustomerServiceCard } from "@/components/admin/dashboard/CustomerServiceCard";
@@ -97,6 +98,7 @@ export default function OpsDashboard({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          <DashboardSwitcher current="/" />
           {/* Recessive by design — these are exceptions, not a dashboard of alarms. */}
           {attention.length > 0 && (
             <div className="flex items-center gap-3 flex-wrap">

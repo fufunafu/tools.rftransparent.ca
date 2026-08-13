@@ -68,17 +68,20 @@ export async function GET() {
     profile.name ??
     getPreferredName(user.user_metadata);
 
-  // The concrete landing path — "auto" is resolved here so no client ever has
-  // to put the sentinel in an href.
+  // Concrete paths — "auto" is resolved here so no client ever has to put
+  // the sentinel in an href. The dashboard is the user's picked one, else
+  // their role's default; the home page is their explicit choice, else
+  // that same dashboard.
   const preferences = getAccountPreferences(user.user_metadata);
-  const resolvedHomePage =
-    preferences.homePage === "auto"
-      ? deriveDefaultDashboard({
+  const resolvedDashboard =
+    preferences.dashboard !== "auto"
+      ? preferences.dashboard
+      : deriveDefaultDashboard({
           isOwner: email === OWNER_EMAIL,
           department: profile.department,
           locationName: profile.locationName,
-        })
-      : preferences.homePage;
+        });
+  const resolvedHomePage = preferences.homePage === "auto" ? resolvedDashboard : preferences.homePage;
 
   return NextResponse.json({
     email: user.email,
@@ -86,6 +89,7 @@ export async function GET() {
     avatarUrl: getProfileAvatarUrl(user.user_metadata),
     preferences,
     resolvedHomePage,
+    resolvedDashboard,
     isAdmin,
     isManagement,
   });
