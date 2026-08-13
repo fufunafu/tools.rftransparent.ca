@@ -1,5 +1,10 @@
 export const HOME_PAGE_OPTIONS = [
-  { value: "/", label: "Dashboard", description: "Company overview and daily priorities" },
+  { value: "auto", label: "Automatic", description: "Your role's dashboard — store, sales manager, or marketing" },
+  { value: "/", label: "Main dashboard", description: "Company overview and daily priorities" },
+  { value: "/dashboards/sales", label: "Sales Manager", description: "Revenue, quotes, follow-ups, and commissions" },
+  { value: "/dashboards/store/toronto", label: "Toronto Store", description: "Toronto sales, calls, and team" },
+  { value: "/dashboards/store/montreal", label: "Montreal Store", description: "Montreal sales, calls, and team" },
+  { value: "/dashboards/marketing", label: "Marketing", description: "Ad performance at a glance" },
   { value: "/todos", label: "Tasks", description: "Your open tasks and due dates" },
   { value: "/sales", label: "Sales", description: "Store performance and revenue" },
 ] as const;
@@ -21,7 +26,10 @@ export interface AccountPreferences {
 }
 
 export const DEFAULT_ACCOUNT_PREFERENCES: AccountPreferences = {
-  homePage: "/",
+  // "auto" resolves to the viewer's role dashboard via resolveLandingPage()
+  // (default-dashboard.ts). It is a sentinel, not a path — anything that puts
+  // homePage in an href or redirect must resolve it first.
+  homePage: "auto",
   sidebarMode: "expanded",
   canvasTone: "soft",
   motion: "system",

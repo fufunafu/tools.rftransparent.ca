@@ -13,6 +13,8 @@ Authorization has three independent levels. A person may be an admin without bei
 | Area | View access | Elevated actions |
 | --- | --- | --- |
 | Home, sales, pipeline, marketing, Shopify | Authenticated | Route-specific API checks |
+| Role dashboards (`/dashboards/sales`, `/dashboards/store/[location]`, `/dashboards/marketing`) | Authenticated | None — an employee's role/location picks their default landing dashboard, never restricts access |
+| Sales commissions (`/api/kpi/commissions`) | Authenticated | Commission rates edited via admin-only employee routes |
 | Customer service | Authenticated | Admin checks for destructive or configuration actions |
 | Warehouse dashboard and reports | Authenticated | Authenticated report writes |
 | Purchasing | Management | Management for all purchasing reads and writes |
@@ -21,7 +23,9 @@ Authorization has three independent levels. A person may be an admin without bei
 | Employees | Authenticated | Admin for employee and password administration |
 | Settings access list | Admin | Admin |
 | Other settings and health | Authenticated | Admin where a form changes shared configuration |
-| Weekly employee survey | Public capability link | Possession of the unguessable survey token |
+| Employee survey response | Public capability link | Possession of the unguessable survey-recipient token |
+| Employee survey results and actions | Management | Exit-response detail additionally requires owner or `SURVEY_RESTRICTED_ACCESS_EMAILS` |
+| WhatsApp delivery webhook | Public endpoint | Meta challenge token or signed request body |
 | Lead webhooks | Public endpoint | Shopify App Proxy or provider signature, plus persistent rate limits |
 | Cron endpoints | Public endpoint | Configured cron authorization secret |
 

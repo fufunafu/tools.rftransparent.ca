@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { getAccountPreferences } from "@/lib/account-preferences";
+import { resolveLandingPage } from "@/lib/default-dashboard";
 
 function safeNextPath(value: string | null): string | null {
   return value && value.startsWith("/") && !value.startsWith("//") ? value : null;
@@ -33,7 +33,8 @@ export async function GET(request: Request) {
 
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
-      const next = requestedNext ?? getAccountPreferences(data.user?.user_metadata).homePage;
+      const next =
+        requestedNext ?? (data.user ? await resolveLandingPage(data.user) : "/");
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

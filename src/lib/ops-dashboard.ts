@@ -17,6 +17,7 @@ import {
   configuredSalesReps,
   resolveSalesAttribution,
 } from "@/lib/sales-attribution";
+import { scopeForShopifyStoreIds, type StoreScope } from "@/lib/store-scopes";
 
 // Data behind the operations dashboard. Same contract as home-dashboard.ts:
 // every getter resolves to a value OR an error string and never throws, so one
@@ -610,15 +611,16 @@ interface DraftRow extends RevenueFields {
  * progress rather than a quote that went out, and /api/kpi/metrics applies the
  * same exclusion — the two pages must not disagree about what counts.
  */
-async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
+async function getQuoteWindows(now: Date, scope?: StoreScope): Promise<QuoteWindows> {
   const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29);
   const startYesterday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -1).toISOString();
   const startToday = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 0).toISOString();
   const start7 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -6).toISOString();
   const filter = `created_at:>='${start30.toISOString()}'`;
+  const stores = getStores().filter((s) => !scope || scope.shopifyStoreIds.includes(s.id));
 
   const results = await Promise.allSettled(
-    getStores().map((s) =>
+    stores.map((s) =>
       fetchAllPages<DraftRow, { draftOrders: { edges: { node: DraftRow; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
         { storeId: s.id, query: DRAFTS_QUERY, variables: { filter }, getConnection: (d) => d.draftOrders, maxPages: 40 }
       )
@@ -628,7 +630,7 @@ async function getQuoteWindows(now: Date): Promise<QuoteWindows> {
   const drafts = results
     .flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []))
     .filter((d) => d.status !== "OPEN");
-  const warnings = getStores().flatMap((store, index) => {
+  const warnings = stores.flatMap((store, index) => {
     const result = results[index];
     if (result.status === "rejected") return [`${store.label} quotes are unavailable`];
     return result.value.truncated
@@ -710,13 +712,15 @@ async function fetchAllRows<T>(
   return all;
 }
 
-export async function getCustomerServiceOps(): Promise<Result<CustomerServiceOps>> {
+export async function getCustomerServiceOps(scope?: StoreScope): Promise<Result<CustomerServiceOps>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
+    // Scope lands in the cache key so Toronto's numbers can never be served
+    // as Montreal's (or as the all-stores card).
     const { data, cachedAt } = await cached(
-      `ops:cs:v2:${dayKey}`,
+      `ops:cs:v2:${dayKey}:${scope?.slug ?? "all"}`,
       OPS_TTL_MS,
-      computeCustomerServiceOps
+      () => computeCustomerServiceOps(scope)
     );
     return ok({ ...data, cachedAt });
   } catch (err) {
@@ -740,7 +744,7 @@ function lastBusinessDayOffset(now: Date): number {
   return -1;
 }
 
-async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
+async function computeCustomerServiceOps(scope?: StoreScope): Promise<CustomerServiceOps> {
   const now = new Date();
   const since = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29).toISOString();
 
@@ -758,19 +762,21 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
 
   const sevenStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -6).toISOString();
 
-  const quotes = await getQuoteWindows(now);
+  const quotes = await getQuoteWindows(now, scope);
 
-  const raw = await fetchAllRows<CallRecord & { store_id: string | null }>((from, to) =>
-    getSupabase()
+  const raw = await fetchAllRows<CallRecord & { store_id: string | null }>((from, to) => {
+    let query = getSupabase()
       .from("call_records")
       .select("id, store_id, call_start, call_end, from_number, to_number, direction, duration_min, charge, endpoint, source")
-      .gte("call_start", since)
+      .gte("call_start", since);
+    if (scope) query = query.in("store_id", scope.phoneStoreIds);
+    return query
       // id as tie-break: same-second calls at a page boundary would otherwise
       // have no deterministic order and could be skipped or doubled.
       .order("call_start", { ascending: true })
       .order("id", { ascending: true })
-      .range(from, to)
-  );
+      .range(from, to);
+  });
 
   // Dedupe per store and only then merge — exactly the Phones page's
   // pipeline, so this card is that page's per-store numbers summed rather
@@ -802,6 +808,7 @@ async function computeCustomerServiceOps(): Promise<CustomerServiceOps> {
 export interface Performer {
   id: string;
   name: string;
+  locationSlug?: string;
   /** Headline value for the currently selected ranking metric. */
   value: number;
   /** Same metric over the previous 30 days, for the delta. Null when unknown. */
@@ -867,7 +874,9 @@ export async function getTopPerformers(): Promise<Result<TopPerformers>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
-      `ops:performers:v2:${dayKey}`,
+      // v3: rows now carry locationSlug — the bump keeps stale cached rows
+      // (which lack the field) from feeding the store dashboards.
+      `ops:performers:v3:${dayKey}`,
       OPS_TTL_MS,
       computeTopPerformers
     );
@@ -959,6 +968,11 @@ async function computeTopPerformers(): Promise<TopPerformers> {
     // records, and records carrying tags for multiple reps are excluded.
     const reps = configuredSalesReps(employees);
     const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
+    // Which store dashboard a person belongs on, via their location's stores.
+    const slugFor = (employee: EmployeeRow | undefined): string | undefined =>
+      employee?.locations?.shopify_store_ids
+        ? scopeForShopifyStoreIds(employee.locations.shopify_store_ids)?.slug
+        : undefined;
     const salesTotals = new Map<
       string,
       { sold: number; soldPrev: number; orderCount: number; quoted: number; total: number; won: number }
@@ -1016,6 +1030,7 @@ async function computeTopPerformers(): Promise<TopPerformers> {
         return {
           id,
           name: employeeById.get(id)?.name ?? "Unknown employee",
+          locationSlug: slugFor(employeeById.get(id)),
           value: total.sold,
           previous: total.soldPrev,
           metrics: { sold: total.sold, quoted: total.quoted, conversion },
@@ -1050,6 +1065,7 @@ async function computeTopPerformers(): Promise<TopPerformers> {
       .map(([id, v]) => ({
         id,
         name: nameById.get(id)!,
+        locationSlug: slugFor(employeeById.get(id)),
         value: v.cur.units,
         previous: v.prevUnits,
         metrics: v.cur,
@@ -1079,6 +1095,7 @@ async function computeTopPerformers(): Promise<TopPerformers> {
         return {
           id: emp?.id ?? who,
           name: emp?.name ?? who,
+          locationSlug: slugFor(emp),
           value: v.cur,
           previous: v.prev,
           metrics: { followups: v.cur },
@@ -1125,6 +1142,63 @@ export async function getOpsDashboard(): Promise<OpsDashboard> {
     getCollectionOps(),
   ]);
   return { sales, warehouse, customerService, performers, collection };
+}
+
+// ─── Follow-up overview ──────────────────────────────────────────────────────
+
+export interface FollowupOverview {
+  dueToday: number;
+  overdue: number;
+  active: number;
+  pipelineValue: number;
+  /** Won ÷ closed across the covered stores, as a percentage. Null when nothing closed. */
+  conversionRate: number | null;
+}
+
+/**
+ * The Follow-up page's own per-store summary RPC, summed across the given
+ * Shopify store ids — so a dashboard card and the Follow-up page can't
+ * disagree. Conversion is recomputed from the summed win/loss counts rather
+ * than averaging per-store percentages.
+ */
+export async function getFollowupOverview(shopifyStoreIds: string[]): Promise<Result<FollowupOverview>> {
+  try {
+    const { getFollowupSummary } = await import("@/lib/customer-service/followup-queries");
+    const summaries = await Promise.all(
+      shopifyStoreIds.map((storeId) => getFollowupSummary(storeId, null))
+    );
+    const rows = summaries.filter((s): s is NonNullable<typeof s> => s !== null);
+    const won = rows.reduce((sum, r) => sum + r.won_count, 0);
+    const lost = rows.reduce((sum, r) => sum + r.lost_count, 0);
+    return ok({
+      dueToday: rows.reduce((sum, r) => sum + r.due_today, 0),
+      overdue: rows.reduce((sum, r) => sum + r.overdue, 0),
+      active: rows.reduce((sum, r) => sum + r.total_active, 0),
+      pipelineValue: rows.reduce((sum, r) => sum + r.pipeline_value, 0),
+      conversionRate: won + lost > 0 ? (won / (won + lost)) * 100 : null,
+    });
+  } catch (err) {
+    return fail(err, "Could not read follow-up data.");
+  }
+}
+
+export interface StoreDashboardData {
+  sales: Result<SalesByStore>;
+  customerService: Result<CustomerServiceOps>;
+  performers: Result<TopPerformers>;
+  /** Null when the scope's dashboard doesn't show warehouse ops. */
+  warehouse: Result<WarehouseOps> | null;
+}
+
+/** Everything a store-manager dashboard needs, scoped where the data allows. */
+export async function getStoreDashboard(scope: StoreScope): Promise<StoreDashboardData> {
+  const [sales, customerService, performers, warehouse] = await Promise.all([
+    getSalesByStore(),
+    getCustomerServiceOps(scope),
+    getTopPerformers(),
+    scope.showWarehouse ? getWarehouseOps() : Promise.resolve(null),
+  ]);
+  return { sales, customerService, performers, warehouse };
 }
 
 export async function getCollectionOps(): Promise<Result<CollectionOps>> {

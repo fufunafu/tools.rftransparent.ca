@@ -8,9 +8,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
 import CommandPalette from "@/components/CommandPalette";
+import MobileTabBar from "@/components/MobileTabBar";
 import SidebarNavRow from "@/components/SidebarNavRow";
 import {
-  DEFAULT_ACCOUNT_PREFERENCES,
   applyAccountPreferences,
   sanitizeAccountPreferences,
   type AccountPreferences,
@@ -99,7 +99,6 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     setCollapsed,
   } = useSidebarResize(240);
   const [isMobile, setIsMobile] = useState(false);
-  const [mobileOpen, setMobileOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [viewerAccess, setViewerAccess] = useState<ViewerAccess>({
     isAdmin: false,
@@ -114,7 +113,9 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     email: "",
     avatarUrl: null,
   });
-  const [homePath, setHomePath] = useState(DEFAULT_ACCOUNT_PREFERENCES.homePage);
+  // A concrete path, never the "auto" sentinel — the resolved value arrives
+  // from /api/admin/me.
+  const [homePath, setHomePath] = useState("/");
   const preferencesApplied = useRef(false);
   const modKey = useSyncExternalStore(NEVER_CHANGES, readModKey, noModKey);
   // On phones the drawer always renders expanded (full labels), regardless of
@@ -143,23 +144,12 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setMobileOpen(false);
         setSearchOpen((open) => !open);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
-
-  // Lock body scroll while the mobile drawer is open.
-  useEffect(() => {
-    if (!mobileOpen) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-    };
-  }, [mobileOpen]);
 
   // One shared value gives the navigation true accordion behavior: opening a
   // section always closes the previous one. Route changes open the section
@@ -192,7 +182,13 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           email: typeof me.email === "string" ? me.email : "",
           avatarUrl: typeof me.avatarUrl === "string" ? me.avatarUrl : null,
         });
-        setHomePath(preferences.homePage);
+        setHomePath(
+          typeof me.resolvedHomePage === "string"
+            ? me.resolvedHomePage
+            : preferences.homePage === "auto"
+              ? "/"
+              : preferences.homePage
+        );
         applyAccountPreferences(preferences);
         if (!preferencesApplied.current) {
           setCollapsed(preferences.sidebarMode === "compact");
@@ -221,7 +217,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       }
 
       const preferences = sanitizeAccountPreferences(detail.preferences);
-      setHomePath(preferences.homePage);
+      if (preferences.homePage === "auto") {
+        // The client can't derive the role default itself — ask the probe.
+        fetch("/api/admin/me")
+          .then((res) => (res.ok ? res.json() : null))
+          .then((me) => {
+            setHomePath(typeof me?.resolvedHomePage === "string" ? me.resolvedHomePage : "/");
+          })
+          .catch(() => setHomePath("/"));
+      } else {
+        setHomePath(preferences.homePage);
+      }
       setCollapsed(preferences.sidebarMode === "compact");
       applyAccountPreferences(preferences);
       preferencesApplied.current = true;
@@ -276,25 +282,14 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         <CommandPalette targets={searchTargets} onClose={() => setSearchOpen(false)} />
       )}
 
-      {/* Mobile backdrop — dims content and closes the drawer on tap */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
-          onClick={() => setMobileOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* Sidebar — in-flow and resizable on desktop; an off-canvas drawer that
-          slides in over the content below the md breakpoint. */}
+      {/* Sidebar — in-flow and resizable on desktop. Below the md breakpoint
+          it stays off-canvas: phones navigate with the bottom tab bar and the
+          More page instead of a drawer. */}
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className={`bg-white border-r border-slate-200 flex flex-col z-40 relative
-          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:!w-72 max-md:shadow-xl
-          max-md:transition-transform max-md:duration-200
-          ${mobileOpen ? "max-md:translate-x-0" : "max-md:-translate-x-full"}
-          md:shrink-0 md:transition-[width] md:duration-200`}
+        className="bg-white border-r border-slate-200 flex-col z-40 relative hidden md:flex
+          md:shrink-0 md:transition-[width] md:duration-200"
       >
         {/* Logo and collapse controls */}
         <div className="px-3 pt-3 pb-2.5 flex items-center gap-2.5">
@@ -323,26 +318,13 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
             </svg>
           </button>
-          {/* Mobile: close the drawer */}
-          <button
-            onClick={() => setMobileOpen(false)}
-            className="md:hidden w-8 h-8 rounded-md flex items-center justify-center text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors shrink-0"
-            aria-label="Close menu"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-            </svg>
-          </button>
         </div>
 
         {/* Page search — opens the same palette as ⌘K */}
         <div className="px-3 pb-1.5">
           <button
             type="button"
-            onClick={() => {
-              setMobileOpen(false);
-              setSearchOpen(true);
-            }}
+            onClick={() => setSearchOpen(true)}
             title={collapsed ? "Search pages" : undefined}
             className={`w-full h-[30px] flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600 transition-colors ${
               collapsed ? "justify-center" : "px-[9px]"
@@ -360,15 +342,9 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           </button>
         </div>
 
-        {/* Navigation. On mobile, a click on any nav link (not a section
-            toggle button) closes the drawer — delegated so we don't thread an
-            onClick through every link. */}
         <nav
           className="flex-1 px-3 pt-1 pb-2 overflow-y-auto flex flex-col gap-0.5"
           aria-label="Main navigation"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
-          }}
         >
           {NAV_GROUPS.map((group, groupIndex) => {
             const items = visibleNavItems.filter((item) => item.group === group.id);
@@ -405,12 +381,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         {/* One footer block: Settings, then who you're signed in as. Reporting
             a bug and signing out hang off the identity row rather than taking
             a full-width strip each. */}
-        <div
-          className="px-3 pt-2 pb-2.5 border-t border-slate-100 flex flex-col gap-0.5"
-          onClick={(e) => {
-            if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
-          }}
-        >
+        <div className="px-3 pt-2 pb-2.5 border-t border-slate-100 flex flex-col gap-0.5">
           {visibleSettings && (
             <SidebarNavRow
               item={visibleSettings}
@@ -485,17 +456,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Mobile top bar — hamburger opens the drawer */}
-        <div className="md:hidden flex items-center gap-3 h-14 px-4 border-b border-slate-200 bg-white shrink-0">
-          <button
-            onClick={() => setMobileOpen(true)}
-            className="w-9 h-9 -ml-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
-            aria-label="Open menu"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-6 h-6">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5M3.75 17.25h16.5" />
-            </svg>
-          </button>
+        {/* Mobile top bar — brand and search. Navigation lives in the bottom
+            tab bar. The top safe-area padding clears the notch when the site
+            runs full-screen (home-screen install or the iOS app). */}
+        <div className="md:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
           <Link href={homePath} className="flex items-center gap-3 flex-1 min-w-0">
             <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
               <span className="text-white text-[10px] font-bold">RF</span>
@@ -512,12 +476,15 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           </button>
         </div>
 
-        {/* Main content */}
+        {/* Main content. Extra bottom padding on phones keeps the last of the
+            page above the fixed tab bar. */}
         <main data-app-main className="flex-1 overflow-auto bg-slate-100">
-          <div className="p-4 md:p-8">
+          <div className="p-4 pb-28 md:p-8">
             {children}
           </div>
         </main>
+
+        <MobileTabBar homePath={homePath} />
       </div>
     </div>
   );

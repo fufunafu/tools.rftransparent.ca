@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedEmail } from "@/lib/authz";
-import { getAccountPreferences } from "@/lib/account-preferences";
+import { resolveLandingPage } from "@/lib/default-dashboard";
 
 const LEAD_WEBHOOK_PATH = "/api/customer-service/leads/webhook";
 
@@ -65,6 +65,9 @@ export async function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/login" ||
+    // Safari fetches the PWA manifest without auth cookies when the user
+    // adds the site to their home screen; it holds no sensitive data.
+    pathname === "/manifest.webmanifest" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/survey/") ||
@@ -75,6 +78,7 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/wall/") ||
     pathname === LEAD_WEBHOOK_PATH ||
     pathname === "/api/customer-service/leads/meta-webhook" ||
+    pathname === "/api/webhooks/whatsapp" ||
     pathname === "/api/internal/whatsapp/employee-context";
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -144,7 +148,10 @@ export async function proxy(request: NextRequest) {
 
   if (user && pathname === "/login") {
     const homeUrl = request.nextUrl.clone();
-    homeUrl.pathname = getAccountPreferences(user.user_metadata).homePage;
+    // Explicit preference wins; "auto" resolves to the role's dashboard. Only
+    // this login-bounce branch pays the employees lookup — never a normal
+    // request — and resolveLandingPage falls back to "/" instead of throwing.
+    homeUrl.pathname = await resolveLandingPage(user);
     homeUrl.search = "";
     return NextResponse.redirect(homeUrl);
   }

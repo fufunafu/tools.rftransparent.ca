@@ -6,23 +6,41 @@ import {
   getCustomDisplayName,
   getPreferredName,
 } from "@/lib/account-preferences";
+import { deriveDefaultDashboard } from "@/lib/default-dashboard";
+import { OWNER_EMAIL } from "@/lib/authz";
+import { quotePostgrestValue } from "@/lib/postgrest";
 import { getProfileAvatarUrl } from "@/lib/profile-avatar";
 
-// Display name for the sidebar footer. Null for anyone without an employee
-// row (the owner, domain-allowlisted accounts) — the caller falls back to
-// the email, so this never blocks the response.
-async function getDisplayName(email: string): Promise<string | null> {
+interface EmployeeProfile {
+  name: string | null;
+  department: string | null;
+  locationName: string | null;
+}
+
+// Display name + role facts for the sidebar. All-null for anyone without an
+// employee row (the owner, domain-allowlisted accounts) — the caller falls
+// back to the email, so this never blocks the response.
+async function getEmployeeProfile(email: string): Promise<EmployeeProfile> {
+  const none: EmployeeProfile = { name: null, department: null, locationName: null };
   try {
+    const quoted = quotePostgrestValue(email);
     const { data, error } = await getSupabase()
       .from("employees")
-      .select("name")
-      .or(`email.eq.${email},email_alt.eq.${email}`)
+      .select("name, department, locations(name)")
+      .or(`email.eq.${quoted},email_alt.eq.${quoted}`)
       .limit(1)
       .maybeSingle();
-    if (error) return null;
-    return data?.name ?? null;
+    if (error || !data) return none;
+    const locations = data.locations as { name?: string | null } | { name?: string | null }[] | null;
+    return {
+      name: (data.name as string | null) ?? null,
+      department: (data.department as string | null) ?? null,
+      locationName: Array.isArray(locations)
+        ? locations[0]?.name ?? null
+        : locations?.name ?? null,
+    };
   } catch {
-    return null;
+    return none;
   }
 }
 
@@ -36,22 +54,38 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [isAdmin, isManagement, employeeName] = await Promise.all([
+  const email = user.email?.toLowerCase() ?? null;
+  const [isAdmin, isManagement, profile] = await Promise.all([
     isAdminUser(),
     isManagementUser(),
-    user.email ? getDisplayName(user.email.toLowerCase()) : Promise.resolve(null),
+    email
+      ? getEmployeeProfile(email)
+      : Promise.resolve<EmployeeProfile>({ name: null, department: null, locationName: null }),
   ]);
 
   const preferredName =
     getCustomDisplayName(user.user_metadata) ??
-    employeeName ??
+    profile.name ??
     getPreferredName(user.user_metadata);
+
+  // The concrete landing path — "auto" is resolved here so no client ever has
+  // to put the sentinel in an href.
+  const preferences = getAccountPreferences(user.user_metadata);
+  const resolvedHomePage =
+    preferences.homePage === "auto"
+      ? deriveDefaultDashboard({
+          isOwner: email === OWNER_EMAIL,
+          department: profile.department,
+          locationName: profile.locationName,
+        })
+      : preferences.homePage;
 
   return NextResponse.json({
     email: user.email,
     name: preferredName,
     avatarUrl: getProfileAvatarUrl(user.user_metadata),
-    preferences: getAccountPreferences(user.user_metadata),
+    preferences,
+    resolvedHomePage,
     isAdmin,
     isManagement,
   });
