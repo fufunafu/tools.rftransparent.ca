@@ -121,7 +121,7 @@ describe("isAuthorizedEmail", () => {
 
     const empQuery = state.queries.find((q) => q.table === "employees")!;
     const orFilter = empQuery.filters.find((f) => f.method === "or")!;
-    expect(orFilter.args[0]).toBe("email.eq.worker@shop.com,email_alt.eq.worker@shop.com");
+    expect(orFilter.args[0]).toBe('email.eq."worker@shop.com",email_alt.eq."worker@shop.com"');
     const eqFilter = empQuery.filters.find((f) => f.method === "eq")!;
     expect(eqFilter.args).toEqual(["active", true]);
     // Matched on employees — admin_users never consulted

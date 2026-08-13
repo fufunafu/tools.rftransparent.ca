@@ -443,6 +443,10 @@ function LeadDetailPanel({
     isLoading: detailsLoading,
   } = useSWR<{ details: LeadSubmission[]; lead_ids: string[] }>(detailUrl, fetcher);
   const callAttemptLeadIds = detailData?.lead_ids?.length ? detailData.lead_ids : [lead.id];
+  // Every edit below applies to the whole duplicate group, but the group's id
+  // list only arrives with the details response — until then a save would
+  // update just the primary row and leave the merged submissions behind.
+  const groupPending = detailsLoading && (lead.duplicate_count ?? 1) > 1;
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
     `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`,
     fetcher
@@ -507,6 +511,10 @@ function LeadDetailPanel({
     update: Record<string, unknown>,
     allSubmissions = false,
   ): Promise<boolean> => {
+    if (allSubmissions && groupPending) {
+      setSaveError("Still loading this lead's combined submissions — try again in a moment.");
+      return false;
+    }
     setSaveError(null);
     try {
       const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads", {
@@ -669,7 +677,7 @@ function LeadDetailPanel({
                 <button
                   type="button"
                   onClick={handleSavePhone}
-                  disabled={!isCallablePhone(phoneNumber)}
+                  disabled={!isCallablePhone(phoneNumber) || groupPending}
                   className="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Save phone
@@ -733,7 +741,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleInstallationToggle}
-              disabled={savingInstallation}
+              disabled={savingInstallation || groupPending}
               className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
                 lead.installation_requested === true
                   ? "border border-teal-300 bg-white text-teal-800 hover:bg-teal-100"
@@ -913,7 +921,7 @@ function LeadDetailPanel({
               />
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditingQuote(false)} className="px-3 py-1.5 text-xs text-sand-600">Cancel</button>
-                <button onClick={handleSaveQuote} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded">Save</button>
+                <button onClick={handleSaveQuote} disabled={groupPending} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded disabled:cursor-wait disabled:opacity-60">Save</button>
               </div>
             </div>
           ) : lead.quote_number ? (
@@ -955,7 +963,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleSpamToggle}
-              disabled={savingSpam || savingOutcome !== null}
+              disabled={savingSpam || savingOutcome !== null || groupPending}
               className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
                 spamMarked
                   ? "border-sand-300 bg-white text-sand-600 hover:bg-sand-50"
@@ -971,7 +979,7 @@ function LeadDetailPanel({
                 key={o}
                 type="button"
                 onClick={() => handleOutcomeChange(o)}
-                disabled={savingOutcome !== null}
+                disabled={savingOutcome !== null || groupPending}
                 aria-pressed={(savingOutcome ?? lead.outcome) === o}
                 className={`text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
                   (savingOutcome ?? lead.outcome) === o

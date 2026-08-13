@@ -10,10 +10,16 @@ import { alertOnSoftFailures } from "@/lib/cron-monitor";
 import { syncLeadCallStatuses, type LeadCallSyncSummary } from "@/lib/lead-call-sync";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+// 800s is the Pro-plan ceiling; scrapes are budgeted to finish well before it.
+export const maxDuration = 800;
 
 const STORES = ["bc_transparent", "rf_transparent"];
-const SCRAPER_TIMEOUT_MS = 210_000;
+const SCRAPER_TIMEOUT_MS = 300_000;
+// The route is killed hard at maxDuration, so all scraping must wrap up
+// early enough to leave room for lead-call matching and run-history
+// bookkeeping.
+const SCRAPE_DEADLINE_MS = 740_000;
+const MIN_SCRAPE_BUDGET_MS = 15_000;
 
 interface ScraperTarget {
   scraper: "cik" | "grasshopper";
@@ -33,12 +39,23 @@ async function runScraper(
   scraperUrl: string,
   headers: Record<string, string>,
   target: ScraperTarget,
+  deadline: number,
 ): Promise<ScraperResult> {
+  const budgetMs = deadline - Date.now();
+  if (budgetMs < MIN_SCRAPE_BUDGET_MS) {
+    return {
+      scraper: target.scraper,
+      ...(target.store ? { store: target.store } : {}),
+      status: "error",
+      detail: "Skipped — earlier imports used up this run's time budget",
+    };
+  }
+  const timeoutMs = Math.min(SCRAPER_TIMEOUT_MS, budgetMs);
   try {
     const res = await fetch(`${scraperUrl}${target.path}`, {
       method: "POST",
       headers,
-      signal: AbortSignal.timeout(SCRAPER_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     const json = await res.json().catch(() => null) as {
       status?: string;
@@ -61,7 +78,7 @@ async function runScraper(
       ...(target.store ? { store: target.store } : {}),
       status: "error",
       detail: timedOut
-        ? `Timed out after ${Math.round(SCRAPER_TIMEOUT_MS / 1000)} seconds`
+        ? `Timed out after ${Math.round(timeoutMs / 1000)} seconds`
         : error instanceof Error ? error.message : "fetch failed",
     };
   }
@@ -125,15 +142,27 @@ async function handler(req: NextRequest) {
     headers["Authorization"] = `Bearer ${scraperKey}`;
   }
 
-  // These imports are independent. Running them together keeps the manual
-  // sync within the route duration even when Grasshopper takes 2-3 minutes.
-  const targets: ScraperTarget[] = [
-    ...STORES.map((store) => ({ scraper: "cik" as const, store, path: `/scrape?store=${store}` })),
-    { scraper: "grasshopper", path: "/scrape-grasshopper" },
-  ];
-  const results = await Promise.all(
-    targets.map((target) => runScraper(scraperUrl, headers, target)),
-  );
+  // Both CIK imports hit the same scraper instance, so running them
+  // concurrently makes the second one burn its timeout waiting on the first.
+  // Run CIK store-by-store; only Grasshopper (a separate provider) runs in
+  // parallel, keeping the manual sync fast even when it takes 2-3 minutes.
+  const deadline = Date.now() + SCRAPE_DEADLINE_MS;
+  const [cikResults, grasshopperResult] = await Promise.all([
+    (async () => {
+      const out: ScraperResult[] = [];
+      for (const store of STORES) {
+        out.push(await runScraper(
+          scraperUrl,
+          headers,
+          { scraper: "cik", store, path: `/scrape?store=${store}` },
+          deadline,
+        ));
+      }
+      return out;
+    })(),
+    runScraper(scraperUrl, headers, { scraper: "grasshopper", path: "/scrape-grasshopper" }, deadline),
+  ]);
+  const results: ScraperResult[] = [...cikResults, grasshopperResult];
 
   let leadCallSync: LeadCallSyncSummary | null = null;
   try {

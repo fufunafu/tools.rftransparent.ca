@@ -43,25 +43,36 @@ beforeEach(() => {
 });
 
 describe("GET /api/cron/sync-calls", () => {
-  it("starts both CIK imports and Grasshopper concurrently", async () => {
+  it("runs the CIK stores one at a time with Grasshopper in parallel", async () => {
     const resolvers: Array<(response: Response) => void> = [];
     fetchMock.mockImplementation(() => new Promise<Response>((resolve) => resolvers.push(resolve)));
 
     const responsePromise = GET(manualRequest());
-    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
+    // The second CIK store must NOT start while the first is still running —
+    // both hit the same scraper instance and would slow each other down.
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
       "https://scraper.example.com/scrape?store=bc_transparent",
-      "https://scraper.example.com/scrape?store=rf_transparent",
       "https://scraper.example.com/scrape-grasshopper",
     ]);
 
-    for (const resolve of resolvers) {
+    resolvers[0](new Response(JSON.stringify({ status: "success", records_inserted: 4 })));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(String(fetchMock.mock.calls[2][0])).toBe(
+      "https://scraper.example.com/scrape?store=rf_transparent",
+    );
+
+    for (const resolve of resolvers.slice(1)) {
       resolve(new Response(JSON.stringify({ status: "success", records_inserted: 4 })));
     }
 
     const response = await responsePromise;
+    const body = await response.json();
     expect(response.status).toBe(200);
+    // CIK results come first, in store order, then Grasshopper.
+    expect(body.results.map((r: { scraper: string }) => r.scraper))
+      .toEqual(["cik", "cik", "grasshopper", "lead-call-matching"]);
     expect(syncLeadCallStatusesMock).toHaveBeenCalledOnce();
   });
 

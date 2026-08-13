@@ -4,6 +4,7 @@
 // "should this email be allowed?".
 
 import { getSupabase } from "@/lib/supabase";
+import { quotePostgrestValue } from "@/lib/postgrest";
 
 export const OWNER_EMAIL = "fuannegao25@gmail.com";
 
@@ -107,7 +108,7 @@ async function employeeMatches(
   let q = sb
     .from("employees")
     .select("id")
-    .or(`email.eq.${email},email_alt.eq.${email}`)
+    .or(`email.eq.${quotePostgrestValue(email)},email_alt.eq.${quotePostgrestValue(email)}`)
     .eq("active", true);
   if (opts?.managementOnly) q = q.eq("department", "management");
   const { data, error } = await q.maybeSingle();

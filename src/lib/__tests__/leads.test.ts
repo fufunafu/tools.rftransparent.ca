@@ -343,7 +343,7 @@ describe("findOrInsertLead", () => {
     expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
 
     const orFilter = state.selects[0].filters.find((f) => f.method === "or")!;
-    expect(orFilter.args[0]).toBe("email.ilike.jane@example.com");
+    expect(orFilter.args[0]).toBe('email.ilike."jane@example.com"');
     expect(state.inserts[0].email).toBe("jane@example.com");
   });
 
@@ -419,7 +419,19 @@ describe("findOrInsertLead", () => {
   it("matches on email OR phone when both are present", async () => {
     await findOrInsertLead(leadInput({ email: "jane@example.com", phone: "5145551234" }));
     const orFilter = state.selects[0].filters.find((f) => f.method === "or")!;
-    expect(orFilter.args[0]).toBe("email.ilike.jane@example.com,phone.eq.5145551234");
+    expect(orFilter.args[0]).toBe('email.ilike."jane@example.com",phone.eq."5145551234"');
+  });
+
+  it("quotes filter metacharacters in a submitted email so they cannot inject conditions", async () => {
+    await findOrInsertLead(leadInput({ email: "x,outcome.eq.won", phone: null }));
+    const orFilter = state.selects[0].filters.find((f) => f.method === "or")!;
+    expect(orFilter.args[0]).toBe('email.ilike."x,outcome.eq.won"');
+  });
+
+  it("escapes wildcards in a submitted email so they only match literally", async () => {
+    await findOrInsertLead(leadInput({ email: "%@example.com", phone: null }));
+    const orFilter = state.selects[0].filters.find((f) => f.method === "or")!;
+    expect(orFilter.args[0]).toBe('email.ilike."\\\\%@example.com"');
   });
 
   it("accepts phone-only submissions and dedups on phone alone", async () => {
@@ -427,7 +439,7 @@ describe("findOrInsertLead", () => {
     expect(result).toEqual({ ok: true, lead_id: "new-lead-id", deduped: false });
 
     const orFilter = state.selects[0].filters.find((f) => f.method === "or")!;
-    expect(orFilter.args[0]).toBe("phone.eq.5145551234");
+    expect(orFilter.args[0]).toBe('phone.eq."5145551234"');
     expect(state.inserts[0].phone).toBe("5145551234");
     expect(state.inserts[0].email).toBeNull();
   });

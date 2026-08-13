@@ -1,6 +1,7 @@
 // Shared types + payload-extraction helpers for the Leads section.
 
 import { getSupabase } from "@/lib/supabase";
+import { escapeIlikeValue, quotePostgrestValue } from "@/lib/postgrest";
 import { sendNewLeadNotification } from "@/lib/lead-notifications";
 import type { LeadAttachment } from "@/lib/customer-service/lead-attachments";
 import {
@@ -350,8 +351,11 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
 
   const duplicateWindowStart = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const orFilters: string[] = [];
-  if (email) orFilters.push(`email.ilike.${email}`);
-  if (phone) orFilters.push(`phone.eq.${phone}`);
+  // email/phone come from public form submissions — quote them so filter
+  // grammar characters (or SQL wildcards) in a submission can never widen
+  // this match onto an unrelated lead, which the branch below would overwrite.
+  if (email) orFilters.push(`email.ilike.${quotePostgrestValue(escapeIlikeValue(email))}`);
+  if (phone) orFilters.push(`phone.eq.${quotePostgrestValue(phone)}`);
   let duplicateQuery = supabase
     .from("leads")
     .select("id,name,email,phone,message,installation_requested,raw_payload,outcome")
