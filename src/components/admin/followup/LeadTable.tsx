@@ -259,7 +259,9 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
         </div>
       ) : (
         <div className="overflow-auto max-h-[calc(100vh-260px)]">
-          <table className="w-full text-sm">
+          {/* min-w keeps the columns readable on phones — the table scrolls
+              sideways inside this card instead of crushing every column. */}
+          <table className="w-full min-w-[860px] text-sm">
             <thead className="sticky top-0 z-20 bg-white">
               <tr className="border-b border-sand-200/60">
                 <th className="px-3 py-3 w-10">

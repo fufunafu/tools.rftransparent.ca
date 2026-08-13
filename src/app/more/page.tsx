@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getAuthenticatedUser, isAdminUser, isManagementUser } from "@/lib/admin-auth";
+import { getProfileAvatarUrl } from "@/lib/profile-avatar";
 import MoreScreen from "@/components/MoreScreen";
 
 export const metadata: Metadata = {
@@ -24,6 +25,7 @@ export default async function MorePage() {
         viewerAccess={{ isAdmin, isManagement }}
         viewerName={name}
         viewerEmail={user.email ?? ""}
+        avatarUrl={getProfileAvatarUrl(user.user_metadata)}
       />
     </div>
   );

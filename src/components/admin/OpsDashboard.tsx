@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import Link from "next/link";
 import { formatCADWhole, formatCADShort } from "@/lib/format";
 import type { OpsDashboard as OpsData } from "@/lib/ops-dashboard";
 import type { TicketStats } from "@/lib/home-dashboard";
@@ -92,8 +93,11 @@ export default function OpsDashboard({
           <h2 className="text-xl font-semibold text-slate-900">Today</h2>
           <p className="text-[12.5px] text-slate-500 mt-0.5">
             {today}
-            {data.sales.ok && data.sales.value.cachedAt ? " · sales cached" : ""}
-            {" · performers over 30 days"}
+            {/* Provenance notes are desktop detail — a phone wants the date. */}
+            <span className="hidden sm:inline">
+              {data.sales.ok && data.sales.value.cachedAt ? " · sales cached" : ""}
+              {" · performers over 30 days"}
+            </span>
           </p>
         </div>
 
@@ -117,7 +121,7 @@ export default function OpsDashboard({
             target={wallHref ? "_blank" : undefined}
             rel="noopener noreferrer"
             title={wallHref ? "Open the office wall board" : "No wall token issued yet"}
-            className={`h-7 inline-flex items-center gap-1.5 px-2.5 border rounded-lg bg-white text-xs transition-colors ${
+            className={`max-sm:hidden h-7 inline-flex items-center gap-1.5 px-2.5 border rounded-lg bg-white text-xs transition-colors ${
               wallHref
                 ? "border-slate-200 text-slate-600 hover:border-blue-300 hover:text-blue-700"
                 : "border-slate-200 text-slate-300 pointer-events-none"
@@ -138,8 +142,57 @@ export default function OpsDashboard({
         <Unavailable label="Sales by store" error={data.sales.error} />
       )}
 
-      {/* 2 — Warehouse + Customer service */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
+      {/* Phones get an edited dashboard, not the desktop one shrunk: after
+          sales, just the four numbers that say whether anything's on fire.
+          The full analysis cards below stay desktop-only. */}
+      <section className="sm:hidden bg-white border border-slate-200 rounded-xl shadow-soft overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-slate-100 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+          Needs a look
+        </div>
+        <div className="grid grid-cols-2 gap-px bg-slate-100">
+          <Link href="/customer-service/problems" className="bg-white px-4 py-3 active:bg-slate-50">
+            <p className="text-[11px] text-slate-400">Problem tickets</p>
+            <p className={`mt-1 text-xl font-semibold tabular-nums ${ticketStats && ticketStats.overAlertAge > 0 ? "text-amber-600" : "text-slate-900"}`}>
+              {ticketStats ? ticketStats.open : "—"}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {ticketStats && ticketStats.oldest
+                ? `oldest ${ticketStats.oldest.ageDays}d`
+                : "none open"}
+            </p>
+          </Link>
+          <Link href="/warehouse" className="bg-white px-4 py-3 active:bg-slate-50">
+            <p className="text-[11px] text-slate-400">Unfulfilled orders</p>
+            <p className="mt-1 text-xl font-semibold tabular-nums text-slate-900">
+              {data.warehouse.ok && data.warehouse.value.unfulfilled !== null
+                ? num(data.warehouse.value.unfulfilled)
+                : "—"}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {data.warehouse.ok && data.warehouse.value.oldestUnfulfilledDays !== null
+                ? `oldest ${data.warehouse.value.oldestUnfulfilledDays}d`
+                : "all stores"}
+            </p>
+          </Link>
+          <Link href="/accounting/analysis" className="bg-white px-4 py-3 active:bg-slate-50">
+            <p className="text-[11px] text-slate-400">To collect (60d+)</p>
+            <p className={`mt-1 text-xl font-semibold tabular-nums ${data.collection.ok && data.collection.value.over60Count > 0 ? "text-red-600" : "text-slate-900"}`}>
+              {data.collection.ok ? formatCADShort(data.collection.value.over60Amount) : "—"}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {data.collection.ok ? `${data.collection.value.over60Count} orders` : ""}
+            </p>
+          </Link>
+          <Link href="/employees" className="bg-white px-4 py-3 active:bg-slate-50">
+            <p className="text-[11px] text-slate-400">Who&apos;s clocked in</p>
+            <p className="mt-1 text-xl font-semibold text-blue-600">Hours →</p>
+            <p className="text-[11px] text-slate-400">week &amp; review</p>
+          </Link>
+        </div>
+      </section>
+
+      {/* 2 — Warehouse + Customer service (desktop) */}
+      <div className="max-sm:hidden grid grid-cols-1 md:grid-cols-2 gap-3 items-start">
         {data.warehouse.ok ? (
           <WarehouseCard w={data.warehouse.value} tickets={ticketStats} />
         ) : (
@@ -152,19 +205,23 @@ export default function OpsDashboard({
         )}
       </div>
 
-      {/* 3 — Top performers */}
-      {data.performers.ok ? (
-        <PerformersSection p={data.performers.value} />
-      ) : (
-        <Unavailable label="Top performers" error={data.performers.error} />
-      )}
+      {/* 3 — Top performers (desktop) */}
+      <div className="max-sm:hidden">
+        {data.performers.ok ? (
+          <PerformersSection p={data.performers.value} />
+        ) : (
+          <Unavailable label="Top performers" error={data.performers.error} />
+        )}
+      </div>
 
-      {/* 4 — Collection */}
-      {data.collection.ok ? (
-        <CollectionCard c={data.collection.value} />
-      ) : (
-        <Unavailable label="Collection" error={data.collection.error} />
-      )}
+      {/* 4 — Collection (desktop) */}
+      <div className="max-sm:hidden">
+        {data.collection.ok ? (
+          <CollectionCard c={data.collection.value} />
+        ) : (
+          <Unavailable label="Collection" error={data.collection.error} />
+        )}
+      </div>
 
       {failures.length > 0 && (
         <p className="text-[11px] text-slate-400">

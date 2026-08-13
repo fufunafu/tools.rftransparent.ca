@@ -3,6 +3,8 @@ import { getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { quotePostgrestValue } from "@/lib/postgrest";
 import {
+  checkGeofence,
+  formatDistance,
   isStaleShift,
   startOfWeekInTimeZone,
   totalMinutes,
@@ -16,18 +18,35 @@ import {
 // anyone else's time from this route. Manager tooling comes later and lives
 // elsewhere.
 
+interface LocationRow {
+  name: string;
+  latitude: number | null;
+  longitude: number | null;
+  clock_in_radius_m: number | null;
+}
+
 interface EmployeeRow {
   id: string;
   name: string;
   department: string;
-  locations: { name: string } | null;
+  locations: LocationRow | null;
+}
+
+// A location only enforces the geofence once someone has set its pin.
+function geofencePin(location: LocationRow | null) {
+  if (location?.latitude == null || location?.longitude == null) return null;
+  return {
+    latitude: location.latitude,
+    longitude: location.longitude,
+    radiusM: location.clock_in_radius_m,
+  };
 }
 
 async function findEmployee(email: string): Promise<EmployeeRow | null> {
   const normalized = email.toLowerCase().trim();
   const { data, error } = await getSupabase()
     .from("employees")
-    .select("id, name, department, locations(name)")
+    .select("id, name, department, locations(name, latitude, longitude, clock_in_radius_m)")
     .or(
       `email.eq.${quotePostgrestValue(normalized)},email_alt.eq.${quotePostgrestValue(normalized)}`,
     )
@@ -39,7 +58,7 @@ async function findEmployee(email: string): Promise<EmployeeRow | null> {
     id: string;
     name: string;
     department: string;
-    locations: { name: string } | { name: string }[] | null;
+    locations: LocationRow | LocationRow[] | null;
   } | null;
   if (!row) return null;
   const locations = Array.isArray(row.locations) ? row.locations[0] ?? null : row.locations;
@@ -82,6 +101,8 @@ async function buildStatus(employee: EmployeeRow, now: Date) {
     employeeName: employee.name,
     department: employee.department,
     locationName: employee.locations?.name ?? null,
+    // True when clock-in requires the phone's location (store has a pin).
+    geofenced: geofencePin(employee.locations) !== null,
     open: open
       ? { id: open.id, clockInAt: open.clock_in_at, stale: isStaleShift(open.clock_in_at, now) }
       : null,
@@ -111,7 +132,11 @@ export async function POST(req: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  let body: { action?: string; clockOutAt?: string };
+  let body: {
+    action?: string;
+    clockOutAt?: string;
+    position?: { latitude?: number; longitude?: number; accuracy?: number };
+  };
   try {
     body = await req.json();
   } catch {
@@ -138,10 +163,38 @@ export async function POST(req: NextRequest) {
           { status: 409 },
         );
       }
+      // Geofence: only enforced when the employee's store has a pin set.
+      const pin = geofencePin(employee.locations);
+      let clockInDistanceM: number | null = null;
+      if (pin) {
+        const { latitude, longitude, accuracy } = body.position ?? {};
+        if (typeof latitude !== "number" || typeof longitude !== "number") {
+          return NextResponse.json(
+            {
+              error: `Clocking in at ${employee.locations?.name ?? "your store"} needs your location. Allow location access and try again.`,
+              code: "location_required",
+            },
+            { status: 400 },
+          );
+        }
+        const check = checkGeofence({ latitude, longitude, accuracy }, pin);
+        if (!check.ok) {
+          return NextResponse.json(
+            {
+              error: `You look ${formatDistance(check.distanceM)} from ${employee.locations?.name ?? "your store"} — clock in when you arrive.`,
+              code: "too_far",
+            },
+            { status: 403 },
+          );
+        }
+        clockInDistanceM = check.distanceM;
+      }
+
       const { error } = await sb.from("time_entries").insert({
         employee_id: employee.id,
         location_name: employee.locations?.name ?? null,
         clock_in_at: now.toISOString(),
+        clock_in_distance_m: clockInDistanceM,
       });
       // 23505 = unique violation on the one-open-shift index (double-tap race).
       if (error && error.code !== "23505") throw new Error(error.message);

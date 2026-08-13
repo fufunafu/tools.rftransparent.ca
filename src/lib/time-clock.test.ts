@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  checkGeofence,
   decimalHours,
+  distanceMeters,
   entryMinutes,
+  formatDistance,
   formatDuration,
   isStaleShift,
   startOfWeekInTimeZone,
@@ -153,6 +156,57 @@ describe("timeEntriesCsv", () => {
     expect(header).toBe("Employee,Department,Store,Date,Clock in,Clock out,Hours,Flagged,Note");
     expect(row1).toBe('"Sam ""Sammy"" Rivera",sales,"Store 2, North",2026-08-10,08:30,16:32,8.03,,');
     expect(row2).toBe("Ana Cruz,warehouse,,2026-08-11,08:00,,0,yes,Forgot to clock out");
+  });
+});
+
+describe("geofence", () => {
+  // CN Tower and Rogers Centre, Toronto — about 350m apart.
+  const cnTower = { latitude: 43.6426, longitude: -79.3871 };
+  const rogersCentre = { latitude: 43.6414, longitude: -79.3894 };
+
+  it("measures a known distance within tolerance", () => {
+    const d = distanceMeters(cnTower.latitude, cnTower.longitude, rogersCentre.latitude, rogersCentre.longitude);
+    expect(d).toBeGreaterThan(200);
+    expect(d).toBeLessThan(300);
+  });
+
+  it("accepts a phone inside the radius", () => {
+    const result = checkGeofence(
+      { ...rogersCentre, accuracy: 20 },
+      { ...cnTower, radiusM: 300 },
+    );
+    expect(result.ok).toBe(true);
+    expect(result.allowedM).toBe(320);
+  });
+
+  it("rejects a phone outside the radius", () => {
+    const result = checkGeofence(
+      { ...rogersCentre, accuracy: 10 },
+      { ...cnTower, radiusM: 100 },
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("caps the accuracy credit so a bad GPS fix can't grant a kilometer", () => {
+    const result = checkGeofence(
+      { ...rogersCentre, accuracy: 5000 },
+      { ...cnTower, radiusM: 100 },
+    );
+    expect(result.allowedM).toBe(200); // 100 radius + 100 capped credit
+    expect(result.ok).toBe(false);
+  });
+
+  it("uses the default radius when the location has none", () => {
+    const result = checkGeofence({ ...cnTower, accuracy: 0 }, { ...cnTower });
+    expect(result.ok).toBe(true);
+    expect(result.allowedM).toBe(200);
+  });
+});
+
+describe("formatDistance", () => {
+  it("formats meters and kilometers", () => {
+    expect(formatDistance(240)).toBe("240 m");
+    expect(formatDistance(3400)).toBe("3.4 km");
   });
 });
 

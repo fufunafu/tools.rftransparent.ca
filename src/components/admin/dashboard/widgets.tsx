@@ -122,7 +122,9 @@ export function CardShell({
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</span>
         {note && <span className="text-[11px] text-slate-400">{note}</span>}
       </div>
-      <div className="grid grid-cols-3 gap-px bg-slate-100">{children}</div>
+      {/* Two columns on phones so tiles keep readable numbers; an odd last
+          tile stretches across both columns instead of leaving a gray hole. */}
+      <div className="grid grid-cols-2 gap-px bg-slate-100 sm:grid-cols-3 [&>*:last-child:nth-child(odd)]:col-span-2 sm:[&>*:last-child:nth-child(odd)]:col-span-1">{children}</div>
       {footer && (
         <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-t border-slate-100 text-[12px]">
           {footer}

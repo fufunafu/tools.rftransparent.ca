@@ -174,6 +174,61 @@ export function timeEntriesCsv(entries: CsvEntry[], now: Date): string {
   return [header, ...lines].join("\n");
 }
 
+// ── Geofenced clock-in ──────────────────────────────────────────────────────
+
+// Default allowed distance from the store pin. Generous enough for a big
+// parking lot; per-location override lives in locations.clock_in_radius_m.
+export const GEOFENCE_DEFAULT_RADIUS_M = 200;
+
+// GPS accuracy varies (indoors it can be 50m+). The reported accuracy is
+// added to the allowed radius, capped so a wildly-imprecise fix can't grant
+// a kilometer of slack.
+export const GEOFENCE_MAX_ACCURACY_CREDIT_M = 100;
+
+const EARTH_RADIUS_M = 6_371_000;
+
+// Haversine great-circle distance in meters.
+export function distanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number,
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return Math.round(2 * EARTH_RADIUS_M * Math.asin(Math.sqrt(a)));
+}
+
+export interface GeofenceCheck {
+  ok: boolean;
+  distanceM: number;
+  allowedM: number;
+}
+
+export function checkGeofence(
+  position: { latitude: number; longitude: number; accuracy?: number },
+  pin: { latitude: number; longitude: number; radiusM?: number | null },
+): GeofenceCheck {
+  const distanceM = distanceMeters(
+    position.latitude,
+    position.longitude,
+    pin.latitude,
+    pin.longitude,
+  );
+  const allowedM =
+    (pin.radiusM ?? GEOFENCE_DEFAULT_RADIUS_M) +
+    Math.min(Math.max(0, position.accuracy ?? 0), GEOFENCE_MAX_ACCURACY_CREDIT_M);
+  return { ok: distanceM <= allowedM, distanceM, allowedM };
+}
+
+export function formatDistance(meters: number): string {
+  return meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`;
+}
+
 export function formatDuration(minutes: number): string {
   const h = Math.floor(minutes / 60);
   const m = Math.abs(minutes % 60);

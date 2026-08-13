@@ -13,8 +13,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function getProfileAvatarUrl(metadata: unknown): string | null {
   if (!isRecord(metadata)) return null;
   const updatedAt = metadata.avatar_updated_at;
-  if (typeof updatedAt !== "string" || !updatedAt.trim()) return null;
-  return `/api/settings/account/avatar?v=${encodeURIComponent(updatedAt)}`;
+  if (typeof updatedAt === "string" && updatedAt.trim()) {
+    return `/api/settings/account/avatar?v=${encodeURIComponent(updatedAt)}`;
+  }
+  // No uploaded photo — fall back to the Google account picture that OAuth
+  // sign-in stores in the metadata, so people get a face without uploading.
+  const picture = metadata.picture ?? metadata.avatar_url;
+  if (typeof picture === "string" && picture.startsWith("https://")) return picture;
+  return null;
 }
 
 export function isProfileAvatarType(value: string): value is (typeof PROFILE_AVATAR_TYPES)[number] {

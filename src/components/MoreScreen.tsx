@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement } from "react";
+import { cloneElement, useState } from "react";
 import Link from "next/link";
 import {
   NAV_GROUPS,
@@ -82,12 +82,17 @@ export default function MoreScreen({
   viewerAccess,
   viewerName,
   viewerEmail,
+  avatarUrl = null,
 }: {
   viewerAccess: ViewerAccess;
   viewerName: string | null;
   viewerEmail: string;
+  avatarUrl?: string | null;
 }) {
   const visibleSettings = filterNavItem(SETTINGS_ITEM, viewerAccess);
+  // Google-hosted avatar URLs go stale; fall back to initials when one 404s.
+  const [avatarFailed, setAvatarFailed] = useState(false);
+  const showAvatar = avatarUrl && !avatarFailed;
 
   return (
     <div className="space-y-5">
@@ -96,8 +101,14 @@ export default function MoreScreen({
         href="/settings/account"
         className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5"
       >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-bold text-white">
-          {initialsFor(viewerName, viewerEmail)}
+        <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 text-sm font-bold text-white">
+          {showAvatar ? (
+            /* Served by an authenticated route — the image optimizer can't fetch it. */
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} className="h-full w-full object-cover" />
+          ) : (
+            initialsFor(viewerName, viewerEmail)
+          )}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-slate-900">

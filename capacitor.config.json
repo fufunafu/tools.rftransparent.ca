@@ -3,8 +3,7 @@
   "appName": "RF Tools",
   "webDir": "capacitor/www",
   "server": {
-    "url": "http://localhost:3000",
-    "cleartext": true
+    "url": "https://tools.rftransparent.ca"
   },
   "ios": {
     "contentInset": "automatic"

@@ -124,7 +124,8 @@ export default function StaffBreakdown({
 
   return (
     <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
-      <div className="w-full flex items-center justify-between px-5 py-4 gap-3">
+      {/* Phones: label+pills and the range picker stack; desktop unchanged. */}
+      <div className="w-full flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">
             Quotes by Staff
@@ -155,13 +156,13 @@ export default function StaffBreakdown({
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <div className="flex items-center gap-1 bg-sand-50 rounded-lg p-0.5">
+        <div className="flex items-center gap-2 sm:shrink-0">
+          <div className="flex flex-1 items-center gap-1 overflow-x-auto rounded-lg bg-sand-50 p-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:flex-none">
             {RANGE_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setDays(opt.value)}
-                className={`px-2.5 py-1 text-xs font-medium rounded transition-colors ${
+                className={`shrink-0 px-2.5 py-1 text-xs font-medium rounded transition-colors ${
                   days === opt.value
                     ? "bg-white text-sand-900 shadow-sm"
                     : "text-sand-500 hover:text-sand-700"
@@ -199,7 +200,9 @@ export default function StaffBreakdown({
 
       {expanded && sorted.length > 0 && (
         <div className="border-t border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
-          <table className="w-full text-sm">
+          {/* min-w keeps 8 columns readable on phones — the card scrolls sideways
+              instead of crushing every column to a sliver. */}
+          <table className="w-full min-w-[640px] text-sm">
             <thead className="sticky top-0 z-20 bg-sand-50">
               <tr className="border-b border-sand-200/60 bg-sand-50/50">
                 {columns.map((col) => (

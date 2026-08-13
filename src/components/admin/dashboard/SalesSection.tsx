@@ -35,7 +35,12 @@ export function SalesSection({
 
   return (
     <section className="bg-white border border-slate-200 rounded-xl shadow-soft overflow-x-auto">
-      <div className={`min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400`}>
+      {/* Phones get a stacked list (below); the wide table is desktop/tablet. */}
+      <div className="sm:hidden flex items-center justify-between px-4 py-2.5 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">
+        <span>Sales by store</span>
+        <span>Today</span>
+      </div>
+      <div className={`max-sm:hidden min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 border-b border-slate-200 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400`}>
         <span>Sales by store</span>
         <span>14d</span>
         <span className="text-right">Today</span>
@@ -51,10 +56,42 @@ export function SalesSection({
         const d30 = delta(s.last30, s.previous30);
         const targetPct = s.target ? (s.last30 / s.target) * 100 : null;
         return (
+          <div key={s.id} className="contents">
+          {/* Phone row: today's number is the headline; the rest is one quiet line. */}
           <Link
-            key={s.id}
             href="/sales"
-            className={`min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 items-center hover:bg-slate-50 transition-colors ${
+            className={`sm:hidden flex flex-col gap-1 px-4 py-3 active:bg-slate-50 ${
+              i === sales.length - 1 ? "border-b border-slate-200" : "border-b border-slate-100"
+            }`}
+          >
+            <span className="flex items-center justify-between gap-3">
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="text-[10px] font-bold text-blue-600 bg-blue-50 rounded-[5px] px-[5px] py-[2px] shrink-0">
+                  {s.code}
+                </span>
+                <span className="text-[13px] font-semibold text-slate-900 truncate">{s.label}</span>
+              </span>
+              <span className="shrink-0 text-[17px] font-semibold tabular-nums text-slate-900">
+                {formatCADWhole(s.todayRevenue)}
+              </span>
+            </span>
+            <span className="flex items-center justify-between gap-3">
+              <Sparkline values={s.sparkline} />
+              <span className="text-[11px] text-slate-400">
+                {s.todayOrders} order{s.todayOrders === 1 ? "" : "s"} today
+                {vs7 ? ` · ${vs7.text} vs 7d` : ""}
+              </span>
+            </span>
+            <span className="text-[11px] text-slate-400">
+              7d {formatCADShort(s.last7)}
+              {d7 ? ` (${d7.text})` : ""} · 30d {formatCADShort(s.last30)}
+              {d30 ? ` (${d30.text})` : ""}
+              {targetPct !== null ? ` · ${targetPct.toFixed(0)}% of target` : ""}
+            </span>
+          </Link>
+          <Link
+            href="/sales"
+            className={`max-sm:hidden min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 items-center hover:bg-slate-50 transition-colors ${
               i === sales.length - 1 ? "border-b border-slate-200" : "border-b border-slate-100"
             }`}
             data-label={`${s.label} — sales`}
@@ -111,10 +148,22 @@ export function SalesSection({
               )}
             </span>
           </Link>
+          </div>
         );
       })}
 
-      <div className={`min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 items-center bg-slate-50`}>
+      <div className="sm:hidden flex items-center justify-between px-4 py-2.5 bg-slate-50">
+        <span className="text-[13px] font-semibold text-slate-900">{totalLabel}</span>
+        <span className="text-right">
+          <span className="block text-[15px] font-semibold tabular-nums text-slate-900">
+            {formatCADWhole(totals.today)}
+          </span>
+          <span className="block text-[11px] text-slate-400">
+            7d {formatCADShort(totals.last7)} · 30d {formatCADShort(totals.last30)}
+          </span>
+        </span>
+      </div>
+      <div className={`max-sm:hidden min-w-[900px] grid ${cols} gap-3 px-[18px] py-2.5 items-center bg-slate-50`}>
         <span className="text-[13px] font-semibold text-slate-900">{totalLabel}</span>
         <span />
         <span className="text-right text-[16px] font-semibold tabular-nums text-slate-900">

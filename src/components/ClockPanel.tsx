@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { formatDuration, type WeekDay } from "@/lib/time-clock";
+import { getCurrentPosition } from "@/lib/app-geolocation";
 
 interface ClockStatus {
   linked: boolean;
   employeeName?: string;
   locationName?: string | null;
+  // True when this employee's store requires the phone's location to clock in.
+  geofenced?: boolean;
   open?: { id: string; clockInAt: string; stale: boolean } | null;
   week?: WeekDay[];
   weekMinutes?: number;
@@ -42,6 +45,7 @@ function formatClockDay(iso: string): string {
 export default function ClockPanel() {
   const { data, error, mutate } = useSWR<ClockStatus>("/api/clock", { refreshInterval: 60_000 });
   const [pending, setPending] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [resolveValue, setResolveValue] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -55,7 +59,34 @@ export default function ClockPanel() {
     return () => clearInterval(id);
   }, [running]);
 
-  const post = async (body: { action: string; clockOutAt?: string }) => {
+  // Clock in with the store's location check when the store has a pin set.
+  const clockIn = async () => {
+    if (!data?.geofenced) {
+      await post({ action: "in" });
+      return;
+    }
+    setPending(true);
+    setLocating(true);
+    setActionError(null);
+    const result = await getCurrentPosition();
+    setLocating(false);
+    if (!result.ok) {
+      setActionError(
+        result.reason === "denied"
+          ? "Clocking in here needs your location. Enable it for RF Tools in your phone's Settings and try again."
+          : "Couldn't get your location. Move somewhere with better signal and try again.",
+      );
+      setPending(false);
+      return;
+    }
+    await post({ action: "in", position: result.position });
+  };
+
+  const post = async (body: {
+    action: string;
+    clockOutAt?: string;
+    position?: { latitude: number; longitude: number; accuracy: number };
+  }) => {
     setPending(true);
     setActionError(null);
     try {
@@ -198,7 +229,7 @@ export default function ClockPanel() {
       {/* Main action */}
       {!open?.stale && (
         <button
-          onClick={() => post({ action: open ? "out" : "in" })}
+          onClick={() => (open ? post({ action: "out" }) : clockIn())}
           disabled={pending}
           className={`w-full rounded-2xl py-4 text-lg font-bold text-white shadow-lg transition-colors disabled:opacity-50 ${
             open
@@ -206,7 +237,7 @@ export default function ClockPanel() {
               : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700"
           }`}
         >
-          {pending ? "One sec…" : open ? "Clock Out" : "Clock In"}
+          {locating ? "Checking you're at the store…" : pending ? "One sec…" : open ? "Clock Out" : "Clock In"}
         </button>
       )}
 
