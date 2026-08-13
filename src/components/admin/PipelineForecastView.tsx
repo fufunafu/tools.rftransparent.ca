@@ -81,10 +81,10 @@ export default function PipelineForecastView({
     <div className="space-y-8">
       <section aria-labelledby="forecast-summary-heading">
         <SectionHeader
+          id="forecast-summary-heading"
           title="Forecast outlook"
           description="A management view of expected revenue, the pipeline already visible, and the strength of the underlying history."
         />
-        <h2 id="forecast-summary-heading" className="sr-only">Forecast outlook summary</h2>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div data-content-id="annual-forecast">
             <MetricCard
@@ -128,11 +128,11 @@ export default function PipelineForecastView({
         className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
       >
         <SectionHeader
+          id="monthly-forecast-heading"
           title="Monthly revenue forecast"
           description="Actual revenue establishes the baseline. Projected revenue extends it, while the purple line shows pipeline already visible today."
           action={<InfoTip text="Forecast bars apply historical month-over-month growth to the latest completed month. The visible pipeline line is the win-rate-weighted portion of current invoiced quotes expected in each month." />}
         />
-        <h2 id="monthly-forecast-heading" className="sr-only">Monthly revenue forecast chart</h2>
         <div className="mt-5">
           {forecasts.length > 0 ? (
             <ForecastChart
@@ -163,10 +163,10 @@ export default function PipelineForecastView({
           className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
         >
           <SectionHeader
+            id="pipeline-aging-heading"
             title="Pipeline aging"
             description="The expected value of invoiced quotes by time since invoice."
           />
-          <h2 id="pipeline-aging-heading" className="sr-only">Pipeline aging</h2>
           {buckets.length > 0 ? (
             <div className="mt-5 overflow-x-auto">
               <table className="w-full min-w-[560px] text-sm">
@@ -203,11 +203,11 @@ export default function PipelineForecastView({
           className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
         >
           <SectionHeader
+            id="seasonal-history-heading"
             title="Seasonal history"
             description="Actual monthly revenue and the historical change used to inform future months."
             action={<InfoTip text="The amber line is limited to plus or minus 100 percent in the chart for readability. Forecast calculations still use their documented cap." />}
           />
-          <h2 id="seasonal-history-heading" className="sr-only">Seasonal history chart</h2>
           <div className="mt-5">
             {seasonalChartData.length > 2 ? (
               <SeasonalPatternChart data={seasonalChartData} />

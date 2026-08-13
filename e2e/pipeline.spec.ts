@@ -142,10 +142,32 @@ test.describe("authenticated pipeline dashboard", () => {
     await expect(page).toHaveURL(/view=team/);
     await expect(page.getByRole("tab", { name: /Team/ })).toHaveAttribute("aria-selected", "true");
 
-    await page.getByRole("button", { name: "Custom" }).click();
+    await page.getByRole("button", { name: "Custom", exact: true }).click();
     await page.getByLabel("Start date").fill("2026-07-01");
     await expect(page).toHaveURL(/view=team/);
     await expect(page.getByRole("heading", { name: "Rep leaderboard", exact: true })).toBeVisible();
+  });
+
+  test("keeps the app shell painted when reversing scroll at the bottom", async ({ page }) => {
+    await page.goto("/pipeline?view=forecast");
+    await page.getByRole("button", { name: "30d" }).click();
+    await expect(page.getByRole("heading", { name: "Monthly revenue forecast", exact: true })).toBeVisible();
+
+    const main = page.locator("main[data-app-main]");
+    await main.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await main.hover();
+    await page.mouse.wheel(0, -160);
+
+    await expect.poll(async () => main.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await expect.poll(async () =>
+      main.evaluate((element) => element.scrollTop < element.scrollHeight - element.clientHeight),
+    ).toBe(true);
+    await expect.poll(async () =>
+      main.evaluate((element) => Math.abs(element.getBoundingClientRect().bottom - window.innerHeight) < 1),
+    ).toBe(true);
+    await expect.poll(async () => page.evaluate(() => window.scrollY)).toBe(0);
   });
 
   test("contains tabs and wide tables at a narrow viewport", async ({ page }) => {

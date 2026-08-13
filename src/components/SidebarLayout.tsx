@@ -285,7 +285,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   }
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-dvh min-h-0 overflow-hidden">
       {searchOpen && (
         <CommandPalette targets={searchTargets} onClose={() => setSearchOpen(false)} />
       )}
@@ -296,7 +296,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="bg-white border-r border-slate-200 flex-col z-40 relative hidden md:flex
+        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden md:flex
           md:shrink-0 md:transition-[width] md:duration-200"
       >
         {/* Logo and collapse controls */}
@@ -463,7 +463,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       </aside>
 
       {/* Main column */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Mobile top bar — brand and search. Navigation lives in the bottom
             tab bar. The top safe-area padding clears the notch when the site
             runs full-screen (home-screen install or the iOS app). */}
@@ -486,7 +486,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
         {/* Main content. Extra bottom padding on phones keeps the last of the
             page above the fixed tab bar. */}
-        <main data-app-main className="flex-1 overflow-auto bg-slate-100">
+        <main data-app-main className="min-h-0 flex-1 overflow-y-auto overscroll-y-none bg-slate-100">
           <div className="p-4 pb-28 md:p-8">
             {children}
           </div>

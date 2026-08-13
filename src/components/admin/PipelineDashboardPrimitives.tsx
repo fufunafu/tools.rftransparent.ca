@@ -18,10 +18,12 @@ export const formatMoneyFull = (value: number) =>
 export const formatPercent = (value: number) => `${value}%`;
 
 export function SectionHeader({
+  id,
   title,
   description,
   action,
 }: {
+  id?: string;
   title: string;
   description?: string;
   action?: ReactNode;
@@ -29,7 +31,7 @@ export function SectionHeader({
   return (
     <div className="flex items-start justify-between gap-4">
       <div>
-        <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+        <h2 id={id} className="text-base font-semibold text-slate-900">{title}</h2>
         {description && (
           <p className="mt-1 max-w-2xl text-sm leading-5 text-slate-500">{description}</p>
         )}

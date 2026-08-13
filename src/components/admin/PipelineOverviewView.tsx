@@ -56,10 +56,10 @@ export default function PipelineOverviewView({ data }: { data: PipelineData }) {
     <div className="space-y-8">
       <section data-content-id="pipeline-flow" aria-labelledby="pipeline-flow-heading">
         <SectionHeader
+          id="pipeline-flow-heading"
           title="Pipeline health"
           description="See how quoted value moves into won revenue and what remains active."
         />
-        <h3 id="pipeline-flow-heading" className="sr-only">Quoted, won, and pending flow</h3>
         <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr] sm:items-stretch">
           <FlowStage
             label="Quoted"
@@ -132,10 +132,10 @@ export default function PipelineOverviewView({ data }: { data: PipelineData }) {
           className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
         >
           <SectionHeader
+            id="monthly-pipeline-trend-heading"
             title="Monthly pipeline trend"
             description="Won revenue, pending pipeline, and quote conversion across the selected range."
           />
-          <h3 id="monthly-pipeline-trend-heading" className="sr-only">Monthly pipeline trend chart</h3>
           <div className="mt-5">
             {(metrics.monthlyTrend ?? []).length > 1 ? (
               <MonthlyTrendChart data={metrics.monthlyTrend} />
@@ -156,10 +156,10 @@ export default function PipelineOverviewView({ data }: { data: PipelineData }) {
           className="rounded-2xl bg-amber-50/70 p-5 ring-1 ring-amber-200 sm:p-6"
         >
           <SectionHeader
+            id="needs-attention-heading"
             title="Needs attention"
             description="The highest-priority actions for the selected period."
           />
-          <h3 id="needs-attention-heading" className="sr-only">Needs attention</h3>
           {attentionItems.length > 0 ? (
             <ol className="mt-5 space-y-4">
               {attentionItems.map((item, index) => (
@@ -196,10 +196,10 @@ export default function PipelineOverviewView({ data }: { data: PipelineData }) {
         className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
       >
         <SectionHeader
+          id="pipeline-condition-heading"
           title="Pipeline condition"
           description="Draft status and the age of the oldest active invoiced quotes in one operating view."
         />
-        <h3 id="pipeline-condition-heading" className="sr-only">Pipeline condition</h3>
         <div className="mt-5 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(240px,1fr)] lg:items-center">
           <div>
             {metrics.totalDrafts > 0 ? (
@@ -244,11 +244,11 @@ export default function PipelineOverviewView({ data }: { data: PipelineData }) {
         className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
       >
         <SectionHeader
+          id="channel-snapshot-heading"
           title="Quote versus direct revenue"
           description="A concise view of paid revenue influenced by a team quote compared with direct online sales."
           action={<InfoTip text="Quote revenue comes from paid orders linked to draft orders. Direct revenue comes from paid online orders without a linked quote." />}
         />
-        <h3 id="channel-snapshot-heading" className="sr-only">Quote versus direct revenue</h3>
         {channel.totalOrders > 0 ? (
           <div className="mt-5">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

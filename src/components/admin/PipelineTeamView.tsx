@@ -58,10 +58,10 @@ export default function PipelineTeamView({ data }: { data: PipelineData }) {
     <div className="space-y-8">
       <section aria-labelledby="team-summary-heading">
         <SectionHeader
+          id="team-summary-heading"
           title="Management summary"
           description="The leaders and open opportunities that stand out in the selected period."
         />
-        <h2 id="team-summary-heading" className="sr-only">Team management summary</h2>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div data-content-id="strongest-rep">
             <MetricCard
@@ -104,10 +104,10 @@ export default function PipelineTeamView({ data }: { data: PipelineData }) {
         className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
       >
         <SectionHeader
+          id="rep-leaderboard-heading"
           title="Rep leaderboard"
           description="Select a column to sort the existing quote, conversion, pipeline, and revenue calculations."
         />
-        <h2 id="rep-leaderboard-heading" className="sr-only">Rep leaderboard</h2>
         {sortedLeaderboard.length > 0 ? (
           <div className="mt-5 max-w-full overflow-x-auto">
             <table className="w-full min-w-[900px] text-sm">
@@ -160,10 +160,10 @@ export default function PipelineTeamView({ data }: { data: PipelineData }) {
         className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-slate-200/70 sm:p-6"
       >
         <SectionHeader
+          id="quote-revenue-employee-heading"
           title="Quote revenue by employee"
           description="Paid revenue from orders linked to quotes, grouped by the attributed employee."
         />
-        <h2 id="quote-revenue-employee-heading" className="sr-only">Quote revenue by employee</h2>
         {employeeBreakdown.length > 0 ? (
           <div className="mt-5 space-y-4">
             {employeeBreakdown.map((employee) => {
