@@ -1,3 +1,5 @@
+import { normalizeInternationalPhone } from "@/lib/phone";
+
 const DEFAULT_GRAPH_API_VERSION = "v24.0";
 
 interface WhatsAppConfig {
@@ -51,11 +53,7 @@ async function readJson(response: Response): Promise<WhatsAppTemplateResponse | 
 }
 
 export function normalizeWhatsAppNumber(value: string): string {
-  const number = value.trim().replace(/[\s\-().]/g, "").replace(/^\+/, "");
-  if (!/^\d{8,15}$/.test(number)) {
-    throw new Error("WhatsApp phone number must be in international format");
-  }
-  return number;
+  return normalizeInternationalPhone(value).slice(1);
 }
 
 export function assertWhatsAppConfigured(): void {
@@ -70,13 +68,18 @@ export async function sendWhatsAppSurvey({
   to,
   employeeName,
   surveyUrl,
+  templateName,
 }: {
   to: string;
   employeeName: string;
   surveyUrl: string;
+  templateName?: string;
 }): Promise<{ messageId: string }> {
   const config = getConfig();
-  const templateName = requiredEnv("WHATSAPP_SURVEY_TEMPLATE_NAME");
+  const selectedTemplate = templateName || requiredEnv("WHATSAPP_SURVEY_TEMPLATE_NAME");
+  if (!/^[a-z0-9_]+$/.test(selectedTemplate)) {
+    throw new Error("WhatsApp survey template names must use lowercase letters, numbers, and underscores");
+  }
   const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || "en_US";
   const recipient = normalizeWhatsAppNumber(to);
 
@@ -92,7 +95,7 @@ export async function sendWhatsAppSurvey({
       to: recipient,
       type: "template",
       template: {
-        name: templateName,
+        name: selectedTemplate,
         language: { code: languageCode },
         components: [
           {
@@ -112,6 +115,56 @@ export async function sendWhatsAppSurvey({
 
   const messageId = payload?.messages?.[0]?.id;
   if (!messageId) throw new Error("Meta WhatsApp accepted the request without returning a message ID");
+  return { messageId };
+}
+
+export async function sendWhatsAppEmployeeUpdate({
+  to,
+  employeeName,
+  title,
+  update,
+}: {
+  to: string;
+  employeeName: string;
+  title: string;
+  update: string;
+}): Promise<{ messageId: string }> {
+  const config = getConfig();
+  const templateName = requiredEnv("WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME");
+  if (!/^[a-z0-9_]+$/.test(templateName)) {
+    throw new Error("WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME must use lowercase letters, numbers, and underscores");
+  }
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || "en_US";
+  const recipient = normalizeWhatsAppNumber(to);
+  const response = await fetch(graphUrl(config, "/messages"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: recipient,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [{
+          type: "body",
+          parameters: [
+            { type: "text", parameter_name: "name", text: employeeName },
+            { type: "text", parameter_name: "title", text: title },
+            { type: "text", parameter_name: "update", text: update },
+          ],
+        }],
+      },
+    }),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) throw new Error(errorMessage(payload, response.status));
+  const messageId = payload?.messages?.[0]?.id;
+  if (!messageId) throw new Error("Meta WhatsApp accepted the employee update without returning a message ID");
   return { messageId };
 }
 

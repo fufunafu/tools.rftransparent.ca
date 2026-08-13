@@ -13,12 +13,16 @@
       "schedule": "0 12 * * *"
     },
     {
+      "path": "/api/cron/sync-pipeline",
+      "schedule": "15 * * * *"
+    },
+    {
       "path": "/api/cron/followup-reminders",
       "schedule": "0 13 * * 1-5"
     },
     {
       "path": "/api/cron/send-employee-surveys",
-      "schedule": "0 14 * * 5"
+      "schedule": "25 * * * *"
     },
     {
       "path": "/api/cron/problems-digest",

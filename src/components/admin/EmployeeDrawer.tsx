@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ConfirmDialog from "@/components/admin/ConfirmDialog";
+import { getInternationalPhoneError } from "@/lib/phone";
 
 interface Location {
   id: string;
@@ -14,9 +15,13 @@ export interface EditDraft {
   email_alt: string;
   phone: string;
   birthday: string;
+  hire_date: string;
+  employment_ended_at: string;
+  exit_survey_enabled: boolean;
   department: string;
   location_id: string;
   shopify_tags: string;
+  commission_percent: string;
   active: boolean;
 }
 
@@ -71,6 +76,7 @@ export default function EmployeeDrawer({
   const [pwSaving, setPwSaving] = useState(false);
   const [pwError, setPwError] = useState("");
   const [pwSuccess, setPwSuccess] = useState("");
+  const phoneError = getInternationalPhoneError(draft.phone);
 
   useEffect(() => {
     if (!passwordOpen) {
@@ -274,8 +280,16 @@ export default function EmployeeDrawer({
                   value={draft.phone}
                   onChange={(e) => setField("phone", e.target.value)}
                   placeholder="+1 514 555 0000"
-                  className={FIELD_CLS}
+                  aria-invalid={phoneError ? "true" : undefined}
+                  aria-describedby="employee-phone-help"
+                  className={`${FIELD_CLS} ${phoneError ? "border-red-300 focus:border-red-500 focus:ring-red-500/10" : ""}`}
                 />
+                <p
+                  id="employee-phone-help"
+                  className={`mt-1.5 text-xs leading-4 ${phoneError ? "text-red-600" : "text-slate-400"}`}
+                >
+                  {phoneError ?? "Include + and the country code. Saved in international format."}
+                </p>
               </div>
               <div>
                 <label className={LABEL_CLS}>Birthday</label>
@@ -285,6 +299,37 @@ export default function EmployeeDrawer({
                   onChange={(e) => setField("birthday", e.target.value)}
                   className={FIELD_CLS}
                 />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label className={LABEL_CLS}>Hire Date</label>
+                <input
+                  type="date"
+                  value={draft.hire_date}
+                  onChange={(e) => setField("hire_date", e.target.value)}
+                  className={FIELD_CLS}
+                />
+                <p className="mt-1.5 text-xs leading-4 text-slate-400">Starts day 14, 45, and 90 onboarding check-ins.</p>
+              </div>
+              <div>
+                <label className={LABEL_CLS}>Employment End Date</label>
+                <input
+                  type="date"
+                  value={draft.employment_ended_at}
+                  onChange={(e) => setField("employment_ended_at", e.target.value)}
+                  className={FIELD_CLS}
+                />
+                <label className="mt-2 flex items-start gap-2 text-xs leading-4 text-slate-500">
+                  <input
+                    type="checkbox"
+                    checked={draft.exit_survey_enabled}
+                    onChange={(e) => setField("exit_survey_enabled", e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Offer the voluntary exit survey
+                </label>
               </div>
             </div>
 
@@ -306,6 +351,36 @@ export default function EmployeeDrawer({
                 Matching is case-insensitive. Add all variations used in Shopify.
               </p>
             </div>
+
+            {draft.department === "sales" && (
+              <div>
+                <label className={LABEL_CLS}>
+                  Commission Rate
+                  <span className="ml-1 font-normal text-slate-400">
+                    (% of net revenue on tagged orders)
+                  </span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.5"
+                    value={draft.commission_percent}
+                    onChange={(e) => setField("commission_percent", e.target.value)}
+                    placeholder="e.g. 5"
+                    className={`${FIELD_CLS} pr-8`}
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3.5 flex items-center text-sm text-slate-400">
+                    %
+                  </span>
+                </div>
+                <p className="mt-1.5 text-xs leading-5 text-slate-400">
+                  Used by the Sales commissions panel. Net revenue is money
+                  collected minus taxes, shipping, and refunds.
+                </p>
+              </div>
+            )}
 
             {isAdmin && mode === "edit" && (
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">

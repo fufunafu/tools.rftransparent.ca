@@ -15,11 +15,11 @@ import {
 
 // Extracted from PipelineDashboard and loaded via next/dynamic so recharts
 // stays out of the route's initial bundle (same pattern as ShopifyCharts).
-// Each export is a whole chart block (ResponsiveContainer outward) — never
+// Each export is a whole chart block (ResponsiveContainer outward). Never
 // wrap individual recharts children in dynamic(), chart containers introspect
 // their child component types.
 
-// ─── Types (mirror PipelineDashboard) ───────────────────────────────────────
+// Types mirror PipelineDashboard.
 
 interface ChannelMonthlyTrend {
   month: string;
@@ -58,8 +58,7 @@ interface MonthlyTrend {
   revenue: number;
 }
 
-// ─── Formatters (duplicated from PipelineDashboard — importing them from the
-// parent would statically link the two modules and defeat the code split) ───
+// These formatters stay local so the chart bundle remains independent.
 
 const fmt = (n: number) =>
   n >= 1_000_000
@@ -76,7 +75,7 @@ const tooltipStyle = {
   labelStyle: { color: "#78736a" },
 };
 
-// ─── Chart blocks ───────────────────────────────────────────────────────────
+// Chart blocks
 
 /** Monthly channel trend: stacked quote/direct revenue bars + quote share % line. */
 export function ChannelTrendChart({ data }: { data: ChannelMonthlyTrend[] }) {
@@ -113,26 +112,51 @@ export function ChannelTrendChart({ data }: { data: ChannelMonthlyTrend[] }) {
   );
 }
 
-/** Month-by-month revenue forecast bars (forecast + from-pipeline portion). */
-export function ForecastChart({ data }: { data: MonthlyForecast[] }) {
+/** Revenue baseline, monthly projections, and the already-visible pipeline. */
+export function ForecastChart({
+  data,
+  startingMonth,
+  startingRevenue,
+}: {
+  data: MonthlyForecast[];
+  startingMonth: string;
+  startingRevenue: number;
+}) {
+  const chartData = [
+    {
+      month: startingMonth,
+      monthLabel: startingMonth,
+      actual: startingRevenue,
+      projected: null,
+      fromPipeline: null,
+    },
+    ...data.map((month) => ({
+      ...month,
+      actual: null,
+      projected: month.forecast,
+    })),
+  ];
+
   return (
-    <ResponsiveContainer width="100%" height={240}>
-      <ComposedChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
-        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#60a5fa" }} interval={0} angle={-45} textAnchor="end" height={50} />
-        <YAxis tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => fmt(v)} />
+    <ResponsiveContainer width="100%" height={300}>
+      <ComposedChart data={chartData}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#64748b" }} interval={0} angle={-45} textAnchor="end" height={54} />
+        <YAxis tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v: number) => fmt(v)} />
         <Tooltip
           {...tooltipStyle}
           formatter={(value: unknown, name: unknown) => {
             const v = Number(value);
             const n = String(name);
-            if (n === "forecast") return [fmtFull(v), "Forecast"];
-            if (n === "fromPipeline") return [fmtFull(v), "From Pipeline"];
+            if (n === "actual") return [fmtFull(v), "Actual Revenue"];
+            if (n === "projected") return [fmtFull(v), "Projected Revenue"];
+            if (n === "fromPipeline") return [fmtFull(v), "Already-Visible Pipeline"];
             return [v, n];
           }}
         />
-        <Bar dataKey="forecast" fill="#2563eb" radius={[4, 4, 0, 0]} name="forecast" />
-        <Bar dataKey="fromPipeline" fill="#7c3aed" radius={[4, 4, 0, 0]} name="fromPipeline" />
+        <Bar dataKey="actual" fill="#16a34a" radius={[5, 5, 0, 0]} name="actual" />
+        <Bar dataKey="projected" fill="#2563eb" radius={[5, 5, 0, 0]} name="projected" />
+        <Line type="monotone" dataKey="fromPipeline" stroke="#7c3aed" strokeWidth={2.5} dot={{ r: 3, fill: "#7c3aed" }} connectNulls name="fromPipeline" />
       </ComposedChart>
     </ResponsiveContainer>
   );
@@ -143,10 +167,10 @@ export function SeasonalPatternChart({ data }: { data: SeasonalChartPoint[] }) {
   return (
     <ResponsiveContainer width="100%" height={220}>
       <ComposedChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#dbeafe" />
-        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#60a5fa" }} interval={0} angle={-45} textAnchor="end" height={50} />
-        <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => fmt(v)} />
-        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#60a5fa" }} tickFormatter={(v: number) => `${v}%`} domain={[-100, 100]} />
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+        <XAxis dataKey="monthLabel" tick={{ fontSize: 10, fill: "#64748b" }} interval={0} angle={-45} textAnchor="end" height={50} />
+        <YAxis yAxisId="left" tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v: number) => fmt(v)} />
+        <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11, fill: "#64748b" }} tickFormatter={(v: number) => `${v}%`} domain={[-100, 100]} />
         <Tooltip
           {...tooltipStyle}
           formatter={(value: unknown, name: unknown) => {
@@ -157,19 +181,19 @@ export function SeasonalPatternChart({ data }: { data: SeasonalChartPoint[] }) {
             return [v, n];
           }}
         />
-        <Bar yAxisId="left" dataKey="revenue" fill="#2563eb" radius={[4, 4, 0, 0]} />
+        <Bar yAxisId="left" dataKey="revenue" fill="#16a34a" radius={[4, 4, 0, 0]} />
         <Line yAxisId="right" type="monotone" dataKey="momGrowthClamped" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3, fill: "#f59e0b" }} connectNulls />
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
 
-/** Monthly trend: won revenue + pipeline value areas with conversion rate line. */
+/** Monthly trend: won revenue, pending pipeline, and conversion rate. */
 export function MonthlyTrendChart({ data }: { data: MonthlyTrend[] }) {
   return (
     <ResponsiveContainer width="100%" height={280}>
       <ComposedChart data={data}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#e5e0d8" />
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
         <XAxis
           dataKey="month"
           tick={{ fontSize: 11, fill: "#a39e93" }}
@@ -191,8 +215,8 @@ export function MonthlyTrendChart({ data }: { data: MonthlyTrend[] }) {
             return [v, n];
           }}
         />
-        <Area yAxisId="left" type="monotone" dataKey="revenue" fill="#dbeafe" stroke="#2563eb" fillOpacity={0.3} />
-        <Area yAxisId="left" type="monotone" dataKey="pipelineValue" fill="#dcfce7" stroke="#16a34a" fillOpacity={0.2} />
+        <Area yAxisId="left" type="monotone" dataKey="revenue" fill="#dcfce7" stroke="#16a34a" fillOpacity={0.35} />
+        <Area yAxisId="left" type="monotone" dataKey="pipelineValue" fill="#dbeafe" stroke="#2563eb" fillOpacity={0.28} />
         <Line yAxisId="right" type="monotone" dataKey="conversionRate" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} />
       </ComposedChart>
     </ResponsiveContainer>
@@ -225,8 +249,8 @@ export function StatusBreakdownChart({
             return [String(value), label];
           }}
         />
-        <Bar dataKey="open" stackId="a" fill="#f59e0b" radius={[4, 0, 0, 4]} />
-        <Bar dataKey="invoiceSent" stackId="a" fill="#3b82f6" />
+        <Bar dataKey="open" stackId="a" fill="#94a3b8" radius={[4, 0, 0, 4]} />
+        <Bar dataKey="invoiceSent" stackId="a" fill="#2563eb" />
         <Bar dataKey="completed" stackId="a" fill="#16a34a" radius={[0, 4, 4, 0]} />
       </BarChart>
     </ResponsiveContainer>

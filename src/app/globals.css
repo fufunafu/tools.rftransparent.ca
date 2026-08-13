@@ -2,6 +2,39 @@
 @tailwind components;
 @tailwind utilities;
 
+/* No page-level rubber-band bounce — matters most inside the iOS app, where
+   the whole screen stretching past its edges feels broken. Scroll areas
+   inside the page (main, tables) keep their native scrolling. */
+html,
+body {
+  overscroll-behavior-y: none;
+}
+
+/* App feel on touch: no gray flash when tapping buttons and links. */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 767px) {
+  /* iOS auto-zooms the whole page when a focused input's font is under
+     16px — the single biggest "this is a website" tell. Utility classes
+     like text-sm would win the cascade, hence the !important. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+
+  /* iOS gives date inputs an intrinsic width that ignores the layout and
+     overflows cards; stripping the native appearance makes them behave
+     like normal boxes. */
+  input[type="date"],
+  input[type="datetime-local"] {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+}
+
 html[data-canvas="clean"] main[data-app-main] {
   background-color: #ffffff;
 }

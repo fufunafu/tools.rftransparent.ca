@@ -4,19 +4,21 @@ import { getSupabase } from "@/lib/supabase";
 
 // --------------- Types ---------------
 
-interface OrderNode extends RevenueFields {
+export interface OrderNode extends RevenueFields {
   id: string;
   createdAt: string;
+  updatedAt?: string;
   tags: string[];
   staffMember?: { firstName: string; lastName: string } | null;
   cancelledAt?: string | null;
   currentSubtotalPriceSet?: { shopMoney: { amount: string } };
 }
 
-interface DraftOrderNode extends RevenueFields {
+export interface DraftOrderNode extends RevenueFields {
   id: string;
   name: string;
   createdAt: string;
+  updatedAt?: string;
   status: string; // OPEN, INVOICE_SENT, COMPLETED
   tags: string[];
   order: { id: string; createdAt: string } | null;
@@ -97,6 +99,7 @@ const DRAFT_ORDERS_QUERY = `
 // --------------- Data Fetching ---------------
 
 const MAX_PAGES = 80; // 80 pages × 250 per page = 20,000 records max per store
+const PIPELINE_FETCH_PARTITIONS = 3;
 
 /** Tracks partial failures so the API can surface warnings to the UI. */
 export interface FetchWarning {
@@ -110,71 +113,123 @@ interface FetchResult<T> {
   warnings: FetchWarning[];
 }
 
+export interface PipelineSourceData {
+  orders: OrderNode[];
+  drafts: DraftOrderNode[];
+  warnings: FetchWarning[];
+}
+
 async function fetchAllOrders(
   storeIds: string[],
-  fromDate: string
+  fromDate: string,
+  toDate?: string,
 ): Promise<FetchResult<OrderNode>> {
-  const stores = getStores();
-  const allOrders: OrderNode[] = [];
-  const warnings: FetchWarning[] = [];
-
-  for (const store of stores) {
-    if (!storeIds.includes(store.id)) continue;
+  const stores = getStores().filter((store) => storeIds.includes(store.id));
+  const results = await Promise.all(stores.map(async (store): Promise<FetchResult<OrderNode>> => {
     try {
       const { nodes, truncated } = await fetchAllPages<OrderNode>({
         storeId: store.id,
         query: ORDERS_QUERY,
         getConnection: (raw) =>
           OrdersResponseSchema.parse(raw).orders as unknown as ShopifyConnection<OrderNode>,
-        variables: { search: `created_at:>='${fromDate}'` },
+        variables: {
+          search: `created_at:>='${fromDate}'${toDate ? ` AND created_at:<'${toDate}'` : ""}`,
+        },
         maxPages: MAX_PAGES,
         app: "quotation", // Quotation app has read_users, needed for staffMember field
       });
-      allOrders.push(...nodes);
-      if (truncated) {
-        warnings.push({ storeId: store.id, type: "orders", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
-      }
+      return {
+        data: nodes,
+        warnings: truncated
+          ? [{ storeId: store.id, type: "orders", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` }]
+          : [],
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[kpi-sales] Order fetch failed for ${store.id}:`, err);
-      warnings.push({ storeId: store.id, type: "orders", message: `Failed to fetch orders: ${msg}` });
+      return {
+        data: [],
+        warnings: [{ storeId: store.id, type: "orders", message: `Failed to fetch orders: ${msg}` }],
+      };
     }
-  }
+  }));
 
-  return { data: allOrders, warnings };
+  return {
+    data: results.flatMap((result) => result.data),
+    warnings: results.flatMap((result) => result.warnings),
+  };
 }
 
 async function fetchAllDraftOrders(
   storeIds: string[],
-  fromDate: string
+  fromDate: string,
+  toDate?: string,
 ): Promise<FetchResult<DraftOrderNode>> {
-  const stores = getStores();
-  const allDrafts: DraftOrderNode[] = [];
-  const warnings: FetchWarning[] = [];
-
-  for (const store of stores) {
-    if (!storeIds.includes(store.id)) continue;
+  const stores = getStores().filter((store) => storeIds.includes(store.id));
+  const results = await Promise.all(stores.map(async (store): Promise<FetchResult<DraftOrderNode>> => {
     try {
       const { nodes, truncated } = await fetchAllPages<DraftOrderNode>({
         storeId: store.id,
         query: DRAFT_ORDERS_QUERY,
         getConnection: (raw) =>
           DraftOrdersResponseSchema.parse(raw).draftOrders as unknown as ShopifyConnection<DraftOrderNode>,
-        variables: { search: `created_at:>='${fromDate}'` },
+        variables: {
+          search: `created_at:>='${fromDate}'${toDate ? ` AND created_at:<'${toDate}'` : ""}`,
+        },
         maxPages: MAX_PAGES,
       });
-      allDrafts.push(...nodes);
-      if (truncated) {
-        warnings.push({ storeId: store.id, type: "drafts", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` });
-      }
+      return {
+        data: nodes,
+        warnings: truncated
+          ? [{ storeId: store.id, type: "drafts", message: `Hit ${MAX_PAGES}-page limit — results may be incomplete` }]
+          : [],
+      };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[kpi-sales] Draft fetch FAILED for ${store.id}:`, msg);
-      warnings.push({ storeId: store.id, type: "drafts", message: `Failed to fetch drafts: ${msg}` });
+      return {
+        data: [],
+        warnings: [{ storeId: store.id, type: "drafts", message: `Failed to fetch drafts: ${msg}` }],
+      };
     }
-  }
+  }));
 
-  return { data: allDrafts, warnings };
+  return {
+    data: results.flatMap((result) => result.data),
+    warnings: results.flatMap((result) => result.warnings),
+  };
+}
+
+async function fetchPipelineSourceData(
+  storeIds: string[],
+  fromDate: Date,
+): Promise<PipelineSourceData> {
+  const start = new Date(`${toDateStr(fromDate)}T00:00:00.000Z`);
+  const end = new Date();
+  end.setUTCDate(end.getUTCDate() + 1);
+  end.setUTCHours(0, 0, 0, 0);
+  const duration = end.getTime() - start.getTime();
+  const boundaries = Array.from(
+    { length: PIPELINE_FETCH_PARTITIONS + 1 },
+    (_, index) => index === PIPELINE_FETCH_PARTITIONS
+      ? toDateStr(end)
+      : toDateStr(new Date(start.getTime() + duration * (index / PIPELINE_FETCH_PARTITIONS))),
+  );
+  const ranges = boundaries.slice(0, -1).map((rangeStart, index) => ({
+    from: rangeStart,
+    to: boundaries[index + 1],
+  }));
+
+  const [orderResults, draftResults] = await Promise.all([
+    Promise.all(ranges.map((range) => fetchAllOrders(storeIds, range.from, range.to))),
+    Promise.all(ranges.map((range) => fetchAllDraftOrders(storeIds, range.from, range.to))),
+  ]);
+
+  return {
+    orders: orderResults.flatMap((result) => result.data),
+    drafts: draftResults.flatMap((result) => result.data),
+    warnings: [...orderResults, ...draftResults].flatMap((result) => result.warnings),
+  };
 }
 
 // --------------- Metrics Calculation ---------------
@@ -404,11 +459,21 @@ export async function getFullPipelineData(
   fromDate: Date,
   toDate: Date,
   knownRepTags: string[],
+  sourceData?: PipelineSourceData,
 ): Promise<{ metrics: PipelineMetrics; leaderboard: RepPipelineEntry[]; warnings: FetchWarning[] }> {
-  const { data: allDrafts, warnings } = await fetchAllDraftOrders(storeIds, toDateStr(fromDate));
+  const draftsResult = sourceData
+    ? {
+        data: sourceData.drafts,
+        warnings: sourceData.warnings.filter((warning) => warning.type === "drafts"),
+      }
+    : await fetchAllDraftOrders(storeIds, toDateStr(fromDate));
+  const { data: allDrafts, warnings } = draftsResult;
 
-  // Filter by upper date bound
-  const drafts = allDrafts.filter((d) => new Date(d.createdAt) < toDate);
+  // Shared source data can start before the selected dashboard period.
+  const drafts = allDrafts.filter((d) => {
+    const createdAt = new Date(d.createdAt);
+    return createdAt >= fromDate && createdAt < toDate;
+  });
 
   // ── Pipeline metrics ──────────────────────────────────────────────────────
   let completedCount = 0;
@@ -623,19 +688,25 @@ const PREDICTION_BUCKETS = [
  */
 export async function getPipelinePrediction(
   storeIds: string[],
+  sourceData?: PipelineSourceData,
 ): Promise<PipelinePrediction> {
   const now = new Date();
-  const historyStart = new Date();
+  const historyStart = new Date(now);
   historyStart.setFullYear(historyStart.getFullYear() - 2);
-  const dateStr = toDateStr(historyStart);
 
-  // Fetch orders + drafts in parallel for full historical picture
-  const [ordersResult, draftsResult] = await Promise.all([
-    fetchAllOrders(storeIds, dateStr),
-    fetchAllDraftOrders(storeIds, dateStr),
-  ]);
-  const allOrders = ordersResult.data;
-  const allDrafts = draftsResult.data;
+  const sources = sourceData ?? await (async () => {
+    const [ordersResult, draftsResult] = await Promise.all([
+      fetchAllOrders(storeIds, toDateStr(historyStart)),
+      fetchAllDraftOrders(storeIds, toDateStr(historyStart)),
+    ]);
+    return {
+      orders: ordersResult.data,
+      drafts: draftsResult.data,
+      warnings: [...ordersResult.warnings, ...draftsResult.warnings],
+    };
+  })();
+  const allOrders = sources.orders.filter((order) => new Date(order.createdAt) >= historyStart);
+  const allDrafts = sources.drafts.filter((draft) => new Date(draft.createdAt) >= historyStart);
 
   // ── 1. Build monthly TOTAL revenue from real orders ─────────────────────
   const monthlyRevenue = new Map<string, number>();
@@ -899,17 +970,23 @@ export async function getOrderChannelMetrics(
   fromDate: Date,
   toDate: Date,
   knownRepTags: string[] = [],
+  sourceData?: PipelineSourceData,
 ): Promise<OrderChannelMetrics> {
-  const dateStr = toDateStr(fromDate);
   const knownRepSet = new Set(knownRepTags.map((t) => t.toLowerCase()));
 
-  // Fetch all orders and all draft orders in parallel
-  const [ordersResult, draftsResult] = await Promise.all([
-    fetchAllOrders(storeIds, dateStr),
-    fetchAllDraftOrders(storeIds, dateStr),
-  ]);
-  const allOrders = ordersResult.data;
-  const allDrafts = draftsResult.data;
+  const sources = sourceData ?? await (async () => {
+    const [ordersResult, draftsResult] = await Promise.all([
+      fetchAllOrders(storeIds, toDateStr(fromDate)),
+      fetchAllDraftOrders(storeIds, toDateStr(fromDate)),
+    ]);
+    return {
+      orders: ordersResult.data,
+      drafts: draftsResult.data,
+      warnings: [...ordersResult.warnings, ...draftsResult.warnings],
+    };
+  })();
+  const allOrders = sources.orders;
+  const allDrafts = sources.drafts;
 
   // Build set of order GIDs that originated from a draft order
   const draftOrderIds = new Set<string>();
@@ -925,7 +1002,8 @@ export async function getOrderChannelMetrics(
 
   for (const order of allOrders) {
     if (order.cancelledAt) continue; // skip cancelled orders
-    if (new Date(order.createdAt) >= toDate) continue;
+    const createdAt = new Date(order.createdAt);
+    if (createdAt < fromDate || createdAt >= toDate) continue;
     if (draftOrderIds.has(order.id)) {
       draftOrders.push(order);
     } else {
@@ -1032,6 +1110,46 @@ export async function getOrderChannelMetrics(
     draftRevenueShare: totalRevenue > 0 ? Math.round((draft.revenue / totalRevenue) * 1000) / 10 : 0,
     employeeBreakdown,
     monthlyTrend,
+  };
+}
+
+export interface PipelineDashboardData {
+  metrics: PipelineMetrics;
+  prediction: PipelinePrediction;
+  channelMetrics: OrderChannelMetrics;
+  leaderboard: RepPipelineEntry[];
+  warnings: FetchWarning[];
+}
+
+/**
+ * Fetch the common Shopify history once, then reuse it for every dashboard
+ * calculation. A cold dashboard request previously downloaded draft orders
+ * three times and orders twice.
+ */
+export async function getPipelineDashboardData(
+  storeIds: string[],
+  fromDate: Date,
+  toDate: Date,
+  knownRepTags: string[],
+  sourceData?: PipelineSourceData,
+): Promise<PipelineDashboardData> {
+  const historyStart = new Date();
+  historyStart.setFullYear(historyStart.getFullYear() - 2);
+  const sourceStart = fromDate < historyStart ? fromDate : historyStart;
+  const sources = sourceData ?? await fetchPipelineSourceData(storeIds, sourceStart);
+
+  const [{ metrics, leaderboard }, prediction, channelMetrics] = await Promise.all([
+    getFullPipelineData(storeIds, fromDate, toDate, knownRepTags, sources),
+    getPipelinePrediction(storeIds, sources),
+    getOrderChannelMetrics(storeIds, fromDate, toDate, knownRepTags, sources),
+  ]);
+
+  return {
+    metrics,
+    prediction,
+    channelMetrics,
+    leaderboard,
+    warnings: sources.warnings,
   };
 }
 

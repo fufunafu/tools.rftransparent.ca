@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
+import { SWRProvider } from "@/lib/swr-provider";
+import MobileHome from "@/components/MobileHome";
 import { getOpsDashboard } from "@/lib/ops-dashboard";
 import { getTicketStats, getAutomationHealth } from "@/lib/home-dashboard";
 import { getWallToken } from "@/lib/settings";
@@ -18,6 +20,10 @@ export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   if (!(await isAuthenticated())) redirect("/login");
+
+  // Employees get the app-style Home on phones (clock status + their tools);
+  // admins keep the ops dashboard everywhere.
+  const admin = await isAdminUser();
 
   const [data, tickets, automations, wallToken] = await Promise.all([
     getOpsDashboard(),
@@ -55,13 +61,22 @@ export default async function HomePage() {
       {/* The cached() layer (5 min TTLs) absorbs most of the cost; each tick
           mainly re-reads Supabase, so 90s keeps home and wall in step. */}
       <AutoRefresh intervalMs={90_000} />
-      <OpsDashboard
-        data={data}
-        today={today}
-        attention={attention}
-        ticketStats={tickets.ok ? tickets.value : null}
-        wallHref={wallToken ? `/wall/${wallToken}` : null}
-      />
+      {!admin && (
+        <div className="md:hidden">
+          <SWRProvider>
+            <MobileHome />
+          </SWRProvider>
+        </div>
+      )}
+      <div className={admin ? undefined : "hidden md:block"}>
+        <OpsDashboard
+          data={data}
+          today={today}
+          attention={attention}
+          ticketStats={tickets.ok ? tickets.value : null}
+          wallHref={wallToken ? `/wall/${wallToken}` : null}
+        />
+      </div>
     </>
   );
 }

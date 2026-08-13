@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
@@ -16,6 +16,18 @@ export const metadata: Metadata = {
   },
   description: "Internal tools for RF Transparent",
   robots: { index: false, follow: false },
+  appleWebApp: {
+    capable: true,
+    title: "RF Tools",
+    statusBarStyle: "black-translucent",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#1c1917",
+  viewportFit: "cover",
+  width: "device-width",
+  initialScale: 1,
 };
 
 export default function RootLayout({

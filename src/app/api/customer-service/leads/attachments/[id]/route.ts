@@ -3,6 +3,7 @@ import { getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import {
   attachmentContentDisposition,
+  attachmentResponseDisposition,
   LEAD_ATTACHMENT_BUCKET,
 } from "@/lib/customer-service/lead-attachments";
 
@@ -44,7 +45,11 @@ export async function GET(
       "Content-Type": attachment.content_type || "application/octet-stream",
       "Content-Disposition": attachmentContentDisposition(
         attachment.filename,
-        shouldDownload || attachment.content_type === "image/svg+xml" ? "attachment" : "inline",
+        attachmentResponseDisposition(
+          attachment.filename,
+          attachment.content_type,
+          shouldDownload,
+        ),
       ),
       "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",

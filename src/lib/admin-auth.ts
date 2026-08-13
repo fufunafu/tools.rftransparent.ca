@@ -33,6 +33,22 @@ export async function isManagementUser(): Promise<boolean> {
   return isManagementEmail(user?.email);
 }
 
+// Exit survey answers are intentionally narrower than the regular management
+// dashboard. The owner always has access; additional recipients must be named
+// explicitly in SURVEY_RESTRICTED_ACCESS_EMAILS.
+export async function isRestrictedSurveyManager(): Promise<boolean> {
+  const user = await getAuthenticatedUser();
+  const email = user?.email?.trim().toLowerCase();
+  if (!email) return false;
+  const configured = new Set(
+    (process.env.SURVEY_RESTRICTED_ACCESS_EMAILS ?? "")
+      .split(",")
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return email === "fuannegao25@gmail.com" || configured.has(email);
+}
+
 export async function clearSessionCookie(): Promise<void> {
   const supabase = await createSupabaseServerClient();
   await supabase.auth.signOut();

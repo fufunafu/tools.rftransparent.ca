@@ -1,1035 +1,520 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import dynamic from "next/dynamic";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import PipelineOverviewView from "./PipelineOverviewView";
+import PipelineForecastView from "./PipelineForecastView";
+import PipelineTeamView from "./PipelineTeamView";
+import { StatusPill } from "./PipelineDashboardPrimitives";
+import type { PipelineData } from "./PipelineDashboard.types";
+import type { PipelineView } from "@/lib/pipeline-dashboard-view";
 import {
-  pipelineCacheSave,
+  getPipelineDisplayState,
+} from "@/lib/pipeline-dashboard-view";
+import {
   pipelineCacheLoad,
+  pipelineCacheSave,
+  PIPELINE_CACHE_MAX_STALE_MS,
   PIPELINE_CACHE_TTL_MS,
 } from "@/lib/pipeline-cache";
 
-// Chart blocks are split out so recharts loads on demand instead of in the
-// route's initial bundle (same pattern as ShopifyCharts). Placeholder heights
-// match each chart's ResponsiveContainer height so the layout doesn't shift.
-function ChartLoading({ height }: { height: number }) {
-  return (
-    <div style={{ height }} className="flex items-center justify-center text-sand-400 text-sm animate-pulse">
-      Loading chart...
-    </div>
-  );
-}
-
-const ChannelTrendChart = dynamic(
-  () => import("./PipelineCharts").then((m) => m.ChannelTrendChart),
-  { ssr: false, loading: () => <ChartLoading height={220} /> },
-);
-const ForecastChart = dynamic(
-  () => import("./PipelineCharts").then((m) => m.ForecastChart),
-  { ssr: false, loading: () => <ChartLoading height={240} /> },
-);
-const SeasonalPatternChart = dynamic(
-  () => import("./PipelineCharts").then((m) => m.SeasonalPatternChart),
-  { ssr: false, loading: () => <ChartLoading height={220} /> },
-);
-const MonthlyTrendChart = dynamic(
-  () => import("./PipelineCharts").then((m) => m.MonthlyTrendChart),
-  { ssr: false, loading: () => <ChartLoading height={280} /> },
-);
-const StatusBreakdownChart = dynamic(
-  () => import("./PipelineCharts").then((m) => m.StatusBreakdownChart),
-  { ssr: false, loading: () => <ChartLoading height={60} /> },
-);
-
-// ─── Types ──────────────────────────────────────────────────────────────────
-
-interface MonthlyTrend {
-  month: string;
-  draftsCreated: number;
-  draftsConverted: number;
-  conversionRate: number;
-  pipelineValue: number;
-  revenue: number;
-}
-
-interface PipelineMetrics {
-  totalQuotedValue: number;
-  wonRevenue: number;
-  conversionRate: number;
-  valueWinRate: number;
-  avgCycleTimeDays: number;
-  pipelineValue: number;
-  avgSaleValue: number;
-  totalDrafts: number;
-  completedDrafts: number;
-  openDrafts: number;
-  invoiceSentDrafts: number;
-  predictedRevenue: number;
-  predictedTimelineDays: number;
-  monthlyTrend: MonthlyTrend[];
-}
-
-interface RepEntry {
-  repTag: string;
-  repName: string;
-  totalDrafts: number;
-  completedDrafts: number;
-  openDrafts: number;
-  conversionRate: number;
-  totalQuoted: number;
-  wonRevenue: number;
-  avgCycleTimeDays: number | null;
-  avgSaleValue: number;
-  pipelineValue: number;
-}
-
-interface StoreOption {
-  id: string;
-  label: string;
-}
-
-interface AgeBucket {
-  label: string;
-  drafts: number;
-  value: number;
-  conversionRate: number;
-  predictedValue: number;
-}
-
-interface MonthlyForecast {
-  month: string;
-  monthLabel: string;
-  forecast: number;
-  prevMonthRevenue: number;
-  momRate: number;
-  momRateCapped: boolean;
-  fromPipeline: number;
-  isFallback: boolean;
-}
-
-interface SeasonalMonth {
-  month: string;
-  monthLabel: string;
-  revenue: number;
-  momGrowth: number | null;
-}
-
-interface PipelinePrediction {
-  totalPipelineValue: number;
-  totalPredictedRevenue: number;
-  avgMonthlyRevenue: number;
-  avgCycleTimeDays: number;
-  startingMonth: string;
-  startingRevenue: number;
-  monthlyForecasts: MonthlyForecast[];
-  annualForecast: number;
-  fallbackMomRates: Record<number, number>;
-  buckets: AgeBucket[];
-  seasonalPattern: SeasonalMonth[];
-}
-
-interface ChannelMonthlyTrend {
-  month: string;
-  draftOrders: number;
-  draftRevenue: number;
-  directOrders: number;
-  directRevenue: number;
-  draftRevenueShare: number;
-}
-
-interface RepChannelEntry {
-  repTag: string;
-  repName: string;
-  orders: number;
-  revenue: number;
-  aov: number;
-}
-
-interface OrderChannelMetrics {
-  totalOrders: number;
-  totalRevenue: number;
-  draftOrders: number;
-  draftRevenue: number;
-  draftAOV: number;
-  directOrders: number;
-  directRevenue: number;
-  directAOV: number;
-  draftRevenueShare: number;
-  employeeBreakdown: RepChannelEntry[];
-  monthlyTrend: ChannelMonthlyTrend[];
-}
-
-interface PipelineData {
-  metrics: PipelineMetrics;
-  prediction: PipelinePrediction;
-  channelMetrics: OrderChannelMetrics;
-  leaderboard: RepEntry[];
-  stores: StoreOption[];
-  period: { from: string; to: string; days: number };
-  cachedAt?: string;
-}
-
-// ─── Formatters ─────────────────────────────────────────────────────────────
-
-const fmt = (n: number) =>
-  n >= 1_000_000
-    ? `$${(n / 1_000_000).toFixed(2)}M`
-    : n >= 1_000
-      ? `$${(n / 1_000).toFixed(2)}K`
-      : `$${n.toFixed(2)}`;
-
-const fmtFull = (n: number) =>
-  `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const fmtPct = (n: number) => `${n}%`;
+export type { PipelineData } from "./PipelineDashboard.types";
 
 const DAY_OPTIONS = [30, 90, 180, 365, 730] as const;
-const DAY_LABELS: Record<number, string> = { 30: "30d", 90: "90d", 180: "6mo", 365: "1yr", 730: "2yr" };
-
-type SortKey = "repName" | "totalDrafts" | "completedDrafts" | "conversionRate" | "pipelineValue" | "wonRevenue" | "avgSaleValue" | "avgCycleTimeDays";
-
-// ─── InfoTip ────────────────────────────────────────────────────────────────
-
-function InfoTip({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <span className="relative inline-block">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        onBlur={() => setTimeout(() => setOpen(false), 150)}
-        className="text-sand-300 hover:text-sand-500 transition-colors focus:outline-none"
-        aria-label="More info"
-      >
-        <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-        </svg>
-      </button>
-      {open && (
-        <span className="absolute z-50 left-1/2 -translate-x-1/2 top-6 w-56 bg-sand-900 text-white text-[11px] leading-relaxed rounded-lg px-3 py-2 shadow-lg normal-case tracking-normal font-normal">
-          {text}
-          <span className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-sand-900 rotate-45" />
-        </span>
-      )}
-    </span>
-  );
-}
-
-// ─── Insights ───────────────────────────────────────────────────────────────
-
-function PipelineInsights({ m }: { m: PipelineMetrics }) {
-  const insights: { text: string; type: "positive" | "improvement" }[] = [];
-
-  // Positive
-  if (m.conversionRate >= 50) {
-    insights.push({ text: `Conversion rate of ${m.conversionRate}% is strong — more than half of quotes turn into orders.`, type: "positive" });
-  } else if (m.conversionRate >= 30) {
-    insights.push({ text: `Conversion rate of ${m.conversionRate}% is solid for this industry.`, type: "positive" });
-  }
-
-  if (m.avgCycleTimeDays > 0 && m.avgCycleTimeDays <= 7) {
-    insights.push({ text: `Average cycle time of ${m.avgCycleTimeDays} days is fast — deals are closing quickly.`, type: "positive" });
-  }
-
-  if (m.pipelineValue > 0) {
-    insights.push({ text: `Pipeline value of ${fmtFull(m.pipelineValue)} from ${m.invoiceSentDrafts} invoiced quotes awaiting payment.`, type: "positive" });
-  }
-
-  if (m.completedDrafts > 0 && m.avgSaleValue > 0) {
-    insights.push({ text: `Average sale of ${fmt(m.avgSaleValue)} across ${m.completedDrafts} completed orders.`, type: "positive" });
-  }
-
-  if (insights.filter((i) => i.type === "positive").length === 0 && m.totalDrafts > 0) {
-    insights.push({ text: `${m.totalDrafts} quotes created in this period — keep building the pipeline.`, type: "positive" });
-  }
-
-  // Improvements
-  if (m.conversionRate < 30 && m.totalDrafts > 5) {
-    insights.push({ text: `Conversion rate of ${m.conversionRate}% is below average. Review lost quotes to identify common objections and improve follow-up.`, type: "improvement" });
-  }
-
-  if (m.avgCycleTimeDays > 14) {
-    insights.push({ text: `Average cycle time of ${m.avgCycleTimeDays} days is long. Consider following up on stale drafts sooner to close deals faster.`, type: "improvement" });
-  }
-
-  if (m.openDrafts > 0 && m.completedDrafts === 0) {
-    insights.push({ text: `${m.openDrafts} open quotes but no conversions yet. Prioritize follow-ups on the oldest drafts.`, type: "improvement" });
-  }
-
-  if (m.invoiceSentDrafts > 3) {
-    insights.push({ text: `${m.invoiceSentDrafts} invoices sent but not yet paid. Follow up to collect payment and close these deals.`, type: "improvement" });
-  }
-
-  if (insights.length === 0) return null;
-
-  return (
-    <div className="bg-white rounded-xl border border-sand-200 p-5 space-y-3">
-      <p className="text-xs text-sand-400 uppercase tracking-wider">Insights & Recommendations</p>
-      <div className="space-y-2.5">
-        {insights.map((insight, i) => (
-          <div key={i} className="flex gap-2">
-            <span className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded-full flex items-center justify-center text-[10px] ${
-              insight.type === "positive" ? "bg-green-100 text-green-600" : "bg-amber-100 text-amber-600"
-            }`}>
-              {insight.type === "positive" ? "\u2713" : "!"}
-            </span>
-            <p className="text-[12px] text-sand-600 leading-relaxed">{insight.text}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Metric card tooltips ───────────────────────────────────────────────────
-
-const METRIC_TOOLTIPS: Record<string, string> = {
-  "Conversion Rate": "Percentage of draft orders (quotes) that were converted to paid orders. Calculated as: completed drafts \u00f7 total drafts \u00d7 100.",
-  "Avg Cycle Time": "Average number of days from when a quote was created to when the customer paid and it became an order. Only includes completed drafts. Excludes outliers over 180 days.",
-  "Pipeline Value": "Total dollar value of invoiced draft orders that haven't been completed yet. Only includes drafts where an invoice has been sent to the customer.",
-  "Avg Sale": "Average revenue per completed draft order. Calculated as: total completed revenue \u00f7 number of completed drafts.",
+const DAY_LABELS: Record<number, string> = {
+  30: "30d",
+  90: "90d",
+  180: "6mo",
+  365: "1yr",
+  730: "2yr",
 };
 
-// ─── Fallback Rates Editor ──────────────────────────────────────────────────
-
-const TRANSITION_LABELS = [
-  "Dec→Jan", "Jan→Feb", "Feb→Mar", "Mar→Apr", "Apr→May", "May→Jun",
-  "Jun→Jul", "Jul→Aug", "Aug→Sep", "Sep→Oct", "Oct→Nov", "Nov→Dec",
+const TABS: Array<{ id: PipelineView; label: string; description: string }> = [
+  { id: "overview", label: "Overview", description: "Pipeline health and risks" },
+  { id: "forecast", label: "Forecast", description: "Revenue outlook and assumptions" },
+  { id: "team", label: "Team", description: "Rep performance and attribution" },
 ];
 
-function FallbackRatesEditor({ rates, storeId, onSaved }: { rates: Record<number, number>; storeId: string; onSaved: () => void }) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState<Record<number, string>>({});
-  const [saving, setSaving] = useState(false);
-
-  const startEdit = () => {
-    const d: Record<number, string> = {};
-    for (let i = 0; i < 12; i++) {
-      d[i] = String(Math.round((rates[i] ?? 0) * 100));
-    }
-    setDraft(d);
-    setEditing(true);
-  };
-
-  const handleSave = async () => {
-    setSaving(true);
-    const ratesObj: Record<string, number> = {};
-    for (let i = 0; i < 12; i++) {
-      ratesObj[i] = (parseFloat(draft[i]) || 0) / 100;
-    }
-    try {
-      const res = await fetch("/api/settings/forecast-rates", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rates: ratesObj, storeId }),
-      });
-      if (!res.ok) throw new Error(res.status === 403 ? "forbidden" : "Failed to save");
-      setEditing(false);
-      onSaved();
-    } catch (err) {
-      alert(
-        err instanceof Error && err.message === "forbidden"
-          ? "Only admins can change the forecast rates."
-          : "Failed to save rates"
-      );
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2 border-t border-blue-100 pt-4">
-      <div className="flex items-center justify-between">
-        <p className="text-blue-800 font-medium">Seasonal fallback rates</p>
-        {!editing ? (
-          storeId !== "all" && <button onClick={startEdit} className="text-xs text-blue-500 hover:text-blue-700 underline">Edit</button>
-        ) : (
-          <div className="flex gap-2">
-            <button onClick={() => setEditing(false)} className="text-xs text-slate-400 hover:text-slate-600">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="text-xs text-white bg-blue-600 hover:bg-blue-700 px-2.5 py-1 rounded-md disabled:opacity-50">
-              {saving ? "Saving..." : "Save & Recalculate"}
-            </button>
-          </div>
-        )}
-      </div>
-      <p className="text-xs text-blue-500">Used when Shopify data is missing for a month transition (pre-July 2025). Rates are per-store{storeId !== "all" ? ` (editing: ${storeId})` : " — select a single store to edit"}.</p>
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-x-4 gap-y-1.5 text-xs">
-        {Array.from({ length: 12 }, (_, i) => (
-          <div key={i} className="flex items-center justify-between gap-2">
-            <span className="text-blue-600 whitespace-nowrap">{TRANSITION_LABELS[i]}</span>
-            {editing ? (
-              <div className="flex items-center gap-0.5">
-                <input
-                  type="number"
-                  value={draft[i] ?? "0"}
-                  onChange={(e) => setDraft((d) => ({ ...d, [i]: e.target.value }))}
-                  className="w-14 px-1.5 py-0.5 text-right text-xs border border-blue-200 rounded focus:outline-none focus:ring-1 focus:ring-blue-400"
-                />
-                <span className="text-blue-400">%</span>
-              </div>
-            ) : (
-              <span className={`font-medium ${(rates[i] ?? 0) >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                {(rates[i] ?? 0) >= 0 ? "+" : ""}{Math.round((rates[i] ?? 0) * 100)}%
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── Component ──────────────────────────────────────────────────────────────
-
-// Session-level cache: survives tab navigation, clears on reload. Entries past
-// the shared TTL are treated as misses — same expiry as the localStorage tier,
-// so a long-lived session can't keep serving stale predictions.
 const pipelineCache = new Map<string, { data: PipelineData; ts: number }>();
 
-export default function PipelineDashboard() {
+export default function PipelineDashboard({
+  initialData,
+  initialView = "overview",
+}: {
+  initialData?: PipelineData;
+  initialView?: PipelineView;
+}) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [activeView, setActiveView] = useState<PipelineView>(initialView);
   const [days, setDays] = useState(90);
   const [store, setStore] = useState("all");
   const [useCustom, setUseCustom] = useState(false);
   const [customFrom, setCustomFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 90);
-    return d.toISOString().split("T")[0];
+    const date = new Date();
+    date.setDate(date.getDate() - 90);
+    return date.toISOString().split("T")[0];
   });
   const [customTo, setCustomTo] = useState(() => new Date().toISOString().split("T")[0]);
-  const [data, setData] = useState<PipelineData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState<PipelineData | null>(initialData ?? null);
+  const [loading, setLoading] = useState(!initialData);
+  const [refreshing, setRefreshing] = useState(false);
   const [recalculating, setRecalculating] = useState(false);
   const [error, setError] = useState("");
-  const [sortBy, setSortBy] = useState<SortKey>("wonRevenue");
-  const [sortAsc, setSortAsc] = useState(false);
   const [loadStep, setLoadStep] = useState("");
-  const [showCalc, setShowCalc] = useState(false);
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const dataRef = useRef<PipelineData | null>(initialData ?? null);
+
+  useEffect(() => {
+    setActiveView(initialView);
+  }, [initialView]);
+
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("view") === initialView) return;
+    params.set("view", initialView);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }, [initialView, pathname, router]);
 
   useEffect(() => {
     let cancelled = false;
-
-    const params = new URLSearchParams({ store });
-    if (useCustom) {
-      params.set("from", customFrom);
-      params.set("to", customTo);
-    } else {
-      params.set("days", String(days));
-    }
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const params = buildDataParams({ store, days, useCustom, customFrom, customTo });
     const cacheKey = params.toString();
+    let cached = pipelineCache.get(cacheKey);
 
-    // 1. In-memory cache hit — show immediately, no fetch
-    const cached = pipelineCache.get(cacheKey);
-    if (cached && Date.now() - cached.ts <= PIPELINE_CACHE_TTL_MS) {
-      setData(cached.data);
-      setLoading(false);
-      return;
-    }
-
-    // 2. localStorage hit — show immediately, populate in-memory cache, no fetch
-    const persisted = pipelineCacheLoad<PipelineData>(cacheKey);
-    if (persisted) {
-      pipelineCache.set(cacheKey, persisted);
-      setData(persisted.data);
-      setLoading(false);
-      return;
-    }
-
-    // 3. True cache miss — fetch from API
-    setLoading(true);
-    setLoadStep("Connecting to Shopify...");
     setError("");
 
-    // Simulate progress steps for slow loads
-    const stepTimer = setTimeout(() => { if (!cancelled) setLoadStep("Fetching draft orders & computing predictions..."); }, 3000);
+    if (!cached && initialData && cacheKey === "store=all&days=90") {
+      const timestamp = pipelineCacheSave(cacheKey, initialData);
+      cached = { data: initialData, ts: timestamp };
+      pipelineCache.set(cacheKey, cached);
+    }
+    if (cached && Date.now() - cached.ts > PIPELINE_CACHE_MAX_STALE_MS) {
+      pipelineCache.delete(cacheKey);
+      cached = undefined;
+    }
+    if (!cached) {
+      const persisted = pipelineCacheLoad<PipelineData>(cacheKey);
+      if (persisted) {
+        cached = { data: persisted.data, ts: persisted.ts };
+        pipelineCache.set(cacheKey, cached);
+      }
+    }
 
-    fetch(`/api/shopify/pipeline?${params}`)
-      .then((r) => r.json())
-      .then((json) => {
+    const cacheAge = cached ? Date.now() - cached.ts : Number.POSITIVE_INFINITY;
+    const hasVisibleData = Boolean(cached || dataRef.current);
+    if (cached) {
+      setData(cached.data);
+      setLoading(false);
+      if (cacheAge <= PIPELINE_CACHE_TTL_MS) {
+        setRefreshing(false);
+        return;
+      }
+    }
+
+    setLoading(!hasVisibleData);
+    setRefreshing(hasVisibleData);
+    setLoadStep(hasVisibleData ? "" : "Connecting to Shopify...");
+
+    const stepTimer = hasVisibleData
+      ? undefined
+      : setTimeout(() => {
+          if (!cancelled) setLoadStep("Fetching quotes and calculating the pipeline...");
+        }, 3000);
+
+    const fetchPipeline = async (retryCount = 0) => {
+      try {
+        const response = await fetch(`/api/shopify/pipeline?${params.toString()}`);
+        const cacheStatus = response.headers.get("X-Pipeline-Cache");
+        const payload = await response.json();
         if (cancelled) return;
-        if (json.error) throw new Error(json.error);
-        setData(json);
-        pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
-        pipelineCacheSave(cacheKey, json);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err.message ?? "Failed to load pipeline data");
-      })
-      .finally(() => {
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error || "Pipeline data could not be loaded");
+        }
+
+        const nextData = payload as PipelineData;
+        setData(nextData);
+        const timestamp = pipelineCacheSave(cacheKey, nextData);
+        pipelineCache.set(cacheKey, { data: nextData, ts: timestamp });
+
+        if (cacheStatus === "stale" && retryCount < 2) {
+          setRefreshing(true);
+          retryTimer = setTimeout(() => {
+            void fetchPipeline(retryCount + 1);
+          }, 12_000);
+        } else {
+          setRefreshing(false);
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setError(fetchError instanceof Error ? fetchError.message : "Pipeline data could not be loaded");
+          setRefreshing(false);
+        }
+      } finally {
         if (!cancelled) {
           setLoading(false);
           setLoadStep("");
         }
-      });
+      }
+    };
 
-    return () => { cancelled = true; clearTimeout(stepTimer); };
-  }, [days, store, useCustom, customFrom, customTo]);
+    void fetchPipeline();
 
-  const handleRecalculate = async () => {
+    return () => {
+      cancelled = true;
+      if (stepTimer) clearTimeout(stepTimer);
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [customFrom, customTo, days, initialData, store, useCustom]);
+
+  const recalculate = async () => {
     setRecalculating(true);
+    setRefreshing(Boolean(data));
+    setError("");
     try {
-      const cacheParams = new URLSearchParams({ store });
-      if (useCustom) { cacheParams.set("from", customFrom); cacheParams.set("to", customTo); }
-      else cacheParams.set("days", String(days));
+      const cacheParams = buildDataParams({ store, days, useCustom, customFrom, customTo });
       const cacheKey = cacheParams.toString();
-
       const fetchParams = new URLSearchParams(cacheParams);
       fetchParams.set("refresh", "true");
-
-      const res = await fetch(`/api/shopify/pipeline?${fetchParams}`);
-      const json = await res.json();
-      if (json.error) throw new Error(json.error);
-      setData(json);
-      pipelineCache.set(cacheKey, { data: json, ts: Date.now() });
-      pipelineCacheSave(cacheKey, json);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Recalculation failed");
+      const response = await fetch(`/api/shopify/pipeline?${fetchParams.toString()}`);
+      const payload = await response.json();
+      if (!response.ok || payload.error) {
+        throw new Error(payload.error || "Pipeline recalculation failed");
+      }
+      const nextData = payload as PipelineData;
+      setData(nextData);
+      const timestamp = pipelineCacheSave(cacheKey, nextData);
+      pipelineCache.set(cacheKey, { data: nextData, ts: timestamp });
+    } catch (recalculationError) {
+      setError(
+        recalculationError instanceof Error
+          ? recalculationError.message
+          : "Pipeline recalculation failed",
+      );
     } finally {
       setRecalculating(false);
+      setRefreshing(false);
     }
   };
 
-  const handleSort = (key: SortKey) => {
-    if (sortBy === key) setSortAsc(!sortAsc);
-    else { setSortBy(key); setSortAsc(false); }
+  const selectView = (nextView: PipelineView) => {
+    setActiveView(nextView);
+    const params = new URLSearchParams(window.location.search);
+    params.set("view", nextView);
+    router.push(`${pathname}?${params.toString()}`, { scroll: false });
   };
 
-  const sortedLeaderboard = useMemo(() => {
-    if (!data) return [];
-    return [...data.leaderboard].sort((a, b) => {
-      const av = a[sortBy] ?? -1;
-      const bv = b[sortBy] ?? -1;
-      if (typeof av === "string" && typeof bv === "string")
-        return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
-      return sortAsc ? (av as number) - (bv as number) : (bv as number) - (av as number);
-    });
-  }, [data, sortBy, sortAsc]);
+  const handleTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight") nextIndex = (index + 1) % TABS.length;
+    if (event.key === "ArrowLeft") nextIndex = (index - 1 + TABS.length) % TABS.length;
+    if (event.key === "Home") nextIndex = 0;
+    if (event.key === "End") nextIndex = TABS.length - 1;
+    if (nextIndex === null) return;
 
-  const m = data?.metrics;
-  const pred = data?.prediction;
-  const ch = data?.channelMetrics;
+    event.preventDefault();
+    const nextView = TABS[nextIndex].id;
+    selectView(nextView);
+    window.requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus());
+  };
 
-  const SortIcon = ({ active, asc }: { active: boolean; asc: boolean }) => (
-    <span className="ml-1 text-[10px]">{active ? (asc ? "\u25b2" : "\u25bc") : "\u25b4"}</span>
+  const stores = data?.stores ?? initialData?.stores ?? [];
+  const isEmpty = Boolean(
+    data &&
+      data.metrics.totalDrafts === 0 &&
+      data.channelMetrics.totalOrders === 0 &&
+      (data.leaderboard ?? []).length === 0,
   );
-
-  const stores = data?.stores ?? [];
+  const isPartial = Boolean(
+    data &&
+      [
+        data.metrics.monthlyTrend,
+        data.prediction.monthlyForecasts,
+        data.prediction.buckets,
+        data.prediction.seasonalPattern,
+        data.leaderboard,
+        data.channelMetrics.employeeBreakdown,
+      ].some((section) => !Array.isArray(section)),
+  );
+  const displayState = getPipelineDisplayState({
+    hasData: Boolean(data),
+    isEmpty,
+    isPartial,
+    loading,
+    refreshing: refreshing || recalculating,
+    error,
+    cachedAt: data?.cachedAt,
+  });
 
   return (
-    <div className="space-y-6">
-      {/* Header + controls */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-3">
+    <div className="space-y-6 pb-10">
+      <header className="space-y-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-sand-900">Sales Pipeline</h2>
-            <div className="flex items-center gap-2 mt-0.5">
-              <p className="text-xs text-sand-400">
-                Draft orders (quotes) to completed sales
-              </p>
-              {data?.cachedAt && (
-                <span className="text-[10px] text-sand-300">
-                  Computed {(() => {
-                    const mins = Math.floor((Date.now() - new Date(data.cachedAt).getTime()) / 60000);
-                    if (mins < 1) return "just now";
-                    if (mins < 60) return `${mins}m ago`;
-                    return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
-                  })()}
-                </span>
-              )}
-              <button
-                onClick={handleRecalculate}
-                disabled={recalculating}
-                className="text-[10px] text-sand-400 hover:text-sand-600 disabled:opacity-50 underline"
-                title="Force recalculate from Shopify (ignores cache)"
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">Sales management</p>
+            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-950 sm:text-3xl">Sales pipeline</h1>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500">
+              Understand pipeline health first, then explore the forecast and team performance.
+            </p>
+          </div>
+          <RefreshStatus
+            state={displayState}
+            cachedAt={data?.cachedAt}
+            onRecalculate={recalculate}
+            recalculating={recalculating}
+          />
+        </div>
+
+        <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200/70">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(180px,0.7fr)_minmax(0,2fr)] xl:items-end">
+            <label className="block">
+              <span className="mb-1.5 block text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">Store</span>
+              <select
+                aria-label="Store"
+                value={store}
+                onChange={(event) => setStore(event.target.value)}
+                className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
               >
-                {recalculating ? "Recalculating..." : "Recalculate"}
-              </button>
-            </div>
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          {/* Store selector */}
-          {stores.length > 1 && (
-            <select
-              value={store}
-              onChange={(e) => setStore(e.target.value)}
-              className="px-3 py-1.5 text-xs font-medium border border-sand-200 rounded-lg bg-white text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-            >
-              <option value="all">All Stores</option>
-              {stores.map((s) => (
-                <option key={s.id} value={s.id}>{s.label}</option>
-              ))}
-            </select>
-          )}
-          {/* Time range */}
-          <div className="flex gap-1 bg-sand-100 rounded-lg p-0.5">
-            {DAY_OPTIONS.map((d) => (
-              <button
-                key={d}
-                onClick={() => { setDays(d); setUseCustom(false); }}
-                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                  !useCustom && days === d ? "bg-white text-sand-900 shadow-sm" : "text-sand-500 hover:text-sand-700"
-                }`}
-              >
-                {DAY_LABELS[d]}
-              </button>
-            ))}
-            <button
-              onClick={() => setUseCustom(true)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                useCustom ? "bg-white text-sand-900 shadow-sm" : "text-sand-500 hover:text-sand-700"
-              }`}
-            >
-              Custom
-            </button>
-          </div>
-          {useCustom && (
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={customFrom}
-                onChange={(e) => setCustomFrom(e.target.value)}
-                className="px-2 py-1 text-xs border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-              />
-              <span className="text-xs text-sand-400">to</span>
-              <input
-                type="date"
-                value={customTo}
-                onChange={(e) => setCustomTo(e.target.value)}
-                className="px-2 py-1 text-xs border border-sand-200 rounded-md bg-white text-sand-700 focus:outline-none focus:ring-1 focus:ring-sand-400"
-              />
-            </div>
-          )}
-        </div>
-      </div>
+                <option value="all">All stores</option>
+                {stores.map((storeOption) => (
+                  <option key={storeOption.id} value={storeOption.id}>{storeOption.label}</option>
+                ))}
+              </select>
+            </label>
 
-      {loading && (
-        <div className="text-center py-12 space-y-3">
-          <div className="inline-block w-48 h-1.5 bg-sand-200 rounded-full overflow-hidden">
-            <div className="h-full bg-blue-500 rounded-full animate-pulse" style={{ width: loadStep.includes("predictions") ? "70%" : "30%" }} />
-          </div>
-          <p className="text-sand-400 text-sm">{loadStep || "Loading..."}</p>
-        </div>
-      )}
-      {error && <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>}
-
-      {m && !loading && (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-5">
-          {/* Main content — 3/4 */}
-          <div className="lg:col-span-3 space-y-5">
-            {/* ── 1. Period summary: what did we quote and what converted? ── */}
-            <div className="bg-white rounded-xl border border-sand-200 p-5">
-              <div className="grid grid-cols-3 divide-x divide-sand-100">
-                <div className="pr-5">
-                  <p className="text-[10px] text-sand-400 uppercase tracking-wider">Quoted</p>
-                  <p className="text-2xl font-bold text-sand-900 mt-1">{fmt(m.totalQuotedValue)}</p>
-                  <p className="text-xs text-sand-400 mt-0.5">{m.totalDrafts} drafts created</p>
+            <fieldset className="min-w-0">
+              <legend className="mb-1.5 text-[11px] font-medium uppercase tracking-[0.12em] text-slate-500">Date range</legend>
+              <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center">
+                <div className="flex max-w-full gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1">
+                  {DAY_OPTIONS.map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      aria-pressed={!useCustom && days === option}
+                      onClick={() => {
+                        setDays(option);
+                        setUseCustom(false);
+                      }}
+                      className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+                        !useCustom && days === option
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-800"
+                      }`}
+                    >
+                      {DAY_LABELS[option]}
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    aria-pressed={useCustom}
+                    onClick={() => setUseCustom(true)}
+                    className={`shrink-0 rounded-md px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+                      useCustom
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    Custom
+                  </button>
                 </div>
-                <div className="px-5">
-                  <p className="text-[10px] text-sand-400 uppercase tracking-wider">Converted</p>
-                  <p className="text-2xl font-bold text-green-600 mt-1">{fmt(m.wonRevenue)}</p>
-                  <p className="text-xs text-sand-400 mt-0.5">{m.completedDrafts} orders &middot; {fmtPct(m.conversionRate)} rate</p>
-                </div>
-                <div className="pl-5">
-                  <p className="text-[10px] text-sand-400 uppercase tracking-wider">Pending</p>
-                  <p className="text-2xl font-bold text-blue-600 mt-1">{fmt(m.pipelineValue)}</p>
-                  <p className="text-xs text-sand-400 mt-0.5">{m.invoiceSentDrafts} invoiced &middot; {m.openDrafts} open</p>
-                </div>
-              </div>
-            </div>
-
-            {/* ── 1b. Revenue split: draft orders vs direct web ── */}
-            {ch && ch.totalOrders > 0 && (
-              <div className="bg-white rounded-xl border border-sand-200 p-5 space-y-4">
-                <div className="flex items-center gap-2">
-                  <p className="text-xs text-sand-400 uppercase tracking-wider">
-                    Revenue by Channel
-                  </p>
-                  <InfoTip text="Compares revenue from draft orders (quotes your team sends) vs direct web purchases (customers buying online without a quote). Based on actual paid orders, not drafts." />
-                </div>
-
-                <div className="grid grid-cols-3 divide-x divide-sand-100">
-                  <div className="pr-5">
-                    <p className="text-[10px] text-sand-400 uppercase tracking-wider">Total Revenue</p>
-                    <p className="text-2xl font-bold text-sand-900 mt-1">{fmt(ch.totalRevenue)}</p>
-                    <p className="text-xs text-sand-400 mt-0.5">{ch.totalOrders} orders</p>
-                  </div>
-                  <div className="px-5">
-                    <p className="text-[10px] text-purple-400 uppercase tracking-wider">From Quotes</p>
-                    <p className="text-2xl font-bold text-purple-600 mt-1">{fmt(ch.draftRevenue)}</p>
-                    <p className="text-xs text-sand-400 mt-0.5">
-                      {ch.draftOrders} orders &middot; {fmt(ch.draftAOV)} avg
-                    </p>
-                  </div>
-                  <div className="pl-5">
-                    <p className="text-[10px] text-emerald-400 uppercase tracking-wider">Direct Web</p>
-                    <p className="text-2xl font-bold text-emerald-600 mt-1">{fmt(ch.directRevenue)}</p>
-                    <p className="text-xs text-sand-400 mt-0.5">
-                      {ch.directOrders} orders &middot; {fmt(ch.directAOV)} avg
-                    </p>
-                  </div>
-                </div>
-
-                {/* Revenue split bar */}
-                <div>
-                  <div className="flex h-3 rounded-full overflow-hidden">
-                    <div
-                      className="bg-purple-500 transition-all"
-                      style={{ width: `${ch.draftRevenueShare}%` }}
-                      title={`Quotes: ${fmtPct(ch.draftRevenueShare)}`}
-                    />
-                    <div
-                      className="bg-emerald-500 transition-all"
-                      style={{ width: `${100 - ch.draftRevenueShare}%` }}
-                      title={`Direct: ${fmtPct(100 - ch.draftRevenueShare)}`}
-                    />
-                  </div>
-                  <div className="flex justify-between mt-1.5 text-xs text-sand-500">
-                    <span className="flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-sm bg-purple-500" />
-                      Quotes {fmtPct(ch.draftRevenueShare)}
-                    </span>
-                    <span className="flex items-center gap-1.5">
-                      Direct {fmtPct(Math.round((100 - ch.draftRevenueShare) * 10) / 10)}
-                      <span className="w-2 h-2 rounded-sm bg-emerald-500" />
-                    </span>
-                  </div>
-                </div>
-
-                {/* Employee attribution for quote-originated orders (hidden if only unassigned) */}
-                {ch.employeeBreakdown.length > 0 && ch.employeeBreakdown.some((e) => e.repTag !== "(unassigned)") && (
-                  <div>
-                    <p className="text-[10px] text-sand-400 uppercase tracking-wider mb-2">Quote Revenue by Employee</p>
-                    <div className="space-y-1.5">
-                      {ch.employeeBreakdown.map((emp) => {
-                        const pct = ch.draftRevenue > 0 ? (emp.revenue / ch.draftRevenue) * 100 : 0;
-                        return (
-                          <div key={emp.repTag} className="flex items-center gap-3">
-                            <p className="text-sm text-sand-700 font-medium w-36 truncate">{emp.repName}</p>
-                            <div className="flex-1 h-5 bg-sand-100 rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-purple-400 rounded-full transition-all"
-                                style={{ width: `${pct}%` }}
-                              />
-                            </div>
-                            <p className="text-sm text-sand-700 font-medium w-20 text-right">{fmt(emp.revenue)}</p>
-                            <p className="text-xs text-sand-400 w-16 text-right">{emp.orders} orders</p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Monthly channel trend chart with quote share % line */}
-                {ch.monthlyTrend.length > 1 && (
-                  <div className="pt-2">
-                    <ChannelTrendChart data={ch.monthlyTrend} />
-                    <div className="flex justify-center gap-5 mt-1 text-xs text-sand-500">
-                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-purple-500" /> Quotes</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-500" /> Direct Web</span>
-                      <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-purple-600 rounded" /> Quote Share %</span>
-                    </div>
+                {useCustom && (
+                  <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2">
+                    <label>
+                      <span className="sr-only">Start date</span>
+                      <input
+                        type="date"
+                        aria-label="Start date"
+                        value={customFrom}
+                        max={customTo}
+                        onChange={(event) => setCustomFrom(event.target.value)}
+                        className="h-10 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
+                    <span className="text-xs text-slate-400">to</span>
+                    <label>
+                      <span className="sr-only">End date</span>
+                      <input
+                        type="date"
+                        aria-label="End date"
+                        value={customTo}
+                        min={customFrom}
+                        onChange={(event) => setCustomTo(event.target.value)}
+                        className="h-10 min-w-0 w-full rounded-lg border border-slate-200 bg-white px-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+                      />
+                    </label>
                   </div>
                 )}
               </div>
-            )}
+            </fieldset>
+          </div>
+        </div>
 
-            {/* ── 2. Revenue forecast ── */}
-            {pred && (
-              <div className="space-y-4">
-                <p className="text-xs text-sand-400 uppercase tracking-wider">
-                  Revenue Forecast
-                  <InfoTip text={`Compounds forward from ${pred.startingMonth} (${fmt(pred.startingRevenue)}) using last year's month-over-month growth rates. Each month = previous month × (1 + last year's MoM%). MoM rates capped at ±200%. Falls back to 0% growth when no prior year data.`} />
-                </p>
-
-                {/* Summary cards */}
-                <div className="grid grid-cols-3 gap-4">
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-[10px] text-blue-400 uppercase tracking-wider">12-Month Forecast</p>
-                    <p className="text-2xl font-bold text-blue-900 mt-1">{fmt(pred.annualForecast)}</p>
-                    <p className="text-xs text-blue-500 mt-0.5">Next 12 months projected</p>
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-[10px] text-blue-400 uppercase tracking-wider">Starting From</p>
-                    <p className="text-2xl font-bold text-blue-900 mt-1">{fmt(pred.startingRevenue)}</p>
-                    <p className="text-xs text-blue-500 mt-0.5">{pred.startingMonth} actual revenue</p>
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5">
-                    <p className="text-[10px] text-blue-400 uppercase tracking-wider">Pipeline Value</p>
-                    <p className="text-2xl font-bold text-blue-900 mt-1">{fmt(pred.totalPipelineValue)}</p>
-                    <p className="text-xs text-blue-500 mt-0.5">{fmt(pred.totalPredictedRevenue)} weighted by win rate</p>
-                  </div>
-                </div>
-
-                {/* Show calculation toggle */}
+        <div className="max-w-full overflow-x-auto border-b border-slate-200">
+          <div role="tablist" aria-label="Pipeline views" className="grid min-w-[540px] grid-cols-3 gap-1">
+            {TABS.map((tab, index) => {
+              const selected = activeView === tab.id;
+              return (
                 <button
-                  onClick={() => setShowCalc((v) => !v)}
-                  className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition-colors"
+                  key={tab.id}
+                  ref={(element) => { tabRefs.current[index] = element; }}
+                  id={`pipeline-tab-${tab.id}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  aria-controls={`pipeline-panel-${tab.id}`}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => selectView(tab.id)}
+                  onKeyDown={(event) => handleTabKeyDown(event, index)}
+                  className={`border-b-2 px-4 py-3 text-left transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-blue-600 ${
+                    selected
+                      ? "border-blue-600 bg-blue-50/50 text-blue-800"
+                      : "border-transparent text-slate-500 hover:border-slate-300 hover:text-slate-800"
+                  }`}
                 >
-                  <svg viewBox="0 0 20 20" fill="currentColor" className={`w-3.5 h-3.5 transition-transform ${showCalc ? "rotate-90" : ""}`}>
-                    <path fillRule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clipRule="evenodd" />
-                  </svg>
-                  {showCalc ? "Hide calculation" : "Show calculation"}
+                  <span className="block text-sm font-semibold">{tab.label}</span>
+                  <span className="mt-0.5 block text-xs font-normal opacity-75">{tab.description}</span>
                 </button>
-
-                {/* Calculation details */}
-                {showCalc && (
-                  <div className="bg-white border border-blue-200 rounded-xl p-5 space-y-4 text-sm">
-                    <p className="text-xs text-blue-400 uppercase tracking-wider font-medium">How this forecast is calculated</p>
-
-                    {/* Method explanation */}
-                    <div className="space-y-2">
-                      <p className="text-blue-800 font-medium">Method: Seasonal MoM Compounding</p>
-                      <div className="bg-blue-50 rounded-lg px-3 py-2 text-xs text-blue-700 space-y-1">
-                        <p>1. Start from last completed month: <span className="font-bold">{pred.startingMonth} = {fmt(pred.startingRevenue)}</span></p>
-                        <p>2. For each future month, apply last year&apos;s MoM growth rate for that same month transition</p>
-                        <p>3. MoM rates are capped at &plusmn;200% to prevent extreme outliers from skewing the forecast</p>
-                        <p>4. If no prior year data exists for a transition, 0% growth is assumed</p>
-                      </div>
-                    </div>
-
-                    {/* Per-month breakdown */}
-                    <div className="space-y-2">
-                      <p className="text-blue-800 font-medium">Month-by-month calculation</p>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="border-b border-blue-100">
-                              <th className="pb-1 text-left text-blue-400 font-medium">Month</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Prev Month</th>
-                              <th className="pb-1 text-center text-blue-400 font-medium">&times;</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">MoM Rate</th>
-                              <th className="pb-1 text-center text-blue-400 font-medium">=</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Forecast</th>
-                              <th className="pb-1 text-right text-blue-400 font-medium">Pipeline</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-blue-50">
-                            {pred.monthlyForecasts.map((f) => (
-                              <tr key={f.month}>
-                                <td className="py-1 text-blue-700">
-                                  {f.monthLabel}
-                                  {f.isFallback && <span className="ml-1 text-[10px] text-amber-500" title="No prior year data — 0% growth assumed">*</span>}
-                                  {f.momRateCapped && <span className="ml-1 text-[10px] text-red-400" title="MoM rate was capped at ±200%">!</span>}
-                                </td>
-                                <td className="py-1 text-right text-slate-500">{fmt(f.prevMonthRevenue)}</td>
-                                <td className="py-1 text-center text-blue-300">&times;</td>
-                                <td className={`py-1 text-right font-medium ${f.momRate >= 0 ? "text-emerald-600" : "text-red-500"}`}>
-                                  {f.momRate >= 0 ? "+" : ""}{Math.round(f.momRate * 100)}%
-                                </td>
-                                <td className="py-1 text-center text-blue-300">=</td>
-                                <td className="py-1 text-right text-blue-800 font-medium">{fmt(f.forecast)}</td>
-                                <td className="py-1 text-right text-violet-600">{f.fromPipeline > 0 ? fmt(f.fromPipeline) : "—"}</td>
-                              </tr>
-                            ))}
-                            <tr className="border-t-2 border-blue-200">
-                              <td colSpan={5} className="py-1.5 text-blue-800 font-bold">12-Month Total</td>
-                              <td className="py-1.5 text-right text-blue-900 font-bold">{fmt(pred.annualForecast)}</td>
-                              <td className="py-1.5 text-right text-violet-700 font-medium">
-                                {fmt(pred.monthlyForecasts.reduce((s, f) => s + f.fromPipeline, 0))}
-                              </td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <div className="flex gap-4 text-[10px] text-blue-400">
-                        {pred.monthlyForecasts.some((f) => f.isFallback) && (
-                          <span>* No prior year data — 0% growth assumed</span>
-                        )}
-                        {pred.monthlyForecasts.some((f) => f.momRateCapped) && (
-                          <span className="text-red-400">! MoM rate was capped at &plusmn;200%</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Editable fallback rates */}
-                    <FallbackRatesEditor
-                      rates={pred.fallbackMomRates}
-                      storeId={store}
-                      onSaved={handleRecalculate}
-                    />
-                  </div>
-                )}
-
-                {/* Month-by-month forecast chart */}
-                {pred.monthlyForecasts.length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-blue-700">
-                        Monthly Forecast
-                        <span className="font-normal text-blue-500 ml-1">(next 12 months)</span>
-                      </p>
-                      <InfoTip text="Blue bars = projected revenue. Purple bars = pipeline (quoted/invoiced) portion already visible. Dashed outline = same month last year for comparison." />
-                    </div>
-                    <ForecastChart data={pred.monthlyForecasts} />
-                    <div className="flex justify-center gap-5 text-xs text-blue-500">
-                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Forecast</span>
-                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-violet-600" /> From Pipeline</span>
-                    </div>
-                  </div>
-                )}
-
-                {/* Historical seasonal pattern */}
-                {pred.seasonalPattern.length > 2 && (() => {
-                  const activeMonths = pred.seasonalPattern.filter((m) => m.revenue > 0);
-                  const chartData = activeMonths.map((m, i) => ({
-                    ...m,
-                    momGrowthClamped: i === 0 ? null : m.momGrowth !== null ? Math.max(-100, Math.min(100, m.momGrowth)) : null,
-                  }));
-                  return chartData.length > 2 ? (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-blue-700">
-                        Seasonal Pattern
-                        <span className="font-normal text-blue-500 ml-1">(month-over-month growth)</span>
-                      </p>
-                      <InfoTip text="Historical monthly revenue from all orders with month-over-month growth %. Positive = seasonal ramp-up, negative = seasonal slowdown. Growth % clamped to ±100% for readability." />
-                    </div>
-                    <SeasonalPatternChart data={chartData} />
-                    <div className="flex justify-center gap-5 text-xs text-blue-500">
-                      <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-600" /> Monthly Revenue</span>
-                      <span className="flex items-center gap-1.5"><span className="w-5 h-0.5 bg-amber-500 rounded" /> MoM Growth %</span>
-                    </div>
-                  </div>
-                  ) : null;
-                })()}
-
-                {/* Pipeline age breakdown */}
-                {pred.buckets.length > 0 && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium text-blue-700">
-                        {fmtFull(pred.totalPipelineValue)} in pipeline
-                        <span className="font-normal text-blue-500"> across {pred.buckets.reduce((s, b) => s + b.drafts, 0)} invoiced drafts</span>
-                      </p>
-                      {pred.avgCycleTimeDays > 0 && (
-                        <p className="text-xs text-blue-500">Avg cycle: {pred.avgCycleTimeDays} days</p>
-                      )}
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-blue-200">
-                            <th className="pb-1.5 text-left font-medium text-blue-400 uppercase tracking-wider">Invoice Age</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Drafts</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Value</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Win Rate</th>
-                            <th className="pb-1.5 text-right font-medium text-blue-400 uppercase tracking-wider">Predicted</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-blue-100">
-                          {pred.buckets.map((b) => (
-                            <tr key={b.label}>
-                              <td className="py-1.5 text-blue-700 font-medium">{b.label}</td>
-                              <td className="py-1.5 text-blue-600 text-right">{b.drafts}</td>
-                              <td className="py-1.5 text-blue-600 text-right">{fmt(b.value)}</td>
-                              <td className="py-1.5 text-blue-600 text-right">{fmtPct(b.conversionRate)}</td>
-                              <td className="py-1.5 text-blue-800 text-right font-medium">{fmt(b.predictedValue)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ── 3. Detail cards ── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {[
-                { label: "Conversion Rate", value: fmtPct(m.conversionRate), sub: `${m.completedDrafts} of ${m.totalDrafts} drafts` },
-                { label: "Avg Cycle Time", value: m.avgCycleTimeDays > 0 ? `${m.avgCycleTimeDays}d` : "N/A", sub: "Draft to order" },
-                { label: "Avg Sale", value: fmt(m.avgSaleValue), sub: `From ${m.completedDrafts} completed` },
-                { label: "Value Win Rate", value: fmtPct(m.valueWinRate), sub: "Completed $ / quoted $" },
-              ].map((card) => (
-                <div key={card.label} className="bg-white rounded-xl border border-sand-200 p-5">
-                  <div className="flex items-center gap-1">
-                    <p className="text-[10px] text-sand-400 uppercase tracking-wider">{card.label}</p>
-                    {METRIC_TOOLTIPS[card.label] && <InfoTip text={METRIC_TOOLTIPS[card.label]} />}
-                  </div>
-                  <p className="text-2xl font-semibold text-sand-900 mt-1">{card.value}</p>
-                  <p className="text-xs text-sand-400 mt-0.5">{card.sub}</p>
-                </div>
-              ))}
-            </div>
-
-            {/* Monthly trend chart */}
-            {m.monthlyTrend.length > 1 && (
-              <div className="bg-white rounded-xl border border-sand-200 p-5">
-                <h3 className="text-sm font-medium text-sand-700 mb-4">Monthly Trend</h3>
-                <MonthlyTrendChart data={m.monthlyTrend} />
-              </div>
-            )}
-
-            {/* Rep leaderboard */}
-            {sortedLeaderboard.length > 0 && (
-              <div className="bg-white rounded-xl border border-sand-200 p-5">
-                <h3 className="text-sm font-medium text-sand-700 mb-4">Rep Leaderboard</h3>
-                <div className="overflow-auto max-h-[calc(100vh-260px)]">
-                  <table className="w-full">
-                    <thead className="sticky top-0 z-20 bg-white">
-                      <tr className="border-b border-sand-100">
-                        {([
-                          ["repName", "Rep"],
-                          ["totalDrafts", "Drafts"],
-                          ["completedDrafts", "Converted"],
-                          ["conversionRate", "Conv%"],
-                          ["pipelineValue", "Pipeline $"],
-                          ["wonRevenue", "Won $"],
-                          ["avgSaleValue", "Avg Sale"],
-                          ["avgCycleTimeDays", "Cycle Time"],
-                        ] as [SortKey, string][]).map(([key, label]) => (
-                          <th
-                            key={key}
-                            onClick={() => handleSort(key)}
-                            className={`pb-2 text-xs font-medium text-sand-500 uppercase cursor-pointer hover:text-sand-700 ${key === "repName" ? "text-left" : "text-right"}`}
-                          >
-                            {label}
-                            <SortIcon active={sortBy === key} asc={sortAsc} />
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-sand-50">
-                      {sortedLeaderboard.map((r, i) => (
-                        <tr key={r.repTag} className={`hover:bg-sand-50 transition-colors ${i === 0 ? "bg-amber-50/40" : ""}`}>
-                          <td className="py-2.5 text-sm text-sand-900 font-medium">{r.repName}</td>
-                          <td className="py-2.5 text-sm text-sand-700 text-right">{r.totalDrafts}</td>
-                          <td className="py-2.5 text-sm text-sand-700 text-right">{r.completedDrafts}</td>
-                          <td className="py-2.5 text-sm text-sand-700 text-right">{fmtPct(r.conversionRate)}</td>
-                          <td className="py-2.5 text-sm text-sand-700 text-right">{fmt(r.pipelineValue)}</td>
-                          <td className="py-2.5 text-sm font-medium text-sand-900 text-right">{fmt(r.wonRevenue)}</td>
-                          <td className="py-2.5 text-sm text-sand-700 text-right">{fmt(r.avgSaleValue)}</td>
-                          <td className="py-2.5 text-sm text-sand-500 text-right">
-                            {r.avgCycleTimeDays !== null ? `${r.avgCycleTimeDays}d` : "\u2014"}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {/* Status breakdown bar */}
-            {m.totalDrafts > 0 && (
-              <div className="bg-white rounded-xl border border-sand-200 p-5">
-                <h3 className="text-sm font-medium text-sand-700 mb-4">Draft Status Breakdown</h3>
-                <StatusBreakdownChart open={m.openDrafts} invoiceSent={m.invoiceSentDrafts} completed={m.completedDrafts} />
-                <div className="flex gap-4 mt-2 text-xs text-sand-500">
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-500" /> Open ({m.openDrafts})</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-blue-500" /> Invoice Sent ({m.invoiceSentDrafts})</span>
-                  <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-green-600" /> Completed ({m.completedDrafts})</span>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Right sidebar — insights */}
-          <div className="lg:col-span-1 space-y-5">
-            <PipelineInsights m={m} />
+              );
+            })}
           </div>
         </div>
+      </header>
+
+      {error && data && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          The latest update failed. Saved results remain visible. {error}
+        </div>
       )}
+
+      {displayState === "partial" && data && (
+        <div role="status" className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Some pipeline sections are unavailable. Available metrics remain visible while the next refresh completes.
+        </div>
+      )}
+
+      {loading && !data && <PipelineLoading label={loadStep || "Loading pipeline data..."} />}
+
+      {error && !data && !loading && (
+        <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-5 py-6 text-red-800">
+          <p className="font-semibold">Pipeline data could not be loaded</p>
+          <p className="mt-1 text-sm">{error}</p>
+          <button type="button" onClick={() => void recalculate()} className="mt-4 rounded-lg bg-red-700 px-3 py-2 text-sm font-medium text-white hover:bg-red-800">
+            Try again
+          </button>
+        </div>
+      )}
+
+      {data && (
+        <div
+          id={`pipeline-panel-${activeView}`}
+          role="tabpanel"
+          aria-labelledby={`pipeline-tab-${activeView}`}
+          tabIndex={0}
+          className="focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-blue-600"
+        >
+          {isEmpty && (
+            <div className="mb-6 rounded-xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600">
+              No pipeline activity was found for these filters. The dashboard remains available so you can review each section or change the date range.
+            </div>
+          )}
+          {activeView === "overview" && <PipelineOverviewView data={data} />}
+          {activeView === "forecast" && (
+            <PipelineForecastView data={data} storeId={store} onRecalculate={recalculate} />
+          )}
+          {activeView === "team" && <PipelineTeamView data={data} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildDataParams({
+  store,
+  days,
+  useCustom,
+  customFrom,
+  customTo,
+}: {
+  store: string;
+  days: number;
+  useCustom: boolean;
+  customFrom: string;
+  customTo: string;
+}) {
+  const params = new URLSearchParams({ store });
+  if (useCustom) {
+    params.set("from", customFrom);
+    params.set("to", customTo);
+  } else {
+    params.set("days", String(days));
+  }
+  return params;
+}
+
+function formatCacheAge(cachedAt: string) {
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(cachedAt).getTime()) / 60_000));
+  if (minutes < 1) return "Computed just now";
+  if (minutes < 60) return `Computed ${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  return `Computed ${hours}h ${minutes % 60}m ago`;
+}
+
+function RefreshStatus({
+  state,
+  cachedAt,
+  onRecalculate,
+  recalculating,
+}: {
+  state: ReturnType<typeof getPipelineDisplayState>;
+  cachedAt?: string;
+  onRecalculate: () => Promise<void>;
+  recalculating: boolean;
+}) {
+  const status = {
+    loading: { tone: "blue" as const, label: "Loading" },
+    error: { tone: "red" as const, label: "Unavailable" },
+    empty: { tone: "slate" as const, label: "No activity" },
+    partial: { tone: "amber" as const, label: "Partial data" },
+    ready: { tone: "green" as const, label: "Current" },
+    cached: { tone: "slate" as const, label: "Saved data" },
+    refreshing: { tone: "blue" as const, label: "Updating" },
+    stale: { tone: "amber" as const, label: "Saved data" },
+  }[state];
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+      <div className="text-right">
+        <StatusPill tone={status.tone}>{status.label}</StatusPill>
+        {cachedAt && (
+          <p suppressHydrationWarning className="mt-1 text-[11px] text-slate-400">
+            {formatCacheAge(cachedAt)}
+          </p>
+        )}
+      </div>
+      <button
+        type="button"
+        onClick={() => void onRecalculate()}
+        disabled={recalculating}
+        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 shadow-sm transition-colors hover:border-slate-300 hover:text-slate-900 disabled:cursor-wait disabled:opacity-50"
+      >
+        {recalculating ? "Recalculating..." : "Recalculate"}
+      </button>
+    </div>
+  );
+}
+
+function PipelineLoading({ label }: { label: string }) {
+  return (
+    <div role="status" aria-live="polite" className="rounded-2xl bg-white px-6 py-12 text-center shadow-sm ring-1 ring-slate-200/70">
+      <div className="mx-auto h-1.5 w-48 overflow-hidden rounded-full bg-slate-100">
+        <div className="h-full w-2/3 rounded-full bg-blue-600 motion-safe:animate-pulse" />
+      </div>
+      <p className="mt-3 text-sm text-slate-500">{label}</p>
     </div>
   );
 }

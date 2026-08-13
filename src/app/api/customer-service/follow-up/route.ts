@@ -1230,8 +1230,21 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "store_id and config required" }, { status: 400 });
     }
 
+    const entries = Object.entries(config);
+    const invalidEntry = entries.find(([category, followupDays]) => (
+      !(category in FOLLOWUP_CATEGORIES)
+      || (followupDays !== null && (
+        !Number.isInteger(followupDays)
+        || followupDays < 1
+        || followupDays > 3650
+      ))
+    ));
+    if (entries.length === 0 || invalidEntry) {
+      return NextResponse.json({ error: "Invalid follow-up timing configuration" }, { status: 400 });
+    }
+
     const supabase = getSupabase();
-    const rows = Object.entries(config).map(([category, followup_days]) => ({
+    const rows = entries.map(([category, followup_days]) => ({
       store_id,
       category,
       followup_days,

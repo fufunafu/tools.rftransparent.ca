@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import EmployeeDrawer, { type EditDraft } from "@/components/admin/EmployeeDrawer";
 import EmployeeFilters, { type StatusFilter } from "@/components/admin/EmployeeFilters";
+import { normalizeOptionalInternationalPhone } from "@/lib/phone";
 
 interface Location {
   id: string;
@@ -20,6 +21,10 @@ interface Employee {
   department: string;
   location_id: string | null;
   shopify_tags: string[];
+  commission_rate: number | null;
+  hire_date: string | null;
+  employment_ended_at: string | null;
+  exit_survey_enabled: boolean | null;
   active: boolean;
   locations: Location | null;
 }
@@ -52,9 +57,13 @@ function emptyDraft(): EditDraft {
     email_alt: "",
     phone: "",
     birthday: "",
+    hire_date: "",
+    employment_ended_at: "",
+    exit_survey_enabled: true,
     department: "sales",
     location_id: "",
     shopify_tags: "",
+    commission_percent: "",
     active: true,
   };
 }
@@ -66,9 +75,16 @@ function draftFromEmployee(emp: Employee): EditDraft {
     email_alt: emp.email_alt ?? "",
     phone: emp.phone ?? "",
     birthday: emp.birthday ?? "",
+    hire_date: emp.hire_date ?? "",
+    employment_ended_at: emp.employment_ended_at ?? "",
+    exit_survey_enabled: emp.exit_survey_enabled !== false,
     department: emp.department,
     location_id: emp.location_id ?? "",
     shopify_tags: (emp.shopify_tags ?? []).join(", "),
+    // Stored as a fraction (0.05); edited as a percentage (5).
+    commission_percent: emp.commission_rate
+      ? String(+(emp.commission_rate * 100).toFixed(4))
+      : "",
     active: emp.active,
   };
 }
@@ -224,6 +240,13 @@ export default function EmployeeList() {
       setSaveError("Name is required");
       return;
     }
+    let normalizedPhone: string | null;
+    try {
+      normalizedPhone = normalizeOptionalInternationalPhone(draft.phone);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Invalid phone number");
+      return;
+    }
     setSaving(true);
     setSaveError("");
     try {
@@ -232,14 +255,20 @@ export default function EmployeeList() {
         name: draft.name.trim(),
         email: draft.email.trim().toLowerCase() || null,
         email_alt: draft.email_alt.trim().toLowerCase() || null,
-        phone: draft.phone.trim() || null,
+        phone: normalizedPhone,
         birthday: draft.birthday || null,
+        hire_date: draft.hire_date || null,
+        employment_ended_at: draft.employment_ended_at || null,
+        exit_survey_enabled: draft.exit_survey_enabled,
         department: draft.department,
         location_id: draft.location_id || null,
         shopify_tags: draft.shopify_tags
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean),
+        commission_rate: draft.commission_percent.trim()
+          ? Number(draft.commission_percent) / 100
+          : 0,
         active: draft.active,
       };
       const res = await fetch(

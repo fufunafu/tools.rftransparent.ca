@@ -5,6 +5,7 @@ import EmployeeList from "@/components/admin/EmployeeList";
 import EmployeeSatisfaction from "@/components/admin/EmployeeSatisfaction";
 import BirthdayCalendar from "@/components/admin/BirthdayCalendar";
 import EmployeePerformanceDashboard from "@/components/admin/EmployeePerformanceDashboard";
+import HoursPanel from "@/components/admin/HoursPanel";
 
 interface Employee {
   id: string;
@@ -13,7 +14,7 @@ interface Employee {
   active?: boolean;
 }
 
-type Tab = "employees" | "performance" | "satisfaction" | "birthdays";
+type Tab = "employees" | "hours" | "performance" | "satisfaction" | "birthdays";
 
 function DirectoryIcon() {
   return (
@@ -52,9 +53,30 @@ function CalendarIcon() {
 
 const BASE_TABS: { key: Tab; label: string; shortLabel: string; icon: ReactNode }[] = [
   { key: "employees", label: "Employee directory", shortLabel: "Directory", icon: <DirectoryIcon /> },
-  { key: "satisfaction", label: "Team satisfaction", shortLabel: "Satisfaction", icon: <PulseIcon /> },
   { key: "birthdays", label: "Birthday calendar", shortLabel: "Birthdays", icon: <CalendarIcon /> },
 ];
+
+const SATISFACTION_TAB = {
+  key: "satisfaction" as const,
+  label: "Team surveys",
+  shortLabel: "Surveys",
+  icon: <PulseIcon />,
+};
+
+function HoursIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-4 w-4" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+  );
+}
+
+const HOURS_TAB = {
+  key: "hours" as const,
+  label: "Hours",
+  shortLabel: "Hours",
+  icon: <HoursIcon />,
+};
 
 const PERFORMANCE_TAB = {
   key: "performance" as const,
@@ -67,7 +89,7 @@ export default function EmployeesHub({ canViewPerformance }: { canViewPerformanc
   const [tab, setTab] = useState<Tab>("employees");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const tabs = canViewPerformance
-    ? [BASE_TABS[0], PERFORMANCE_TAB, ...BASE_TABS.slice(1)]
+    ? [BASE_TABS[0], HOURS_TAB, PERFORMANCE_TAB, SATISFACTION_TAB, BASE_TABS[1]]
     : BASE_TABS;
 
   useEffect(() => {
@@ -109,7 +131,7 @@ export default function EmployeesHub({ canViewPerformance }: { canViewPerformanc
       </header>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm" role="tablist" aria-label="Employee tools">
-        <div className={`grid gap-1.5 ${canViewPerformance ? "grid-cols-2 sm:grid-cols-4" : "grid-cols-3"}`}>
+        <div className={`grid gap-1.5 ${canViewPerformance ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2"}`}>
           {tabs.map((item) => {
             const selected = tab === item.key;
             return (
@@ -142,8 +164,9 @@ export default function EmployeesHub({ canViewPerformance }: { canViewPerformanc
         aria-labelledby={`employee-tab-${tab}`}
       >
         {tab === "employees" && <EmployeeList />}
+        {tab === "hours" && canViewPerformance && <HoursPanel />}
         {tab === "performance" && canViewPerformance && <EmployeePerformanceDashboard />}
-        {tab === "satisfaction" && <EmployeeSatisfaction employees={employees} />}
+        {tab === "satisfaction" && canViewPerformance && <EmployeeSatisfaction employees={employees} />}
         {tab === "birthdays" && <BirthdayCalendar employees={employees} />}
       </div>
     </div>

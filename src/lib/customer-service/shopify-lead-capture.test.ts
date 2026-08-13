@@ -61,6 +61,13 @@ function captureRuntime() {
 }
 
 describe("Shopify lead capture storefront script", () => {
+  it("supports every drawing format advertised by the live form", () => {
+    expect(captureScript).toContain('"image/gif"');
+    expect(captureScript).toContain('"image/svg+xml"');
+    expect(captureScript).toContain('gif: "image/gif"');
+    expect(captureScript).toContain('svg: "image/svg+xml"');
+  });
+
   it("maps the live GRS contact fields and installs only once", async () => {
     const runtime = captureRuntime();
     vm.runInContext(captureScript, runtime.context);

@@ -49,4 +49,27 @@ describe("withCronRun", () => {
       expect.objectContaining({ startedAt: expect.any(Number) }),
     );
   });
+
+  it("records actionable per-recipient errors from failed survey runs", async () => {
+    const handler = withCronRun("send-employee-surveys", async () =>
+      NextResponse.json(
+        {
+          error: "1 survey message(s) failed",
+          errors: ["Alex (invalid WhatsApp phone): Enter an international number"],
+        },
+        { status: 502 },
+      ),
+    );
+
+    await handler(
+      new NextRequest("https://tools.rftransparent.ca/api/cron/send-employee-surveys"),
+    );
+
+    expect(recordCronRunMock).toHaveBeenCalledWith(
+      "send-employee-surveys",
+      "error",
+      "1 survey message(s) failed: Alex (invalid WhatsApp phone): Enter an international number",
+      expect.objectContaining({ startedAt: expect.any(Number) }),
+    );
+  });
 });

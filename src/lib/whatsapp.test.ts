@@ -36,7 +36,15 @@ describe("normalizeWhatsAppNumber", () => {
   });
 
   it("rejects invalid phone numbers", () => {
-    expect(() => normalizeWhatsAppNumber("416-555")).toThrow("international format");
+    expect(() => normalizeWhatsAppNumber("416-555")).toThrow(
+      "international WhatsApp number",
+    );
+  });
+
+  it("rejects numbers without an explicit country-code prefix", () => {
+    expect(() => normalizeWhatsAppNumber("416-555-0123")).toThrow(
+      "international WhatsApp number",
+    );
   });
 });
 

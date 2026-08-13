@@ -105,13 +105,13 @@ function Metric({
   }[tone];
 
   return (
-    <div className="border-t border-slate-200/80 px-5 py-4 sm:border-l sm:border-t-0 sm:first:border-l-0">
+    <div className="border-t border-slate-200/80 px-4 py-3 even:border-l sm:border-l sm:border-t-0 sm:px-5 sm:py-4 sm:first:border-l-0">
       <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
         <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} aria-hidden="true" />
         {label}
       </div>
-      <p className="mt-2 text-2xl font-semibold tracking-tight text-slate-950">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-400">{note}</p>
+      <p className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">{value}</p>
+      <p className="mt-1 text-[11px] text-slate-400 max-sm:truncate">{note}</p>
     </div>
   );
 }
@@ -303,7 +303,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                 Focus
               </div>
               <h1 className="text-2xl font-semibold tracking-tight text-slate-950 sm:text-[28px]">Tasks</h1>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500">
+              <p className="mt-2 max-w-xl text-sm leading-6 text-slate-500 max-sm:hidden">
                 Capture what matters, keep deadlines visible, and close the loop on your work.
               </p>
             </div>
@@ -330,7 +330,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
           </div>
         </div>
 
-        <div className="grid bg-slate-50/70 sm:grid-cols-4 sm:border-t sm:border-slate-200">
+        <div className="grid grid-cols-2 bg-slate-50/70 sm:grid-cols-4 sm:border-t sm:border-slate-200">
           <Metric label="Active" value={loading ? "..." : counts.all} note={scope === "all" ? "Across the team" : "On your list"} tone="blue" />
           <Metric label="Due today" value={loading ? "..." : counts.today} note="Needs attention now" tone="amber" />
           <Metric label="Overdue" value={loading ? "..." : counts.overdue} note={counts.overdue > 0 ? "Past the due date" : "Nothing behind"} tone="red" />
@@ -367,24 +367,27 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                 className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 hover:border-slate-300 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10"
               />
             </label>
-            <label className="relative lg:w-48">
-              <span className="sr-only">Due date</span>
-              <CalendarIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-              <input
-                type="date"
-                value={dueAt}
-                onChange={(event) => setDueAt(event.target.value)}
-                min={today}
-                className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm font-medium text-slate-600 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={adding || !title.trim()}
-              className="h-11 shrink-0 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              {adding ? "Adding..." : "Add task"}
-            </button>
+            {/* One row on phones (date + button), unchanged side-by-side on desktop. */}
+            <div className="flex min-w-0 gap-2.5 lg:contents">
+              <label className="relative min-w-0 flex-1 lg:w-48 lg:flex-none">
+                <span className="sr-only">Due date</span>
+                <CalendarIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="date"
+                  value={dueAt}
+                  onChange={(event) => setDueAt(event.target.value)}
+                  min={today}
+                  className="h-11 w-full max-w-full rounded-xl border border-slate-200 bg-white pl-10 pr-3 text-sm font-medium text-slate-600 outline-none transition hover:border-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
+                />
+              </label>
+              <button
+                type="submit"
+                disabled={adding || !title.trim()}
+                className="h-11 shrink-0 rounded-xl bg-blue-600 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {adding ? "Adding..." : "Add task"}
+              </button>
+            </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -427,7 +430,8 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
       )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm" aria-label="Task filters">
-        <div className="grid grid-cols-3 gap-1 sm:grid-cols-5">
+        {/* Phones: one swipeable strip, like a segmented control. Desktop: the same five-column grid as before. */}
+        <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:grid sm:grid-cols-5">
           {FILTERS.map((item) => {
             const selected = filter === item.key;
             const urgent = item.key === "overdue" && counts.overdue > 0;
@@ -437,7 +441,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                 type="button"
                 aria-pressed={selected}
                 onClick={() => setFilter(item.key)}
-                className={`flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-2 text-xs font-semibold transition sm:text-sm ${
+                className={`flex min-h-10 shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl px-3.5 text-xs font-semibold transition sm:px-2 sm:text-sm ${
                   selected
                     ? urgent
                       ? "bg-red-50 text-red-700"

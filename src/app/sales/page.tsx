@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { EmployeeTab } from "@/components/admin/KPIDashboard";
+import CommissionsPanel from "@/components/admin/CommissionsPanel";
 
 export const metadata: Metadata = {
   title: "Sales | RF Tools",
@@ -15,6 +16,7 @@ export default async function SalesPage() {
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">
       <EmployeeTab department="sales" />
+      <CommissionsPanel />
     </div>
   );
 }

@@ -45,13 +45,17 @@ vi.mock("@/lib/shopify", () => {
   };
 });
 
-import { getEmployeeSalesMetrics, getEmployeeDraftMetrics, getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics } from "@/lib/kpi-sales";
-import { shopifyGraphQL } from "@/lib/shopify";
+import { getEmployeeSalesMetrics, getEmployeeDraftMetrics, getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics, getPipelineDashboardData } from "@/lib/kpi-sales";
+import { getStores, shopifyGraphQL } from "@/lib/shopify";
 
 const mockShopifyGraphQL = vi.mocked(shopifyGraphQL);
+const mockGetStores = vi.mocked(getStores);
 
 beforeEach(() => {
   mockShopifyGraphQL.mockReset();
+  mockGetStores.mockReturnValue([
+    { id: "store1", label: "Store 1", store: "test.myshopify.com", clientId: "id", clientSecret: "secret" },
+  ]);
 });
 
 // ─── Helper to build a draft order node ─────────────────────────────────────
@@ -106,6 +110,34 @@ function mockOrderResponse(orders: ReturnType<typeof makeOrder>[]) {
       edges: orders.map((o, i) => ({ node: o, cursor: `c${i}` })),
       pageInfo: { hasNextPage: false },
     },
+  });
+}
+
+function mockPartitionedPipelineResponses(
+  orders: ReturnType<typeof makeOrder>[],
+  drafts: ReturnType<typeof makeDraft>[],
+) {
+  mockShopifyGraphQL.mockImplementation(async (_storeId, query, variables) => {
+    const search = String(variables?.search ?? "");
+    const from = search.match(/created_at:>='([^']+)'/)?.[1] ?? "";
+    const to = search.match(/created_at:<'([^']+)'/)?.[1] ?? "9999-12-31";
+    const inRange = <T extends { createdAt: string }>(item: T) =>
+      item.createdAt.slice(0, 10) >= from && item.createdAt.slice(0, 10) < to;
+
+    if (query.includes("draftOrders")) {
+      return {
+        draftOrders: {
+          edges: drafts.filter(inRange).map((draft, index) => ({ node: draft, cursor: `d${index}` })),
+          pageInfo: { hasNextPage: false },
+        },
+      };
+    }
+    return {
+      orders: {
+        edges: orders.filter(inRange).map((order, index) => ({ node: order, cursor: `o${index}` })),
+        pageInfo: { hasNextPage: false },
+      },
+    };
   });
 }
 
@@ -227,6 +259,39 @@ describe("getEmployeeDraftMetrics", () => {
 // ─── getFullPipelineData ────────────────────────────────────────────────────
 
 describe("getFullPipelineData", () => {
+  it("starts independent store requests concurrently", async () => {
+    mockGetStores.mockReturnValue([
+      { id: "store1", label: "Store 1", store: "one.myshopify.com", clientId: "id", clientSecret: "secret" },
+      { id: "store2", label: "Store 2", store: "two.myshopify.com", clientId: "id", clientSecret: "secret" },
+    ]);
+
+    let releaseFirstStore: (() => void) | undefined;
+    const firstStoreBlocked = new Promise<void>((resolve) => {
+      releaseFirstStore = resolve;
+    });
+    mockShopifyGraphQL.mockImplementation(async (storeId) => {
+      if (storeId === "store1") await firstStoreBlocked;
+      return {
+        draftOrders: {
+          edges: [],
+          pageInfo: { hasNextPage: false },
+        },
+      };
+    });
+
+    const resultPromise = getFullPipelineData(
+      ["store1", "store2"],
+      new Date("2026-01-01"),
+      new Date("2026-02-01"),
+      [],
+    );
+    await Promise.resolve();
+
+    expect(mockShopifyGraphQL).toHaveBeenCalledTimes(2);
+    releaseFirstStore?.();
+    await resultPromise;
+  });
+
   it("filters drafts by toDate (bug 1 fix)", async () => {
     mockDraftResponse([
       makeDraft({ createdAt: "2026-01-10T00:00:00Z", status: "INVOICE_SENT", tags: ["john"], amount: "100.00" }),
@@ -550,5 +615,56 @@ describe("getOrderChannelMetrics", () => {
     expect(result.draftOrders).toBe(0);
     expect(result.directOrders).toBe(2);
     expect(result.directRevenue).toBe(300);
+  });
+});
+
+describe("getPipelineDashboardData", () => {
+  it("calculates from mirrored source data without calling Shopify", async () => {
+    const result = await getPipelineDashboardData(
+      ["store1"],
+      new Date("2026-01-01"),
+      new Date("2026-02-01"),
+      ["john"],
+      {
+        orders: [],
+        drafts: [
+          makeDraft({ createdAt: "2026-01-15T00:00:00Z", status: "INVOICE_SENT", tags: ["john"], amount: "100.00" }),
+        ],
+        warnings: [],
+      },
+    );
+
+    expect(result.metrics.pipelineValue).toBe(100);
+    expect(mockShopifyGraphQL).not.toHaveBeenCalled();
+  });
+
+  it("fetches each partition once and reuses it across all dashboard calculations", async () => {
+    mockPartitionedPipelineResponses([], []);
+
+    await getPipelineDashboardData(
+      ["store1"],
+      new Date("2026-01-01"),
+      new Date("2026-02-01"),
+      ["john"],
+    );
+
+    expect(mockShopifyGraphQL).toHaveBeenCalledTimes(6);
+  });
+
+  it("keeps period metrics limited to the selected date range", async () => {
+    mockPartitionedPipelineResponses([], [
+      makeDraft({ createdAt: "2025-12-15T00:00:00Z", status: "INVOICE_SENT", tags: ["john"], amount: "900.00" }),
+      makeDraft({ createdAt: "2026-01-15T00:00:00Z", status: "INVOICE_SENT", tags: ["john"], amount: "100.00" }),
+    ]);
+
+    const result = await getPipelineDashboardData(
+      ["store1"],
+      new Date("2026-01-01"),
+      new Date("2026-02-01"),
+      ["john"],
+    );
+
+    expect(result.metrics.totalDrafts).toBe(1);
+    expect(result.metrics.pipelineValue).toBe(100);
   });
 });

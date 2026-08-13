@@ -80,17 +80,38 @@ export async function POST(request: Request) {
     }, { headers: { "Cache-Control": "no-store" } });
   }
 
-  const { data: survey, error: surveyError } = await supabase
-    .from("employee_surveys")
-    .select("token, week_of, responded_at, created_at")
-    .eq("employee_id", employee.id)
-    .order("week_of", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (surveyError) {
-    return NextResponse.json({ error: "Survey lookup failed" }, { status: 500 });
+  let survey: {
+    token: string;
+    week_of?: string | null;
+    responded_at?: string | null;
+    completed_at?: string | null;
+    survey_campaigns?: { name?: string; closes_at?: string | null; status?: string } | Array<{ name?: string; closes_at?: string | null; status?: string }> | null;
+  } | null = null;
+  try {
+    const surveyResult = await supabase
+      .from("survey_recipients")
+      .select("token,completed_at,created_at,survey_campaigns!inner(name,closes_at,status)")
+      .eq("employee_id", employee.id)
+      .eq("survey_campaigns.status", "open")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (surveyResult.error) throw surveyResult.error;
+    survey = surveyResult.data;
+  } catch {
+    // Compatibility until the normalized survey migration is applied.
+    const legacyResult = await supabase
+      .from("employee_surveys")
+      .select("token, week_of, responded_at, created_at")
+      .eq("employee_id", employee.id)
+      .order("week_of", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (legacyResult.error) {
+      return NextResponse.json({ error: "Survey lookup failed" }, { status: 500 });
+    }
+    survey = legacyResult.data;
   }
 
   const location = employee.locations?.name ?? null;
@@ -114,11 +135,19 @@ export async function POST(request: Request) {
       location,
     },
     survey: survey
-      ? {
-          weekOf: survey.week_of,
-          completed: survey.responded_at !== null,
-          link: survey.responded_at ? null : `${appUrl}/survey/${survey.token}`,
-        }
+      ? (() => {
+          const title = Array.isArray(survey.survey_campaigns)
+            ? survey.survey_campaigns[0]?.name ?? null
+            : survey.survey_campaigns?.name ?? null;
+          return {
+          weekOf: survey.week_of ?? null,
+          ...(title ? { title } : {}),
+          completed: (survey.completed_at ?? survey.responded_at ?? null) !== null,
+          link: (survey.completed_at ?? survey.responded_at ?? null)
+            ? null
+            : `${appUrl}/survey/${survey.token}`,
+          };
+        })()
       : null,
     ...retrievalResponse(retrieval),
   }, { headers: { "Cache-Control": "no-store" } });

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { withCronRun } from "@/lib/automations";
-import { sendSurveys } from "@/lib/employee-surveys";
+import { TRIGGERED_BY_HEADER, withCronRun } from "@/lib/automations";
+import { runSurveyAutomation } from "@/lib/employee-surveys";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { reportCronFailure } from "@/lib/cron-monitor";
 
@@ -13,12 +13,18 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const result = await sendSurveys();
-    if (result.errors.length > 0) {
-      const detail = `${result.errors.length} survey message(s) failed:\n${result.errors.join("\n")}`;
+    const result = await runSurveyAutomation(new Date(), {
+      forcePeriodic: Boolean(req.headers.get(TRIGGERED_BY_HEADER)),
+    });
+    const errors = [
+      ...result.campaigns.flatMap((campaign) => campaign.errors),
+      ...result.reminders.errors,
+    ];
+    if (errors.length > 0) {
+      const detail = `${errors.length} survey message(s) failed:\n${errors.join("\n")}`;
       await reportCronFailure("send-employee-surveys", detail);
       return NextResponse.json(
-        { ...result, error: `${result.errors.length} survey message(s) failed` },
+        { ...result, errors, error: `${errors.length} survey message(s) failed` },
         { status: 502 },
       );
     }

@@ -1,11 +1,131 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getStores } from "@/lib/shopify";
 import { getSupabase } from "@/lib/supabase";
-import { getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics } from "@/lib/kpi-sales";
+import { getPipelineDashboardData } from "@/lib/kpi-sales";
+import {
+  loadPipelineMirror,
+  pipelineMirrorHistoryStart,
+  syncPipelineShopifyMirror,
+} from "@/lib/pipeline-shopify-mirror";
 
 const VALID_DAYS = [30, 90, 180, 365, 730];
 const CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+interface PipelineRefreshParams {
+  cacheKey: string;
+  storeIds: string[];
+  fromDate: Date;
+  toDate: Date;
+  days: number;
+  forceMirrorSync?: boolean;
+}
+
+async function computeAndCachePipeline({
+  cacheKey,
+  storeIds,
+  fromDate,
+  toDate,
+  days,
+  forceMirrorSync,
+}: PipelineRefreshParams) {
+  const empResult = await getSupabase()
+    .from("employees")
+    .select("name, shopify_tags")
+    .eq("department", "sales")
+    .eq("active", true);
+
+  const tagToName = new Map<string, string>();
+  const knownRepTags: string[] = [];
+  if (empResult.data) {
+    for (const emp of empResult.data) {
+      for (const t of (emp.shopify_tags ?? []) as string[]) {
+        if (t) {
+          const lower = t.toLowerCase();
+          tagToName.set(lower, emp.name);
+          knownRepTags.push(lower);
+        }
+      }
+    }
+  }
+
+  const mirrorFrom = pipelineMirrorHistoryStart(fromDate);
+  let mirroredSource = null;
+  try {
+    await syncPipelineShopifyMirror(mirrorFrom, { force: forceMirrorSync });
+    mirroredSource = await loadPipelineMirror(storeIds, mirrorFrom);
+  } catch (err) {
+    console.warn("[Pipeline API] Shopify mirror unavailable, using direct fetch", err);
+  }
+  const { metrics, leaderboard, warnings, prediction, channelMetrics } =
+    await getPipelineDashboardData(
+      storeIds,
+      fromDate,
+      toDate,
+      knownRepTags,
+      mirroredSource ?? undefined,
+    );
+
+  const enrichedLeaderboard = leaderboard.map((rep) => ({
+    ...rep,
+    repName: tagToName.get(rep.repTag) ?? rep.repTag,
+  }));
+  const enrichedChannelMetrics = {
+    ...channelMetrics,
+    employeeBreakdown: channelMetrics.employeeBreakdown.map((employee) => ({
+      ...employee,
+      repName: tagToName.get(employee.repTag) ?? employee.repTag,
+    })),
+  };
+
+  const computedAt = new Date().toISOString();
+  const result = {
+    metrics,
+    prediction,
+    channelMetrics: enrichedChannelMetrics,
+    leaderboard: enrichedLeaderboard,
+    period: {
+      from: fromDate.toISOString().split("T")[0],
+      to: toDate.toISOString().split("T")[0],
+      days,
+    },
+    warnings: warnings.length > 0 ? warnings : undefined,
+  };
+
+  await getSupabase()
+    .from("pipeline_cache")
+    .upsert({
+      cache_key: cacheKey,
+      result,
+      computed_at: computedAt,
+    });
+
+  return { result, computedAt };
+}
+
+const inFlightRefreshes = new Map<
+  string,
+  ReturnType<typeof computeAndCachePipeline>
+>();
+
+function refreshPipeline(params: PipelineRefreshParams) {
+  const existing = inFlightRefreshes.get(params.cacheKey);
+  if (existing) return existing;
+
+  const refresh = computeAndCachePipeline(params);
+  inFlightRefreshes.set(params.cacheKey, refresh);
+  refresh.then(
+    () => {
+      if (inFlightRefreshes.get(params.cacheKey) === refresh)
+        inFlightRefreshes.delete(params.cacheKey);
+    },
+    () => {
+      if (inFlightRefreshes.get(params.cacheKey) === refresh)
+        inFlightRefreshes.delete(params.cacheKey);
+    },
+  );
+  return refresh;
+}
 
 export async function GET(req: NextRequest) {
   if (!(await isAuthenticated()))
@@ -38,16 +158,27 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No stores configured" }, { status: 503 });
 
   // Cache key based on store filter + date range
-  const cacheKey = `pipeline:${storeIds.sort().join(",")}:${days}:${customFrom ?? ""}:${customTo ?? ""}`;
+  const cacheKey = `pipeline:${[...storeIds].sort().join(",")}:${days}:${customFrom ?? ""}:${customTo ?? ""}`;
+  const stores = allStores.map((configuredStore) => ({
+    id: configuredStore.id,
+    label: configuredStore.label,
+  }));
+  const refreshParams = {
+    cacheKey,
+    storeIds,
+    fromDate,
+    toDate,
+    days,
+    forceMirrorSync: forceRefresh,
+  };
 
   try {
-    // Check cache first (unless force refresh)
     if (!forceRefresh) {
       const { data: cached } = await getSupabase()
         .from("pipeline_cache")
         .select("result, computed_at")
         .eq("cache_key", cacheKey)
-        .single();
+        .maybeSingle();
 
       if (cached) {
         const age = Date.now() - new Date(cached.computed_at).getTime();
@@ -55,84 +186,33 @@ export async function GET(req: NextRequest) {
           return NextResponse.json({
             ...cached.result,
             cachedAt: cached.computed_at,
-            stores: allStores.map((s) => ({ id: s.id, label: s.label })),
-          });
+            stores,
+          }, { headers: { "X-Pipeline-Cache": "hit" } });
         }
-      }
-    }
 
-    // Fetch employee tags first (fast Supabase query)
-    const empResult = await getSupabase()
-      .from("employees")
-      .select("name, shopify_tags")
-      .eq("department", "sales")
-      .eq("active", true);
-
-    // Build tag → employee name map and known rep tags list
-    const tagToName = new Map<string, string>();
-    const knownRepTags: string[] = [];
-    if (empResult.data) {
-      for (const emp of empResult.data) {
-        for (const t of (emp.shopify_tags ?? []) as string[]) {
-          if (t) {
-            const lower = t.toLowerCase();
-            tagToName.set(lower, emp.name);
-            knownRepTags.push(lower);
+        // Keep expired data usable while the expensive refresh runs after the response.
+        after(async () => {
+          try {
+            await refreshPipeline(refreshParams);
+          } catch (err) {
+            console.error("[Pipeline API] Background refresh failed", err);
           }
-        }
+        });
+        return NextResponse.json({
+          ...cached.result,
+          cachedAt: cached.computed_at,
+          stores,
+        }, { headers: { "X-Pipeline-Cache": "stale" } });
       }
     }
 
-    // Metrics + prediction + channel split in parallel
-    const [{ metrics, leaderboard, warnings }, prediction, channelMetrics] = await Promise.all([
-      getFullPipelineData(storeIds, fromDate, toDate, knownRepTags),
-      getPipelinePrediction(storeIds),
-      getOrderChannelMetrics(storeIds, fromDate, toDate, knownRepTags),
-    ]);
-
-    // Enrich leaderboard with employee names
-    const enrichedLeaderboard = leaderboard.map((r) => ({
-      ...r,
-      repName: tagToName.get(r.repTag) ?? r.repTag,
-    }));
-
-    // Enrich channel employee breakdown with names
-    const enrichedChannelMetrics = {
-      ...channelMetrics,
-      employeeBreakdown: channelMetrics.employeeBreakdown.map((e) => ({
-        ...e,
-        repName: tagToName.get(e.repTag) ?? e.repTag,
-      })),
-    };
-
-    const now = new Date().toISOString();
-    const result = {
-      metrics,
-      prediction,
-      channelMetrics: enrichedChannelMetrics,
-      leaderboard: enrichedLeaderboard,
-      period: {
-        from: fromDate.toISOString().split("T")[0],
-        to: toDate.toISOString().split("T")[0],
-        days,
-      },
-      warnings: warnings.length > 0 ? warnings : undefined,
-    };
-
-    // Write to cache (upsert)
-    await getSupabase()
-      .from("pipeline_cache")
-      .upsert({
-        cache_key: cacheKey,
-        result,
-        computed_at: now,
-      });
+    const { result, computedAt } = await refreshPipeline(refreshParams);
 
     return NextResponse.json({
       ...result,
-      cachedAt: now,
-      stores: allStores.map((s) => ({ id: s.id, label: s.label })),
-    });
+      cachedAt: computedAt,
+      stores,
+    }, { headers: { "X-Pipeline-Cache": forceRefresh ? "refresh" : "miss" } });
   } catch (err) {
     console.error("[Pipeline API]", err);
     return NextResponse.json(

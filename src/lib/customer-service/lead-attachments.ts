@@ -8,6 +8,8 @@ export const LEAD_ATTACHMENT_TYPES = [
   "image/jpeg",
   "image/heic",
   "image/heif",
+  "image/gif",
+  "image/svg+xml",
 ] as const;
 
 export interface LeadAttachment {
@@ -35,6 +37,8 @@ const EXTENSION_TYPES: Record<string, string> = {
   jpeg: "image/jpeg",
   heic: "image/heic",
   heif: "image/heif",
+  gif: "image/gif",
+  svg: "image/svg+xml",
 };
 
 export function attachmentContentType(filename: string, suppliedType: string): string | null {
@@ -60,7 +64,10 @@ export function validateAttachmentMetadata(input: {
   if (!filename) return { ok: false, error: "The drawing filename is missing." };
   const contentType = attachmentContentType(filename, suppliedType);
   if (!contentType) {
-    return { ok: false, error: `${filename} must be a PDF, PNG, JPEG, HEIC, or HEIF file.` };
+    return {
+      ok: false,
+      error: `${filename} must be a PDF, PNG, JPEG, HEIC, HEIF, GIF, or SVG file.`,
+    };
   }
   if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) {
     return { ok: false, error: `${filename} is empty or has an invalid size.` };
@@ -121,6 +128,18 @@ export function attachmentContentDisposition(
 ): string {
   const ascii = filename.replace(/[^\x20-\x7E]+/g, "_").replace(/["\\]/g, "");
   return `${disposition}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+export function attachmentResponseDisposition(
+  filename: string,
+  contentType: string,
+  downloadRequested: boolean,
+): "inline" | "attachment" {
+  return downloadRequested
+    || contentType.trim().toLowerCase() === "image/svg+xml"
+    || filename.toLowerCase().endsWith(".svg")
+    ? "attachment"
+    : "inline";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -73,7 +73,9 @@
       "image/png",
       "image/jpeg",
       "image/heic",
-      "image/heif"
+      "image/heif",
+      "image/gif",
+      "image/svg+xml"
     ];
     if (supported.indexOf(supplied) !== -1) {
       return supplied;
@@ -89,7 +91,9 @@
       jpg: "image/jpeg",
       jpeg: "image/jpeg",
       heic: "image/heic",
-      heif: "image/heif"
+      heif: "image/heif",
+      gif: "image/gif",
+      svg: "image/svg+xml"
     }[extension] || null;
   }
 
@@ -108,7 +112,7 @@
     var file = drawing.file;
     var type = contentType(file);
     if (!type) {
-      return Promise.reject(new Error(file.name + " must be a PDF, PNG, JPEG, HEIC, or HEIF file."));
+      return Promise.reject(new Error(file.name + " must be a PDF, PNG, JPEG, HEIC, HEIF, GIF, or SVG file."));
     }
     if (!file.size) {
       return Promise.reject(new Error(file.name + " is empty."));

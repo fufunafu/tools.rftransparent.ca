@@ -38,9 +38,16 @@ export interface MatchedLeadCalls {
   }>;
 }
 
+interface LeadCallMatchPlan {
+  matches: MatchedLeadCalls[];
+  ambiguousCallIds: string[];
+}
+
 export interface LeadCallSyncSummary {
   leadsScanned: number;
   callsScanned: number;
+  ambiguousCallsSkipped: number;
+  ambiguousAttemptsRemoved: number;
   matchedLeads: number;
   called: number;
   noAnswer: number;
@@ -166,10 +173,28 @@ function preferredEligibleLead(
     ?? latestEligibleLead(candidates, callTime);
 }
 
-export function matchPhoneCallsToLeads(
+function hasMultipleEligibleEmailIdentities(
+  candidates: Array<LeadForCallSync & { submittedTime: number }> | undefined,
+  callTime: number,
+): boolean {
+  if (!candidates) return false;
+
+  const emails = new Set<string>();
+  for (const lead of candidates) {
+    if (lead.submittedTime > callTime) break;
+    const email = normalizedEmail(lead.email);
+    if (!email) continue;
+    emails.add(email);
+    if (emails.size > 1) return true;
+  }
+
+  return false;
+}
+
+function planPhoneCallMatches(
   leads: LeadForCallSync[],
   calls: PhoneCallForLeadSync[],
-): MatchedLeadCalls[] {
+): LeadCallMatchPlan {
   const leadsByPhone = new Map<string, Array<LeadForCallSync & { submittedTime: number }>>();
   for (const lead of leads) {
     const phone = matchablePhone(lead.phone);
@@ -184,6 +209,7 @@ export function matchPhoneCallsToLeads(
   }
 
   const matches = new Map<string, MatchedLeadCalls>();
+  const ambiguousCallIds: string[] = [];
   const sortedCalls = [...calls].sort(
     (a, b) => new Date(a.call_start).getTime() - new Date(b.call_start).getTime(),
   );
@@ -193,7 +219,13 @@ export function matchPhoneCallsToLeads(
     const callTime = new Date(call.call_start).getTime();
     if (!status || !phone || Number.isNaN(callTime)) continue;
 
-    const lead = preferredEligibleLead(leadsByPhone.get(phone), callTime);
+    const candidates = leadsByPhone.get(phone);
+    if (hasMultipleEligibleEmailIdentities(candidates, callTime)) {
+      ambiguousCallIds.push(call.id);
+      continue;
+    }
+
+    const lead = preferredEligibleLead(candidates, callTime);
     if (!lead) continue;
 
     const current = matches.get(lead.id) ?? {
@@ -213,7 +245,14 @@ export function matchPhoneCallsToLeads(
     matches.set(lead.id, current);
   }
 
-  return [...matches.values()];
+  return { matches: [...matches.values()], ambiguousCallIds };
+}
+
+export function matchPhoneCallsToLeads(
+  leads: LeadForCallSync[],
+  calls: PhoneCallForLeadSync[],
+): MatchedLeadCalls[] {
+  return planPhoneCallMatches(leads, calls).matches;
 }
 
 async function fetchAllRows<T>(
@@ -248,6 +287,73 @@ async function updateLeadIds(
   }
 }
 
+async function removeAmbiguousAttempts(
+  callIds: string[],
+  leadById: Map<string, LeadForCallSync>,
+): Promise<{ attemptsRemoved: number; statusesUpdated: number; affectedLeadIds: string[] }> {
+  if (callIds.length === 0) {
+    return { attemptsRemoved: 0, statusesUpdated: 0, affectedLeadIds: [] };
+  }
+
+  const supabase = getSupabase();
+  const affectedLeadIds = new Set<string>();
+  let attemptsRemoved = 0;
+
+  for (let offset = 0; offset < callIds.length; offset += WRITE_CHUNK_SIZE) {
+    const ids = callIds.slice(offset, offset + WRITE_CHUNK_SIZE);
+    const { data, error: lookupError } = await supabase
+      .from("lead_call_attempts")
+      .select("id,lead_id")
+      .in("id", ids);
+    if (lookupError) throw new Error(lookupError.message);
+    if (!data || data.length === 0) continue;
+
+    data.forEach((attempt) => affectedLeadIds.add(attempt.lead_id));
+    const { error: deleteError } = await supabase
+      .from("lead_call_attempts")
+      .delete()
+      .in("id", data.map((attempt) => attempt.id));
+    if (deleteError) throw new Error(deleteError.message);
+    attemptsRemoved += data.length;
+  }
+
+  const affectedIds = [...affectedLeadIds];
+  if (affectedIds.length === 0) {
+    return { attemptsRemoved, statusesUpdated: 0, affectedLeadIds: [] };
+  }
+
+  const statusByLead = new Map<string, LeadCallStatus>(
+    affectedIds.map((id) => [id, "not_called"]),
+  );
+  for (let offset = 0; offset < affectedIds.length; offset += WRITE_CHUNK_SIZE) {
+    const { data, error } = await supabase
+      .from("lead_call_attempts")
+      .select("lead_id,result")
+      .in("lead_id", affectedIds.slice(offset, offset + WRITE_CHUNK_SIZE));
+    if (error) throw new Error(error.message);
+
+    for (const attempt of data ?? []) {
+      const current = statusByLead.get(attempt.lead_id) ?? "not_called";
+      if (attempt.result.trim().toLowerCase() !== "no answer") {
+        statusByLead.set(attempt.lead_id, "called");
+      } else if (current === "not_called") {
+        statusByLead.set(attempt.lead_id, "no_answer");
+      }
+    }
+  }
+
+  let statusesUpdated = 0;
+  for (const status of ["not_called", "no_answer", "called"] as const) {
+    const ids = affectedIds.filter((id) => (
+      statusByLead.get(id) === status && leadById.get(id)?.call_status !== status
+    ));
+    await updateLeadIds(ids, { call_status: status });
+    statusesUpdated += ids.length;
+  }
+
+  return { attemptsRemoved, statusesUpdated, affectedLeadIds: affectedIds };
+}
+
 export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
   const supabase = getSupabase();
   const leads = await fetchAllRows<LeadForCallSync>((from, to) =>
@@ -262,6 +368,8 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
     return {
       leadsScanned: 0,
       callsScanned: 0,
+      ambiguousCallsSkipped: 0,
+      ambiguousAttemptsRemoved: 0,
       matchedLeads: 0,
       called: 0,
       noAnswer: 0,
@@ -305,7 +413,10 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
       .range(from, to),
   );
   const dedupedCalls = deduplicateRecords(calls);
-  const matches = matchPhoneCallsToLeads(leadsWithRecoveredPhones, dedupedCalls);
+  const { matches, ambiguousCallIds } = planPhoneCallMatches(
+    leadsWithRecoveredPhones,
+    dedupedCalls,
+  );
   const leadById = new Map(leadsWithRecoveredPhones.map((lead) => [lead.id, lead]));
 
   const attempts = matches.flatMap((match) => match.attempts);
@@ -315,17 +426,21 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
       .upsert(attempts.slice(offset, offset + WRITE_CHUNK_SIZE), { onConflict: "id" });
     if (error) throw new Error(error.message);
   }
+  const ambiguityCleanup = await removeAmbiguousAttempts(ambiguousCallIds, leadById);
+  const ambiguityAffectedLeads = new Set(ambiguityCleanup.affectedLeadIds);
 
   const calledIds = matches
     .filter((match) => match.status === "called")
     .map((match) => match.leadId);
   const noAnswerIds = matches
     .filter(
-      (match) => match.status === "no_answer" && leadById.get(match.leadId)?.call_status === "not_called",
+      (match) => match.status === "no_answer"
+        && !ambiguityAffectedLeads.has(match.leadId)
+        && leadById.get(match.leadId)?.call_status === "not_called",
     )
     .map((match) => match.leadId);
   const calledStatusUpdates = calledIds.filter(
-    (id) => leadById.get(id)?.call_status !== "called",
+    (id) => !ambiguityAffectedLeads.has(id) && leadById.get(id)?.call_status !== "called",
   );
 
   await updateLeadIds(calledStatusUpdates, { call_status: "called" });
@@ -335,11 +450,15 @@ export async function syncLeadCallStatuses(): Promise<LeadCallSyncSummary> {
   return {
     leadsScanned: leads.length,
     callsScanned: dedupedCalls.length,
+    ambiguousCallsSkipped: ambiguousCallIds.length,
+    ambiguousAttemptsRemoved: ambiguityCleanup.attemptsRemoved,
     matchedLeads: matches.length,
     called: matches.filter((match) => match.status === "called").length,
     noAnswer: matches.filter((match) => match.status === "no_answer").length,
     attemptsSynced: attempts.length,
-    statusesUpdated: calledStatusUpdates.length + noAnswerIds.length,
+    statusesUpdated: ambiguityCleanup.statusesUpdated
+      + calledStatusUpdates.length
+      + noAnswerIds.length,
     phonesRecovered: recoveredPhones.length,
   };
 }

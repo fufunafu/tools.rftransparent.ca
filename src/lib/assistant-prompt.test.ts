@@ -64,7 +64,7 @@ If you are unsure whether a question requires company-specific information, trea
     expect(DEFAULT_ASSISTANT_INITIAL_PROMPT).toContain(
       "Never share one employee's personal or HR information",
     );
-    expect(DEFAULT_ASSISTANT_INITIAL_PROMPT).toContain("pending weekly survey link");
+    expect(DEFAULT_ASSISTANT_INITIAL_PROMPT).toContain("pending employee survey link");
     expect(DEFAULT_ASSISTANT_INITIAL_PROMPT).toContain(
       "Reply in the language the employee writes in.",
     );

@@ -26,6 +26,7 @@ export const RevenueFieldsSchema = z.object({
 export const OrderNodeSchema = RevenueFieldsSchema.extend({
   id: z.string(),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
   tags: z.array(z.string()),
   cancelledAt: z.string().nullable().optional(),
   staffMember: z.object({
@@ -51,6 +52,7 @@ export const DraftOrderNodeSchema = RevenueFieldsSchema.extend({
   id: z.string(),
   name: z.string(),
   createdAt: z.string(),
+  updatedAt: z.string().optional(),
   status: z.string(),
   tags: z.array(z.string()),
   order: z.object({

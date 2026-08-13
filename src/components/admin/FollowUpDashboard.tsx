@@ -346,11 +346,12 @@ function TimingEditor({ store }: { store: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ store_id: store, config: configObj }),
       });
-      if (!res.ok) throw new Error("Failed to save");
+      const responseBody = await res.json().catch(() => ({})) as { error?: string };
+      if (!res.ok) throw new Error(responseBody.error || "Failed to save timing config");
       await mutateConfig({ config: configObj }, { revalidate: false });
       setEditing(false);
-    } catch {
-      alert("Failed to save timing config");
+    } catch (error) {
+      alert(error instanceof Error ? error.message : "Failed to save timing config");
     } finally {
       setSaving(false);
     }

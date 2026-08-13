@@ -1,54 +1,123 @@
-# WhatsApp employee surveys
+# Employee survey program
 
-Weekly employee surveys are sent directly through Meta's WhatsApp Cloud API.
+RF Tools runs employee surveys through Meta's WhatsApp Cloud API. Survey results are management-only. Public survey pages are protected by unique recipient tokens.
 
-## Message template
+## Program schedule
 
-Create and approve a WhatsApp message template in WhatsApp Manager with these values:
+The hourly survey dispatcher evaluates all dates and times in `America/Toronto`:
 
-- Name: `weekly_checkin`
-- Language: `en`
-- Body: `Hi {{name}}! It is time for your weekly check-in. Please take 2 minutes to share how you are doing this week: {{link}} Please do not share this private link.`
+- Weekly pulse: Thursday at 3:00 PM
+- Response window: Thursday afternoon through Tuesday at 9:00 AM
+- Nonresponder reminder: Monday at 9:00 AM
+- Quarterly engagement survey: the first Thursday of January, April, July, and October
+- The weekly pulse is not created during quarterly survey week
+- Onboarding surveys: day 14, 45, and 90 after `employees.hire_date`
+- Exit survey: once, voluntarily, within 30 days after `employees.employment_ended_at` when enabled
+- Targeted surveys: created manually after a meaningful event and require the decision the results will support
 
-The first body parameter is the employee name. The second is the unique survey URL. If Meta assigns a different category or you choose a different template name or language, use the approved values in the environment variables below.
+Vercel invokes `/api/cron/send-employee-surveys` hourly at minute 25. Off-schedule invocations are safe no-ops. Campaign and recipient dedupe keys make retries idempotent.
+
+## WhatsApp templates
+
+Create and approve these templates in WhatsApp Manager.
+
+### Survey invitation
+
+- Environment name: `WHATSAPP_SURVEY_TEMPLATE_NAME`
+- Suggested template name: `employee_survey`
+- Body: `Hi {{name}}. A new employee survey is ready. It takes only a few minutes: {{link}}. This link is private, so please do not share it.`
+
+The body uses named parameters `name` and `link`.
+
+### Nonresponder reminder
+
+- Environment name: `WHATSAPP_SURVEY_REMINDER_TEMPLATE_NAME`
+- Suggested template name: `employee_survey_reminder`
+- Body: `Hi {{name}}. This is a reminder that your employee survey is still open: {{link}}. Please do not share this private link.`
+
+It uses the same `name` and `link` parameters. When the reminder variable is absent, RF Tools falls back to the invitation template.
+
+### Monthly employee update
+
+- Environment name: `WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME`
+- Suggested template name: `employee_feedback_update`
+- Body: `Hi {{name}}. You said: {{title}}. We did: {{update}}.`
+
+The body uses named parameters `name`, `title`, and `update`. Management reviews and explicitly publishes these messages from Employees, Team surveys.
 
 ## Environment variables
 
-Configure these values in Vercel for every deployed environment that sends surveys:
+Configure these values in Vercel for every environment that sends messages:
 
 ```text
 WHATSAPP_ACCESS_TOKEN=
 WHATSAPP_PHONE_NUMBER_ID=
-WHATSAPP_SURVEY_TEMPLATE_NAME=weekly_checkin
-WHATSAPP_TEMPLATE_LANGUAGE=en
+WHATSAPP_SURVEY_TEMPLATE_NAME=employee_survey
+WHATSAPP_SURVEY_REMINDER_TEMPLATE_NAME=employee_survey_reminder
+WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME=employee_feedback_update
+WHATSAPP_TEMPLATE_LANGUAGE=en_US
 WHATSAPP_GRAPH_API_VERSION=v24.0
+WHATSAPP_APP_SECRET=
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=
+SURVEY_RESTRICTED_ACCESS_EMAILS=
 ```
 
-Use a permanent system-user access token with permission to send WhatsApp business messages. The phone-number ID is the Meta asset ID, not the visible phone number.
+Use a permanent system-user access token. The phone-number ID is the Meta asset ID, not the visible phone number. Employee phone numbers must use international format such as `+14165550123`.
 
-The WhatsApp asset currently configured in `Welly-box-DUPE` is Meta's test number. It is suitable for validating this integration with approved test recipients, but production employee surveys need a registered business phone number and its matching permanent token.
+`SURVEY_RESTRICTED_ACCESS_EMAILS` is a comma-separated list of the small management group allowed to review named exit responses. The owner always has this access. Ordinary managers can review weekly, onboarding, and targeted named responses plus quarterly aggregates, but cannot retrieve exit campaigns or answers.
 
-Employee phone numbers must use international format, such as `+14165550123`. Spaces, parentheses, periods, and hyphens are accepted and removed before sending.
+## Delivery-status webhook
+
+Configure the WhatsApp webhook callback as:
+
+```text
+https://tools.rftransparent.ca/api/webhooks/whatsapp
+```
+
+Use `WHATSAPP_WEBHOOK_VERIFY_TOKEN` as the verification token and subscribe to message status events. RF Tools verifies every POST using `WHATSAPP_APP_SECRET` and `X-Hub-Signature-256`, then records delivered or failed status against the provider message ID.
+
+Opening the survey link separately records `opened_at`. Submitting records `completed_at`, so campaign reporting distinguishes sent, delivered, opened, and completed.
 
 ## Safe test mode
 
-Configure both values to limit the scheduled job to one employee and redirect that employee's message to a test number:
+Configure both values to limit a campaign to one employee and redirect that employee's messages to a test number:
 
 ```text
 WHATSAPP_TEST_RECIPIENT=+16477404552
 WHATSAPP_TEST_EMPLOYEE_ID=7e6e6237-892e-43ef-b707-87106a29cf5f
 ```
 
-When either value is missing, the job stops with a configuration error. Remove both values to return to normal employee-wide delivery.
+When only one value is present, sending stops with a configuration error. Remove both values for normal employee-wide delivery.
 
-## Verification
+## Privacy model
 
-After the template is approved and the variables are configured:
+- Weekly, onboarding, and targeted surveys are named. The response page clearly explains this before submission.
+- Quarterly answers are stored without recipient or employee identifiers. Department and location snapshots remain available only for aggregate reporting, and groups under five responses are suppressed.
+- Exit surveys are named and restricted to the owner and `SURVEY_RESTRICTED_ACCESS_EMAILS`. They appear in a separate restricted section, never in weekly reporting.
+- Only management API routes can load survey reporting or mutate actions.
+- Written answers are retained for the campaign's configured period, 365 days by default, then cleared by the dispatcher.
+- Survey data is excluded from commissions, employee KPI calculations, discipline, and compensation workflows.
 
-1. Open Settings, then Automations.
-2. Run Employee surveys manually.
-3. Confirm the run reports a sent count with no errors.
-4. Confirm the recipient receives the message and the survey link opens.
-5. Open System health and confirm WhatsApp Cloud API is operational.
+## Management workflow
 
-Failed sends are removed from the current week's survey records so a later run can retry them.
+1. Tuesday morning, management reviews the closed weekly pulse.
+2. A weekly overall score of 1 or 2, or an explicit follow-up request, creates a private review item automatically.
+3. The review item is due in two business days. Acknowledge it when contact begins.
+4. Team-wide issues must be recorded with an owner and due date.
+5. Draft and publish one “You said, we did” update each month.
+6. The dashboard reports overdue actions, completion time, acknowledgment SLA, four-week trends, medians, distributions, response rate, delivery, and recurring written-feedback terms.
+
+## Migration and verification
+
+Apply `supabase/migrations/20260813123000_employee_survey_program.sql`. It creates the normalized program tables, seeds all templates and questions, and backfills legacy `employee_surveys` records into campaign history without deleting the legacy table.
+
+After deployment:
+
+1. Set employee hire dates and any employment end dates.
+2. Configure and approve the three WhatsApp templates.
+3. Configure the signed delivery-status webhook.
+4. Run Employee survey program from Settings, Automations or send a weekly pulse from Employees, Team surveys.
+5. Confirm one invitation moves from sent to delivered, opened, and completed.
+6. Confirm a score of 1 or 2 creates a private review item.
+7. Confirm an ordinary employee receives HTTP 403 from `/api/kpi/employees/surveys`.
+8. Confirm a four-person quarterly group is shown as suppressed and a five-person group is reported only in aggregate.

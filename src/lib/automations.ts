@@ -57,6 +57,17 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     scheduleDetail: "Scheduler starts at 12:00 UTC",
   },
   {
+    slug: "sync-pipeline",
+    label: "Shopify pipeline mirror",
+    description: "Incrementally copies changed Shopify orders and quotes into RF Tools.",
+    kind: "sync",
+    result: "Fast local data for pipeline metrics and forecasts",
+    staleAfterHours: 3,
+    cron: "15 * * * *",
+    schedule: "Hourly, around 15 minutes past the hour",
+    scheduleDetail: "Keeps pipeline history local so dashboards avoid full Shopify downloads",
+  },
+  {
     slug: "followup-reminders",
     label: "Follow-up reminders",
     description: "Sends each store its leads due or overdue that day.",
@@ -82,15 +93,15 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
   },
   {
     slug: "send-employee-surveys",
-    label: "Employee surveys",
-    description: "Sends every active employee a unique weekly survey link.",
+    label: "Employee survey program",
+    description: "Dispatches weekly, quarterly, onboarding, exit, reminder, retention, and campaign-closing work in Toronto time.",
     kind: "email",
     result: "Sends to every active employee",
-    staleAfterHours: 192,
-    cron: "0 14 * * 5",
-    schedule: "Fridays, around 10:00 AM Toronto",
-    scheduleDetail: "Scheduler starts at 14:00 UTC",
-    sendsEmail: "every active employee",
+    staleAfterHours: 3,
+    cron: "25 * * * *",
+    schedule: "Hourly dispatcher; survey messages follow their Toronto schedule",
+    scheduleDetail: "Weekly pulse Thursday afternoon, nonresponder reminder Monday morning, close Tuesday morning",
+    sendsEmail: "survey recipients when a campaign or reminder is due",
   },
 ];
 
@@ -148,7 +159,11 @@ async function summarize(res: NextResponse): Promise<{ status: CronStatus; detai
   }
 
   if (!res.ok) {
-    const message = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`;
+    const summary = typeof body?.error === "string" ? body.error : `HTTP ${res.status}`;
+    const errors = Array.isArray(body?.errors)
+      ? body.errors.filter((error): error is string => typeof error === "string" && error.length > 0)
+      : [];
+    const message = errors.length > 0 ? `${summary}: ${errors.join("; ")}` : summary;
     return { status: "error", detail: message };
   }
 

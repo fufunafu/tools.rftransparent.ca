@@ -108,6 +108,60 @@ describe("matchPhoneCallsToLeads", () => {
     expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
   });
 
+  it("does not assign a call when eligible leads sharing the phone have different emails", () => {
+    const matches = matchPhoneCallsToLeads(
+      [
+        {
+          ...lead("family-1", "5145551234", "2026-07-01T12:00:00.000Z"),
+          email: "alex@example.com",
+        },
+        {
+          ...lead("family-2", "5145551234", "2026-08-01T12:00:00.000Z"),
+          email: "sam@example.com",
+        },
+      ],
+      [call()],
+    );
+
+    expect(matches).toEqual([]);
+  });
+
+  it("still assigns a call made before a second email identity used the phone", () => {
+    const matches = matchPhoneCallsToLeads(
+      [
+        {
+          ...lead("first", "5145551234", "2026-07-01T12:00:00.000Z"),
+          email: "alex@example.com",
+        },
+        {
+          ...lead("later", "5145551234", "2026-08-02T12:00:00.000Z"),
+          email: "sam@example.com",
+        },
+      ],
+      [call()],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["first"]);
+  });
+
+  it("treats normalized versions of the same email as one identity", () => {
+    const matches = matchPhoneCallsToLeads(
+      [
+        {
+          ...lead("older", "5145551234", "2026-07-01T12:00:00.000Z"),
+          email: "JANE@example.com",
+        },
+        {
+          ...lead("newer", "5145551234", "2026-08-01T12:00:00.000Z"),
+          email: " jane@example.com ",
+        },
+      ],
+      [call()],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+  });
+
   it("prefers the active lead over a newer historical duplicate", () => {
     const matches = matchPhoneCallsToLeads(
       [

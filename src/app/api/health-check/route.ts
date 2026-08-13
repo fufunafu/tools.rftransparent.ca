@@ -372,6 +372,10 @@ export async function GET(req: NextRequest) {
       "WHATSAPP_ACCESS_TOKEN",
       "WHATSAPP_PHONE_NUMBER_ID",
       "WHATSAPP_SURVEY_TEMPLATE_NAME",
+      "WHATSAPP_SURVEY_REMINDER_TEMPLATE_NAME",
+      "WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME",
+      "WHATSAPP_APP_SECRET",
+      "WHATSAPP_WEBHOOK_VERIFY_TOKEN",
     ]),
     // CRON_SECRET missing means every scheduled job 401s — and those 401s are
     // deliberately not recorded, so cron_runs just goes quiet.

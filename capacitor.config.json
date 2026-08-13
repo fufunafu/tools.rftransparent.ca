@@ -1,0 +1,12 @@
+{
+  "appId": "ca.rftransparent.tools",
+  "appName": "RF Tools",
+  "webDir": "capacitor/www",
+  "server": {
+    "url": "http://localhost:3000",
+    "cleartext": true
+  },
+  "ios": {
+    "contentInset": "automatic"
+  }
+}
