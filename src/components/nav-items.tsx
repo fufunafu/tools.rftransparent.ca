@@ -47,6 +47,11 @@ export interface NavItem {
   // When true, `href` is an absolute URL to a separate site — rendered as a
   // plain <a target="_blank"> instead of a Next.js <Link>.
   external?: boolean;
+  // The section's own colour, worn by its icon and by the bar down the left of
+  // the row when it is the live page. Without it every icon is the same grey
+  // and the rail reads as one long undifferentiated list — the colour is what
+  // makes a section recognisable before the label is read.
+  tint?: string;
   // When true, `href` is on this domain but is not a route of this app — a
   // static file served through a rewrite. It gets a plain <a> in the same
   // tab: <Link> would try a client-side navigation, find no route payload and
@@ -73,6 +78,7 @@ export const NAV_ITEMS: NavSection[] = [
     // role's default). `match` keeps it highlighted on every dashboard route.
     href: "/",
     label: "Dashboard",
+    tint: "#4F8F7C",
     status: "done",
     group: "overview",
     match: ["/", "/dashboards"],
@@ -85,6 +91,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/todos",
     label: "Tasks",
+    tint: "#3E6E96",
     status: "done",
     group: "overview",
     icon: (
@@ -96,6 +103,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/clock",
     label: "Clock",
+    tint: "#5C5B9E",
     status: "done",
     group: "overview",
     icon: (
@@ -107,6 +115,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/sales",
     label: "Sales",
+    tint: "#C79A12",
     status: "done",
     group: "revenue",
     icon: (
@@ -118,6 +127,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/pipeline",
     label: "Pipeline",
+    tint: "#2FA39B",
     status: "done",
     group: "revenue",
     icon: (
@@ -129,6 +139,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/marketing",
     label: "Marketing",
+    tint: "#B4552C",
     status: "done",
     group: "revenue",
     icon: (
@@ -140,6 +151,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/warehouse",
     label: "Logistics",
+    tint: "#5A6B73",
     status: "done",
     group: "operations",
     icon: (
@@ -168,6 +180,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/customer-service",
     label: "Customer Service",
+    tint: "#A83E3E",
     status: "done",
     group: "operations",
     icon: (
@@ -186,6 +199,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/accounting",
     label: "Accounting",
+    tint: "#7A5EA8",
     status: "done",
     group: "finance",
     icon: (
@@ -207,6 +221,7 @@ export const NAV_ITEMS: NavSection[] = [
   {
     href: "/shopify",
     label: "Shopify",
+    tint: "#2E7D4F",
     status: "done",
     group: "finance",
     icon: (
@@ -215,34 +230,94 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
   },
+  /* Six pages of a separate application on the same domain: one static file
+     under /library, reached through a rewrite. They sit here as ordinary rows
+     rather than inside a section, because the library is no longer one place
+     you open — it is six, and burying five of them behind a chevron made them
+     cost two clicks each. Every href hands the file the page to open and asks
+     it to leave its own sidebar out, so this rail stays the only one.
+     `plain` is what keeps them out of the Next router — see the flag above. */
   {
-    // A separate application on the same domain: one static file under
-    // /library, served through a rewrite. Every child hands it the page to
-    // open and asks it to leave its own sidebar out, so the rail on the left
-    // stays the only one on screen. `plain` is what keeps these out of the
-    // Next router — see the flag on NavItem.
-    href: "/library",
-    label: "Image Library",
+    href: "/library?chrome=off",
+    label: "Photo library",
+    tint: "#8A4F76",
     status: "done",
     group: "library",
     plain: true,
-    match: ["/library"],
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
       </svg>
     ),
-    children: [
-      { href: "/library?chrome=off", label: "Photo library", status: "done", plain: true },
-      { href: "/library?page=shows&chrome=off", label: "Trade shows", status: "done", plain: true },
-      { href: "/library?page=stores&chrome=off", label: "Stores", status: "done", plain: true },
-      { href: "/library?page=workspace&chrome=off", label: "My workspace", status: "done", plain: true },
-      // Both of these are gated inside the library as well, on its own
-      // permissions rather than this app's — the flag here only decides who is
-      // shown the door.
-      { href: "/library?page=vault&chrome=off", label: "Accounts & Passwords", status: "done", plain: true, access: "admin" },
-      { href: "/library?page=team&chrome=off", label: "Team & access", status: "done", plain: true, access: "admin" },
-    ],
+  },
+  {
+    href: "/library?page=shows&chrome=off",
+    label: "Trade shows",
+    tint: "#C79A12",
+    status: "done",
+    group: "library",
+    plain: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
+      </svg>
+    ),
+  },
+  {
+    href: "/library?page=stores&chrome=off",
+    label: "Stores",
+    tint: "#2FA39B",
+    status: "done",
+    group: "library",
+    plain: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349M3.75 21V9.349m0 0a3.001 3.001 0 0 0 3.75-.615A2.993 2.993 0 0 0 9.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 0 0 2.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 0 0 3.75.614m-16.5 0a3.004 3.004 0 0 1-.621-4.72l1.189-1.19A1.5 1.5 0 0 1 5.378 3h13.243a1.5 1.5 0 0 1 1.06.44l1.19 1.189a3 3 0 0 1-.621 4.72M6.75 18h3.75a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-.75-.75H6.75a.75.75 0 0 0-.75.75v3.75c0 .414.336.75.75.75Z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/library?page=workspace&chrome=off",
+    label: "My workspace",
+    tint: "#3E6E96",
+    status: "done",
+    group: "library",
+    plain: true,
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
+      </svg>
+    ),
+  },
+  // Both of these are gated inside the library as well, on its own permissions
+  // rather than this app's — the flag here only decides who is shown the door.
+  {
+    href: "/library?page=vault&chrome=off",
+    label: "Accounts & Passwords",
+    tint: "#5C5B9E",
+    status: "done",
+    group: "library",
+    plain: true,
+    access: "admin",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/library?page=team&chrome=off",
+    label: "Team & access",
+    tint: "#7A5EA8",
+    status: "done",
+    group: "library",
+    plain: true,
+    access: "admin",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
+      </svg>
+    ),
   },
 ];
 
@@ -252,6 +327,7 @@ export const NAV_ITEMS: NavSection[] = [
 export const SETTINGS_ITEM: NavItem = {
   href: "/settings",
   label: "Settings",
+  tint: "#5A6B73",
   status: "done",
   match: ["/settings", "/employees", "/health-check"],
   icon: (
