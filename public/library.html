@@ -906,6 +906,13 @@ body.vaultro .vfield input:focus,body.vaultro .vlabel:focus{outline:none;backgro
 .savechip.bad{border-color:#9A3A22;background:#F6E0D9;color:#7E2F1C;cursor:pointer}
 .savechip.bad::before{background:#B4452A}
 .savechip:disabled{cursor:default}
+/* Folded into somebody else's application. Their sidebar is the only one on
+   screen, so ours goes — and it goes the way a customer link already does it,
+   by zeroing the token rather than hiding the element, so the page padding and
+   the footer both follow. The header stays: it carries the page name and the
+   bell. */
+body.embedded{--rail:0px;padding-left:0}
+body.embedded .rail{display:none}
 .undofloat{position:fixed;left:26px;bottom:78px;z-index:40;display:flex;align-items:center;gap:9px;
   padding:11px 16px;border:1px solid #68919E;border-radius:999px;background:var(--panel);
   box-shadow:0 8px 22px rgba(18,23,26,.16);font-family:var(--field);font-size:13px;font-weight:600;
@@ -3308,7 +3315,7 @@ const CATALOG_PATH = "catalog.json";
 
    To release: raise the minor by one. 15.5 -> 15.6 -> ... -> 15.9 -> 16.0.
    The minor is a single digit, so 9 rolls the major. Keep it a string.        */
-const BUILD = "31.0";
+const BUILD = "31.1";
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const shareParam = new URLSearchParams(location.search).get("p");
 const selParam   = new URLSearchParams(location.search).get("s");
@@ -3317,6 +3324,16 @@ const showsParam = new URLSearchParams(location.search).get("shows");
    season is not handed three years of history to scroll past. */
 const showsYear = new URLSearchParams(location.search).get("year") || "";
 const brandParam = new URLSearchParams(location.search).get("brand");
+/* Which page to open on arrival, and whether to draw our own furniture.
+
+   Both exist because this page now lives inside another application. Its
+   sidebar links straight to a page of ours — ?page=shows — so a person picks
+   "Trade shows" over there and lands on it here, rather than on the photo
+   library with another click to make. And with a sidebar already on screen,
+   drawing a second one beside it would say "two websites" no matter how well
+   the colours matched: ?chrome=off folds ours away and leaves theirs alone. */
+const pageParam  = new URLSearchParams(location.search).get("page");
+const chromeOff  = new URLSearchParams(location.search).get("chrome") === "off";
 /* decided here, not in boot, so nothing can render team chrome first */
 let shareMode = !!selParam || !!shareParam || !!showsParam || !!brandParam;
 let shareItems = null;
@@ -14246,6 +14263,7 @@ registerPage(()=> reportsMode, ()=> setReports(false));
   }
   applyGate();
   document.getElementById("boot").hidden=true;
+  if(chromeOff) document.body.classList.add("embedded");
 
   /* Arriving from an invitation or a reset link: the session is already live,
      but the account has no password yet, so ask for one before anything else. */
@@ -14259,6 +14277,20 @@ registerPage(()=> reportsMode, ()=> setReports(false));
   if(!session) return;
   await loadCatalog();
   render(); syncTray();
+  /* After the catalog, because every one of these draws from it. Names match
+     the sidebar over there; anything else is ignored and the library opens. */
+  if(pageParam){
+    const open = {
+      shows:     ()=> setShows(true),
+      stores:    ()=> setStores(true),
+      vault:     ()=> setVault(true),
+      passwords: ()=> setVault(true),
+      team:      ()=> setTeam(true),
+      workspace: ()=> setWork(true),
+      work:      ()=> setWork(true),
+    }[String(pageParam).toLowerCase()];
+    if(open) await open();
+  }
   document.getElementById("whoami").textContent=
     "Managing as "+(session.user?.email||"admin")+".";
 })().catch(err=>{
