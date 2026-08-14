@@ -35,7 +35,7 @@ const readModKey = () => (/Mac|iPhone|iPad/i.test(navigator.userAgent) ? "⌘" :
 const noModKey = () => "";
 
 const SearchIcon = ({ className }: { className: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className={className}>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={className}>
     <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
   </svg>
 );
@@ -49,7 +49,7 @@ function sectionForPathname(pathname: string) {
 }
 
 const SignOutIcon = ({ className }: { className: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className={className}>
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className={className}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
   </svg>
 );
@@ -79,7 +79,7 @@ function ViewerAvatar({
     <span
       role="img"
       aria-label={`${label} profile`}
-      className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-600"
+      className="flex h-[26px] w-[26px] shrink-0 items-center justify-center overflow-hidden rounded-full bg-white border border-[#A2B5BD] text-[10px] font-bold text-[#3F5057]"
     >
       {avatarUrl && !failed ? (
         <img src={avatarUrl} alt="" onError={() => setFailed(true)} className="h-full w-full object-cover" />
@@ -284,6 +284,32 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     return <>{children}</>;
   }
 
+  // The collapse control. It used to sit beside the logo, where at 56px of rail
+  // there was room for one of the two and they landed on top of each other.
+  // Down here it has the footer to itself, and it is the one blue thing in the
+  // rail because it is the one control that changes the rail rather than
+  // navigating it.
+  const foldButton = (
+    <button
+      onClick={toggleCollapsed}
+      className="max-md:hidden w-8 h-8 shrink-0 rounded-[7px] flex items-center justify-center
+        bg-[#3E6E96] text-white shadow-[0_1px_2px_rgba(18,23,26,.12),0_6px_14px_-8px_rgba(62,110,150,.7)]
+        hover:bg-[#33597A] active:translate-y-px transition-colors"
+      title={collapsed ? "Expand the menu" : "Collapse the menu"}
+      aria-label={collapsed ? "Expand the menu" : "Collapse the menu"}
+    >
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={2.2}
+        className={`w-[15px] h-[15px] transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+      </svg>
+    </button>
+  );
+
   return (
     <div className="flex h-dvh min-h-0 overflow-hidden">
       {searchOpen && (
@@ -296,54 +322,49 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden md:flex
+        className="min-h-0 bg-[#F7F9FA] border-r border-[#A2B5BD] flex-col z-40 relative hidden md:flex
           md:shrink-0 md:transition-[width] md:duration-200"
       >
-        {/* Logo and collapse controls */}
-        <div className="px-3 pt-3 pb-2.5 flex items-center gap-2.5">
+        {/* The brand lockup, and nothing else — see foldButton. */}
+        <div className={`min-h-16 flex items-center ${collapsed ? "justify-center px-2" : "gap-[11px] px-4"}`}>
           <Link
             href={homePath}
             title={collapsed ? "Go to your home page" : undefined}
-            className={`flex min-w-0 items-center gap-2.5 ${collapsed ? "" : "flex-1"}`}
+            className={`group flex min-w-0 items-center gap-[11px] ${collapsed ? "" : "flex-1"}`}
           >
-            <span className="w-[26px] h-[26px] rounded-[7px] bg-blue-600 flex items-center justify-center shrink-0">
-              <span className="text-white text-[10.5px] font-bold tracking-[0.02em]">RF</span>
+            <span className="w-[34px] h-[34px] rounded-[9px] bg-[#3E6E96] group-hover:bg-[#33597A] transition-colors flex items-center justify-center shrink-0">
+              <span className="text-white text-[11px] font-bold tracking-[0.02em]">RF</span>
             </span>
             {!collapsed && (
-              <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-slate-900">
-                RF Transparent
+              <span className="flex min-w-0 flex-col gap-[4px] leading-none">
+                <b className="truncate text-[15.5px] font-semibold tracking-[-0.035em] text-[#12171A]">
+                  RF Transparent
+                </b>
+                <span className="text-[8.5px] font-semibold uppercase tracking-[0.17em] text-[#68757B]">
+                  Internal Tools
+                </span>
               </span>
             )}
           </Link>
-          {/* Desktop: collapse/expand toggle */}
-          <button
-            onClick={toggleCollapsed}
-            className="max-md:hidden w-[22px] h-[22px] rounded-md flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0"
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
-            </svg>
-          </button>
         </div>
 
         {/* Page search — opens the same palette as ⌘K */}
-        <div className="px-3 pb-1.5">
+        <div className={`pb-2 ${collapsed ? "px-2" : "px-3"}`}>
           <button
             type="button"
             onClick={() => setSearchOpen(true)}
             title={collapsed ? "Search pages" : undefined}
-            className={`w-full h-[30px] flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600 transition-colors ${
-              collapsed ? "justify-center" : "px-[9px]"
+            className={`w-full h-8 flex items-center gap-2 rounded-[7px] bg-white border border-[#A2B5BD]
+              text-[#5A686E] hover:border-[#3F5057] hover:text-[#12171A] transition-colors ${
+              collapsed ? "justify-center" : "px-[10px]"
             }`}
           >
-            <SearchIcon className="w-3.5 h-3.5 shrink-0" />
+            <SearchIcon className="w-[15px] h-[15px] shrink-0" />
             {!collapsed && (
               <>
-                <span className="flex-1 text-left text-[12.5px]">Search</span>
+                <span className="flex-1 text-left text-[12.5px] font-medium">Search</span>
                 {modKey ? (
-                  <kbd className="font-sans text-[10px] text-slate-300">{modKey}K</kbd>
+                  <kbd className="font-sans text-[10px] font-semibold text-[#68757B]">{modKey}K</kbd>
                 ) : null}
               </>
             )}
@@ -351,7 +372,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         </div>
 
         <nav
-          className="flex-1 px-3 pt-1 pb-2 overflow-y-auto flex flex-col gap-0.5"
+          className={`flex-1 pt-1 pb-2 overflow-y-auto flex flex-col gap-0.5 ${collapsed ? "px-2" : "px-3"}`}
           aria-label="Main navigation"
         >
           {NAV_GROUPS.map((group, groupIndex) => {
@@ -362,10 +383,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                 {collapsed
                   ? // No room for a label — a hairline keeps the grouping
                     // legible in the rail.
-                    groupIndex > 0 && <span className="my-1.5 h-px w-6 mx-auto bg-slate-100" />
+                    groupIndex > 0 && <span className="my-2 h-px w-7 mx-auto bg-[#A2B5BD]" />
                   : (
                     <p
-                      className={`${groupIndex === 0 ? "mt-2" : "mt-3"} mb-[3px] px-[9px] text-[9.5px] font-semibold uppercase tracking-[0.13em] text-slate-300`}
+                      className={`${groupIndex === 0 ? "pt-1.5" : "pt-4"} pb-[7px] px-[10px] text-[9px] font-semibold uppercase tracking-[0.17em] text-[#68757B] whitespace-nowrap`}
                     >
                       {group.label}
                     </p>
@@ -386,10 +407,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        {/* One footer block: Settings, then who you're signed in as. Reporting
-            a bug and signing out hang off the identity row rather than taking
-            a full-width strip each. */}
-        <div className="px-3 pt-2 pb-2.5 border-t border-slate-100 flex flex-col gap-0.5">
+        {/* One footer block: Settings, then who you're signed in as, then the
+            control that folds the rail. Reporting a bug and signing out hang
+            off the identity row rather than taking a full-width strip each. */}
+        <div className={`pt-2 pb-2.5 border-t border-[#A2B5BD] flex flex-col gap-0.5 ${collapsed ? "px-2" : "px-3"}`}>
           {visibleSettings && (
             <SidebarNavRow
               item={visibleSettings}
@@ -404,8 +425,8 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           {collapsed ? (
             // Stacked rather than avatar-only: there's no avatar menu to hide
             // sign-out behind, and needing to expand the rail to sign out is a
-            // worse trade than one more 26px row.
-            <div className="mt-1.5 flex flex-col items-center gap-1">
+            // worse trade than one more row.
+            <div className="mt-1.5 flex flex-col items-center gap-1.5">
               <ViewerAvatar
                 name={viewer.name}
                 email={viewer.email}
@@ -415,49 +436,53 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                 href="/api/logout"
                 title="Sign out"
                 aria-label="Sign out"
-                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                className="w-8 h-8 rounded-[7px] flex items-center justify-center text-[#5A686E] hover:text-[#12171A] hover:bg-[rgba(18,23,26,.045)] transition-colors"
               >
-                <SignOutIcon className="w-[15px] h-[15px]" />
+                <SignOutIcon className="w-[16px] h-[16px]" />
               </a>
+              {foldButton}
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 h-[38px] pl-[9px] pr-[5px]">
-              <ViewerAvatar
-                name={viewer.name}
-                email={viewer.email}
-                avatarUrl={viewer.avatarUrl}
-              />
-              <span className="flex-1 min-w-0 flex flex-col leading-[1.25]">
-                <span className="truncate text-xs font-semibold text-slate-900">
-                  {viewer.name ?? viewer.email ?? ""}
+            <>
+              <div className="flex items-center gap-2.5 h-[38px] pl-[11px] pr-[5px]">
+                <ViewerAvatar
+                  name={viewer.name}
+                  email={viewer.email}
+                  avatarUrl={viewer.avatarUrl}
+                />
+                <span className="flex-1 min-w-0 flex flex-col leading-[1.25]">
+                  <span className="truncate text-[12px] font-semibold text-[#12171A]">
+                    {viewer.name ?? viewer.email ?? ""}
+                  </span>
+                  <Link
+                    href="/bugs"
+                    className={`text-[10px] w-fit font-medium transition-colors ${
+                      pathname === "/bugs"
+                        ? "text-[#12171A]"
+                        : "text-[#68757B] hover:text-[#12171A]"
+                    }`}
+                  >
+                    Report a bug
+                  </Link>
                 </span>
-                <Link
-                  href="/bugs"
-                  className={`text-[10px] w-fit transition-colors ${
-                    pathname === "/bugs"
-                      ? "text-slate-600 font-medium"
-                      : "text-slate-300 hover:text-slate-500"
-                  }`}
+                <a
+                  href="/api/logout"
+                  title="Sign out"
+                  aria-label="Sign out"
+                  className="w-8 h-8 rounded-[7px] flex items-center justify-center text-[#5A686E] hover:text-[#12171A] hover:bg-[rgba(18,23,26,.045)] transition-colors shrink-0"
                 >
-                  Report a bug
-                </Link>
-              </span>
-              <a
-                href="/api/logout"
-                title="Sign out"
-                aria-label="Sign out"
-                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors shrink-0"
-              >
-                <SignOutIcon className="w-[15px] h-[15px]" />
-              </a>
-            </div>
+                  <SignOutIcon className="w-[16px] h-[16px]" />
+                </a>
+              </div>
+              <div className="flex items-center justify-end pt-1">{foldButton}</div>
+            </>
           )}
         </div>
         {/* Resize handle — desktop only (drag is mouse-driven) */}
         {!collapsed && (
           <div
             onMouseDown={handleMouseDown}
-            className="max-md:hidden absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-blue-400 active:bg-blue-500 transition-colors"
+            className="max-md:hidden absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-[#3E6E96] active:bg-[#33597A] transition-colors"
           />
         )}
       </aside>
@@ -467,17 +492,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         {/* Mobile top bar — brand and search. Navigation lives in the bottom
             tab bar. The top safe-area padding clears the notch when the site
             runs full-screen (home-screen install or the iOS app). */}
-        <div className="md:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
+        <div className="md:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-[#A2B5BD] bg-white shrink-0">
           <Link href={homePath} className="flex items-center gap-3 flex-1 min-w-0">
-            <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+            <span className="w-7 h-7 rounded-lg bg-[#3E6E96] flex items-center justify-center shrink-0">
               <span className="text-white text-[10px] font-bold">RF</span>
             </span>
-            <span className="truncate text-sm font-semibold text-slate-900">RF Transparent</span>
+            <span className="truncate text-sm font-semibold text-[#12171A]">RF Transparent</span>
           </Link>
           {/* Phones have no keyboard shortcut, so search gets its own button */}
           <button
             onClick={() => setSearchOpen(true)}
-            className="w-9 h-9 -mr-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+            className="w-9 h-9 -mr-1.5 rounded-md flex items-center justify-center text-[#3F5057] hover:bg-[rgba(18,23,26,.045)] transition-colors"
             aria-label="Search pages"
           >
             <SearchIcon className="w-5 h-5" />
@@ -486,7 +511,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
         {/* Main content. Extra bottom padding on phones keeps the last of the
             page above the fixed tab bar. */}
-        <main data-app-main className="min-h-0 flex-1 overflow-y-auto overscroll-y-none bg-slate-100">
+        <main data-app-main className="min-h-0 flex-1 overflow-y-auto overscroll-y-none bg-[#F1F4F5]">
           <div className="p-4 pb-28 md:p-8">
             {children}
           </div>
