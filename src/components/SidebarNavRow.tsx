@@ -80,6 +80,35 @@ export default function SidebarNavRow({
 
   const trailing = collapsed ? null : badge;
 
+  // Where a row without a chevron points. A section collapsed to the icon rail
+  // has no way to expand, so it stands in for its first child — and it has to
+  // borrow that child's link kind too, or a static destination would go back
+  // through the router the moment the rail was narrowed.
+  const linkTarget = hasChildren ? item.children![0] : item;
+
+  // Shared by the two link branches below, so the badge-in-the-rail treatment
+  // is written once.
+  const rowInner = (
+    <>
+      {collapsed && showBadge ? (
+        <span className="relative flex items-center justify-center">
+          {icon}
+          {/* No room for the pill in the rail — a corner dot still
+              signals open problem tickets. */}
+          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white" />
+        </span>
+      ) : (
+        icon
+      )}
+      {!collapsed && (
+        <>
+          <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          {trailing}
+        </>
+      )}
+    </>
+  );
+
   return (
     <div>
       {hasChildren && !collapsed ? (
@@ -121,28 +150,16 @@ export default function SidebarNavRow({
             </>
           )}
         </a>
+      ) : linkTarget.plain ? (
+        /* Our domain, not our router: a static file behind a rewrite. Same tab
+           and no arrow — it is meant to read as another page of this app, not
+           as a trip somewhere else. */
+        <a href={linkTarget.href} className={rowClass} title={collapsed ? item.label : undefined}>
+          {rowInner}
+        </a>
       ) : (
-        <Link
-          href={hasChildren ? item.children![0].href : item.href}
-          className={rowClass}
-          title={collapsed ? item.label : undefined}
-        >
-          {collapsed && showBadge ? (
-            <span className="relative flex items-center justify-center">
-              {icon}
-              {/* No room for the pill in the rail — a corner dot still
-                  signals open problem tickets. */}
-              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white" />
-            </span>
-          ) : (
-            icon
-          )}
-          {!collapsed && (
-            <>
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              {trailing}
-            </>
-          )}
+        <Link href={linkTarget.href} className={rowClass} title={collapsed ? item.label : undefined}>
+          {rowInner}
         </Link>
       )}
 
@@ -189,6 +206,15 @@ export default function SidebarNavRow({
                     href={child.href}
                     target="_blank"
                     rel="noopener noreferrer"
+                    className={childClass}
+                    tabIndex={expanded ? undefined : -1}
+                  >
+                    {childContent}
+                  </a>
+                ) : child.plain ? (
+                  <a
+                    key={child.href}
+                    href={child.href}
                     className={childClass}
                     tabIndex={expanded ? undefined : -1}
                   >
