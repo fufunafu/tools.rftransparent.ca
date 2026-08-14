@@ -2,7 +2,7 @@ import type { NavTarget } from "@/components/CommandPalette";
 
 export type Status = "done" | "wip" | "todo";
 export type AccessLevel = "authenticated" | "admin" | "management";
-export type NavGroup = "overview" | "revenue" | "operations" | "finance" | "library";
+export type NavGroup = "overview" | "revenue" | "operations" | "finance";
 
 // Rendered as labelled bands in the rail, in this order. NAV_ITEMS is kept in
 // the same order, so rendering is a filter per group with no sort.
@@ -11,10 +11,6 @@ export const NAV_GROUPS: { id: NavGroup; label: string }[] = [
   { id: "revenue", label: "Revenue" },
   { id: "operations", label: "Operations" },
   { id: "finance", label: "Finance" },
-  // Last band, below Shopify. Its own heading rather than a row inside
-  // Finance: the library is not an accounting page, and a band costs one line
-  // to say so.
-  { id: "library", label: "Image Library" },
 ];
 
 export interface ViewerAccess {
@@ -147,6 +143,20 @@ export const NAV_ITEMS: NavSection[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
       </svg>
     ),
+    // The image library (six framed pages of the separate app under
+    // src/app/library) lives here as children: it's marketing material, so it
+    // sits under Marketing rather than as its own band.
+    children: [
+      { href: "/marketing", label: "Analytics", status: "done" },
+      { href: "/library/photos", label: "Photo library", status: "done" },
+      { href: "/library/shows", label: "Trade shows", status: "done" },
+      { href: "/library/stores", label: "Stores", status: "done" },
+      { href: "/library/workspace", label: "My workspace", status: "done" },
+      // Both are gated inside the library as well, on its own permissions —
+      // the flag here only decides who is shown the door.
+      { href: "/library/vault", label: "Accounts & Passwords", status: "done", access: "admin" },
+      { href: "/library/team", label: "Team & access", status: "done", access: "admin" },
+    ],
   },
   {
     href: "/warehouse",
@@ -227,89 +237,6 @@ export const NAV_ITEMS: NavSection[] = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
-      </svg>
-    ),
-  },
-  /* Six pages of a separate application, framed by src/app/library. They are
-     ordinary routes of this app — <Link>, client-side navigation, and a row
-     that highlights on arrival — and the page behind them puts the library
-     file in the content area with its own sidebar folded away. They sit here
-     as rows rather than inside a section because the library is no longer one
-     place you open: it is six, and burying five behind a chevron made them
-     cost two clicks each. */
-  {
-    href: "/library/photos",
-    label: "Photo library",
-    tint: "#8A4F76",
-    status: "done",
-    group: "library",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/library/shows",
-    label: "Trade shows",
-    tint: "#C79A12",
-    status: "done",
-    group: "library",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
-      </svg>
-    ),
-  },
-  {
-    href: "/library/stores",
-    label: "Stores",
-    tint: "#2FA39B",
-    status: "done",
-    group: "library",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349M3.75 21V9.349m0 0a3.001 3.001 0 0 0 3.75-.615A2.993 2.993 0 0 0 9.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 0 0 2.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 0 0 3.75.614m-16.5 0a3.004 3.004 0 0 1-.621-4.72l1.189-1.19A1.5 1.5 0 0 1 5.378 3h13.243a1.5 1.5 0 0 1 1.06.44l1.19 1.189a3 3 0 0 1-.621 4.72M6.75 18h3.75a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-.75-.75H6.75a.75.75 0 0 0-.75.75v3.75c0 .414.336.75.75.75Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/library/workspace",
-    label: "My workspace",
-    tint: "#3E6E96",
-    status: "done",
-    group: "library",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
-      </svg>
-    ),
-  },
-  // Both of these are gated inside the library as well, on its own permissions
-  // rather than this app's — the flag here only decides who is shown the door.
-  {
-    href: "/library/vault",
-    label: "Accounts & Passwords",
-    tint: "#5C5B9E",
-    status: "done",
-    group: "library",
-    access: "admin",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
-      </svg>
-    ),
-  },
-  {
-    href: "/library/team",
-    label: "Team & access",
-    tint: "#7A5EA8",
-    status: "done",
-    group: "library",
-    access: "admin",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z" />
       </svg>
     ),
   },
