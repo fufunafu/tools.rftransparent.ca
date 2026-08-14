@@ -3580,7 +3580,8 @@ function applyGate(){
      the rung it advertises: view opens it, edit writes to it, delete removes
      from it. Team & access is a different question and stays with edit, because
      handing out permissions is not reading a password. */
-  document.getElementById("vaultToggle").hidden = !canView("passwords");
+  /* Vault removed from this deployment — the button never shows. */
+  document.getElementById("vaultToggle").hidden = true;
   document.getElementById("teamToggle").hidden  = !isAdmin();
   document.getElementById("showsToggle").hidden = !authed || shareMode || !canView("shows");
   document.getElementById("cmpToggle").hidden = !authed || shareMode || !canView("stores");
@@ -7233,6 +7234,10 @@ function renderVault(){
 }
 
 async function setVault(on){
+  /* Vault removed from this deployment (owner decision, 2026-08-14): the
+     password vault must not live inside the company tool. The function stays
+     so every caller keeps working, but it can only ever close the page. */
+  on = false;
   vaultMode = on && canView("passwords");
   document.body.classList.toggle("vaulting", vaultMode);
   /* Everything on this page was built for an admin, because until now only an
@@ -14283,8 +14288,6 @@ registerPage(()=> reportsMode, ()=> setReports(false));
     const open = {
       shows:     ()=> setShows(true),
       stores:    ()=> setStores(true),
-      vault:     ()=> setVault(true),
-      passwords: ()=> setVault(true),
       team:      ()=> setTeam(true),
       workspace: ()=> setWork(true),
       work:      ()=> setWork(true),

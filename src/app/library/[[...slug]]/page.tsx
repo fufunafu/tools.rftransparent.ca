@@ -24,7 +24,6 @@ const PAGES: Record<string, string> = {
   shows: "shows",
   stores: "stores",
   workspace: "workspace",
-  vault: "vault",
   team: "team",
 };
 

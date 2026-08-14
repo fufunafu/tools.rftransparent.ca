@@ -152,9 +152,9 @@ export const NAV_ITEMS: NavSection[] = [
       { href: "/library/shows", label: "Trade shows", status: "done" },
       { href: "/library/stores", label: "Stores", status: "done" },
       { href: "/library/workspace", label: "My workspace", status: "done" },
-      // Both are gated inside the library as well, on its own permissions —
-      // the flag here only decides who is shown the door.
-      { href: "/library/vault", label: "Accounts & Passwords", status: "done", access: "admin" },
+      // Gated inside the library as well, on its own permissions — the flag
+      // here only decides who is shown the door. (The password vault was
+      // removed from this deployment entirely; see public/library.html.)
       { href: "/library/team", label: "Team & access", status: "done", access: "admin" },
     ],
   },
