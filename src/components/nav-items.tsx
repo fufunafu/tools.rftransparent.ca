@@ -2,7 +2,7 @@ import type { NavTarget } from "@/components/CommandPalette";
 
 export type Status = "done" | "wip" | "todo";
 export type AccessLevel = "authenticated" | "admin" | "management";
-export type NavGroup = "overview" | "revenue" | "operations" | "finance";
+export type NavGroup = "overview" | "revenue" | "operations" | "finance" | "library";
 
 // Rendered as labelled bands in the rail, in this order. NAV_ITEMS is kept in
 // the same order, so rendering is a filter per group with no sort.
@@ -11,6 +11,10 @@ export const NAV_GROUPS: { id: NavGroup; label: string }[] = [
   { id: "revenue", label: "Revenue" },
   { id: "operations", label: "Operations" },
   { id: "finance", label: "Finance" },
+  // Last band, below Shopify. Its own heading rather than a row inside
+  // Finance: the library is not an accounting page, and a band costs one line
+  // to say so.
+  { id: "library", label: "Image Library" },
 ];
 
 export interface ViewerAccess {
@@ -24,6 +28,8 @@ export interface NavChild {
   status: Status;
   // Same meaning as on NavItem — an absolute URL to a separate site.
   external?: boolean;
+  // Same meaning as on NavItem — this app's domain, but not this app's router.
+  plain?: boolean;
   access?: AccessLevel;
 }
 
@@ -41,6 +47,13 @@ export interface NavItem {
   // When true, `href` is an absolute URL to a separate site — rendered as a
   // plain <a target="_blank"> instead of a Next.js <Link>.
   external?: boolean;
+  // When true, `href` is on this domain but is not a route of this app — a
+  // static file served through a rewrite. It gets a plain <a> in the same
+  // tab: <Link> would try a client-side navigation, find no route payload and
+  // fall back to a full load anyway, having already prefetched the whole file
+  // on hover. Same tab, because the point of these is that they do not feel
+  // like leaving.
+  plain?: boolean;
   access?: AccessLevel;
   // Path prefixes that count as "inside" this section for highlighting and
   // auto-expanding. Defaults to `href`. Settings needs this because two of
@@ -201,6 +214,35 @@ export const NAV_ITEMS: NavSection[] = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
       </svg>
     ),
+  },
+  {
+    // A separate application on the same domain: one static file under
+    // /library, served through a rewrite. Every child hands it the page to
+    // open and asks it to leave its own sidebar out, so the rail on the left
+    // stays the only one on screen. `plain` is what keeps these out of the
+    // Next router — see the flag on NavItem.
+    href: "/library",
+    label: "Image Library",
+    status: "done",
+    group: "library",
+    plain: true,
+    match: ["/library"],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+      </svg>
+    ),
+    children: [
+      { href: "/library?chrome=off", label: "Photo library", status: "done", plain: true },
+      { href: "/library?page=shows&chrome=off", label: "Trade shows", status: "done", plain: true },
+      { href: "/library?page=stores&chrome=off", label: "Stores", status: "done", plain: true },
+      { href: "/library?page=workspace&chrome=off", label: "My workspace", status: "done", plain: true },
+      // Both of these are gated inside the library as well, on its own
+      // permissions rather than this app's — the flag here only decides who is
+      // shown the door.
+      { href: "/library?page=vault&chrome=off", label: "Accounts & Passwords", status: "done", plain: true, access: "admin" },
+      { href: "/library?page=team&chrome=off", label: "Team & access", status: "done", plain: true, access: "admin" },
+    ],
   },
 ];
 
