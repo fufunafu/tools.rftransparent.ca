@@ -230,20 +230,19 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
   },
-  /* Six pages of a separate application on the same domain: one static file
-     under /library, reached through a rewrite. They sit here as ordinary rows
-     rather than inside a section, because the library is no longer one place
-     you open — it is six, and burying five of them behind a chevron made them
-     cost two clicks each. Every href hands the file the page to open and asks
-     it to leave its own sidebar out, so this rail stays the only one.
-     `plain` is what keeps them out of the Next router — see the flag above. */
+  /* Six pages of a separate application, framed by src/app/library. They are
+     ordinary routes of this app — <Link>, client-side navigation, and a row
+     that highlights on arrival — and the page behind them puts the library
+     file in the content area with its own sidebar folded away. They sit here
+     as rows rather than inside a section because the library is no longer one
+     place you open: it is six, and burying five behind a chevron made them
+     cost two clicks each. */
   {
-    href: "/library?chrome=off",
+    href: "/library/photos",
     label: "Photo library",
     tint: "#8A4F76",
     status: "done",
     group: "library",
-    plain: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
@@ -251,12 +250,11 @@ export const NAV_ITEMS: NavSection[] = [
     ),
   },
   {
-    href: "/library?page=shows&chrome=off",
+    href: "/library/shows",
     label: "Trade shows",
     tint: "#C79A12",
     status: "done",
     group: "library",
-    plain: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5" />
@@ -264,12 +262,11 @@ export const NAV_ITEMS: NavSection[] = [
     ),
   },
   {
-    href: "/library?page=stores&chrome=off",
+    href: "/library/stores",
     label: "Stores",
     tint: "#2FA39B",
     status: "done",
     group: "library",
-    plain: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h3.64m-1.39 0V9.349M3.75 21V9.349m0 0a3.001 3.001 0 0 0 3.75-.615A2.993 2.993 0 0 0 9.75 9.75c.896 0 1.7-.393 2.25-1.016a2.993 2.993 0 0 0 2.25 1.016c.896 0 1.7-.393 2.25-1.016a3.001 3.001 0 0 0 3.75.614m-16.5 0a3.004 3.004 0 0 1-.621-4.72l1.189-1.19A1.5 1.5 0 0 1 5.378 3h13.243a1.5 1.5 0 0 1 1.06.44l1.19 1.189a3 3 0 0 1-.621 4.72M6.75 18h3.75a.75.75 0 0 0 .75-.75V13.5a.75.75 0 0 0-.75-.75H6.75a.75.75 0 0 0-.75.75v3.75c0 .414.336.75.75.75Z" />
@@ -277,12 +274,11 @@ export const NAV_ITEMS: NavSection[] = [
     ),
   },
   {
-    href: "/library?page=workspace&chrome=off",
+    href: "/library/workspace",
     label: "My workspace",
     tint: "#3E6E96",
     status: "done",
     group: "library",
-    plain: true,
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25A2.25 2.25 0 0 1 13.5 18v-2.25Z" />
@@ -292,12 +288,11 @@ export const NAV_ITEMS: NavSection[] = [
   // Both of these are gated inside the library as well, on its own permissions
   // rather than this app's — the flag here only decides who is shown the door.
   {
-    href: "/library?page=vault&chrome=off",
+    href: "/library/vault",
     label: "Accounts & Passwords",
     tint: "#5C5B9E",
     status: "done",
     group: "library",
-    plain: true,
     access: "admin",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
@@ -306,12 +301,11 @@ export const NAV_ITEMS: NavSection[] = [
     ),
   },
   {
-    href: "/library?page=team&chrome=off",
+    href: "/library/team",
     label: "Team & access",
     tint: "#7A5EA8",
     status: "done",
     group: "library",
-    plain: true,
     access: "admin",
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
