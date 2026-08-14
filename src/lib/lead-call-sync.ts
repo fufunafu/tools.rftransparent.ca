@@ -66,7 +66,12 @@ function matchablePhone(raw: string | null): string | null {
 
 function normalizedEmail(raw: string | null): string | null {
   const email = raw?.replace(/\s+/g, "").toLowerCase() ?? "";
-  return email.includes("@") ? email : null;
+  if (!email.includes("@")) return null;
+  // Typo tolerance: quotes in an address are almost always a data-entry slip
+  // ("bev'scarpentry@…" vs "bevscarpentry@…"). Treating the variants as one
+  // identity keeps the ambiguity guard from splitting one person in two and
+  // silently skipping every call to their number.
+  return email.replace(/['"‘’“”]/g, "");
 }
 
 function isHistoricalLead(lead: LeadForCallSync): boolean {

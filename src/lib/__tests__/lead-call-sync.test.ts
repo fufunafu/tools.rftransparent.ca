@@ -162,6 +162,26 @@ describe("matchPhoneCallsToLeads", () => {
     expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
   });
 
+  it("treats an apostrophe-typo variant of the same email as one identity", () => {
+    // Real case: "bev'scarpentry@…" and "bevscarpentry@…" are one person whose
+    // calls were all skipped as ambiguous until quote characters were ignored.
+    const matches = matchPhoneCallsToLeads(
+      [
+        {
+          ...lead("older", "5145551234", "2026-07-01T12:00:00.000Z"),
+          email: "bev'scarpentry@hotmail.com",
+        },
+        {
+          ...lead("newer", "5145551234", "2026-08-01T12:00:00.000Z"),
+          email: "bevscarpentry@hotmail.com",
+        },
+      ],
+      [call()],
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+  });
+
   it("prefers the active lead over a newer historical duplicate", () => {
     const matches = matchPhoneCallsToLeads(
       [
