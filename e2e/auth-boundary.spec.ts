@@ -12,8 +12,8 @@ for (const route of protectedRoutes) {
   test(`redirects signed-out visitors from ${route} to login`, async ({ page }) => {
     await page.goto(route);
 
-    await expect(page).toHaveURL(/\/login$/);
-    await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+    await expect(page).toHaveURL(/\/login(?:\?|$)/);
+    await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
   });
 }
 
@@ -38,5 +38,6 @@ test("keeps token-based employee surveys public", async ({ page }) => {
   await page.goto("/survey/invalid-smoke-test-token");
 
   await expect(page).not.toHaveURL(/\/login/);
-  await expect(page.getByText("This survey link is invalid or has expired.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "This link is not available" })).toBeVisible();
+  await expect(page.getByText("This survey link is invalid. Ask your manager for a new link.")).toBeVisible();
 });
