@@ -96,7 +96,7 @@ describe("matchPhoneCallsToLeads", () => {
     ).toEqual([]);
   });
 
-  it("assigns a call to the most recent eligible lead for a repeated phone number", () => {
+  it("puts the attempt on the most recent lead and credits same-identity duplicates", () => {
     const matches = matchPhoneCallsToLeads(
       [
         lead("older", "5145551234", "2026-07-01T12:00:00.000Z"),
@@ -105,7 +105,24 @@ describe("matchPhoneCallsToLeads", () => {
       [call()],
     );
 
-    expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+    expect(matches.map((match) => [match.leadId, match.status, match.attempts.length])).toEqual([
+      ["older", "called", 0],
+      ["newer", "called", 1],
+    ]);
+  });
+
+  it("does not credit a duplicate submitted after the call", () => {
+    // A fresh re-inquiry from the same person must still surface as
+    // not-called — the earlier call was about the earlier request.
+    const matches = matchPhoneCallsToLeads(
+      [
+        lead("before-call", "5145551234", "2026-08-01T12:00:00.000Z"),
+        lead("after-call", "5145551234", "2026-08-02T12:00:00.000Z"),
+      ],
+      [call()], // 2026-08-01T13:00
+    );
+
+    expect(matches.map((match) => match.leadId)).toEqual(["before-call"]);
   });
 
   it("does not assign a call when eligible leads sharing the phone have different emails", () => {
@@ -159,7 +176,8 @@ describe("matchPhoneCallsToLeads", () => {
       [call()],
     );
 
-    expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+    expect(matches.map((match) => match.leadId).sort()).toEqual(["newer", "older"]);
+    expect(matches.find((match) => match.leadId === "newer")?.attempts).toHaveLength(1);
   });
 
   it("treats an apostrophe-typo variant of the same email as one identity", () => {
@@ -179,7 +197,8 @@ describe("matchPhoneCallsToLeads", () => {
       [call()],
     );
 
-    expect(matches.map((match) => match.leadId)).toEqual(["newer"]);
+    expect(matches.map((match) => match.leadId).sort()).toEqual(["newer", "older"]);
+    expect(matches.find((match) => match.leadId === "newer")?.attempts).toHaveLength(1);
   });
 
   it("prefers the active lead over a newer historical duplicate", () => {
@@ -195,7 +214,9 @@ describe("matchPhoneCallsToLeads", () => {
       [call({ call_start: "2026-08-07T15:58:53.000Z" })],
     );
 
-    expect(matches.map((match) => match.leadId)).toEqual(["current"]);
+    expect(matches.map((match) => match.leadId).sort()).toEqual(["current", "historical"]);
+    expect(matches.find((match) => match.leadId === "current")?.attempts).toHaveLength(1);
+    expect(matches.find((match) => match.leadId === "historical")?.attempts).toHaveLength(0);
   });
 
   it("still matches a historical lead when no active lead existed yet", () => {

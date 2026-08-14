@@ -233,21 +233,32 @@ function planPhoneCallMatches(
     const lead = preferredEligibleLead(candidates, callTime);
     if (!lead) continue;
 
-    const current = matches.get(lead.id) ?? {
-      leadId: lead.id,
-      status,
-      attempts: [],
-    };
-    if (status === "called") current.status = "called";
-    current.attempts.push({
-      id: call.id,
-      lead_id: lead.id,
-      staff: staffLabel(call),
-      result: resultLabel(call, status),
-      notes: sourceLabel(call),
-      called_at: call.call_start,
-    });
-    matches.set(lead.id, current);
+    // The attempt row lands on the preferred lead. Every other lead that was
+    // already submitted at call time is a duplicate row of the same person —
+    // the ambiguity guard above has ensured a single email identity — so it
+    // gets the status too. That keeps the uncalled log and exports in
+    // agreement with the credited twin, while a later re-inquiry from the
+    // same person (submitted after the call) still surfaces as not called.
+    for (const candidate of candidates ?? []) {
+      if (candidate.submittedTime > callTime) break; // sorted ascending
+      const current = matches.get(candidate.id) ?? {
+        leadId: candidate.id,
+        status,
+        attempts: [],
+      };
+      if (status === "called") current.status = "called";
+      if (candidate.id === lead.id) {
+        current.attempts.push({
+          id: call.id,
+          lead_id: lead.id,
+          staff: staffLabel(call),
+          result: resultLabel(call, status),
+          notes: sourceLabel(call),
+          called_at: call.call_start,
+        });
+      }
+      matches.set(candidate.id, current);
+    }
   }
 
   return { matches: [...matches.values()], ambiguousCallIds };
