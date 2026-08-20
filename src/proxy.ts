@@ -65,6 +65,9 @@ export async function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/login" ||
+    // Password recovery — reached from the reset email while signed out.
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
     // Safari fetches the PWA manifest without auth cookies when the user
     // adds the site to their home screen; it holds no sensitive data.
     pathname === "/manifest.webmanifest" ||

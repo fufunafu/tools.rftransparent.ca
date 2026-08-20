@@ -285,6 +285,12 @@ export default function LoginForm({
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
+          <a
+            href="/forgot-password"
+            className="block py-1 text-center text-sm font-medium text-blue-600 transition-colors hover:text-blue-700"
+          >
+            Forgot your password?
+          </a>
           <p className="text-xs text-slate-400 text-center">
             Don&apos;t have a password? Ask a manager to set one up for you.
           </p>
