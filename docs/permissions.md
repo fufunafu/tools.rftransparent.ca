@@ -23,6 +23,7 @@ Authorization has three independent levels. A person may be an admin without bei
 | Employees | Authenticated | Admin for employee and password administration |
 | Settings access list | Admin | Admin |
 | Other settings and health | Authenticated | Admin where a form changes shared configuration |
+| Image library sign-in (`/api/library-token`) | Authenticated | Returns a one-time library sign-in token for the caller's own session address only; 503 when `LIBRARY_SUPABASE_SERVICE_KEY` is unset |
 | Employee survey response | Public capability link | Possession of the unguessable survey-recipient token |
 | Employee survey results and actions | Management | Exit-response detail additionally requires owner or `SURVEY_RESTRICTED_ACCESS_EMAILS` |
 | WhatsApp delivery webhook | Public endpoint | Meta challenge token or signed request body |
