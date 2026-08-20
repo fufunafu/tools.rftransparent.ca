@@ -266,6 +266,11 @@ export const SETTINGS_ITEM: NavItem = {
     { href: "/settings/access", label: "Who Can Sign In", status: "done", access: "admin" },
     { href: "/settings/assistant", label: "Assistant Knowledge", status: "done", access: "admin" },
     { href: "/employees", label: "Employees", status: "done" },
+    { href: "/employees/new", label: "New employee", status: "done", access: "admin" },
+    // Everyone's own list, so it sits with the other personal rows rather than
+    // behind the admin flag. Settings itself has no access flag, so this is
+    // reachable by exactly the people it is for.
+    { href: "/employees/me/access", label: "My access", status: "done", access: "authenticated" },
     { href: "/settings/notifications", label: "Notifications", status: "done" },
     { href: "/settings/rates", label: "Rates & Thresholds", status: "done" },
     { href: "/settings/automations", label: "Automations", status: "done" },

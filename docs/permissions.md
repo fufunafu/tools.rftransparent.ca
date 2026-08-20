@@ -21,6 +21,9 @@ Authorization has three independent levels. A person may be an admin without bei
 | Accounting and reimbursements | Authenticated | Management for approval and rejection |
 | Tasks | Authenticated | Management for all-employee oversight |
 | Employees | Authenticated | Admin for employee and password administration |
+| New employee (`/employees/new`, `/api/employees/onboarding`) | Admin | Admin — creates the profile, its access rows, the optional Supabase Auth password, and the welcome email |
+| Access list read (`GET /api/employees/access`) | Authenticated | Admin and management may pass `employeeId`; everybody else receives only the rows of the employee resolved from their own session address |
+| Access list write (`PATCH`/`DELETE /api/employees/access`) | Admin | Admin |
 | Settings access list | Admin | Admin |
 | Other settings and health | Authenticated | Admin where a form changes shared configuration |
 | Image library sign-in (`/api/library-token`) | Authenticated | Returns a one-time library sign-in token for the caller's own session address only; 503 when `LIBRARY_SUPABASE_SERVICE_KEY` is unset |
