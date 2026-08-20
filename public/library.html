@@ -3090,6 +3090,18 @@ td.num .wkcell,td.money .wkcell{text-align:right;font-variant-numeric:tabular-nu
 </style>
 </head>
 <body>
+<!-- Folded into somebody else's application: our rail has to be gone before it
+     is drawn, not after. The module below cannot do this. It waits on a CDN
+     import and then on several Supabase round trips, and the rail is painted
+     and sitting on screen for the whole of it — two or three seconds of a
+     second sidebar beside theirs. A classic script is synchronous during
+     parse, so the class is on the body before <nav class="rail"> is even a
+     node. It also reaches the share-link paths, which return early and never
+     ran the boot-time line this replaces. -->
+<script>
+  if(new URLSearchParams(location.search).get("chrome") === "off")
+    document.body.classList.add("embedded");
+</script>
 
 <div class="railscrim" id="railScrim"></div>
 <nav class="rail" id="rail" aria-label="Main">
@@ -3325,7 +3337,7 @@ const CATALOG_PATH = "catalog.json";
 
    To release: raise the minor by one. 15.5 -> 15.6 -> ... -> 15.9 -> 16.0.
    The minor is a single digit, so 9 rolls the major. Keep it a string.        */
-const BUILD = "31.6";
+const BUILD = "31.7";
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const shareParam = new URLSearchParams(location.search).get("p");
 const selParam   = new URLSearchParams(location.search).get("s");
@@ -3341,9 +3353,11 @@ const brandParam = new URLSearchParams(location.search).get("brand");
    "Trade shows" over there and lands on it here, rather than on the photo
    library with another click to make. And with a sidebar already on screen,
    drawing a second one beside it would say "two websites" no matter how well
-   the colours matched: ?chrome=off folds ours away and leaves theirs alone. */
+   the colours matched: ?chrome=off folds ours away and leaves theirs alone.
+   That second one is read by the small classic script at the top of <body>,
+   not here: it has to take effect before the rail is drawn, and nothing in
+   this module runs until the CDN import above has landed. */
 const pageParam  = new URLSearchParams(location.search).get("page");
-const chromeOff  = new URLSearchParams(location.search).get("chrome") === "off";
 /* decided here, not in boot, so nothing can render team chrome first */
 let shareMode = !!selParam || !!shareParam || !!showsParam || !!brandParam;
 let shareItems = null;
@@ -14310,7 +14324,6 @@ registerPage(()=> reportsMode, ()=> setReports(false));
   }
   applyGate();
   document.getElementById("boot").hidden=true;
-  if(chromeOff) document.body.classList.add("embedded");
 
   /* Arriving from an invitation or a reset link: the session is already live,
      but the account has no password yet, so ask for one before anything else. */
@@ -14335,6 +14348,17 @@ registerPage(()=> reportsMode, ()=> setReports(false));
       team:      ()=> setTeam(true),
       workspace: ()=> setWork(true),
       work:      ()=> setWork(true),
+      /* setEditing does not gate itself — the check lives in the rail button's
+         handler, so a URL that reaches this map would walk straight past it.
+         Same reasoning as setVault: re-check where the action happens rather
+         than trust the caller, and say the same thing the button says. */
+      manage:    ()=> {
+        if(!canEdit("library")){
+          toast("This account can browse but not manage", true);
+          return;
+        }
+        setEditing(true);
+      },
     }[String(pageParam).toLowerCase()];
     if(open) await open();
   }

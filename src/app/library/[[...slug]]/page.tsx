@@ -26,6 +26,7 @@ const PAGES: Record<string, string> = {
   workspace: "workspace",
   vault: "vault",
   team: "team",
+  manage: "manage",
 };
 
 export default function LibraryFrame() {
