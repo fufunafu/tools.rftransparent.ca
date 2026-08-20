@@ -52,6 +52,7 @@ export async function GET() {
     if (!res.ok) {
       // The common case is "no account over there", and it is not a failure —
       // it is the answer. The page shows its sign-in box.
+      console.error("[library-token] generate_link refused:", res.status);
       return NextResponse.json({ error: "No library account for this address" }, { status: 404 });
     }
 
