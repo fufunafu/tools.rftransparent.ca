@@ -68,7 +68,8 @@ export async function GET() {
       { token_hash: hash },
       { headers: { "cache-control": "no-store" } },
     );
-  } catch {
+  } catch (error) {
+    console.error("[library-token] could not reach the library:", error);
     return NextResponse.json({ error: "Could not reach the library" }, { status: 502 });
   }
 }
