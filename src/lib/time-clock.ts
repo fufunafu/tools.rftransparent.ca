@@ -185,7 +185,79 @@ export const GEOFENCE_DEFAULT_RADIUS_M = 200;
 // a kilometer of slack.
 export const GEOFENCE_MAX_ACCURACY_CREDIT_M = 100;
 
+// Reject fixes that are too imprecise to prove an employee is at the store.
+// This is intentionally equal to the largest accuracy allowance used above.
+export const GEOFENCE_MAX_ACCEPTABLE_ACCURACY_M = 100;
+
+// The phone must provide a recent fix. A short future tolerance accounts for
+// modest device clock drift without accepting arbitrarily future timestamps.
+export const GEOFENCE_MAX_POSITION_AGE_MS = 2 * 60 * 1000;
+export const GEOFENCE_FUTURE_TOLERANCE_MS = 30 * 1000;
+
 const EARTH_RADIUS_M = 6_371_000;
+
+export interface ClockPositionInput {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  capturedAt: string;
+}
+
+export type ClockPositionErrorCode =
+  | "invalid_location"
+  | "inaccurate_location"
+  | "stale_location";
+
+export type ClockPositionValidation =
+  | { ok: true; position: ClockPositionInput; capturedAt: Date }
+  | { ok: false; code: ClockPositionErrorCode };
+
+export function isValidLatitude(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= -90 && value <= 90;
+}
+
+export function isValidLongitude(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= -180 && value <= 180;
+}
+
+export function validateClockPosition(
+  value: unknown,
+  now: Date,
+): ClockPositionValidation {
+  if (!value || typeof value !== "object") return { ok: false, code: "invalid_location" };
+  const input = value as Partial<ClockPositionInput>;
+  if (
+    !isValidLatitude(input.latitude) ||
+    !isValidLongitude(input.longitude) ||
+    typeof input.accuracy !== "number" ||
+    !Number.isFinite(input.accuracy) ||
+    input.accuracy < 0 ||
+    typeof input.capturedAt !== "string"
+  ) {
+    return { ok: false, code: "invalid_location" };
+  }
+  if (input.accuracy > GEOFENCE_MAX_ACCEPTABLE_ACCURACY_M) {
+    return { ok: false, code: "inaccurate_location" };
+  }
+
+  const capturedAt = new Date(input.capturedAt);
+  if (Number.isNaN(capturedAt.getTime())) return { ok: false, code: "invalid_location" };
+  const ageMs = now.getTime() - capturedAt.getTime();
+  if (ageMs > GEOFENCE_MAX_POSITION_AGE_MS || ageMs < -GEOFENCE_FUTURE_TOLERANCE_MS) {
+    return { ok: false, code: "stale_location" };
+  }
+
+  return {
+    ok: true,
+    position: {
+      latitude: input.latitude,
+      longitude: input.longitude,
+      accuracy: input.accuracy,
+      capturedAt: input.capturedAt,
+    },
+    capturedAt,
+  };
+}
 
 // Haversine great-circle distance in meters.
 export function distanceMeters(

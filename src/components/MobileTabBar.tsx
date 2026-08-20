@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-// iOS-style bottom tab bar, phones only (below md). The desktop sidebar is
-// untouched; on phones this replaces the old hamburger drawer — everything
+// iOS-style bottom tab bar for iPhone and iPad. The desktop sidebar is
+// untouched; on touch layouts this replaces the old hamburger drawer, so everything
 // that isn't a tab lives one tap away under More.
 
 interface Tab {
@@ -15,12 +15,12 @@ interface Tab {
   icon: React.ReactElement;
 }
 
-function tabs(homePath: string): Tab[] {
+function tabs(): Tab[] {
   return [
     {
-      href: homePath,
+      href: "/",
       label: "Home",
-      match: [homePath],
+      match: ["/"],
       icon: (
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="w-6 h-6">
           <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75" />
@@ -63,23 +63,23 @@ function isActive(tab: Tab, pathname: string): boolean {
   );
 }
 
-export default function MobileTabBar({ homePath }: { homePath: string }) {
+export default function MobileTabBar() {
   const pathname = usePathname();
 
   return (
     <nav
       aria-label="Primary"
-      className="md:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
+      className="lg:hidden fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 backdrop-blur pb-[env(safe-area-inset-bottom)]"
     >
       <div className="flex">
-        {tabs(homePath).map((tab) => {
+        {tabs().map((tab) => {
           const active = isActive(tab, pathname);
           return (
             <Link
               key={tab.label}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              className={`flex flex-1 flex-col items-center gap-0.5 pb-1.5 pt-2 text-[10px] font-semibold transition-colors ${
+              className={`flex min-h-11 flex-1 flex-col items-center gap-0.5 pb-1.5 pt-2 text-[10px] font-semibold transition-colors ${
                 active ? "text-blue-600" : "text-slate-400 hover:text-slate-600"
               }`}
             >

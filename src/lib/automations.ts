@@ -125,6 +125,18 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     scheduleDetail: "Weekly pulse Thursday afternoon, nonresponder reminder Monday morning, close Tuesday morning",
     sendsEmail: "survey recipients when a campaign or reminder is due",
   },
+  {
+    slug: "birthday-messages",
+    label: "Employee birthday messages",
+    description: "Sends birthday greetings and reminds coworkers to wish the birthday employee well.",
+    kind: "email",
+    result: "WhatsApp greeting to the birthday employee and reminders to active coworkers",
+    staleAfterHours: 48,
+    cron: "35 * * * *",
+    schedule: "Daily, around 9:35 AM Toronto",
+    scheduleDetail: "Hourly dispatcher handles daylight-saving changes and sends only during the 9 AM Toronto hour",
+    sendsEmail: "the birthday employee and every other active employee",
+  },
 ];
 
 export function findJob(slug: string): AutomationJob | undefined {

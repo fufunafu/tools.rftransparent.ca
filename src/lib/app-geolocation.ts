@@ -4,35 +4,71 @@
 // Dynamically imported so the plugin never lands in the web bundle.
 
 import { isNativeApp } from "@/lib/app-biometrics";
+import {
+  GEOFENCE_MAX_ACCEPTABLE_ACCURACY_M,
+  isValidLatitude,
+  isValidLongitude,
+} from "@/lib/time-clock";
 
 export interface AppPosition {
   latitude: number;
   longitude: number;
   accuracy: number;
+  capturedAt: string;
 }
 
 export type PositionResult =
   | { ok: true; position: AppPosition }
-  | { ok: false; reason: "denied" | "unavailable" };
+  | { ok: false; reason: "denied" | "restricted" | "timeout" | "unavailable" }
+  | { ok: false; reason: "inaccurate"; accuracy: number };
 
-const OPTIONS = { enableHighAccuracy: true, timeout: 15_000, maximumAge: 30_000 };
+const OPTIONS = { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 };
+
+function toResult(position: {
+  timestamp: number;
+  coords: { latitude: number; longitude: number; accuracy: number };
+}): PositionResult {
+  if (
+    !Number.isFinite(position.timestamp) ||
+    !isValidLatitude(position.coords.latitude) ||
+    !isValidLongitude(position.coords.longitude) ||
+    !Number.isFinite(position.coords.accuracy) ||
+    position.coords.accuracy < 0
+  ) {
+    return { ok: false, reason: "unavailable" };
+  }
+  if (position.coords.accuracy > GEOFENCE_MAX_ACCEPTABLE_ACCURACY_M) {
+    return { ok: false, reason: "inaccurate", accuracy: Math.round(position.coords.accuracy) };
+  }
+  return {
+    ok: true,
+    position: {
+      latitude: position.coords.latitude,
+      longitude: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      capturedAt: new Date(position.timestamp).toISOString(),
+    },
+  };
+}
 
 export async function getCurrentPosition(): Promise<PositionResult> {
   if (isNativeApp()) {
     try {
       const { Geolocation } = await import("@capacitor/geolocation");
+      let permission = await Geolocation.checkPermissions();
+      if (permission.location === "prompt" || permission.location === "prompt-with-rationale") {
+        permission = await Geolocation.requestPermissions({ permissions: ["location"] });
+      }
+      if (permission.location === "denied") return { ok: false, reason: "denied" };
+      if (permission.location !== "granted") return { ok: false, reason: "restricted" };
       const pos = await Geolocation.getCurrentPosition(OPTIONS);
-      return {
-        ok: true,
-        position: {
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        },
-      };
+      return toResult(pos);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      return { ok: false, reason: /denied|permission/i.test(message) ? "denied" : "unavailable" };
+      if (/denied|permission/i.test(message)) return { ok: false, reason: "denied" };
+      if (/restricted/i.test(message)) return { ok: false, reason: "restricted" };
+      if (/timeout|timed out/i.test(message)) return { ok: false, reason: "timeout" };
+      return { ok: false, reason: "unavailable" };
     }
   }
 
@@ -42,17 +78,17 @@ export async function getCurrentPosition(): Promise<PositionResult> {
       return;
     }
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        resolve({
-          ok: true,
-          position: {
-            latitude: pos.coords.latitude,
-            longitude: pos.coords.longitude,
-            accuracy: pos.coords.accuracy,
-          },
-        }),
+      (pos) => resolve(toResult(pos)),
       (err) =>
-        resolve({ ok: false, reason: err.code === err.PERMISSION_DENIED ? "denied" : "unavailable" }),
+        resolve({
+          ok: false,
+          reason:
+            err.code === err.PERMISSION_DENIED
+              ? "denied"
+              : err.code === err.TIMEOUT
+                ? "timeout"
+                : "unavailable",
+        }),
       OPTIONS,
     );
   });

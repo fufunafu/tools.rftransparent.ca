@@ -15,7 +15,11 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (max-width: 767px) {
+html[data-native-app="true"] body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+
+@media (max-width: 1023px) {
   /* iOS auto-zooms the whole page when a focused input's font is under
      16px — the single biggest "this is a website" tell. Utility classes
      like text-sm would win the cascade, hence the !important. */
@@ -170,6 +174,15 @@ html[data-motion="reduced"] *::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+
   .animate-in {
     animation: none;
   }

@@ -5,7 +5,7 @@
 
 import { Fragment, useState, useEffect, useRef, useSyncExternalStore } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useSidebarResize } from "@/hooks/useSidebarResize";
 import CommandPalette from "@/components/CommandPalette";
 import MobileTabBar from "@/components/MobileTabBar";
@@ -92,6 +92,7 @@ function ViewerAvatar({
 
 export default function SidebarLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const {
     collapsed: rawCollapsed,
     width,
@@ -135,10 +136,17 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   const searchTargets = getSearchTargets(
     visibleSettings ? [...visibleNavItems, visibleSettings] : visibleNavItems,
   );
+  const mobileHomePath = "/";
+  const tabRoot = [mobileHomePath, "/clock", "/todos", "/more"].includes(pathname);
+  const detailTitle = searchTargets
+    .filter((target) => !target.external && (pathname === target.href || pathname.startsWith(`${target.href}/`)))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.label
+    ?? pathname.split("/").filter(Boolean).at(-1)?.replace(/-/g, " ")
+    ?? "RF Tools";
 
-  // Track viewport (below Tailwind's md breakpoint = phone/small tablet).
+  // Keep the touch-first shell through iPad portrait and landscape widths.
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
+    const mq = window.matchMedia("(max-width: 1023px)");
     const update = () => setIsMobile(mq.matches);
     update();
     mq.addEventListener("change", update);
@@ -296,7 +304,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden md:flex
+        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden lg:flex
           md:shrink-0 md:transition-[width] md:duration-200"
       >
         {/* Logo and collapse controls */}
@@ -464,20 +472,32 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
       {/* Main column */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {/* Mobile top bar — brand and search. Navigation lives in the bottom
-            tab bar. The top safe-area padding clears the notch when the site
-            runs full-screen (home-screen install or the iOS app). */}
-        <div className="md:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
-          <Link href={homePath} className="flex items-center gap-3 flex-1 min-w-0">
-            <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
-              <span className="text-white text-[10px] font-bold">RF</span>
-            </span>
-            <span className="truncate text-sm font-semibold text-slate-900">RF Transparent</span>
-          </Link>
+        {/* Tab roots keep the compact brand. Detail screens expose title and Back. */}
+        <div className="lg:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
+          {tabRoot ? (
+            <Link href={mobileHomePath} className="flex min-h-11 flex-1 items-center gap-3 min-w-0">
+              <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+                <span className="text-white text-[10px] font-bold">RF</span>
+              </span>
+              <span className="truncate text-sm font-semibold text-slate-900">RF Transparent</span>
+            </Link>
+          ) : (
+            <div className="flex min-h-11 min-w-0 flex-1 items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.history.length > 1 ? router.back() : router.push(mobileHomePath)}
+                className="-ml-2 flex min-h-11 shrink-0 items-center gap-1 rounded-xl px-2 text-sm font-bold text-blue-600 active:bg-blue-50"
+                aria-label={`Back from ${detailTitle}`}
+              >
+                <span aria-hidden="true">‹</span> Back
+              </button>
+              <span className="truncate text-sm font-bold capitalize text-slate-900">{detailTitle}</span>
+            </div>
+          )}
           {/* Phones have no keyboard shortcut, so search gets its own button */}
           <button
             onClick={() => setSearchOpen(true)}
-            className="w-9 h-9 -mr-1.5 rounded-md flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
+            className="min-h-11 min-w-11 -mr-2 rounded-xl flex items-center justify-center text-slate-500 hover:bg-slate-100 transition-colors"
             aria-label="Search pages"
           >
             <SearchIcon className="w-5 h-5" />
@@ -487,12 +507,12 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         {/* Main content. Extra bottom padding on phones keeps the last of the
             page above the fixed tab bar. */}
         <main data-app-main className="min-h-0 flex-1 overflow-y-auto overscroll-y-none bg-slate-100">
-          <div className="p-4 pb-28 md:p-8">
+          <div className="p-4 pb-28 lg:p-8">
             {children}
           </div>
         </main>
 
-        <MobileTabBar homePath={homePath} />
+        <MobileTabBar />
       </div>
     </div>
   );

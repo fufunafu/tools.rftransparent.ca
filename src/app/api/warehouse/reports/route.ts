@@ -1,16 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
+import { findActiveEmployeeByEmail } from "@/lib/employee-profile";
 import { getSupabase } from "@/lib/supabase";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { validateWarehouseReport } from "@/lib/warehouse-report";
+
+const NO_STORE = { "Cache-Control": "private, no-store" };
+
+function jsonError(error: string, status: number) {
+  return NextResponse.json({ error }, { status, headers: NO_STORE });
+}
 
 export async function GET(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return jsonError("Unauthorized", 401);
 
   const { searchParams } = req.nextUrl;
+  const scope = searchParams.get("scope") ?? "mine";
+  const employeeId = searchParams.get("employeeId");
+  let scopedEmployeeId: string | null = null;
+
+  if (scope === "all") {
+    if (!(await isManagementUser())) return jsonError("Forbidden", 403);
+    scopedEmployeeId = employeeId;
+  } else {
+    if (employeeId) {
+      return jsonError("Employee identity cannot be selected for a personal report", 400);
+    }
+    const employee = await findActiveEmployeeByEmail(user.email);
+    if (!employee || employee.department !== "warehouse") {
+      return jsonError("Your login is not linked to an active warehouse employee", 403);
+    }
+    scopedEmployeeId = employee.id;
+  }
+
   const from = searchParams.get("from");
   const to = searchParams.get("to");
-  const employeeId = searchParams.get("employeeId");
-
   let query = getSupabase()
     .from("warehouse_daily_reports")
     .select("*, employees(id, name)")
@@ -18,54 +42,49 @@ export async function GET(req: NextRequest) {
 
   if (from) query = query.gte("report_date", from);
   if (to) query = query.lte("report_date", to);
-  if (employeeId) query = query.eq("employee_id", employeeId);
+  if (scopedEmployeeId) query = query.eq("employee_id", scopedEmployeeId);
 
   const { data, error } = await query.limit(500);
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json(data);
+  if (error) return jsonError(error.message, 500);
+  return NextResponse.json(data, { headers: NO_STORE });
 }
 
 export async function POST(req: NextRequest) {
-  if (!(await isAuthenticated()))
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return jsonError("Unauthorized", 401);
 
-  const body = await req.json();
-  const {
-    employee_id,
-    report_date,
-    boxes_built,
-    orders_packed,
-    walkin_pickup,
-    notes,
-  } = body;
+  const employee = await findActiveEmployeeByEmail(user.email);
+  if (!employee || employee.department !== "warehouse") {
+    return jsonError("Your login is not linked to an active warehouse employee", 403);
+  }
 
-  if (!employee_id || !report_date)
-    return NextResponse.json(
-      { error: "employee_id and report_date are required" },
-      { status: 400 }
-    );
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonError("Invalid request body", 400);
+  }
+  const parsed = validateWarehouseReport(body);
+  if (!parsed.ok) return jsonError(parsed.error, 400);
 
+  const { value } = parsed;
   const { data, error } = await getSupabase()
     .from("warehouse_daily_reports")
     .upsert(
       {
-        employee_id,
-        report_date,
-        boxes_built: boxes_built ?? 0,
-        orders_packed: orders_packed ?? 0,
-        walkin_pickup: walkin_pickup ?? 0,
-        notes: notes || null,
+        employee_id: employee.id,
+        report_date: value.reportDate,
+        boxes_built: value.boxesBuilt,
+        orders_packed: value.ordersPacked,
+        walkin_pickup: value.walkinPickup,
+        notes: value.notes,
         updated_at: new Date().toISOString(),
       },
-      { onConflict: "employee_id,report_date" }
+      { onConflict: "employee_id,report_date" },
     )
     .select("*, employees(id, name)")
     .single();
 
-  if (error)
-    return NextResponse.json({ error: error.message }, { status: 500 });
-
-  return NextResponse.json(data, { status: 201 });
+  if (error) return jsonError(error.message, 500);
+  return NextResponse.json(data, { status: 201, headers: NO_STORE });
 }

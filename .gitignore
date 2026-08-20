@@ -56,7 +56,10 @@ next-env.d.ts
 # Local PII backups & one-off scripts — never commit (customer data)
 followup-revert-backup-*.pdf
 followup-revert-backup-*.xlsx
-/scripts/
+/scripts/*
+!/scripts/validate-ios-release.mjs
+!/scripts/validate-mobile-e2e-env.mjs
+!/scripts/validate-native-shell.mjs
 /tmp/
 /output/
 

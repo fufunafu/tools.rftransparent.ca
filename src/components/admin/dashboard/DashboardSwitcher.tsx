@@ -57,7 +57,7 @@ export function DashboardSwitcher({ current }: { current: string }) {
         value={current}
         onChange={(event) => choose(event.target.value)}
         aria-label="Switch dashboard"
-        className="h-7 text-xs border border-slate-200 bg-white rounded-lg px-2 text-slate-700 hover:border-blue-300 transition-colors"
+        className="min-h-11 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-700 transition-colors hover:border-blue-300 lg:min-h-7 lg:px-2"
       >
         {DASHBOARD_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>

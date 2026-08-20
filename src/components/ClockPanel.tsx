@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import { formatDuration, type WeekDay } from "@/lib/time-clock";
-import { getCurrentPosition } from "@/lib/app-geolocation";
+import { getCurrentPosition, type AppPosition } from "@/lib/app-geolocation";
+import { hapticSuccess, hapticWarning } from "@/lib/app-haptics";
+import { useNativeRuntime } from "@/components/NativeAppRuntime";
 
 interface ClockStatus {
   linked: boolean;
@@ -11,6 +13,7 @@ interface ClockStatus {
   locationName?: string | null;
   // True when this employee's store requires the phone's location to clock in.
   geofenced?: boolean;
+  geofenceReady?: boolean;
   open?: { id: string; clockInAt: string; stale: boolean } | null;
   week?: WeekDay[];
   weekMinutes?: number;
@@ -43,10 +46,13 @@ function formatClockDay(iso: string): string {
 }
 
 export default function ClockPanel() {
+  const { connected } = useNativeRuntime();
   const { data, error, mutate } = useSWR<ClockStatus>("/api/clock", { refreshInterval: 60_000 });
   const [pending, setPending] = useState(false);
   const [locating, setLocating] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [showLocationEducation, setShowLocationEducation] = useState(false);
   const [resolveValue, setResolveValue] = useState("");
   const [now, setNow] = useState(() => Date.now());
 
@@ -59,36 +65,64 @@ export default function ClockPanel() {
     return () => clearInterval(id);
   }, [running]);
 
-  // Clock in with the store's location check when the store has a pin set.
-  const clockIn = async () => {
-    if (!data?.geofenced) {
-      await post({ action: "in" });
-      return;
-    }
+  const acquireLocationAndClockIn = async () => {
     setPending(true);
     setLocating(true);
     setActionError(null);
+    setActionSuccess(null);
     const result = await getCurrentPosition();
     setLocating(false);
     if (!result.ok) {
-      setActionError(
+      const message =
         result.reason === "denied"
-          ? "Clocking in here needs your location. Enable it for RF Tools in your phone's Settings and try again."
-          : "Couldn't get your location. Move somewhere with better signal and try again.",
-      );
+          ? "Location access is off. Enable Location for RF Tools in iPhone Settings, then try again."
+          : result.reason === "restricted"
+            ? "Location access is restricted on this device. Ask your manager for help."
+            : result.reason === "timeout"
+              ? "Your location took too long. Move near a window or outdoors and try again."
+              : result.reason === "inaccurate"
+                ? `Your location is only accurate to about ${result.accuracy} m. Move near a window or outdoors and try again.`
+                : "Couldn't get your location. Check that Location Services are on and try again.";
+      setActionError(message);
       setPending(false);
       return;
     }
     await post({ action: "in", position: result.position });
   };
 
+  const clockIn = async () => {
+    if (!connected || !navigator.onLine) {
+      setActionError("Clocking in needs an internet connection. Reconnect and try again.");
+      setActionSuccess(null);
+      return;
+    }
+    if (data?.geofenced && data.geofenceReady === false) {
+      setActionError("Your store's clock-in location needs a manager to fix it before you can clock in.");
+      setActionSuccess(null);
+      return;
+    }
+    if (!data?.geofenced) {
+      await post({ action: "in" });
+      return;
+    }
+    setShowLocationEducation(true);
+  };
+
   const post = async (body: {
     action: string;
     clockOutAt?: string;
-    position?: { latitude: number; longitude: number; accuracy: number };
+    position?: AppPosition;
   }) => {
+    if (!connected || !navigator.onLine) {
+      setActionError("Clock actions need an internet connection. Reconnect and try again.");
+      setActionSuccess(null);
+      setLocating(false);
+      setPending(false);
+      return;
+    }
     setPending(true);
     setActionError(null);
+    setActionSuccess(null);
     try {
       const res = await fetch("/api/clock", {
         method: "POST",
@@ -101,10 +135,19 @@ export default function ClockPanel() {
         // UI shows the real state (e.g. the stale-shift prompt).
         if (res.status === 409) await mutate();
         setActionError(payload?.error ?? "Something went wrong. Try again.");
+        void hapticWarning();
         return;
       }
       setResolveValue("");
       await mutate(payload, { revalidate: false });
+      if (body.action === "in" || body.action === "out") void hapticSuccess();
+      setActionSuccess(
+        body.action === "in"
+          ? "Clock-in confirmed by RF Tools."
+          : body.action === "out"
+            ? "Clock-out confirmed by RF Tools."
+            : "Your shift end time was saved for manager review.",
+      );
     } catch {
       setActionError("Couldn't reach the server. Check your connection and try again.");
     } finally {
@@ -209,13 +252,13 @@ export default function ClockPanel() {
               min={resolveBounds?.min}
               max={resolveBounds?.max}
               onChange={(e) => setResolveValue(e.target.value)}
-              className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900"
+              className="mt-3 min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900"
               aria-label="When your shift actually ended"
             />
             <button
               onClick={() => post({ action: "resolve", clockOutAt: resolveValue ? new Date(resolveValue).toISOString() : "" })}
               disabled={pending || !resolveValue}
-              className="mt-3 w-full rounded-xl bg-amber-600 py-3 text-sm font-bold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              className="mt-3 min-h-12 w-full rounded-xl bg-amber-600 py-3 text-sm font-bold text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
             >
               {pending ? "Saving…" : "Confirm end time"}
             </button>
@@ -230,19 +273,36 @@ export default function ClockPanel() {
       {!open?.stale && (
         <button
           onClick={() => (open ? post({ action: "out" }) : clockIn())}
-          disabled={pending}
+          disabled={pending || !connected}
           className={`w-full rounded-2xl py-4 text-lg font-bold text-white shadow-lg transition-colors disabled:opacity-50 ${
             open
               ? "bg-stone-900 shadow-stone-900/20 hover:bg-stone-800"
               : "bg-blue-600 shadow-blue-600/25 hover:bg-blue-700"
           }`}
         >
-          {locating ? "Checking you're at the store…" : pending ? "One sec…" : open ? "Clock Out" : "Clock In"}
+          {!connected
+            ? "Offline"
+            : locating
+              ? "Checking you're at the store..."
+              : pending
+                ? "One sec..."
+                : open
+                  ? "Clock Out"
+                  : "Clock In"}
         </button>
       )}
 
       {actionError && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{actionError}</p>
+        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" aria-live="assertive">{actionError}</p>
+      )}
+      {actionSuccess && (
+        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" role="status" aria-live="polite">{actionSuccess}</p>
+      )}
+
+      {data.geofenced && !open && (
+        <p className="px-2 text-center text-xs leading-5 text-slate-500">
+          RF Tools checks your location once when you clock in. It does not track you afterward.
+        </p>
       )}
 
       {/* This week */}
@@ -268,6 +328,47 @@ export default function ClockPanel() {
           ))}
         </div>
       </div>
+
+      {showLocationEducation && (
+        <div
+          className="fixed inset-0 z-[90] flex items-end bg-slate-950/45 p-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:items-center sm:justify-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="location-education-title"
+        >
+          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-6 w-6">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s6-5.25 6-11a6 6 0 1 0-12 0c0 5.75 6 11 6 11Z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 12.25a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5Z" />
+              </svg>
+            </div>
+            <h2 id="location-education-title" className="text-xl font-bold tracking-tight text-slate-950">
+              Confirm you are at the store
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              RF Tools will request one fresh location to confirm you are near {data.locationName ?? "your assigned store"}. The reading is saved with this clock-in for audit purposes.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setShowLocationEducation(false);
+                void acquireLocationAndClockIn();
+              }}
+              className="mt-6 min-h-12 w-full rounded-2xl bg-blue-600 px-5 py-3 text-base font-bold text-white active:scale-[0.99]"
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowLocationEducation(false)}
+              className="mt-2 min-h-11 w-full rounded-xl px-4 text-sm font-semibold text-slate-500"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

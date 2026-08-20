@@ -43,7 +43,12 @@ Internal operations software for RF Transparent. The application combines sales,
 | `npm run test:watch` | Run Vitest in watch mode |
 | `npm run build` | Create the production Next.js build |
 | `npm run test:e2e` | Run Playwright browser smoke tests against a built app |
+| `npm run test:e2e:mobile:public` | Run signed-out mobile login checks in four WebKit viewports |
+| `npm run test:e2e:mobile` | Run the authenticated frontline mobile suite in four WebKit viewports |
 | `npm run check` | Run lint, typecheck, and unit tests |
+| `npm run ios:release-check` | Run every automated web and iOS release gate |
+| `npm run ios:build:sim` | Build the Debug iOS app for the simulator |
+| `npm run ios:build:sim:release` | Build the Release iOS app and enforce the production-server guard |
 
 Playwright starts `npm run start`, so create a production build before running the browser suite locally:
 
@@ -59,6 +64,46 @@ E2E_STORAGE_STATE=/absolute/path/to/auth.json npm run test:e2e
 ```
 
 Use a non-production test account and never commit its storage-state file.
+
+The full mobile suite requires a warehouse employee test session so every
+authenticated workflow, including report identity binding, actually runs:
+
+```bash
+E2E_MOBILE_STORAGE_STATE=/absolute/path/to/warehouse-auth.json \
+E2E_MOBILE_DEPARTMENT=warehouse \
+npm run test:e2e:mobile
+```
+
+The full command fails its preflight when this state is missing or when the
+department marker is not `warehouse`. This prevents skipped authenticated
+tests from being reported as a successful release gate. Use
+`npm run test:e2e:mobile:public` when only the signed-out checks are needed.
+
+## iOS development and release checks
+
+The Capacitor configuration defaults to `https://tools.rftransparent.ca`.
+Use the explicit sync command that matches the intended build:
+
+```bash
+npm run cap:sync:dev
+npm run cap:sync:prod
+```
+
+`cap:sync:dev` uses `http://127.0.0.1:3000` and permits cleartext traffic for
+the local simulator only. `cap:sync:prod` forces the production HTTPS origin,
+disables cleartext traffic, and validates the generated iOS configuration.
+
+Before an internal TestFlight upload, provide the warehouse test storage state
+and run:
+
+```bash
+E2E_MOBILE_STORAGE_STATE=/absolute/path/to/warehouse-auth.json \
+E2E_MOBILE_DEPARTMENT=warehouse \
+npm run ios:release-check
+```
+
+The real-device checks and staged rollout steps are in
+[`docs/ios-testflight-rollout.md`](docs/ios-testflight-rollout.md).
 
 ## Architecture
 

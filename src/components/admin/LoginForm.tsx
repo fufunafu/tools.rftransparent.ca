@@ -1,14 +1,11 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import {
-  biometryAvailable,
-  clearSavedCredentials,
+  clearLegacySavedCredentials,
   isNativeApp,
-  saveCredentials,
-  savedCredentialsExist,
-  unlockWithBiometrics,
+  markNativeSessionFresh,
 } from "@/lib/app-biometrics";
 
 // Whether we're inside the iOS app never changes during a page's life; the
@@ -17,21 +14,15 @@ import {
 const NEVER_CHANGES = () => () => {};
 const serverSaysNo = () => false;
 
-const FaceIdIcon = ({ className }: { className: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className={className} aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V6a2 2 0 0 1 2-2h2M4 16v2a2 2 0 0 0 2 2h2m8-16h2a2 2 0 0 1 2 2v2m-4 12h2a2 2 0 0 0 2-2v-2M9 9.5v1m6-1v1m-5.5 4.5c.7.65 1.55 1 2.5 1s1.8-.35 2.5-1" />
-  </svg>
-);
-
 export default function LoginForm({
   authError,
   nextPath = "/",
-  devLogin = false,
+  testLogin = false,
 }: {
   authError?: string;
   nextPath?: string;
-  // True only when the server rendered this page under `next dev`.
-  devLogin?: boolean;
+  // The server only enables this for an explicitly configured local test run.
+  testLogin?: boolean;
 }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(authError ?? "");
@@ -40,30 +31,11 @@ export default function LoginForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  // Inside the iOS app: Google OAuth is blocked by Google in embedded web
-  // views, so the app leads with Face ID (once saved) or the password form.
+  // Google OAuth is blocked in embedded web views, so the iOS app uses the
+  // password form. Once signed in, the persisted session is protected by the
+  // app-level Face ID or device-passcode gate.
   const inApp = useSyncExternalStore(NEVER_CHANGES, isNativeApp, serverSaysNo);
-  const [canUnlock, setCanUnlock] = useState(false);
-  const [offerBiometrics, setOfferBiometrics] = useState(false);
-  const [rememberWithBiometrics, setRememberWithBiometrics] = useState(true);
   const passwordFormVisible = showPassword || inApp;
-
-  useEffect(() => {
-    if (!inApp) return;
-    let cancelled = false;
-    (async () => {
-      const [saved, available] = await Promise.all([
-        savedCredentialsExist(),
-        biometryAvailable(),
-      ]);
-      if (cancelled) return;
-      setCanUnlock(saved && available);
-      setOfferBiometrics(available);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [inApp]);
 
   const supabase = () =>
     createBrowserClient(
@@ -110,8 +82,9 @@ export default function LoginForm({
         setLoading(false);
         return;
       }
-      if (inApp && offerBiometrics && rememberWithBiometrics) {
-        await saveCredentials(email.trim().toLowerCase(), password);
+      if (inApp) {
+        await clearLegacySavedCredentials();
+        markNativeSessionFresh();
       }
       // Full reload so the proxy re-runs and lands them on the home page.
       window.location.href = nextPath;
@@ -141,30 +114,9 @@ export default function LoginForm({
         setLoading(false);
         return;
       }
-      window.location.href = nextPath;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-      setLoading(false);
-    }
-  };
-
-  const handleBiometricLogin = async () => {
-    setError("");
-    setLoading(true);
-    try {
-      const credentials = await unlockWithBiometrics();
-      if (!credentials) {
-        // Cancelled or failed — the password form is right below.
-        setLoading(false);
-        return;
-      }
-      if (!(await signInWithPassword(credentials.email, credentials.password))) {
-        // The password changed since it was saved; make them sign in fresh.
-        await clearSavedCredentials();
-        setCanUnlock(false);
-        setError("Your saved sign-in expired. Enter your password once to refresh it.");
-        setLoading(false);
-        return;
+      if (inApp) {
+        await clearLegacySavedCredentials();
+        markNativeSessionFresh();
       }
       window.location.href = nextPath;
     } catch (err) {
@@ -181,25 +133,13 @@ export default function LoginForm({
         </div>
       )}
 
-      {inApp && canUnlock && (
-        <button
-          onClick={handleBiometricLogin}
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-2.5 rounded-xl bg-blue-600 px-6 py-3.5 text-[15px] font-bold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-700 transition-colors disabled:opacity-60"
-        >
-          <FaceIdIcon className="w-6 h-6" />
-          {loading ? "One sec…" : "Sign in with Face ID"}
-        </button>
-      )}
-
-      {/* Google can't run inside the app's web view (Google blocks embedded
-          sign-in), so the app shows password + Face ID only. */}
+      {/* Google cannot run inside the app's embedded web view. */}
       {!inApp && (
         <>
           <button
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 hover:border-slate-400 hover:shadow-md transition-all disabled:opacity-60"
+            className="flex min-h-11 w-full items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-6 py-3 text-sm font-medium text-slate-700 transition-all hover:border-slate-400 hover:bg-slate-50 hover:shadow-md disabled:opacity-60"
           >
             <svg viewBox="0 0 24 24" className="w-5 h-5 shrink-0" aria-hidden="true">
               <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
@@ -212,18 +152,10 @@ export default function LoginForm({
 
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-slate-200" />
-            <span className="text-xs text-slate-400 uppercase tracking-wider">or</span>
+            <span className="text-xs text-slate-600 uppercase tracking-wider">or</span>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
         </>
-      )}
-
-      {inApp && canUnlock && (
-        <div className="flex items-center gap-3">
-          <div className="flex-1 h-px bg-slate-200" />
-          <span className="text-xs text-slate-400 uppercase tracking-wider">or</span>
-          <div className="flex-1 h-px bg-slate-200" />
-        </div>
       )}
 
       {!passwordFormVisible ? (
@@ -231,7 +163,7 @@ export default function LoginForm({
           type="button"
           onClick={() => setShowPassword(true)}
           disabled={loading}
-          className="w-full text-sm font-medium text-slate-600 hover:text-slate-900 py-2 transition-colors"
+          className="min-h-11 w-full rounded-xl px-4 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
         >
           Sign in with email and password
         </button>
@@ -249,7 +181,7 @@ export default function LoginForm({
               onChange={(e) => setEmail(e.target.value)}
               required
               disabled={loading}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+              className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             />
           </div>
           <div>
@@ -264,24 +196,13 @@ export default function LoginForm({
               onChange={(e) => setPassword(e.target.value)}
               required
               disabled={loading}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+              className="min-h-11 w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             />
           </div>
-          {inApp && offerBiometrics && (
-            <label className="flex items-center gap-2.5 py-1 text-sm text-slate-600">
-              <input
-                type="checkbox"
-                checked={rememberWithBiometrics}
-                onChange={(e) => setRememberWithBiometrics(e.target.checked)}
-                className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              Use Face ID next time
-            </label>
-          )}
           <button
             type="submit"
             disabled={loading || !email || !password}
-            className="w-full rounded-xl bg-blue-600 text-white text-sm font-bold px-6 py-3 hover:bg-blue-700 transition-colors disabled:opacity-50"
+            className="min-h-11 w-full rounded-xl bg-blue-600 text-white text-sm font-bold px-6 py-3 hover:bg-blue-700 transition-colors disabled:opacity-50"
           >
             {loading ? "Signing in..." : "Sign in"}
           </button>
@@ -291,20 +212,20 @@ export default function LoginForm({
           >
             Forgot your password?
           </a>
-          <p className="text-xs text-slate-400 text-center">
+          <p className="text-xs text-slate-600 text-center">
             Don&apos;t have a password? Ask a manager to set one up for you.
           </p>
         </form>
       )}
 
-      {devLogin && (
+      {testLogin && (
         <button
           type="button"
           onClick={handleDevLogin}
           disabled={loading}
           className="w-full rounded-xl border-2 border-dashed border-amber-400 bg-amber-50 px-6 py-2.5 text-sm font-bold text-amber-700 hover:bg-amber-100 transition-colors disabled:opacity-60"
         >
-          {loading ? "Signing in…" : "Testing: sign in as Fuanne"}
+          {loading ? "Signing in…" : "Sign in as Fuanne"}
         </button>
       )}
     </div>

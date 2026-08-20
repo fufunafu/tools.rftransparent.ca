@@ -426,7 +426,7 @@ export async function GET(req: NextRequest) {
       const [{ data: notes }, { data: priorCallbackCallers }] = await Promise.all([
         getSupabase()
           .from("callback_notes")
-          .select("from_number,note,status")
+          .select("from_number,note,status,assigned_to")
           .eq("store_id", storeId)
           .in("from_number", callbackNumbers.length > 0 ? callbackNumbers : [""]),
         getSupabase()
@@ -438,15 +438,15 @@ export async function GET(req: NextRequest) {
           .in("from_number", callbackNumbers.length > 0 ? callbackNumbers : [""]),
       ]);
 
-      const noteMap = new Map<string, { note: string; status: string }>();
+      const noteMap = new Map<string, { note: string; status: string; assigned_to: string | null }>();
       for (const n of notes ?? []) {
-        noteMap.set(n.from_number, { note: n.note, status: n.status });
+        noteMap.set(n.from_number, { note: n.note, status: n.status, assigned_to: n.assigned_to ?? null });
       }
       const priorCallbackSet = new Set((priorCallbackCallers ?? []).map((r) => r.from_number));
 
       const enrichedCallbacks = callbacks.map((cb) => {
         const n = noteMap.get(cb.from_number);
-        return { ...cb, note: n?.note ?? "", note_status: n?.status ?? "", is_first_time: !priorCallbackSet.has(cb.from_number) };
+        return { ...cb, note: n?.note ?? "", note_status: n?.status ?? "", assigned_to: n?.assigned_to ?? null, is_first_time: !priorCallbackSet.has(cb.from_number) };
       });
 
       return NextResponse.json({

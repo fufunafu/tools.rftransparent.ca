@@ -3,6 +3,8 @@ import {
   assertWhatsAppConfigured,
   checkWhatsAppConnection,
   normalizeWhatsAppNumber,
+  sendWhatsAppBirthdayGreeting,
+  sendWhatsAppBirthdayReminder,
   sendWhatsAppSurvey,
 } from "@/lib/whatsapp";
 
@@ -14,6 +16,8 @@ const ENV_KEYS = [
   "WHATSAPP_PHONE_NUMBER_ID",
   "WHATSAPP_GRAPH_API_VERSION",
   "WHATSAPP_SURVEY_TEMPLATE_NAME",
+  "WHATSAPP_BIRTHDAY_GREETING_TEMPLATE_NAME",
+  "WHATSAPP_BIRTHDAY_REMINDER_TEMPLATE_NAME",
   "WHATSAPP_TEMPLATE_LANGUAGE",
 ] as const;
 
@@ -23,6 +27,8 @@ beforeEach(() => {
   process.env.WHATSAPP_PHONE_NUMBER_ID = "123456789";
   process.env.WHATSAPP_GRAPH_API_VERSION = "v24.0";
   process.env.WHATSAPP_SURVEY_TEMPLATE_NAME = "weekly_checkin";
+  process.env.WHATSAPP_BIRTHDAY_GREETING_TEMPLATE_NAME = "employee_birthday_greeting";
+  process.env.WHATSAPP_BIRTHDAY_REMINDER_TEMPLATE_NAME = "employee_birthday_reminder";
   process.env.WHATSAPP_TEMPLATE_LANGUAGE = "en";
 });
 
@@ -107,6 +113,52 @@ describe("sendWhatsAppSurvey", () => {
   it("requires the template configuration", () => {
     delete process.env.WHATSAPP_SURVEY_TEMPLATE_NAME;
     expect(() => assertWhatsAppConfigured()).toThrow("WHATSAPP_SURVEY_TEMPLATE_NAME is not configured");
+  });
+});
+
+describe("birthday WhatsApp templates", () => {
+  it("sends the greeting template to the birthday employee", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ messages: [{ id: "wamid.greeting" }] }), { status: 200 }),
+    );
+    await expect(sendWhatsAppBirthdayGreeting({
+      to: "+14165550123",
+      employeeName: "Alex",
+    })).resolves.toEqual({ messageId: "wamid.greeting" });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      template: {
+        name: "employee_birthday_greeting",
+        components: [{
+          parameters: [{ type: "text", parameter_name: "name", text: "Alex" }],
+        }],
+      },
+    });
+  });
+
+  it("sends the coworker reminder with both employee names", async () => {
+    mockFetch.mockResolvedValueOnce(
+      new Response(JSON.stringify({ messages: [{ id: "wamid.reminder" }] }), { status: 200 }),
+    );
+    await expect(sendWhatsAppBirthdayReminder({
+      to: "+14165550123",
+      recipientName: "Sam",
+      birthdayEmployeeName: "Alex",
+    })).resolves.toEqual({ messageId: "wamid.reminder" });
+
+    const [, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      template: {
+        name: "employee_birthday_reminder",
+        components: [{
+          parameters: [
+            { type: "text", parameter_name: "name", text: "Sam" },
+            { type: "text", parameter_name: "birthday_name", text: "Alex" },
+          ],
+        }],
+      },
+    });
   });
 });
 

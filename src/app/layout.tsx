@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
+import NativeAppRuntime from "@/components/NativeAppRuntime";
 import PushRegistrar from "@/components/PushRegistrar";
 
 const inter = Inter({
@@ -25,7 +26,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1c1917",
+  themeColor: "#1e3a8a",
   viewportFit: "cover",
   width: "device-width",
   initialScale: 1,
@@ -39,8 +40,10 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen">
-        <PushRegistrar />
-        <SidebarLayout>{children}</SidebarLayout>
+        <NativeAppRuntime>
+          <PushRegistrar />
+          <SidebarLayout>{children}</SidebarLayout>
+        </NativeAppRuntime>
       </body>
     </html>
   );

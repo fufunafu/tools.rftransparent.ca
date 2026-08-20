@@ -52,6 +52,52 @@ async function readJson(response: Response): Promise<WhatsAppTemplateResponse | 
   return response.json().catch(() => null) as Promise<WhatsAppTemplateResponse | null>;
 }
 
+async function sendWhatsAppTemplate({
+  to,
+  templateEnv,
+  parameters,
+  failureDescription,
+}: {
+  to: string;
+  templateEnv: string;
+  parameters: Array<{ parameter_name: string; text: string }>;
+  failureDescription: string;
+}): Promise<{ messageId: string }> {
+  const config = getConfig();
+  const templateName = requiredEnv(templateEnv);
+  if (!/^[a-z0-9_]+$/.test(templateName)) {
+    throw new Error(`${templateEnv} must use lowercase letters, numbers, and underscores`);
+  }
+  const languageCode = process.env.WHATSAPP_TEMPLATE_LANGUAGE?.trim() || "en_US";
+  const recipient = normalizeWhatsAppNumber(to);
+  const response = await fetch(graphUrl(config, "/messages"), {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: recipient,
+      type: "template",
+      template: {
+        name: templateName,
+        language: { code: languageCode },
+        components: [{
+          type: "body",
+          parameters: parameters.map((parameter) => ({ type: "text", ...parameter })),
+        }],
+      },
+    }),
+  });
+  const payload = await readJson(response);
+  if (!response.ok) throw new Error(errorMessage(payload, response.status));
+  const messageId = payload?.messages?.[0]?.id;
+  if (!messageId) throw new Error(`Meta WhatsApp accepted ${failureDescription} without returning a message ID`);
+  return { messageId };
+}
+
 export function normalizeWhatsAppNumber(value: string): string {
   return normalizeInternationalPhone(value).slice(1);
 }
@@ -166,6 +212,41 @@ export async function sendWhatsAppEmployeeUpdate({
   const messageId = payload?.messages?.[0]?.id;
   if (!messageId) throw new Error("Meta WhatsApp accepted the employee update without returning a message ID");
   return { messageId };
+}
+
+export async function sendWhatsAppBirthdayGreeting({
+  to,
+  employeeName,
+}: {
+  to: string;
+  employeeName: string;
+}): Promise<{ messageId: string }> {
+  return sendWhatsAppTemplate({
+    to,
+    templateEnv: "WHATSAPP_BIRTHDAY_GREETING_TEMPLATE_NAME",
+    parameters: [{ parameter_name: "name", text: employeeName }],
+    failureDescription: "the birthday greeting",
+  });
+}
+
+export async function sendWhatsAppBirthdayReminder({
+  to,
+  recipientName,
+  birthdayEmployeeName,
+}: {
+  to: string;
+  recipientName: string;
+  birthdayEmployeeName: string;
+}): Promise<{ messageId: string }> {
+  return sendWhatsAppTemplate({
+    to,
+    templateEnv: "WHATSAPP_BIRTHDAY_REMINDER_TEMPLATE_NAME",
+    parameters: [
+      { parameter_name: "name", text: recipientName },
+      { parameter_name: "birthday_name", text: birthdayEmployeeName },
+    ],
+    failureDescription: "the birthday reminder",
+  });
 }
 
 export async function checkWhatsAppConnection(): Promise<string> {

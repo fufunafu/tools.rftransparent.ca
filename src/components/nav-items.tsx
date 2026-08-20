@@ -181,7 +181,7 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
     children: [
-      { href: "/warehouse", label: "Dashboard", status: "done" },
+      { href: "/warehouse", label: "Dashboard", status: "done", access: "management" },
       { href: "/warehouse/report", label: "Daily Report", status: "done" },
       { href: "/warehouse/purchasing", label: "Purchasing", status: "wip", access: "management" },
       {

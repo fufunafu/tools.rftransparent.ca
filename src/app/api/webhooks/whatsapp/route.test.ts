@@ -50,4 +50,41 @@ describe("WhatsApp delivery webhook", () => {
       delivered_at: expect.any(String),
     }));
   });
+
+  it("records birthday-message delivery when the message is not a survey or employee update", async () => {
+    getSupabaseMock.mockReturnValue({
+      from: (table: string) => {
+        if (table === "survey_recipients") {
+          return {
+            select: () => ({
+              or: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+            }),
+          };
+        }
+        if (table === "survey_action_deliveries") {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+            }),
+          };
+        }
+        if (table === "birthday_message_deliveries") {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { id: "birthday-delivery", status: "sent" }, error: null }) }),
+            }),
+            update: updateMock,
+          };
+        }
+        throw new Error(`Unexpected table: ${table}`);
+      },
+    });
+
+    const response = await POST(statusRequest(true));
+    expect(response.status).toBe(200);
+    expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
+      status: "delivered",
+      delivered_at: expect.any(String),
+    }));
+  });
 });

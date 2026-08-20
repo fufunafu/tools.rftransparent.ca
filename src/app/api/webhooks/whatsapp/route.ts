@@ -46,7 +46,28 @@ export async function POST(request: NextRequest) {
         .select("id,status")
         .eq("provider_message_id", status.id)
         .maybeSingle();
-      if (!actionDelivery) continue;
+      if (!actionDelivery) {
+        const { data: birthdayDelivery } = await getSupabase()
+          .from("birthday_message_deliveries")
+          .select("id,status")
+          .eq("provider_message_id", status.id)
+          .maybeSingle();
+        if (!birthdayDelivery) continue;
+        const changes: Record<string, unknown> = { updated_at: timestamp };
+        if (status.status === "delivered" || status.status === "read") {
+          changes.status = "delivered";
+          changes.delivered_at = timestamp;
+        } else if (status.status === "failed") {
+          changes.status = "failed";
+          changes.delivery_error = failure ?? "WhatsApp birthday message delivery failed";
+        }
+        const { error } = await getSupabase()
+          .from("birthday_message_deliveries")
+          .update(changes)
+          .eq("id", birthdayDelivery.id);
+        if (!error) updated += 1;
+        continue;
+      }
       const changes: Record<string, unknown> = { updated_at: timestamp };
       if (status.status === "delivered" || status.status === "read") {
         changes.status = "delivered";
