@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 import { passwordProblem, recoveryParams } from "@/lib/password-reset";
 
 // Reached from the reset email. The templated link carries a token_hash that
 // works in whatever browser it opens in; the default-template fallback
 // carries a PKCE code that only works in the browser that asked for the
-// reset. A signed-in visitor with neither can simply change their password.
+// reset. A visitor with NEITHER is refused, even when a session already
+// exists in the browser — several store machines are shared, so an unlocked
+// signed-in browser must never be enough to set a new password.
 type Step = "verifying" | "ready" | "invalid" | "done";
 
 export default function ResetPasswordForm() {
   const [step, setStep] = useState<Step>("verifying");
-  // A recovery link signs the visitor in as a side effect; remember that so
-  // we can sign the browser back out once the new password is saved.
-  const cameFromEmail = useRef(false);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [saving, setSaving] = useState(false);
@@ -30,12 +29,15 @@ export default function ResetPasswordForm() {
     let cancelled = false;
     (async () => {
       const { tokenHash, code } = recoveryParams(window.location.search);
+      // No recovery credential, no form — a pre-existing session in the
+      // browser does not prove the person at the keyboard owns the account.
+      if (!tokenHash && !code) {
+        if (!cancelled) setStep("invalid");
+        return;
+      }
       // Recovery links are single-use; drop them from the URL so a refresh
       // doesn't retry a consumed token and scare people with an error.
-      if (tokenHash || code) {
-        cameFromEmail.current = true;
-        window.history.replaceState(null, "", "/reset-password");
-      }
+      window.history.replaceState(null, "", "/reset-password");
       try {
         if (tokenHash) {
           const { error: verifyError } = await supabase().auth.verifyOtp({
@@ -45,13 +47,8 @@ export default function ResetPasswordForm() {
           if (!cancelled) setStep(verifyError ? "invalid" : "ready");
           return;
         }
-        if (code) {
-          const { error: codeError } = await supabase().auth.exchangeCodeForSession(code);
-          if (!cancelled) setStep(codeError ? "invalid" : "ready");
-          return;
-        }
-        const { data } = await supabase().auth.getUser();
-        if (!cancelled) setStep(data.user ? "ready" : "invalid");
+        const { error: codeError } = await supabase().auth.exchangeCodeForSession(code!);
+        if (!cancelled) setStep(codeError ? "invalid" : "ready");
       } catch {
         if (!cancelled) setStep("invalid");
       }
@@ -79,8 +76,9 @@ export default function ResetPasswordForm() {
         return;
       }
       // Don't leave a signed-in session lying around in the email browser —
-      // the person is heading back to the app to sign in there.
-      if (cameFromEmail.current) await client.auth.signOut();
+      // the person is heading back to the app to sign in there. (The form is
+      // only ever reachable through a recovery link now, so always sign out.)
+      await client.auth.signOut();
       setStep("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
@@ -96,7 +94,8 @@ export default function ResetPasswordForm() {
     return (
       <div className="space-y-4 text-center">
         <p className="text-sm text-slate-700">
-          This reset link has expired or was already used.
+          This page only works from a password-reset email, and each link
+          works once. Ask for a fresh one below.
         </p>
         <a
           href="/forgot-password"
