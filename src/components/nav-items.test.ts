@@ -32,6 +32,19 @@ describe("role-aware navigation", () => {
     expect(hrefs).not.toContain("/settings/access");
   });
 
+  it("keeps the vault out of a non-admin's menu and offers it to an admin", () => {
+    const employee = getSearchTargets(visibleItems({ isAdmin: false, isManagement: false }))
+      .map((target) => target.href);
+    const admin = getSearchTargets(visibleItems({ isAdmin: true, isManagement: false }))
+      .map((target) => target.href);
+
+    // The library refuses anyone without canView("passwords") at the door, so
+    // the menu deliberately under-offers rather than showing a row that
+    // bounces most of the company with a toast.
+    expect(employee).not.toContain("/library/vault");
+    expect(admin).toContain("/library/vault");
+  });
+
   it("shows access settings to admins without implying management authority", () => {
     const targets = getSearchTargets(visibleItems({ isAdmin: true, isManagement: false }));
     const hrefs = targets.map((target) => target.href);
