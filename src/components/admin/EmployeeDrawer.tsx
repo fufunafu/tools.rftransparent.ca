@@ -352,7 +352,7 @@ export default function EmployeeDrawer({
               </p>
             </div>
 
-            {draft.department === "sales" && (
+            {mode === "edit" && draft.department === "sales" && (
               <div>
                 <label className={LABEL_CLS}>
                   Commission Rate
