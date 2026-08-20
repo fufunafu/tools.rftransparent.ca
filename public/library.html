@@ -14269,6 +14269,31 @@ registerPage(()=> reportsMode, ()=> setReports(false));
   }
   const {data}=await sb.auth.getSession();
   session=data.session||null;
+
+  /* Nobody signed in, and this page is sitting inside the tools application:
+     ask it whether the person at the keyboard is already known. It answers with
+     a one-time token for the same address, minted by our own Supabase, and the
+     sign-in box never has to appear.
+
+     Everything about this is best-effort. On our own domain the request is a
+     404 and we carry on; if the endpoint says no account, the sign-in box
+     opens exactly as before. The permissions are untouched either way — this
+     removes a password prompt, it does not hand anybody access they did not
+     already have. */
+  if(!session && !shareMode){
+    try{
+      const r = await fetch("/api/library-token", {credentials:"include", cache:"no-store"});
+      if(r.ok){
+        const {token_hash} = await r.json();
+        if(token_hash){
+          let out = await sb.auth.verifyOtp({token_hash, type:"magiclink"});
+          if(out.error) out = await sb.auth.verifyOtp({token_hash, type:"email"});
+          if(out.data?.session) session = out.data.session;
+          else if(out.error) console.error("[sso] token refused:", out.error.message);
+        }
+      }
+    }catch(e){ console.error("[sso]", e); }
+  }
   /* The permissions ride inside the token, and the token was minted at sign-in.
      Somebody whose access was widened an hour ago still carried the old claims,
      saw fewer pages than they had been given, and had no way to know why — the
