@@ -699,6 +699,16 @@ body.vaulting .searchwrap,body.vaulting .count,body.vaulting .editbar,
    the rest is already hidden by default — .grid carries the hidden attribute
    until render() clears it, .crumb and .editbar only show with .on. Do not put
    it back here. */
+/* Trade shows was the one page missing from this list. Every other page had a
+   belt as well as braces — the `hidden` attribute set by hideHome(), and a
+   class here that hides the library whatever happens to that attribute. The
+   calendar only ever had the attribute, so anything that called render() again
+   put the photo grid back on screen above it. That is exactly what happened:
+   renderFolders() waits on loadBrand() and re-renders when it lands, which is
+   half a second after the calendar has opened. Both halves are fixed; this is
+   the half that means a future stray render cannot do it again. */
+body.showing .grid,body.showing .crumb,body.showing .hint,body.showing .tray,
+body.showing .searchwrap,body.showing .count,body.showing .editbar,
 body.reporting .grid,body.reporting .crumb,body.reporting .hint,body.reporting .tray,
 body.reporting .searchwrap,body.reporting .count,body.reporting .editbar,
 body.storing .grid,body.storing .crumb,body.storing .hint,body.storing .tray,
@@ -3315,7 +3325,7 @@ const CATALOG_PATH = "catalog.json";
 
    To release: raise the minor by one. 15.5 -> 15.6 -> ... -> 15.9 -> 16.0.
    The minor is a single digit, so 9 rolls the major. Keep it a string.        */
-const BUILD = "31.1";
+const BUILD = "31.4";
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const shareParam = new URLSearchParams(location.search).get("p");
 const selParam   = new URLSearchParams(location.search).get("s");
@@ -4362,7 +4372,18 @@ function renderFolders(only){
   });
   /* always last, and only on the library's own front page */
   if(BRAND) renderBrand();
-  else loadBrand().then(()=>{ if(!openProduct && !query) render(); });
+  /* The brand files arrive after the page has already been drawn, so this asks
+     for a second render — and it used to ask without looking at where the
+     person now is. Landing on ?page=shows starts both at once: the library
+     renders, the calendar opens on top of it, and then this promise settles and
+     renders the library straight back over the calendar. PAGES is the register
+     every sub-page adds itself to, so one test covers the calendar, the stores,
+     the workspace, the team page and anything added later. */
+  else loadBrand().then(()=>{
+    if(openProduct || query) return;
+    if(PAGES.some(pg => pg.isOpen())) return;   // they have gone somewhere else
+    render();
+  });
 }
 
 /* ---------- team & access ----------
