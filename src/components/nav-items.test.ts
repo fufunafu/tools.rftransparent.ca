@@ -45,17 +45,6 @@ describe("role-aware navigation", () => {
     expect(admin).toContain("/library/vault");
   });
 
-  it("offers Manage library to a signed-in viewer who is not an admin", () => {
-    const employee = getSearchTargets(visibleItems({ isAdmin: false, isManagement: false }))
-      .map((target) => target.href);
-
-    // Managing the library is ordinary work, so the row is not held back the
-    // way an admin destination is. canEdit("library") refuses inside the
-    // library for an account that only browses.
-    expect(employee).toContain("/library/manage");
-    expect(employee).not.toContain("/settings/access");
-  });
-
   it("shows access settings to admins without implying management authority", () => {
     const targets = getSearchTargets(visibleItems({ isAdmin: true, isManagement: false }));
     const hrefs = targets.map((target) => target.href);

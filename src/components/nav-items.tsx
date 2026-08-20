@@ -149,12 +149,6 @@ export const NAV_ITEMS: NavSection[] = [
     children: [
       { href: "/marketing", label: "Analytics", status: "done" },
       { href: "/library/photos", label: "Photo library", status: "done" },
-      // `authenticated`, unlike Team & access below: managing the library is
-      // ordinary work, not an admin errand. The Admin, Manager and Marketing
-      // templates all carry `library` at full or delete, so this row lands in
-      // the menu of nearly everyone who would use it. canEdit("library") is
-      // the real gate and refuses inside the library.
-      { href: "/library/manage", label: "Manage library", status: "done", access: "authenticated" },
       { href: "/library/shows", label: "Trade shows", status: "done" },
       { href: "/library/stores", label: "Stores", status: "done" },
       { href: "/library/workspace", label: "My workspace", status: "done" },

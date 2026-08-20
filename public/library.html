@@ -163,6 +163,38 @@ body.shared .rail{display:none}
   font-size:10px;font-weight:700;line-height:18px;text-align:center;font-style:normal;
   border:2px solid var(--panel)}
 
+/* Manage library. It used to be a row in the rail, which said it was a place
+   you navigate to — it is not: it is a mode over the shelf you are already
+   looking at, it has no entry in the PAGES register, and neither Escape nor
+   the back button closes it. So it sits in the bar instead, in the right-hand
+   cluster after .grow, beside the bell. Not next to the search box: that box
+   is flex:1 1 auto and a button beside it eats the field on a narrow screen.
+
+   It is the same #editToggle element as before, carrying the same .nvlabel
+   span, because setEditing() writes the label through that span and paintNav()
+   marks the live state with .on. Only the class and the position changed.
+
+   Always on screen, never a hover reveal, and bordered in --edge rather than
+   --line: a control that changes what the page does should be legible before
+   it is reached for. It carries a word, so it is not the bell's 36px square. */
+.topmanage{display:flex;align-items:center;gap:8px;height:36px;flex-shrink:0;
+  padding:0 13px;border-radius:9px;border:1px solid var(--edge);background:var(--panel);
+  color:#3F5057;font-family:Roboto,"IBM Plex Sans",sans-serif;font-size:13px;font-weight:600;
+  white-space:nowrap;transition:all .14s}
+.topmanage .ico{width:17px;height:17px;flex-shrink:0;display:flex;align-items:center;
+  justify-content:center;color:var(--nc)}
+.topmanage .ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.topmanage:hover{background:#F2F7F5;color:var(--chalk)}
+.topmanage:focus-visible{outline:2px solid var(--edge);outline-offset:2px}
+/* paintNav() puts .on here while editing, exactly as it did on the rail row. */
+.topmanage.on{background:var(--edge);border-color:var(--edge);color:#fff}
+.topmanage.on .ico{color:#fff}
+.topmanage.on:hover{background:#43796A}
+/* Below 900 the rail is a drawer and the bar carries the mark and the name;
+   the word goes and the button keeps its icon rather than crowding them out. */
+@media(max-width:900px){ .topmanage{padding:0;width:36px;justify-content:center} .topmanage .nvlabel{display:none} }
+
 /* ---- collapsed to icons ---- */
 body.rail-min .railhead{padding:0;justify-content:center}
 body.rail-min .railnav{padding:6px 10px 12px;align-items:center}
@@ -691,7 +723,7 @@ body.vaulting{background:#E6EDEF}
 /* Every page hides the library chrome but never the nav itself — the same
    buttons sit in the header everywhere, with the current one marked. */
 body.vaulting .grid,body.vaulting .crumb,body.vaulting .hint,body.vaulting .tray,
-body.vaulting .searchwrap,body.vaulting .count,body.vaulting .editbar,
+body.vaulting .searchwrap,body.vaulting .count,body.vaulting .topmanage,body.vaulting .editbar,
 /* `body.shared` used to sit in this list, and it broke every share link: a
    customer link renders its photos into .grid and its title into .crumb, so
    hiding both left the visitor a blank page. Share mode hides the chrome it
@@ -708,15 +740,15 @@ body.vaulting .searchwrap,body.vaulting .count,body.vaulting .editbar,
    half a second after the calendar has opened. Both halves are fixed; this is
    the half that means a future stray render cannot do it again. */
 body.showing .grid,body.showing .crumb,body.showing .hint,body.showing .tray,
-body.showing .searchwrap,body.showing .count,body.showing .editbar,
+body.showing .searchwrap,body.showing .count,body.showing .topmanage,body.showing .editbar,
 body.reporting .grid,body.reporting .crumb,body.reporting .hint,body.reporting .tray,
-body.reporting .searchwrap,body.reporting .count,body.reporting .editbar,
+body.reporting .searchwrap,body.reporting .count,body.reporting .topmanage,body.reporting .editbar,
 body.storing .grid,body.storing .crumb,body.storing .hint,body.storing .tray,
-body.storing .searchwrap,body.storing .count,body.storing .editbar,
+body.storing .searchwrap,body.storing .count,body.storing .topmanage,body.storing .editbar,
 body.working .grid,body.working .crumb,body.working .hint,body.working .tray,
-body.working .searchwrap,body.working .count,body.working .editbar,
+body.working .searchwrap,body.working .count,body.working .topmanage,body.working .editbar,
 body.aiing .grid,body.aiing .crumb,body.aiing .hint,body.aiing .tray,
-body.aiing .searchwrap,body.aiing .count,body.aiing .editbar{display:none}
+body.aiing .searchwrap,body.aiing .count,body.aiing .topmanage,body.aiing .editbar{display:none}
 
 /* ================= Assistant page =================
    Two columns: what you have asked before on the left, the conversation on the
@@ -1066,9 +1098,9 @@ body.embedded .rail{display:none}
 .shared .foot span{display:none}
 /* ---------- locked / shared ---------- */
 .locked main,.locked .hint,.locked .tray,.locked .searchwrap,.locked .count,.locked .navitem,
-.locked .crumb,.locked .editbar,.locked .railburger,.locked .topbell{display:none}
+.locked .crumb,.locked .editbar,.locked .railburger,.locked .topbell,.locked .topmanage{display:none}
 .shared .searchwrap,.shared .navitem,.shared #topSignOut,.shared .back,.shared .tray,
-.shared .hint,.shared .count,.shared .railburger,.shared .topbell{display:none}
+.shared .hint,.shared .count,.shared .railburger,.shared .topbell,.shared .topmanage{display:none}
 .shared .railhead{cursor:default}
 body.shared .tophome{display:none!important}
 .shared main{max-width:1180px;padding-top:30px}
@@ -3115,9 +3147,6 @@ td.num .wkcell,td.money .wkcell{text-align:right;font-variant-numeric:tabular-nu
       <button class="navitem" id="homeToggle" title="Photo library">
         <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5.5" width="17" height="13" rx="2"/><circle cx="8.8" cy="10.2" r="1.5"/><path d="M4.4 16.2l3.9-4 2.7 2.7 3.2-3.5 5.4 5.4"/></svg></span>
         <span class="nvlabel">Photo library</span></button>
-      <button class="navitem" id="editToggle" aria-pressed="false" title="Manage library">
-        <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2l9.4-9.4a2.1 2.1 0 0 0 0-3l-1.2-1.2a2.1 2.1 0 0 0-3 0L4 15.8z"/><path d="M14.4 7.2l2.4 2.4"/></svg></span>
-        <span class="nvlabel">Manage library</span></button>
     </div>
 
     <div class="railgroup"><p class="raileyebrow">Sales</p>
@@ -3188,6 +3217,9 @@ td.num .wkcell,td.money .wkcell{text-align:right;font-variant-numeric:tabular-nu
       <span class="kbd">/</span>
     </div>
     <span class="grow"></span>
+    <button class="topmanage" id="editToggle" aria-pressed="false" hidden title="Manage library">
+      <span class="ico"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4.2l9.4-9.4a2.1 2.1 0 0 0 0-3l-1.2-1.2a2.1 2.1 0 0 0-3 0L4 15.8z"/><path d="M14.4 7.2l2.4 2.4"/></svg></span>
+      <span class="nvlabel">Manage library</span></button>
     <button class="topbell" id="bellTop" hidden aria-label="Update requests">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6V2.4"/>
         <path d="M18.4 16.1H5.6c-.72 0-1.09-.83-.6-1.35.92-.98 1.6-2.6 1.6-5.25a5.4 5.4 0 0 1 10.8 0c0 2.65.68 4.27 1.6 5.25.49.52.12 1.35-.6 1.35z"/>
@@ -3337,7 +3369,7 @@ const CATALOG_PATH = "catalog.json";
 
    To release: raise the minor by one. 15.5 -> 15.6 -> ... -> 15.9 -> 16.0.
    The minor is a single digit, so 9 rolls the major. Keep it a string.        */
-const BUILD = "31.7";
+const BUILD = "31.8";
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const shareParam = new URLSearchParams(location.search).get("p");
 const selParam   = new URLSearchParams(location.search).get("s");
