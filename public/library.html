@@ -3325,7 +3325,7 @@ const CATALOG_PATH = "catalog.json";
 
    To release: raise the minor by one. 15.5 -> 15.6 -> ... -> 15.9 -> 16.0.
    The minor is a single digit, so 9 rolls the major. Keep it a string.        */
-const BUILD = "31.4";
+const BUILD = "31.6";
 const slug = t => t.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"");
 const shareParam = new URLSearchParams(location.search).get("p");
 const selParam   = new URLSearchParams(location.search).get("s");
@@ -3590,8 +3590,8 @@ function applyGate(){
      the rung it advertises: view opens it, edit writes to it, delete removes
      from it. Team & access is a different question and stays with edit, because
      handing out permissions is not reading a password. */
-  /* Vault removed from this deployment — the button never shows. */
-  document.getElementById("vaultToggle").hidden = true;
+  document.getElementById("vaultToggle").hidden =
+    !authed || shareMode || !canView("passwords");
   document.getElementById("teamToggle").hidden  = !isAdmin();
   document.getElementById("showsToggle").hidden = !authed || shareMode || !canView("shows");
   document.getElementById("cmpToggle").hidden = !authed || shareMode || !canView("stores");
@@ -7255,10 +7255,6 @@ function renderVault(){
 }
 
 async function setVault(on){
-  /* Vault removed from this deployment (owner decision, 2026-08-14): the
-     password vault must not live inside the company tool. The function stays
-     so every caller keeps working, but it can only ever close the page. */
-  on = false;
   vaultMode = on && canView("passwords");
   document.body.classList.toggle("vaulting", vaultMode);
   /* Everything on this page was built for an admin, because until now only an
@@ -14309,6 +14305,8 @@ registerPage(()=> reportsMode, ()=> setReports(false));
     const open = {
       shows:     ()=> setShows(true),
       stores:    ()=> setStores(true),
+      vault:     ()=> setVault(true),
+      passwords: ()=> setVault(true),
       team:      ()=> setTeam(true),
       workspace: ()=> setWork(true),
       work:      ()=> setWork(true),
