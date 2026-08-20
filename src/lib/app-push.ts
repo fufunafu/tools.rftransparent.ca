@@ -8,6 +8,10 @@ import { isNativeApp } from "@/lib/app-biometrics";
 // us from re-asking a user who dismissed it every single launch.
 const PROMPTED_KEY = "rf-push-prompted";
 
+// The device token APNs last handed us, kept so sign-out can tell the server
+// to stop notifying this phone.
+const TOKEN_KEY = "rf-push-token";
+
 export async function registerForPush(): Promise<void> {
   if (!isNativeApp()) return;
   try {
@@ -23,6 +27,7 @@ export async function registerForPush(): Promise<void> {
 
     await PushNotifications.removeAllListeners();
     await PushNotifications.addListener("registration", (token) => {
+      localStorage.setItem(TOKEN_KEY, token.value);
       // Fire-and-forget; a failed save self-heals on the next launch.
       fetch("/api/push/register", {
         method: "POST",
@@ -37,5 +42,22 @@ export async function registerForPush(): Promise<void> {
     await PushNotifications.register();
   } catch {
     // Notifications are an enhancement — never let them break the app.
+  }
+}
+
+// Called on sign-out, while the session cookie still exists. Whoever signs
+// in next re-registers the token to themselves; this covers the phone that
+// nobody signs back in on.
+export async function unregisterForPush(): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
+    const token = localStorage.getItem(TOKEN_KEY);
+    if (!token) return;
+    const res = await fetch(`/api/push/register?token=${encodeURIComponent(token)}`, {
+      method: "DELETE",
+    });
+    if (res.ok) localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    // Best effort — sign-out must never be blocked by this.
   }
 }
