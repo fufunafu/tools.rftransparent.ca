@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
+import PushRegistrar from "@/components/PushRegistrar";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -38,6 +39,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={inter.variable}>
       <body className="min-h-screen">
+        <PushRegistrar />
         <SidebarLayout>{children}</SidebarLayout>
       </body>
     </html>

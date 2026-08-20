@@ -22,10 +22,14 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
 	<string>RF Tools uses Face ID to sign you in quickly and securely.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>RF Tools checks that you&#8217;re at your store when you clock in.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>RF Tools checks that you&#8217;re at your store when you clock in.</string>
 	<key>UIApplicationSceneManifest</key>

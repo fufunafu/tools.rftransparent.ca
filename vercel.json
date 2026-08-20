@@ -21,6 +21,14 @@
       "schedule": "0 13 * * 1-5"
     },
     {
+      "path": "/api/cron/push-clock-reminders",
+      "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/cron/push-followup-digest",
+      "schedule": "5 13 * * 1-5"
+    },
+    {
       "path": "/api/cron/send-employee-surveys",
       "schedule": "25 * * * *"
     },
