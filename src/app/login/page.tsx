@@ -76,9 +76,11 @@ export default async function LoginPage({
               nextPath={safeNextPath(next)}
               testLogin={testLoginEnabled()}
             />
-            <p className="text-xs text-slate-600 text-center mt-6">
-              Authorized personnel only
-            </p>
+            <p className="text-xs text-slate-600 text-center mt-6">Authorized personnel only</p>
+            <nav aria-label="Legal and support" className="mt-3 flex justify-center gap-4 text-xs">
+              <a href="/privacy" className="font-medium text-blue-700 hover:text-blue-800">Privacy</a>
+              <a href="/support" className="font-medium text-blue-700 hover:text-blue-800">Support</a>
+            </nav>
           </div>
         </div>
       </div>

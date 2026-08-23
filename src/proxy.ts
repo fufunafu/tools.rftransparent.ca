@@ -65,6 +65,8 @@ export async function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/login" ||
+    pathname === "/privacy" ||
+    pathname === "/support" ||
     // Password recovery — reached from the reset email while signed out.
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||

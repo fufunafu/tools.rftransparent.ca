@@ -48,6 +48,17 @@ function sectionForPathname(pathname: string) {
   return COLLAPSIBLE_ITEMS.find((item) => matchesItem(item, pathname))?.href ?? null;
 }
 
+function usesStandaloneLayout(pathname: string) {
+  return (
+    pathname === "/login" ||
+    pathname === "/privacy" ||
+    pathname === "/support" ||
+    pathname.startsWith("/print/") ||
+    pathname.startsWith("/survey/") ||
+    pathname.startsWith("/wall/")
+  );
+}
+
 const SignOutIcon = ({ className }: { className: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className={className}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
@@ -174,13 +185,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   }, [pathname]);
 
   useEffect(() => {
-    if (
-      pathname === "/login" ||
-      pathname.startsWith("/print/") ||
-      pathname.startsWith("/survey/") ||
-      // The wall board is a chrome-less TV display — no sidebar, no top bar.
-      pathname.startsWith("/wall/")
-    ) return;
+    if (usesStandaloneLayout(pathname)) return;
     const ctrl = new AbortController();
     fetch("/api/admin/me", { signal: ctrl.signal })
       .then((res) => (res.ok ? res.json() : null))
@@ -260,13 +265,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
   // client-side navigation so resolving a ticket updates the badge promptly.
   const [openProblems, setOpenProblems] = useState(0);
   useEffect(() => {
-    if (
-      pathname === "/login" ||
-      pathname.startsWith("/print/") ||
-      pathname.startsWith("/survey/") ||
-      // The wall board is a chrome-less TV display — no sidebar, no top bar.
-      pathname.startsWith("/wall/")
-    ) return;
+    if (usesStandaloneLayout(pathname)) return;
     let cancelled = false;
     fetch("/api/problems/count", { cache: "no-store" })
       .then((res) => (res.ok ? res.json() : null))
@@ -281,14 +280,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
 
   // No sidebar on the login page, or on print-friendly routes (PO printouts
   // open in a new tab and shouldn't carry the app chrome).
-  if (
-    pathname === "/login" ||
-    pathname.startsWith("/print/") ||
-    pathname.startsWith("/survey/") ||
-    // The wall board is a chrome-less TV display — it must fill 1920×1080
-    // edge to edge with no sidebar and no top bar.
-    pathname.startsWith("/wall/")
-  ) {
+  if (usesStandaloneLayout(pathname)) {
     return <>{children}</>;
   }
 

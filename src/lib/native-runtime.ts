@@ -11,6 +11,8 @@ export function isLocalDevelopmentOrigin(value: string | URL): boolean {
 export function isProtectedNativePath(pathname: string): boolean {
   return !(
     pathname === "/login" ||
+    pathname === "/privacy" ||
+    pathname === "/support" ||
     pathname.startsWith("/print/") ||
     pathname.startsWith("/survey/") ||
     pathname.startsWith("/wall/")

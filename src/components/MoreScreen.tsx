@@ -152,9 +152,12 @@ export default function MoreScreen({
           <Link href="/bugs" className="flex min-h-14 items-center justify-between px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
             Report a bug <span className="text-lg text-slate-300" aria-hidden="true">›</span>
           </Link>
-          <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20support" className="flex min-h-14 items-center justify-between border-t border-slate-100 px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
-            Contact support <span className="text-lg text-slate-300" aria-hidden="true">↗</span>
-          </a>
+          <Link href="/support" className="flex min-h-14 items-center justify-between border-t border-slate-100 px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
+            Support <span className="text-lg text-slate-300" aria-hidden="true">›</span>
+          </Link>
+          <Link href="/privacy" className="flex min-h-14 items-center justify-between border-t border-slate-100 px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
+            Privacy <span className="text-lg text-slate-300" aria-hidden="true">›</span>
+          </Link>
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
           <div><dt className="text-slate-500">Connection</dt><dd className={`mt-0.5 font-bold ${runtime.connected ? "text-emerald-700" : "text-amber-800"}`}>{runtime.connected ? `Online${runtime.connectionType !== "unknown" ? ` · ${runtime.connectionType}` : ""}` : "Offline"}</dd></div>

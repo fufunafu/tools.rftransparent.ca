@@ -10,7 +10,7 @@ describe("native runtime boundaries", () => {
     expect(isProtectedNativePath(path)).toBe(true);
   });
 
-  it.each(["/login", "/print/po/1", "/survey/token", "/wall/token"])("does not lock public path %s", (path) => {
+  it.each(["/login", "/privacy", "/support", "/print/po/1", "/survey/token", "/wall/token"])("does not lock public path %s", (path) => {
     expect(isProtectedNativePath(path)).toBe(false);
   });
 
