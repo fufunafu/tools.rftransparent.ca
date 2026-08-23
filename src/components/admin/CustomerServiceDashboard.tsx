@@ -104,6 +104,7 @@ interface CallbackGroup {
   calls: { id: string; call_start: string; duration_min: number; source?: string }[];
   note?: string;
   note_status?: string;
+  assigned_to?: string | null;
 }
 
 interface CallbacksResponse {

@@ -12,11 +12,14 @@ Authorization has three independent levels. A person may be an admin without bei
 
 | Area | View access | Elevated actions |
 | --- | --- | --- |
-| Home, sales, pipeline, marketing, Shopify | Authenticated | Route-specific API checks |
+| Home, pipeline, marketing, Shopify | Authenticated | Route-specific API checks |
+| Personal sales (`/sales`) | Active sales employee | Management uses `/dashboards/sales` |
 | Role dashboards (`/dashboards/sales`, `/dashboards/store/[location]`, `/dashboards/marketing`) | Authenticated | None — an employee's role/location picks their default landing dashboard, never restricts access |
 | Sales commissions (`/api/kpi/commissions`) | Authenticated | Commission rates edited via admin-only employee routes |
-| Customer service | Authenticated | Admin checks for destructive or configuration actions |
-| Warehouse dashboard and reports | Authenticated | Authenticated report writes |
+| Personal customer-service queue (`/customer-service`) | Active customer-service employee | Assignment writes revalidate the employee role server-side |
+| Customer-service analytics | Authenticated | Admin checks for destructive or configuration actions |
+| Personal warehouse report | Active warehouse employee | Employee identity is resolved from the authenticated email |
+| Warehouse dashboard | Management | Manager corrections use the separate management-only report endpoint |
 | Purchasing | Management | Management for all purchasing reads and writes |
 | Accounting and reimbursements | Authenticated | Management for approval and rejection |
 | Tasks | Authenticated | Management for all-employee oversight |

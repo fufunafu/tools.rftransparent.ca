@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getAuthenticatedUser, isAdminUser, isManagementUser } from "@/lib/admin-auth";
 import { getProfileAvatarUrl } from "@/lib/profile-avatar";
+import { findActiveEmployeeByEmail } from "@/lib/employee-profile";
 import MoreScreen from "@/components/MoreScreen";
 
 export const metadata: Metadata = {
@@ -15,16 +16,21 @@ export default async function MorePage() {
   const user = await getAuthenticatedUser();
   if (!user) redirect("/login");
 
-  const [isAdmin, isManagement] = await Promise.all([isAdminUser(), isManagementUser()]);
-  const name = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
+  const [isAdmin, isManagement, employee] = await Promise.all([
+    isAdminUser(),
+    isManagementUser(),
+    user.email ? findActiveEmployeeByEmail(user.email) : null,
+  ]);
+  const metadataName = typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null;
 
   return (
     <div className="mx-auto max-w-md">
       <h1 className="mb-4 text-2xl font-bold tracking-tight text-slate-900">More</h1>
       <MoreScreen
         viewerAccess={{ isAdmin, isManagement }}
-        viewerName={name}
+        viewerName={employee?.name ?? metadataName}
         viewerEmail={user.email ?? ""}
+        viewerDepartment={employee?.department ?? null}
         avatarUrl={getProfileAvatarUrl(user.user_metadata)}
       />
     </div>

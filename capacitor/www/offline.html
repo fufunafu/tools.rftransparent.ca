@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <title>RF Tools is offline</title>
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        padding: calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px);
+        display: grid;
+        place-items: center;
+        background: #1e3a8a;
+        color: #0f172a;
+      }
+      main { width: min(100%, 420px); border-radius: 28px; background: white; padding: 32px 24px; text-align: center; box-shadow: 0 24px 60px rgb(15 23 42 / 0.28); }
+      .mark { width: 64px; height: 64px; margin: 0 auto 22px; display: grid; place-items: center; border-radius: 18px; background: #2563eb; color: white; font-size: 22px; font-weight: 800; }
+      h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+      p { margin: 12px 0 0; color: #64748b; font-size: 15px; line-height: 1.5; }
+      .status { margin-top: 20px; display: inline-flex; align-items: center; gap: 8px; color: #b45309; font-size: 13px; font-weight: 700; }
+      .dot { width: 8px; height: 8px; border-radius: 999px; background: #f59e0b; }
+      button, a { min-height: 44px; border-radius: 14px; font: inherit; font-weight: 700; }
+      button { width: 100%; margin-top: 24px; border: 0; background: #2563eb; color: white; padding: 12px 18px; }
+      a { margin-top: 10px; display: flex; align-items: center; justify-content: center; color: #475569; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">RF</div>
+      <h1>RF Tools cannot connect</h1>
+      <p>Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.</p>
+      <div class="status" role="status"><span class="dot"></span><span id="connection">No connection</span></div>
+      <button type="button" id="retry">Try again</button>
+      <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20connection%20help">Contact support</a>
+    </main>
+    <script>
+      const productionUrl = "https://tools.rftransparent.ca";
+      const connection = document.getElementById("connection");
+      const retry = document.getElementById("retry");
+
+      function updateConnection() {
+        connection.textContent = navigator.onLine
+          ? "Connection available. Try again."
+          : "No connection";
+      }
+
+      function retryLoad() {
+        if (document.referrer.startsWith("http://") || document.referrer.startsWith("https://")) {
+          window.location.replace(document.referrer);
+          return;
+        }
+        if (window.history.length > 1) {
+          window.history.back();
+          return;
+        }
+        window.location.replace(productionUrl);
+      }
+
+      retry.addEventListener("click", retryLoad);
+      window.addEventListener("online", updateConnection);
+      window.addEventListener("offline", updateConnection);
+      updateConnection();
+
+      window.Capacitor?.Plugins?.SplashScreen?.hide?.();
+    </script>
+  </body>
+</html>

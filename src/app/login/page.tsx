@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import LoginForm from "@/components/admin/LoginForm";
 import { safeNextPath } from "@/lib/client-auth";
+import { testLoginEnabled } from "@/lib/test-login";
 
 export const metadata: Metadata = {
   title: "Login | RF Tools",
@@ -23,7 +24,7 @@ export default async function LoginPage({
       : undefined;
 
   return (
-    <div className="min-h-screen flex bg-gradient-to-br from-blue-900 to-blue-950 md:bg-none md:bg-white">
+    <div className="flex min-h-dvh bg-gradient-to-br from-blue-900 to-blue-950 pb-[env(safe-area-inset-bottom)] pt-[env(safe-area-inset-top)] md:bg-none md:bg-white md:pb-0 md:pt-0">
       {/* Left — brand panel, desktop only */}
       <div className="hidden md:flex md:w-2/5 bg-gradient-to-br from-blue-900 to-blue-950 flex-col items-center justify-center p-12 relative overflow-hidden">
         {/* faint dot pattern overlay */}
@@ -63,7 +64,7 @@ export default async function LoginPage({
                 <span className="text-xl font-bold text-white tracking-tight">RF</span>
               </div>
               <span className="text-lg font-semibold text-slate-900">RF Transparent</span>
-              <span className="text-xs text-slate-400">Internal Operations</span>
+              <span className="text-xs text-slate-600">Internal Operations</span>
             </div>
 
             <h2 className="text-2xl font-semibold text-slate-900 mb-1 max-md:text-center">Welcome back</h2>
@@ -73,9 +74,9 @@ export default async function LoginPage({
             <LoginForm
               authError={authError}
               nextPath={safeNextPath(next)}
-              devLogin={process.env.NODE_ENV === "development"}
+              testLogin={testLoginEnabled()}
             />
-            <p className="text-xs text-slate-400 text-center mt-6">
+            <p className="text-xs text-slate-600 text-center mt-6">
               Authorized personnel only
             </p>
           </div>

@@ -33,6 +33,10 @@
       "schedule": "25 * * * *"
     },
     {
+      "path": "/api/cron/birthday-messages",
+      "schedule": "35 * * * *"
+    },
+    {
       "path": "/api/cron/problems-digest",
       "schedule": "0 13 * * 1"
     }

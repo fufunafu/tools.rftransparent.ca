@@ -45,6 +45,22 @@ It uses the same `name` and `link` parameters. When the reminder variable is abs
 
 The body uses named parameters `name`, `title`, and `update`. Management reviews and explicitly publishes these messages from Employees, Team surveys.
 
+### Birthday greeting
+
+- Environment name: `WHATSAPP_BIRTHDAY_GREETING_TEMPLATE_NAME`
+- Suggested template name: `employee_birthday_greeting`
+- Body: `Happy birthday, {{name}}! Wishing you a wonderful day from everyone at RF Transparent.`
+
+The body uses the named parameter `name`.
+
+### Coworker birthday reminder
+
+- Environment name: `WHATSAPP_BIRTHDAY_REMINDER_TEMPLATE_NAME`
+- Suggested template name: `employee_birthday_reminder`
+- Body: `Hi {{name}}, today is {{birthday_name}}'s birthday. Please take a moment to wish them a happy birthday!`
+
+The body uses named parameters `name` and `birthday_name`. The daily automation sends the greeting to each active birthday employee and sends this reminder to every other active employee at approximately 9:35 AM Toronto time.
+
 ## Environment variables
 
 Configure these values in Vercel for every environment that sends messages:
@@ -55,6 +71,8 @@ WHATSAPP_PHONE_NUMBER_ID=
 WHATSAPP_SURVEY_TEMPLATE_NAME=employee_survey
 WHATSAPP_SURVEY_REMINDER_TEMPLATE_NAME=employee_survey_reminder
 WHATSAPP_EMPLOYEE_UPDATE_TEMPLATE_NAME=employee_feedback_update
+WHATSAPP_BIRTHDAY_GREETING_TEMPLATE_NAME=employee_birthday_greeting
+WHATSAPP_BIRTHDAY_REMINDER_TEMPLATE_NAME=employee_birthday_reminder
 WHATSAPP_TEMPLATE_LANGUAGE=en_US
 WHATSAPP_GRAPH_API_VERSION=v24.0
 WHATSAPP_APP_SECRET=

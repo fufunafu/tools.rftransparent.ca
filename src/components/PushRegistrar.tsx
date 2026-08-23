@@ -46,6 +46,5 @@ export default function PushRegistrar() {
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
   }, [isNative]);
-
   return null;
 }

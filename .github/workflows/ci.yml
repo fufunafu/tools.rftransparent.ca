@@ -44,7 +44,11 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Browser smoke tests
-        run: npm run test:e2e
+        # Chromium only: it is the only browser installed above. The webkit
+        # mobile projects need `playwright install webkit` plus device state
+        # and run through the dedicated test:e2e:mobile* scripts instead —
+        # without this scope they fail on a missing executable, not real bugs.
+        run: npm run test:e2e -- --project=chromium
 
       - name: Upload browser report
         if: failure()

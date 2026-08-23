@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const externalBaseUrl = process.env.E2E_BASE_URL;
 const baseURL = externalBaseUrl ?? "http://127.0.0.1:3000";
 const storageState = process.env.E2E_STORAGE_STATE || undefined;
+const mobileStorageState = process.env.E2E_MOBILE_STORAGE_STATE || storageState;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -29,6 +30,27 @@ export default defineConfig({
     {
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
+      testIgnore: /mobile\.spec\.ts/,
+    },
+    {
+      name: "webkit-iphone-se",
+      testMatch: /mobile\.spec\.ts/,
+      use: { ...devices["iPhone SE (3rd gen)"], storageState: mobileStorageState },
+    },
+    {
+      name: "webkit-iphone",
+      testMatch: /mobile\.spec\.ts/,
+      use: { ...devices["iPhone 15"], storageState: mobileStorageState },
+    },
+    {
+      name: "webkit-iphone-pro-max",
+      testMatch: /mobile\.spec\.ts/,
+      use: { ...devices["iPhone 15 Pro Max"], storageState: mobileStorageState },
+    },
+    {
+      name: "webkit-ipad",
+      testMatch: /mobile\.spec\.ts/,
+      use: { ...devices["iPad (gen 11)"], storageState: mobileStorageState },
     },
   ],
 });

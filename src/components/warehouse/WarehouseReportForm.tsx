@@ -1,15 +1,11 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-
-interface Employee {
-  id: string;
-  name: string;
-}
+import { useCallback, useEffect, useState } from "react";
+import { useNativeRuntime } from "@/components/NativeAppRuntime";
+import { dayKeyInTimeZone } from "@/lib/time-clock";
 
 interface Report {
   id: string;
-  employee_id: string;
   report_date: string;
   boxes_built: number;
   orders_packed: number;
@@ -18,12 +14,22 @@ interface Report {
   updated_at: string;
 }
 
-const STORAGE_KEY = "warehouse_report_employee_id";
+async function responseError(response: Response, fallback: string): Promise<string> {
+  const data = await response.json().catch(() => ({}));
+  return typeof data.error === "string" ? data.error : fallback;
+}
 
-export default function WarehouseReportForm() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [employeeId, setEmployeeId] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
+function numericValue(value: string): number | null {
+  if (!value.trim()) return 0;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= 1_000_000
+    ? parsed
+    : null;
+}
+
+export default function WarehouseReportForm({ employeeName }: { employeeName: string }) {
+  const { connected } = useNativeRuntime();
+  const [date, setDate] = useState(() => dayKeyInTimeZone(new Date()));
   const [boxesBuilt, setBoxesBuilt] = useState("");
   const [ordersPacked, setOrdersPacked] = useState("");
   const [walkinPickup, setWalkinPickup] = useState("");
@@ -32,247 +38,172 @@ export default function WarehouseReportForm() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [existingReport, setExistingReport] = useState<Report | null>(null);
-  const [loadingReport, setLoadingReport] = useState(false);
+  const [loadingReport, setLoadingReport] = useState(true);
 
-  // Load warehouse employees
-  useEffect(() => {
-    fetch("/api/warehouse/employees")
-      .then((r) => r.json())
-      .then((data: Employee[]) => {
-        setEmployees(data);
-        // Restore last-used employee from localStorage
-        const stored = localStorage.getItem(STORAGE_KEY);
-        if (stored && data.some((e) => e.id === stored)) {
-          setEmployeeId(stored);
-        }
-      })
-      .catch(() => setError("Failed to load employees"));
-  }, []);
-
-  // Fetch existing report when employee or date changes
   const loadExisting = useCallback(async () => {
-    if (!employeeId || !date) return;
+    if (!date) return;
     setLoadingReport(true);
+    setError("");
     try {
-      const res = await fetch(
-        `/api/warehouse/reports?employeeId=${employeeId}&from=${date}&to=${date}`
-      );
-      if (!res.ok) return;
-      const data: Report[] = await res.json();
-      if (data.length > 0) {
-        const r = data[0];
-        setExistingReport(r);
-        setBoxesBuilt(String(r.boxes_built));
-        setOrdersPacked(String(r.orders_packed));
-        setWalkinPickup(String(r.walkin_pickup ?? 0));
-        setNotes(r.notes || "");
-      } else {
-        setExistingReport(null);
-        setBoxesBuilt("");
-        setOrdersPacked("");
-        setWalkinPickup("");
-        setNotes("");
-      }
-    } catch {
-      // Ignore — form still works for new entries
+      const response = await fetch(`/api/warehouse/reports?from=${date}&to=${date}`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error(await responseError(response, "Could not load your report."));
+      const reports: Report[] = await response.json();
+      const report = reports[0] ?? null;
+      setExistingReport(report);
+      setBoxesBuilt(report ? String(report.boxes_built) : "");
+      setOrdersPacked(report ? String(report.orders_packed) : "");
+      setWalkinPickup(report ? String(report.walkin_pickup ?? 0) : "");
+      setNotes(report?.notes ?? "");
+    } catch (loadError) {
+      setExistingReport(null);
+      setError(loadError instanceof Error ? loadError.message : "Could not load your report.");
     } finally {
       setLoadingReport(false);
     }
-  }, [employeeId, date]);
+  }, [date]);
 
   useEffect(() => {
-    loadExisting();
+    void loadExisting();
   }, [loadExisting]);
 
-  const handleEmployeeChange = (id: string) => {
-    setEmployeeId(id);
-    setSuccess("");
-    if (id) localStorage.setItem(STORAGE_KEY, id);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!employeeId) return;
-
+  async function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!connected || !navigator.onLine) {
+      setError("Reports require an internet connection. Reconnect and try again.");
+      return;
+    }
     setSaving(true);
     setError("");
     setSuccess("");
-
+    const counts = [
+      numericValue(boxesBuilt),
+      numericValue(ordersPacked),
+      numericValue(walkinPickup),
+    ];
+    if (counts.some((value) => value === null)) {
+      setError("Production counts must be whole numbers between 0 and 1,000,000.");
+      setSaving(false);
+      return;
+    }
     try {
-      const res = await fetch("/api/warehouse/reports", {
+      const response = await fetch("/api/warehouse/reports", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          employee_id: employeeId,
           report_date: date,
-          boxes_built: parseInt(boxesBuilt) || 0,
-          orders_packed: parseInt(ordersPacked) || 0,
-          walkin_pickup: parseInt(walkinPickup) || 0,
+          boxes_built: counts[0],
+          orders_packed: counts[1],
+          walkin_pickup: counts[2],
           notes: notes.trim() || null,
         }),
       });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to save");
-      }
-
-      const saved = await res.json();
+      if (!response.ok) throw new Error(await responseError(response, "Could not save your report."));
+      const saved: Report = await response.json();
       setExistingReport(saved);
-      setSuccess(
-        existingReport ? "Report updated!" : "Report submitted!"
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setSuccess(existingReport ? "Report updated." : "Report submitted.");
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save your report.");
     } finally {
       setSaving(false);
     }
-  };
+  }
 
-  const employeeName = employees.find((e) => e.id === employeeId)?.name;
+  const fieldClass =
+    "min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-base text-slate-950 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
 
   return (
-    <div className="min-h-screen bg-sand-50 flex items-start justify-center px-4 py-8">
+    <div className="mx-auto max-w-lg">
       <form
         onSubmit={handleSubmit}
-        className="bg-white rounded-xl border border-sand-200 shadow-sm w-full max-w-md p-6 space-y-5"
+        className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7"
       >
-        <div>
-          <h1 className="text-lg font-semibold text-sand-900">
-            Daily Warehouse Report
-          </h1>
-          <p className="text-xs text-sand-400 mt-1">
-            Fill in your daily output for each step.
+        <header>
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">Warehouse</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Daily report</h1>
+          <p className="mt-2 text-sm leading-6 text-slate-500">
+            Report your own production for the selected day. You are signed in as {employeeName}.
           </p>
-        </div>
+        </header>
 
-        {/* Employee */}
-        <div>
-          <label className="block text-sm font-medium text-sand-700 mb-1">
-            Your Name
-          </label>
-          <select
-            value={employeeId}
-            onChange={(e) => handleEmployeeChange(e.target.value)}
-            className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 bg-white focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
-          >
-            <option value="">Select your name...</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Date */}
-        <div>
-          <label className="block text-sm font-medium text-sand-700 mb-1">
-            Date
-          </label>
+        <label className="block text-sm font-semibold text-slate-700">
+          Date
           <input
             type="date"
             value={date}
-            onChange={(e) => {
-              setDate(e.target.value);
+            required
+            onChange={(event) => {
+              setDate(event.target.value);
               setSuccess("");
             }}
-            className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
+            className={`${fieldClass} mt-1.5`}
           />
-        </div>
+        </label>
 
-        {loadingReport && employeeId && (
-          <p className="text-xs text-sand-400">Checking for existing report...</p>
+        {loadingReport ? (
+          <div className="h-16 animate-pulse rounded-2xl bg-slate-100" aria-label="Loading report" />
+        ) : existingReport ? (
+          <p className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800" role="status">
+            You already submitted this date. Saving will update your report from {new Date(existingReport.updated_at).toLocaleString()}.
+          </p>
+        ) : (
+          <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600" role="status">
+            No report has been submitted for this date.
+          </p>
         )}
 
-        {existingReport && (
-          <div className="rounded-lg bg-blue-50 border border-blue-200 px-3 py-2 text-xs text-blue-700">
-            Editing existing report &mdash; last updated{" "}
-            {new Date(existingReport.updated_at).toLocaleString()}
-          </div>
-        )}
+        <fieldset className="grid gap-4 sm:grid-cols-2">
+          <legend className="sr-only">Production counts</legend>
+          {[
+            ["Boxes built", boxesBuilt, setBoxesBuilt],
+            ["Orders packed", ordersPacked, setOrdersPacked],
+            ["Walk-in and pick-up", walkinPickup, setWalkinPickup],
+          ].map(([label, value, setter]) => (
+            <label key={label as string} className="block text-sm font-semibold text-slate-700">
+              {label as string}
+              <input
+                type="number"
+                min="0"
+                max="1000000"
+                step="1"
+                inputMode="numeric"
+                value={value as string}
+                onChange={(event) => (setter as (next: string) => void)(event.target.value)}
+                placeholder="0"
+                className={`${fieldClass} mt-1.5`}
+              />
+            </label>
+          ))}
+        </fieldset>
 
-        {/* Step counts */}
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-sand-700 mb-1">
-              Boxes Built
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={boxesBuilt}
-              onChange={(e) => setBoxesBuilt(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-sand-700 mb-1">
-              Orders Packed
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={ordersPacked}
-              onChange={(e) => setOrdersPacked(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-sand-700 mb-1">
-              Walk-in / Pick-up
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={walkinPickup}
-              onChange={(e) => setWalkinPickup(e.target.value)}
-              placeholder="0"
-              className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none"
-            />
-          </div>
-        </div>
-
-        {/* Notes */}
-        <div>
-          <label className="block text-sm font-medium text-sand-700 mb-1">
-            Notes <span className="text-sand-400 font-normal">(optional)</span>
-          </label>
+        <label className="block text-sm font-semibold text-slate-700">
+          Notes <span className="font-normal text-slate-400">(optional)</span>
           <textarea
             value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            rows={2}
-            placeholder="Anything to note about today..."
-            className="w-full rounded-lg border border-sand-300 px-3 py-2 text-sm text-sand-900 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none resize-none"
+            maxLength={2000}
+            onChange={(event) => setNotes(event.target.value)}
+            rows={3}
+            placeholder="Add any issue or context for today"
+            className={`${fieldClass} mt-1.5 resize-y`}
           />
-        </div>
+        </label>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && (
-          <div className="rounded-lg bg-green-50 border border-green-200 px-3 py-2 text-sm text-green-700">
-            {success}
-          </div>
+        {!connected && (
+          <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-900" role="status">
+            You are offline. Nothing will be submitted until you reconnect and tap submit again.
+          </p>
         )}
+        {error && <p className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert" aria-live="assertive">{error}</p>}
+        {success && <p className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800" role="status" aria-live="polite">{success}</p>}
 
         <button
           type="submit"
-          disabled={saving || !employeeId}
-          className="w-full px-4 py-2.5 text-sm font-medium rounded-lg bg-sand-900 text-sand-50 hover:bg-sand-800 transition-colors disabled:opacity-50"
+          disabled={saving || loadingReport || !connected}
+          className="min-h-12 w-full rounded-2xl bg-blue-600 px-5 py-3 text-base font-bold text-white shadow-lg shadow-blue-600/20 transition active:scale-[0.99] disabled:opacity-50"
         >
-          {saving
-            ? "Saving..."
-            : existingReport
-              ? "Update Report"
-              : "Submit Report"}
+          {saving ? "Saving..." : existingReport ? "Update my report" : "Submit my report"}
         </button>
-
-        {employeeName && (
-          <p className="text-xs text-sand-400 text-center">
-            Submitting as {employeeName}
-          </p>
-        )}
       </form>
     </div>
   );

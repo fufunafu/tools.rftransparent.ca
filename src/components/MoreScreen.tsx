@@ -1,18 +1,22 @@
 "use client";
 
-import { cloneElement, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
+import { useNativeRuntime } from "@/components/NativeAppRuntime";
 import {
-  NAV_GROUPS,
   NAV_ITEMS,
   SETTINGS_ITEM,
   filterNavItem,
+  type AccessLevel,
   type NavItem,
   type ViewerAccess,
 } from "@/components/nav-items";
+import { mobileRoleActions } from "@/lib/mobile-home";
+import type { MobileRoleAction } from "@/lib/mobile-types";
 
-// The full tool list for phones — everything the sidebar shows on desktop,
-// filtered by the same access rules, plus account and sign-out.
+interface Destination extends MobileRoleAction {
+  access?: AccessLevel;
+}
 
 function initialsFor(name: string | null, email: string): string {
   const source = name?.trim() || email.split("@")[0] || "";
@@ -22,59 +26,59 @@ function initialsFor(name: string | null, email: string): string {
   return letters.toUpperCase();
 }
 
-const Chevron = () => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="ml-auto w-4 h-4 shrink-0 text-slate-300">
-    <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
-  </svg>
-);
+function destination(item: { href: string; label: string; external?: boolean; access?: AccessLevel }): Destination {
+  return {
+    id: item.href,
+    href: item.href,
+    label: item.label,
+    description: item.external ? "Opens outside RF Tools" : "Open tool",
+    external: item.external,
+    access: item.access,
+  };
+}
 
-function ItemRows({ item }: { item: NavItem }) {
-  const icon = cloneElement(item.icon, { className: "w-[18px] h-[18px] shrink-0 text-slate-500" });
+function flattenItem(item: NavItem): Destination[] {
+  if (item.children?.length) return item.children.map(destination);
+  return [destination(item)];
+}
+
+function uniqueDestinations(destinations: Destination[]): Destination[] {
+  const seen = new Set<string>();
+  return destinations.filter((item) => {
+    if (seen.has(item.href)) return false;
+    seen.add(item.href);
+    return true;
+  });
+}
+
+function Section({ title, items }: { title: string; items: Destination[] }) {
+  if (items.length === 0) return null;
   return (
-    <>
-      {item.external ? (
-        <a
-          href={item.href}
-          target="_blank"
-          rel="noreferrer"
-          className="flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-800 active:bg-slate-50"
-        >
-          {icon}
-          {item.label}
-          <Chevron />
-        </a>
-      ) : (
-        <Link
-          href={item.href}
-          className="flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-800 active:bg-slate-50"
-        >
-          {icon}
-          {item.label}
-          <Chevron />
-        </Link>
-      )}
-      {item.children?.map((child) =>
-        child.external ? (
-          <a
-            key={child.href}
-            href={child.href}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-3 py-2.5 pl-[46px] pr-4 text-[13px] text-slate-500 active:bg-slate-50"
-          >
-            {child.label}
-          </a>
-        ) : (
-          <Link
-            key={child.href}
-            href={child.href}
-            className="flex items-center gap-3 py-2.5 pl-[46px] pr-4 text-[13px] text-slate-500 active:bg-slate-50"
-          >
-            {child.label}
-          </Link>
-        ),
-      )}
-    </>
+    <section aria-labelledby={`more-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
+      <h2 id={`more-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`} className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+        {title}
+      </h2>
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {items.map((item) => {
+          const content = (
+            <>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-bold text-slate-900">{item.label}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{item.description}</span>
+              </span>
+              <span className="text-lg text-slate-300" aria-hidden="true">{item.external ? "↗" : "›"}</span>
+              {item.external && <span className="sr-only">Opens outside RF Tools</span>}
+            </>
+          );
+          const className = "flex min-h-16 items-center gap-3 px-4 py-3 active:bg-slate-50";
+          return item.external ? (
+            <a key={item.href} href={item.href} target="_blank" rel="noreferrer" className={className}>{content}</a>
+          ) : (
+            <Link key={item.href} href={item.href} className={className}>{content}</Link>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -82,88 +86,89 @@ export default function MoreScreen({
   viewerAccess,
   viewerName,
   viewerEmail,
+  viewerDepartment,
   avatarUrl = null,
 }: {
   viewerAccess: ViewerAccess;
   viewerName: string | null;
   viewerEmail: string;
+  viewerDepartment: string | null;
   avatarUrl?: string | null;
 }) {
-  const visibleSettings = filterNavItem(SETTINGS_ITEM, viewerAccess);
-  // Google-hosted avatar URLs go stale; fall back to initials when one 404s.
+  const runtime = useNativeRuntime();
   const [avatarFailed, setAvatarFailed] = useState(false);
   const showAvatar = avatarUrl && !avatarFailed;
+  const role = mobileRoleActions(viewerDepartment);
+  const rolePaths = new Set(role.map((item) => item.href));
+  const personalRolePaths = new Set(["/sales", "/warehouse/report"]);
+  const primaryPaths = new Set(["/", "/clock", "/todos", "/more"]);
+  const accountPaths = new Set(["/settings/account", "/bugs"]);
+
+  const visibleNav = NAV_ITEMS
+    .map((item) => filterNavItem(item, viewerAccess))
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .flatMap(flattenItem);
+  const settings = filterNavItem(SETTINGS_ITEM, viewerAccess);
+  const management = uniqueDestinations([
+    ...visibleNav.filter((item) => item.access === "admin" || item.access === "management"),
+    ...(settings ? flattenItem(settings) : []),
+  ]).filter(
+    (item) =>
+      !primaryPaths.has(item.href) &&
+      !accountPaths.has(item.href) &&
+      !rolePaths.has(item.href),
+  );
+  const managementPaths = new Set(management.map((item) => item.href));
+  const shared = uniqueDestinations(visibleNav).filter(
+    (item) =>
+      !primaryPaths.has(item.href) &&
+      !accountPaths.has(item.href) &&
+      !rolePaths.has(item.href) &&
+      !personalRolePaths.has(item.href) &&
+      !managementPaths.has(item.href),
+  );
 
   return (
     <div className="space-y-5">
-      {/* Profile */}
-      <Link
-        href="/settings/account"
-        className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3.5"
-      >
-        <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 text-sm font-bold text-white">
-          {showAvatar ? (
-            /* Served by an authenticated route — the image optimizer can't fetch it. */
-            /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} className="h-full w-full object-cover" />
-          ) : (
-            initialsFor(viewerName, viewerEmail)
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-slate-900">
-            {viewerName ?? viewerEmail}
-          </span>
-          <span className="block truncate text-xs text-slate-500">{viewerEmail}</span>
-        </span>
-        <Chevron />
-      </Link>
+      <Section title="Your work" items={role} />
+      <Section title="Shared tools" items={shared} />
 
-      {NAV_GROUPS.map((group) => {
-        const items = NAV_ITEMS
-          .map((item) => filterNavItem(item, viewerAccess))
-          .filter((item): item is NonNullable<typeof item> => item !== null && item.group === group.id);
-        if (items.length === 0) return null;
-        return (
-          <div key={group.id}>
-            <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              {group.label}
-            </p>
-            <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-              {items.map((item) => (
-                <ItemRows key={item.href} item={item} />
-              ))}
-            </div>
-          </div>
-        );
-      })}
-
-      {visibleSettings && (
-        <div>
-          <p className="mb-1.5 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-400">
-            Settings
-          </p>
-          <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <ItemRows item={visibleSettings} />
-          </div>
+      <section aria-labelledby="more-account-help">
+        <h2 id="more-account-help" className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">Account and help</h2>
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <Link href="/settings/account" className="flex min-h-16 items-center gap-3 border-b border-slate-100 px-4 py-3 active:bg-slate-50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 text-sm font-bold text-white">
+              {showAvatar ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={avatarUrl} alt="" onError={() => setAvatarFailed(true)} className="h-full w-full object-cover" />
+              ) : initialsFor(viewerName, viewerEmail)}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-bold text-slate-900">{viewerName ?? viewerEmail}</span>
+              <span className="block truncate text-xs text-slate-500">My account</span>
+            </span>
+            <span className="text-lg text-slate-300" aria-hidden="true">›</span>
+          </Link>
+          <Link href="/bugs" className="flex min-h-14 items-center justify-between px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
+            Report a bug <span className="text-lg text-slate-300" aria-hidden="true">›</span>
+          </Link>
+          <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20support" className="flex min-h-14 items-center justify-between border-t border-slate-100 px-4 py-3 text-sm font-bold text-slate-900 active:bg-slate-50">
+            Contact support <span className="text-lg text-slate-300" aria-hidden="true">↗</span>
+          </a>
         </div>
-      )}
+        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
+          <div><dt className="text-slate-500">Connection</dt><dd className={`mt-0.5 font-bold ${runtime.connected ? "text-emerald-700" : "text-amber-800"}`}>{runtime.connected ? `Online${runtime.connectionType !== "unknown" ? ` · ${runtime.connectionType}` : ""}` : "Offline"}</dd></div>
+          <div><dt className="text-slate-500">Environment</dt><dd className="mt-0.5 font-bold capitalize text-slate-800">{runtime.environment}</dd></div>
+          <div><dt className="text-slate-500">App version</dt><dd className="mt-0.5 font-bold text-slate-800">{runtime.appVersion ?? (runtime.isNative ? "Unavailable" : "Web")}</dd></div>
+          <div><dt className="text-slate-500">Build</dt><dd className="mt-0.5 font-bold text-slate-800">{runtime.buildNumber ?? (runtime.isNative ? "Unavailable" : "Web")}</dd></div>
+        </dl>
+      </section>
 
-      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <Link
-          href="/bugs"
-          className="flex items-center gap-3 px-4 py-3 text-sm font-semibold text-slate-800 active:bg-slate-50"
-        >
-          Report a bug
-          <Chevron />
-        </Link>
-        <a
-          href="/api/logout"
-          className="block px-4 py-3 text-center text-sm font-bold text-red-600 active:bg-red-50"
-        >
-          Sign Out
-        </a>
-      </div>
+      {(viewerAccess.isManagement || viewerAccess.isAdmin) && <Section title="Management" items={management} />}
+
+      <a href="/api/logout" className="flex min-h-12 items-center justify-center rounded-2xl border border-red-200 bg-white px-4 py-3 text-sm font-bold text-red-700 active:bg-red-50">
+        Sign out
+      </a>
     </div>
   );
 }

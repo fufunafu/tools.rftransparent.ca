@@ -170,7 +170,7 @@ export default function MarketingOverviewDashboard({
         <div className="flex items-center gap-3 flex-wrap">
           <Link
             href="/marketing"
-            className="h-7 inline-flex items-center gap-1.5 px-2.5 border border-slate-200 rounded-lg bg-white text-xs text-slate-600 hover:border-blue-300 hover:text-blue-700 transition-colors"
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 transition-colors hover:border-blue-300 hover:text-blue-700 lg:min-h-7 lg:px-2.5"
           >
             Full analysis →
           </Link>

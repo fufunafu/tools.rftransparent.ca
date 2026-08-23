@@ -114,7 +114,7 @@ export default function WarehouseDashboard() {
     setError("");
     try {
       const res = await fetch(
-        `/api/warehouse/reports?from=${range.from}&to=${range.to}`
+        `/api/warehouse/reports?scope=all&from=${range.from}&to=${range.to}`
       );
       if (!res.ok) throw new Error("Failed to load reports");
       const data: Report[] = await res.json();

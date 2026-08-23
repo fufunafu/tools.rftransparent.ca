@@ -11,7 +11,6 @@ const PROMPTED_KEY = "rf-push-prompted";
 // The device token APNs last handed us, kept so sign-out can tell the server
 // to stop notifying this phone.
 const TOKEN_KEY = "rf-push-token";
-
 export async function registerForPush(): Promise<void> {
   if (!isNativeApp()) return;
   try {
@@ -44,7 +43,6 @@ export async function registerForPush(): Promise<void> {
     // Notifications are an enhancement — never let them break the app.
   }
 }
-
 // Called on sign-out, while the session cookie still exists. Whoever signs
 // in next re-registers the token to themselves; this covers the phone that
 // nobody signs back in on.

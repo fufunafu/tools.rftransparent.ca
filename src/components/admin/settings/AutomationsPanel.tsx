@@ -252,7 +252,7 @@ function JobCard({
           <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
             <p className="text-xs font-semibold text-amber-900">Send this automation now?</p>
             <p className="mt-1 text-xs leading-5 text-amber-800">
-              This is not a test. It will send real email to <strong>{job.sendsEmail}</strong>.
+              This is not a test. It will send real messages to <strong>{job.sendsEmail}</strong>.
             </p>
             <div className="mt-3 flex items-center gap-2">
               <button

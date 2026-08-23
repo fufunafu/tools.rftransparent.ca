@@ -84,6 +84,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 504EC3161FED79650016851F /* Build configuration list for PBXNativeTarget "App" */;
 			buildPhases = (
+				9A7C42002FEB000100000001 /* Validate Release Server */,
 				504EC3001FED79650016851F /* Sources */,
 				504EC3011FED79650016851F /* Frameworks */,
 				504EC3021FED79650016851F /* Resources */,
@@ -152,6 +153,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		9A7C42002FEB000100000001 /* Validate Release Server */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/App/capacitor.config.json",
+			);
+			name = "Validate Release Server";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ \"$CONFIGURATION\" != \"Release\" ]; then\n  exit 0\nfi\nCONFIG_FILE=\"$SRCROOT/App/capacitor.config.json\"\nif ! /usr/bin/grep -Eq '\"url\"[[:space:]]*:[[:space:]]*\"https://tools\\.rftransparent\\.ca\"' \"$CONFIG_FILE\"; then\n  echo \"error: Release builds must target https://tools.rftransparent.ca. Run npm run cap:sync:prod first.\"\n  exit 1\nfi\nif /usr/bin/grep -Eqi 'localhost|127\\.0\\.0\\.1|\"cleartext\"[[:space:]]*:[[:space:]]*true' \"$CONFIG_FILE\"; then\n  echo \"error: Release builds cannot contain a local server or cleartext setting. Run npm run cap:sync:prod first.\"\n  exit 1\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		504EC3001FED79650016851F /* Sources */ = {
