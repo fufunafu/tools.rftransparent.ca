@@ -2,9 +2,14 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import type { Lead, LeadSource } from "@/lib/customer-service/leads";
+import {
+  LEAD_STORE_OPTIONS,
+  isLeadStoreId,
+  type LeadStoreId,
+} from "@/lib/customer-service/lead-store";
 import {
   buildCustomLeadTrend,
   buildLeadTrend,
@@ -93,18 +98,66 @@ async function fetcher<T>(url: string): Promise<T> {
   return body as T;
 }
 
-function leadListUrl(bounds: LeadTrendQueryBounds | null): string | null {
+function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ to: bounds.to });
+  const params = new URLSearchParams({ store, to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
 }
 
-function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null): string | null {
+function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ view: "response_performance", to: bounds.to });
+  const params = new URLSearchParams({ view: "response_performance", store, to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
+}
+
+const STORE_STORAGE_KEY = "cs_store";
+
+// Shared with the phone page so switching store on one page carries over.
+function useLeadStore(defaultStore: LeadStoreId, lockedByUrl: boolean) {
+  const [store, setStoreState] = useState<LeadStoreId>(defaultStore);
+  useEffect(() => {
+    if (lockedByUrl) return;
+    try {
+      const saved = window.localStorage.getItem(STORE_STORAGE_KEY);
+      // Restoring a saved preference after hydration, same as the phone page.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (isLeadStoreId(saved)) setStoreState(saved);
+    } catch {
+      // Storage may be unavailable; keep the server default.
+    }
+  }, [lockedByUrl]);
+  const setStore = (next: LeadStoreId) => {
+    setStoreState(next);
+    try {
+      window.localStorage.setItem(STORE_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage failures; the selection still applies to this page.
+    }
+  };
+  return [store, setStore] as const;
+}
+
+function StoreSelect({
+  value,
+  onChange,
+}: {
+  value: LeadStoreId;
+  onChange: (store: LeadStoreId) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value as LeadStoreId)}
+      aria-label="Store"
+      className="h-9 rounded-md border border-sand-300 bg-white px-3 text-sm font-medium text-sand-700 hover:bg-sand-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+    >
+      {LEAD_STORE_OPTIONS.map((option) => (
+        <option key={option.id} value={option.id}>{option.label}</option>
+      ))}
+    </select>
+  );
 }
 
 function torontoDateKey(date: Date): string {
@@ -342,11 +395,17 @@ export default function LeadAnalysisDashboard({
   initialLeads,
   initialNow,
   initialBounds,
+  defaultStore,
+  storeFromUrl = false,
 }: {
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
+  defaultStore: LeadStoreId;
+  storeFromUrl?: boolean;
 }) {
+  const [store, setStore] = useLeadStore(defaultStore, storeFromUrl);
+  const hasMeta = store === "rf_transparent";
   const now = useMemo(() => new Date(initialNow), [initialNow]);
   const [trendRange, setTrendRange] = useState<TrendSelection>("30d");
   const [customFrom, setCustomFrom] = useState("");
@@ -359,8 +418,8 @@ export default function LeadAnalysisDashboard({
     () => leadTrendQueryBounds(trendRange, now, customFrom, customTo),
     [trendRange, now, customFrom, customTo],
   );
-  const leadsUrl = leadListUrl(requestedBounds);
-  const initialLeadsUrl = leadListUrl(initialBounds);
+  const leadsUrl = leadListUrl(requestedBounds, store);
+  const initialLeadsUrl = leadListUrl(initialBounds, defaultStore);
   const { data, error, isLoading } = useSWR<{ leads: Lead[] }>(leadsUrl, fetcher, {
     fallbackData: initialLeads && leadsUrl === initialLeadsUrl
       ? { leads: initialLeads }
@@ -373,7 +432,7 @@ export default function LeadAnalysisDashboard({
     error: responsePerformanceError,
     isLoading: responsePerformanceLoading,
   } = useSWR<{ leads: Lead[]; tracking_started_at: string | null }>(
-    leadResponsePerformanceUrl(requestedBounds),
+    leadResponsePerformanceUrl(requestedBounds, store),
     fetcher,
     { refreshInterval: 60_000, revalidateOnFocus: true },
   );
@@ -497,13 +556,16 @@ export default function LeadAnalysisDashboard({
             Understand lead volume, conversion, and response performance over time.
           </p>
         </div>
-        <Link
-          href="/customer-service/leads"
-          className="inline-flex self-start items-center gap-2 rounded-md border border-sand-300 bg-white px-3 py-2 text-sm font-medium text-sand-700 hover:bg-sand-50"
-        >
-          <span aria-hidden="true">←</span>
-          Back to leads
-        </Link>
+        <div className="flex flex-wrap items-center gap-3 self-start">
+          <StoreSelect value={store} onChange={setStore} />
+          <Link
+            href={`/customer-service/leads?store=${store}`}
+            className="inline-flex items-center gap-2 rounded-md border border-sand-300 bg-white px-3 py-2 text-sm font-medium text-sand-700 hover:bg-sand-50"
+          >
+            <span aria-hidden="true">←</span>
+            Back to leads
+          </Link>
+        </div>
       </header>
 
       <section className="rounded-xl border border-sand-200 bg-white p-3 shadow-sm shadow-slate-200/30 sm:p-4">
@@ -532,12 +594,14 @@ export default function LeadAnalysisDashboard({
               disabled={sources.website && !sources.meta}
               onChange={() => toggleSource("website")}
             />
-            <SourceToggle
-              source="meta"
-              checked={sources.meta}
-              disabled={sources.meta && !sources.website}
-              onChange={() => toggleSource("meta")}
-            />
+            {hasMeta && (
+              <SourceToggle
+                source="meta"
+                checked={sources.meta}
+                disabled={sources.meta && !sources.website}
+                onChange={() => toggleSource("meta")}
+              />
+            )}
             <span className="text-xs text-sand-400">{formatSelectedPeriod(trend.points)}</span>
           </div>
         </div>

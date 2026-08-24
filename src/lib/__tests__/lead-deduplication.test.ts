@@ -5,6 +5,7 @@ import { CALL_STATUS_LABELS, type Lead } from "@/lib/customer-service/leads";
 function lead(id: string, overrides: Partial<Lead> = {}): Lead {
   return {
     id,
+    store_id: "rf_transparent",
     source: "website",
     source_detail: "Contact Us",
     form_id: null,

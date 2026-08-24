@@ -9,6 +9,9 @@ import {
   assessLeadSpam,
 } from "@/lib/customer-service/lead-spam";
 
+import type { LeadStoreId } from "@/lib/customer-service/lead-store";
+
+export type { LeadStoreId } from "@/lib/customer-service/lead-store";
 export type LeadSource = "website" | "meta";
 export type CallStatus = "not_called" | "no_answer" | "called";
 export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
@@ -43,6 +46,7 @@ export interface LeadSubmission {
 
 export interface Lead {
   id: string;
+  store_id: LeadStoreId;
   source: LeadSource;
   source_detail: string | null;
   form_id: string | null;
@@ -295,6 +299,7 @@ function prettifyFieldName(s: string): string {
  *     and matches on email or phone, enriches that row instead of inserting.
  */
 export interface UpsertLeadInput {
+  store_id: LeadStoreId;
   source: LeadSource;
   source_detail: string | null;
   form_id: string | null;
@@ -339,6 +344,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     const { data: providerMatch } = await supabase
       .from("leads")
       .select("id")
+      .eq("store_id", input.store_id)
       .eq("source", input.source)
       .contains("raw_payload", { meta_lead_id: input.external_id })
       .limit(1)
@@ -359,6 +365,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   let duplicateQuery = supabase
     .from("leads")
     .select("id,name,email,phone,message,installation_requested,raw_payload,outcome")
+    .eq("store_id", input.store_id)
     .eq("source", input.source)
     .gte("submitted_at", duplicateWindowStart);
   if (input.form_id) duplicateQuery = duplicateQuery.eq("form_id", input.form_id);
@@ -396,6 +403,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   const { data, error } = await supabase
     .from("leads")
     .insert({
+      store_id: input.store_id,
       source: input.source,
       source_detail: input.source_detail,
       form_id: input.form_id,
@@ -423,6 +431,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     try {
       await sendNewLeadNotification({
         leadId: data.id,
+        storeId: input.store_id,
         source: input.source,
         sourceDetail: input.source_detail,
         pageUrl: input.page_url,

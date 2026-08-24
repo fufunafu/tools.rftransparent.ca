@@ -186,6 +186,8 @@ export async function ingestMetaLead(
       : null;
 
   return findOrInsertLead({
+    // Only RF runs Meta lead ads; BC has website leads only.
+    store_id: "rf_transparent",
     source: "meta",
     source_detail: form.name?.trim() || `Meta form ${form.id}`,
     form_id: lead.form_id ?? form.id,

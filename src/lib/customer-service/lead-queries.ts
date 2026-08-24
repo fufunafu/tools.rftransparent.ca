@@ -6,18 +6,20 @@ import {
   type LeadSource,
 } from "@/lib/customer-service/leads";
 import { consolidateDuplicateLeads } from "@/lib/lead-deduplication";
+import type { LeadStoreId } from "@/lib/customer-service/lead-store";
 
 const PAGE_SIZE = 1000;
 const REVALIDATE_SECONDS = 60;
 const LEADS_CACHE_TAG = "customer-service:leads";
 const LEAD_LIST_COLUMNS =
-  "id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to";
+  "id,store_id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to";
 const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 
 type LeadRow = { id: string; [key: string]: unknown };
 type AttemptRow = { lead_id: string; staff: string; called_at: string };
 
 interface LoadLeadsOptions {
+  store?: LeadStoreId;
   source?: LeadSource;
   from?: string | null;
   to?: string | null;
@@ -100,6 +102,7 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
       .from("leads")
       .select(LEAD_LIST_COLUMNS)
       .order("submitted_at", { ascending: false });
+    if (options.store) query = query.eq("store_id", options.store);
     if (options.source) query = query.eq("source", options.source);
     if (options.from) query = query.gte("submitted_at", startOfQueryWindow(options.from));
     if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
@@ -164,7 +167,7 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
 }
 
 export async function loadLeadResponsePerformance(
-  options: Pick<LoadLeadsOptions, "from" | "to"> = {},
+  options: Pick<LoadLeadsOptions, "from" | "to" | "store"> = {},
 ): Promise<LeadResponsePerformanceData> {
   const supabase = getSupabase();
   const { data: trackingRows, error: trackingError } = await supabase
@@ -190,6 +193,7 @@ export async function loadLeadResponsePerformance(
       .select(LEAD_LIST_COLUMNS)
       .gte("submitted_at", effectiveStart)
       .order("submitted_at", { ascending: false });
+    if (options.store) query = query.eq("store_id", options.store);
     if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
     return query.range(from, to);
   });
@@ -224,6 +228,7 @@ export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
   ));
   const leads = rows.map((row) => ({
     id: row.id,
+    store_id: "rf_transparent",
     source: "website",
     source_detail: null,
     form_id: null,
@@ -258,7 +263,7 @@ export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
 }
 
 export const getCachedLeads = unstable_cache(
-  (from?: string | null, to?: string | null) => loadLeads({ from, to }),
+  (from?: string | null, to?: string | null, store?: LeadStoreId) => loadLeads({ from, to, store }),
   ["customer-service:leads:list"],
   { tags: [LEADS_CACHE_TAG], revalidate: REVALIDATE_SECONDS },
 );

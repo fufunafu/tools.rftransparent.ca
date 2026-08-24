@@ -1,11 +1,18 @@
 import { getResend } from "@/lib/resend";
+import { type LeadStoreId, leadStoreLabel } from "@/lib/customer-service/lead-store";
 
 const FROM = "RF Transparent <info@glass-railing.com>";
 export const LEAD_NOTIFICATION_RECIPIENT = "info@glass-railing.com";
+export const BC_LEAD_NOTIFICATION_RECIPIENT = "anne@cloture-verre.com";
+const LEAD_NOTIFICATION_RECIPIENTS: Record<LeadStoreId, string> = {
+  rf_transparent: LEAD_NOTIFICATION_RECIPIENT,
+  bc_transparent: BC_LEAD_NOTIFICATION_RECIPIENT,
+};
 const LEADS_DASHBOARD_URL = "https://tools.rftransparent.ca/customer-service/leads";
 
 export interface NewLeadNotification {
   leadId: string;
+  storeId?: LeadStoreId;
   source: "website" | "meta";
   sourceDetail: string | null;
   pageUrl: string | null;
@@ -23,14 +30,19 @@ export interface NewLeadNotification {
 export async function sendNewLeadNotification(
   lead: NewLeadNotification,
 ): Promise<boolean> {
-  const sourceLabel = lead.source === "meta" ? "Meta" : "website";
+  const storeId: LeadStoreId = lead.storeId ?? "rf_transparent";
+  const sourceLabel = lead.source === "meta"
+    ? "Meta"
+    : storeId === "bc_transparent"
+      ? `${leadStoreLabel(storeId)} website`
+      : "website";
   const subjectName = cleanHeaderText(lead.name);
   const subject = `New ${sourceLabel} lead${subjectName ? `: ${subjectName}` : ""}`;
 
   try {
     const { error } = await getResend().emails.send({
       from: FROM,
-      to: LEAD_NOTIFICATION_RECIPIENT,
+      to: LEAD_NOTIFICATION_RECIPIENTS[storeId],
       subject,
       text: buildText(lead, sourceLabel),
       html: buildHtml(lead, sourceLabel),
@@ -47,6 +59,10 @@ export async function sendNewLeadNotification(
   }
 }
 
+function dashboardUrl(lead: NewLeadNotification): string {
+  return `${LEADS_DASHBOARD_URL}?store=${lead.storeId ?? "rf_transparent"}`;
+}
+
 function buildText(lead: NewLeadNotification, sourceLabel: string): string {
   return [
     `New ${sourceLabel} lead`,
@@ -61,7 +77,7 @@ function buildText(lead: NewLeadNotification, sourceLabel: string): string {
     "Message:",
     displayText(lead.message),
     "",
-    `Open lead dashboard: ${LEADS_DASHBOARD_URL}`,
+    `Open lead dashboard: ${dashboardUrl(lead)}`,
     `Lead ID: ${lead.leadId}`,
   ].join("\n");
 }
@@ -89,7 +105,7 @@ function buildHtml(lead: NewLeadNotification, sourceLabel: string): string {
       <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:12px;white-space:pre-wrap">${escapeHtml(displayText(lead.message))}</div>
     </div>
     <p style="margin:20px 0 0">
-      <a href="${LEADS_DASHBOARD_URL}" style="color:#2563eb">Open lead dashboard</a>
+      <a href="${dashboardUrl(lead)}" style="color:#2563eb">Open lead dashboard</a>
     </p>
     <p style="margin:12px 0 0;color:#94a3b8;font-size:11px">Lead ID: ${escapeHtml(lead.leadId)}</p>
   </div>`;

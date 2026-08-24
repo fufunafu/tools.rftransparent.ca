@@ -47,6 +47,11 @@ import {
   medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
 import { redirectOnUnauthorized } from "@/lib/client-auth";
+import {
+  LEAD_STORE_OPTIONS,
+  isLeadStoreId,
+  type LeadStoreId,
+} from "@/lib/customer-service/lead-store";
 
 const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
   ssr: false,
@@ -263,18 +268,66 @@ async function fetcher<T>(url: string): Promise<T> {
   return body as T;
 }
 
-function leadListUrl(bounds: LeadTrendQueryBounds | null): string | null {
+function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ to: bounds.to });
+  const params = new URLSearchParams({ store, to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
 }
 
-function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null): string | null {
+function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ view: "response_performance", to: bounds.to });
+  const params = new URLSearchParams({ view: "response_performance", store, to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
+}
+
+const STORE_STORAGE_KEY = "cs_store";
+
+// Shared with the phone page so switching store on one page carries over.
+function useLeadStore(defaultStore: LeadStoreId, lockedByUrl: boolean) {
+  const [store, setStoreState] = useState<LeadStoreId>(defaultStore);
+  useEffect(() => {
+    if (lockedByUrl) return;
+    try {
+      const saved = window.localStorage.getItem(STORE_STORAGE_KEY);
+      // Restoring a saved preference after hydration, same as the phone page.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (isLeadStoreId(saved)) setStoreState(saved);
+    } catch {
+      // Storage may be unavailable; keep the server default.
+    }
+  }, [lockedByUrl]);
+  const setStore = (next: LeadStoreId) => {
+    setStoreState(next);
+    try {
+      window.localStorage.setItem(STORE_STORAGE_KEY, next);
+    } catch {
+      // Ignore storage failures; the selection still applies to this page.
+    }
+  };
+  return [store, setStore] as const;
+}
+
+function StoreSelect({
+  value,
+  onChange,
+}: {
+  value: LeadStoreId;
+  onChange: (store: LeadStoreId) => void;
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(event) => onChange(event.target.value as LeadStoreId)}
+      aria-label="Store"
+      className="h-9 rounded-md border border-sand-300 bg-white px-3 text-sm font-medium text-sand-700 hover:bg-sand-50 focus:outline-none focus:ring-2 focus:ring-blue-400"
+    >
+      {LEAD_STORE_OPTIONS.map((option) => (
+        <option key={option.id} value={option.id}>{option.label}</option>
+      ))}
+    </select>
+  );
 }
 
 async function triggerSyncAutomation(job: SyncAutomationJob, label: string): Promise<void> {
@@ -1038,11 +1091,18 @@ export default function LeadsDashboard({
   initialLeads,
   initialNow,
   initialBounds,
+  defaultStore,
+  storeFromUrl = false,
 }: {
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
+  defaultStore: LeadStoreId;
+  storeFromUrl?: boolean;
 }) {
+  const [store, setStore] = useLeadStore(defaultStore, storeFromUrl);
+  // Only RF runs Meta lead ads; BC is website-only.
+  const hasMeta = store === "rf_transparent";
   const [filter, setFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
   const [search, setSearch] = useState("");
@@ -1079,8 +1139,8 @@ export default function LeadsDashboard({
     () => leadTrendQueryBounds(trendRange, new Date(now), customFrom, customTo),
     [trendRange, now, customFrom, customTo],
   );
-  const leadsUrl = leadListUrl(requestedBounds);
-  const initialLeadsUrl = leadListUrl(initialBounds);
+  const leadsUrl = leadListUrl(requestedBounds, store);
+  const initialLeadsUrl = leadListUrl(initialBounds, defaultStore);
   const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
     leadsUrl,
     fetcher,
@@ -1095,7 +1155,7 @@ export default function LeadsDashboard({
     data: metaStatus,
     error: metaStatusError,
     mutate: refreshMetaStatus,
-  } = useSWR<MetaStatus>("/api/customer-service/leads?view=meta_status", fetcher, autoRefreshOpts);
+  } = useSWR<MetaStatus>(hasMeta ? "/api/customer-service/leads?view=meta_status" : null, fetcher, autoRefreshOpts);
   const leads = useMemo(
     () => (hydrated ? data?.leads : leadsUrl === initialLeadsUrl ? initialLeads : null) ?? [],
     [data?.leads, hydrated, initialLeads, initialLeadsUrl, leadsUrl],
@@ -1109,7 +1169,7 @@ export default function LeadsDashboard({
     leads: Lead[];
     tracking_started_at: string | null;
   }>(
-    rawCallPerformanceSelected ? leadResponsePerformanceUrl(requestedBounds) : null,
+    rawCallPerformanceSelected ? leadResponsePerformanceUrl(requestedBounds, store) : null,
     fetcher,
     autoRefreshOpts,
   );
@@ -1126,7 +1186,9 @@ export default function LeadsDashboard({
     const errors: string[] = [];
 
     try {
-      if (metaStatus?.connected) {
+      if (!hasMeta) {
+        // Nothing to pull for BC; phone/Shopify syncs below still apply.
+      } else if (metaStatus?.connected) {
         try {
           const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads?action=sync_meta", {
             method: "POST",
@@ -1380,18 +1442,21 @@ export default function LeadsDashboard({
         <div>
           <h1 className="text-2xl font-bold text-sand-900">Leads</h1>
           <p className="text-sm text-sand-500 mt-1">
-            Track, contact, and convert website and Meta leads.
+            {hasMeta
+              ? "Track, contact, and convert website and Meta leads."
+              : "Track, contact, and convert BC Transparent website leads."}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {metaStatus?.connected && metaStatus.subscribed && (
+        <div className="flex flex-wrap items-center gap-3">
+          <StoreSelect value={store} onChange={setStore} />
+          {hasMeta && metaStatus?.connected && metaStatus.subscribed && (
             <div className="flex items-center gap-2 text-xs text-sand-600">
               <span className="w-2 h-2 rounded-full bg-emerald-500" />
               <span>{metaStatus.page_name ? `Meta: ${metaStatus.page_name}` : "Meta connected"}</span>
             </div>
           )}
           <Link
-            href="/customer-service/leads/analysis"
+            href={`/customer-service/leads/analysis?store=${store}`}
             className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-4 w-4" aria-hidden="true">
@@ -1399,7 +1464,7 @@ export default function LeadsDashboard({
             </svg>
             Analysis
           </Link>
-          {metaStatus?.can_sync && (
+          {(hasMeta ? metaStatus?.can_sync : true) && (
             <button
               type="button"
               onClick={syncAll}
@@ -1471,7 +1536,7 @@ export default function LeadsDashboard({
         <div className="flex flex-col justify-between gap-2.5 border-b border-sand-200 px-4 py-2.5 lg:flex-row lg:items-center xl:items-stretch xl:flex-col">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
-            <p className="text-xs text-sand-500 mt-0.5">Website and Meta leads; matching submissions within 7 days count once</p>
+            <p className="text-xs text-sand-500 mt-0.5">{hasMeta ? "Website and Meta leads" : "Website leads"}; matching submissions within 7 days count once</p>
           </div>
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center xl:items-start xl:flex-col">
             <div className="flex items-center gap-3 text-xs">
@@ -1560,7 +1625,7 @@ export default function LeadsDashboard({
             </div>
           </section>
 
-      {(metaStatusError || metaStatus?.error) && (
+      {hasMeta && (metaStatusError || metaStatus?.error) && (
         <div className="order-3 border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
           <span className="font-medium">Meta connection needs attention. </span>
           {metaStatusError?.message ?? metaStatus?.error}
@@ -1646,7 +1711,7 @@ export default function LeadsDashboard({
             >
               <option value="all">All sources ({sourceCounts.all})</option>
               <option value="website">Website ({sourceCounts.website})</option>
-              <option value="meta">Meta ({sourceCounts.meta})</option>
+              {hasMeta && <option value="meta">Meta ({sourceCounts.meta})</option>}
             </select>
             <select
               value={sortOrder}

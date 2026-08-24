@@ -24,6 +24,7 @@ import {
   type PendingLeadAttachment,
 } from "@/lib/customer-service/lead-attachments";
 import { markLeadsCacheStale } from "@/lib/customer-service/lead-queries";
+import { leadStoreForShopifyShop } from "@/lib/customer-service/lead-store";
 import { enforceLeadIngestionRateLimit } from "@/lib/customer-service/lead-rate-limit";
 import { verifyShopifyAppProxyRequest } from "@/lib/customer-service/shopify-app-proxy";
 
@@ -74,6 +75,8 @@ export async function POST(req: NextRequest) {
   }
 
   const source: LeadSource = "website";
+  // RF and BC share this endpoint; the signing shop tells them apart.
+  const storeId = leadStoreForShopifyShop(verification.shop);
 
   let payload: Record<string, unknown> = {};
   try {
@@ -119,6 +122,7 @@ export async function POST(req: NextRequest) {
     null;
 
   const result = await findOrInsertLead({
+    store_id: storeId,
     source,
     source_detail: sourceDetail,
     form_id: pickStr(payload, "form_id"),

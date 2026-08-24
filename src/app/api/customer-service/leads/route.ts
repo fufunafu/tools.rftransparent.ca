@@ -16,6 +16,7 @@ import {
   markLeadsCacheStale,
 } from "@/lib/customer-service/lead-queries";
 import { isCallablePhone } from "@/lib/call-metrics";
+import { isLeadStoreId } from "@/lib/customer-service/lead-store";
 import {
   getMetaConnectionStatus,
   metaErrorMessage,
@@ -149,9 +150,15 @@ export async function GET(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Invalid lead date range" }, { status: 400 });
   }
+  const storeParam = req.nextUrl.searchParams.get("store");
+  if (storeParam && !isLeadStoreId(storeParam)) {
+    return NextResponse.json({ error: "Invalid store" }, { status: 400 });
+  }
+  const store = storeParam && isLeadStoreId(storeParam) ? storeParam : undefined;
   if (view === "response_performance") {
     try {
       const performance = await loadLeadResponsePerformance({
+        store,
         from: fromParam,
         to: toParam,
       });
@@ -174,6 +181,7 @@ export async function GET(req: NextRequest) {
   try {
     return NextResponse.json({
       leads: await loadLeads({
+        store,
         source,
         from: fromParam,
         to: toParam,

@@ -96,6 +96,7 @@ beforeEach(() => {
 
 function leadInput(overrides: Partial<UpsertLeadInput> = {}): UpsertLeadInput {
   return {
+    store_id: "rf_transparent",
     source: "website",
     source_detail: "contact-form",
     form_id: "f1",
@@ -458,6 +459,7 @@ describe("findOrInsertLead", () => {
     });
     expect(sendNewLeadNotificationMock).toHaveBeenCalledWith({
       leadId: "new-lead-id",
+      storeId: "rf_transparent",
       source: "website",
       sourceDetail: "contact-form",
       pageUrl: "https://example.com/contact",
