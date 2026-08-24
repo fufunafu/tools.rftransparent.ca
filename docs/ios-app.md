@@ -60,7 +60,8 @@ One-time setup, roughly 1 to 2 hours of configuration plus Apple wait times:
    your team.
 3. **Create the app record** at https://appstoreconnect.apple.com →
    My Apps → "+" → New App. Bundle ID `ca.rftransparent.tools`,
-   name "RF Tools".
+   App Store name "RF Transparent Tools". The installed display name remains
+   "RF Tools".
 4. **Upload a build**: in Xcode, set the device to "Any iOS Device", then
    *Product → Archive*, then *Distribute App → TestFlight & App Store*.
 5. **Invite employees**: in App Store Connect → TestFlight → Internal Testing,

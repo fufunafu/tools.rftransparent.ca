@@ -468,7 +468,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         <div className="lg:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
           {tabRoot ? (
             <Link href={mobileHomePath} className="flex min-h-11 flex-1 items-center gap-3 min-w-0">
-              <span className="w-7 h-7 rounded-lg bg-blue-500 flex items-center justify-center shrink-0">
+              <span className="w-7 h-7 rounded-lg bg-blue-700 flex items-center justify-center shrink-0">
                 <span className="text-white text-[10px] font-bold">RF</span>
               </span>
               <span className="truncate text-sm font-semibold text-slate-900">RF Transparent</span>

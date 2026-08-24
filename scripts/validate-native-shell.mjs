@@ -16,6 +16,8 @@ const checks = [
   ["ios\/App\/App\/SceneDelegate.swift", /hasSameOrigin/, "exact native origin comparison"],
   ["ios\/App\/App\/SceneDelegate.swift", /\["mailto", "tel", "sms"\]/, "native support-link handoff"],
   ["ios\/App\/App\/Info.plist", /unlock your existing signed-in session/, "session-based Face ID education"],
+  ["ios\/App\/App\/PrivacyInfo.xcprivacy", /NSPrivacyCollectedDataTypePreciseLocation/, "App Store privacy declaration"],
+  ["ios\/App\/App\.xcodeproj\/project\.pbxproj", /PrivacyInfo\.xcprivacy in Resources/, "privacy manifest target membership"],
   ["ios\/App\/App\.xcodeproj\/project\.pbxproj", /Validate Release Server/, "Xcode release-server build guard"],
   ["ios\/App\/App\.xcodeproj\/project\.pbxproj", /Release builds cannot contain a local server or cleartext setting/, "Xcode local-server rejection"],
   ["src\/components\/NativeAppRuntime.tsx", /appStateChange/, "foreground refresh and re-lock"],

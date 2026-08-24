@@ -5,6 +5,9 @@ repository and enter them directly in App Store Connect.
 
 ## Product page
 
+- Primary language: `English (Canada)`
+- Bundle ID: `ca.rftransparent.tools`
+- SKU: `rf-tools-ios`
 - App name: `RF Transparent Tools`
 - Subtitle: `Workforce operations`
 - Primary category: `Business`
@@ -14,8 +17,10 @@ repository and enter them directly in App Store Connect.
 - Support URL: `https://tools.rftransparent.ca/support`
 - Marketing URL: `https://rftransparent.ca/`
 - Version: `1.0`
+- Build: `3`
 - Copyright: `2026 15041074 Canada Inc.`
 - Price: `Free`
+- Availability: `Canada`
 
 ### Description
 
@@ -50,11 +55,21 @@ clocking in and is not continuously tracked.
 - Release: Automatically release after approval.
 - Game Center: No.
 - In-app purchases: None.
+- Expected age rating: `4+`.
+- Updated age-rating questionnaire:
+  - In-app controls: No parental controls and no age assurance.
+  - Capabilities: No unrestricted web access, broadly distributed
+    user-generated content, social media, messaging or chat, or advertising.
+  - Mature themes, medical or wellness content, sexuality or nudity, violence,
+    and chance-based activities: None.
 
 ## App privacy
 
 - Privacy policy URL: `https://tools.rftransparent.ca/privacy`
 - Tracking: No.
+- The app-level `PrivacyInfo.xcprivacy` mirrors these answers and is included in
+  the native target. Generate the archive privacy report before upload and
+  confirm the aggregate report remains consistent with this section.
 - Data linked to the user's identity and used only for App Functionality:
   - Contact Info: Name, Email Address
   - Location: Precise Location
@@ -86,6 +101,16 @@ audio content.
 - Sign-in required: Yes
 - Review account: Create a dedicated active warehouse employee account with a
   password, then enter it directly in App Store Connect.
+
+## Screenshot upload
+
+- iPhone 6.9-inch: upload the four JPEG files in
+  `app-store-assets/screenshots/iphone-6.9/` in filename order. Each file is
+  1320 by 2868 pixels.
+- iPad 13-inch: upload the four JPEG files in
+  `app-store-assets/screenshots/ipad-13/` in filename order. Each file is 2064
+  by 2752 pixels.
+- App preview video: None.
 
 ### Review notes
 

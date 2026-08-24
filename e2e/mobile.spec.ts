@@ -124,7 +124,7 @@ test.describe("authenticated mobile shell", () => {
       body: JSON.stringify({ error: "Daily view unavailable" }),
     }));
     await page.goto("/");
-    await expect(page.getByRole("alert")).toContainText("Your daily view is unavailable");
+    await expect(page.getByRole("alert").filter({ hasText: "Your daily view is unavailable" })).toBeVisible({ timeout: 15_000 });
     await expect(page.getByRole("button", { name: "Try again" })).toBeEnabled();
   });
 
@@ -148,8 +148,8 @@ test.describe("authenticated mobile shell", () => {
     await expect(page.getByLabel("Task filters")).toBeVisible();
     for (const control of [
       page.getByRole("button", { name: "Add task" }),
-      page.getByRole("button", { name: "Today", exact: true }),
-      page.getByRole("button", { name: "All", exact: true }),
+      page.getByLabel("Task filters").getByRole("button", { name: "Today", exact: true }),
+      page.getByLabel("Task filters").getByRole("button", { name: "Active", exact: true }),
     ]) {
       const box = await control.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
@@ -224,7 +224,7 @@ test.describe("authenticated mobile shell", () => {
     await page.getByRole("button", { name: "Clock In" }).click();
     await expect(page.getByRole("dialog", { name: "Confirm you are at the store" })).toBeVisible();
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("alert")).toContainText("Location access is off");
+    await expect(page.getByRole("alert").filter({ hasText: "Location access is off" })).toBeVisible();
   });
 
   test("clocks in and out once per tap and announces only server-confirmed success", async ({ page }) => {
@@ -321,14 +321,16 @@ test.describe("authenticated mobile shell", () => {
     await page.goto("/clock");
     await page.getByRole("button", { name: "Clock In" }).click();
     await page.getByRole("button", { name: "Continue" }).click();
-    await expect(page.getByRole("alert")).toContainText("accurate to about 250 m");
+    await expect(page.getByRole("alert").filter({ hasText: "accurate to about 250 m" })).toBeVisible();
     expect(postCount).toBe(0);
   });
 
   test("blocks clock actions while offline without showing success", async ({ page, context }) => {
     await page.route("**/api/clock", (route) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(clockFixture) }));
     await page.goto("/clock");
+    await expect(page.getByRole("button", { name: "Clock In" })).toBeVisible();
     await context.setOffline(true);
+    await page.evaluate(() => window.dispatchEvent(new Event("offline")));
     await page.getByRole("button", { name: "Offline" }).click({ force: true });
     await expect(page.getByText("Clocked in", { exact: true })).toHaveCount(0);
   });

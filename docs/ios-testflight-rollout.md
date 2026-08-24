@@ -13,6 +13,8 @@ expanding access.
 - [ ] Create a fresh Playwright storage-state file for the warehouse test user.
 - [ ] Run `npm run ios:release-check` with `E2E_MOBILE_STORAGE_STATE` and
   `E2E_MOBILE_DEPARTMENT=warehouse` set.
+- [ ] Generate the archive privacy report in Xcode and confirm its data types,
+  purposes, and tracking status match `app-store-assets/submission-metadata.md`.
 - [ ] Confirm the embedded `ios/App/App/capacitor.config.json` contains
   `https://tools.rftransparent.ca`, does not contain a local host, and does not
   enable cleartext traffic.

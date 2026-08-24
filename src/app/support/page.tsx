@@ -46,8 +46,15 @@ export default function SupportPage() {
       <section className="rounded-2xl bg-blue-950 px-6 py-6 text-white">
         <h2 className="text-xl font-bold">Contact support</h2>
         <p className="mt-2 text-sm leading-6 text-blue-100">Include your name, app version and build number from More, the screen you were using, and what happened. Do not email passwords or sensitive customer information.</p>
+        <address className="mt-4 not-italic text-sm leading-6 text-blue-100">
+          <span className="block font-bold text-white">15041074 Canada Inc., operating as RF Transparent</span>
+          <span className="block">67 Westmore Drive, Unit 19</span>
+          <span className="block">Etobicoke, Ontario, Canada</span>
+          <a className="block font-semibold text-white underline underline-offset-2" href="tel:+14166134388">+1 416 613 4388</a>
+          <a className="block font-semibold text-white underline underline-offset-2" href="mailto:info@glass-railing.com?subject=RF%20Tools%20support">info@glass-railing.com</a>
+        </address>
         <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20support" className="mt-5 inline-flex min-h-12 items-center rounded-xl bg-white px-5 text-sm font-bold text-blue-950 hover:bg-blue-50">
-          Email info@glass-railing.com
+          Email support
         </a>
       </section>
 

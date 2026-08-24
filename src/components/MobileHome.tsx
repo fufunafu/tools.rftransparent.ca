@@ -75,7 +75,7 @@ export default function MobileHome() {
         <h1 className="text-2xl font-bold tracking-tight text-slate-950">
           {greeting(now)}{firstName ? `, ${firstName}` : ""}
         </h1>
-        <p className="mt-1 text-sm text-slate-500">
+        <p className="mt-1 text-sm text-slate-600">
           {today}{data.profile?.locationName ? ` · ${data.profile.locationName}` : ""}
         </p>
       </header>
@@ -102,7 +102,7 @@ export default function MobileHome() {
 
       <section aria-labelledby="task-summary-title">
         <div className="mb-2 flex items-center justify-between px-1">
-          <h2 id="task-summary-title" className="text-xs font-bold uppercase tracking-wider text-slate-500">Today</h2>
+          <h2 id="task-summary-title" className="text-xs font-bold uppercase tracking-wider text-slate-600">Today</h2>
           <Link href="/todos" className="flex min-h-11 items-center px-1 text-sm font-bold text-blue-600">View tasks</Link>
         </div>
         <div className="grid grid-cols-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -120,7 +120,7 @@ export default function MobileHome() {
       </section>
 
       <section aria-labelledby="role-work-title">
-        <h2 id="role-work-title" className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-slate-500">Your work</h2>
+        <h2 id="role-work-title" className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-slate-600">Your work</h2>
         <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           {data.roleActions.map((action) => {
             const content = <><span><span className="block text-sm font-bold text-slate-950">{action.label}</span><span className="mt-0.5 block text-xs text-slate-500">{action.description}</span></span><span className="text-xl text-slate-300" aria-hidden="true">{action.external ? "↗" : "›"}</span>{action.external && <span className="sr-only">Opens outside RF Tools</span>}</>;
@@ -133,7 +133,7 @@ export default function MobileHome() {
       </section>
 
       {data.clock.weekMinutes > 0 && (
-        <p className="text-center text-xs font-semibold text-slate-400">{formatDuration(data.clock.weekMinutes)} worked this week</p>
+        <p className="text-center text-xs font-semibold text-slate-600">{formatDuration(data.clock.weekMinutes)} worked this week</p>
       )}
     </div>
   );

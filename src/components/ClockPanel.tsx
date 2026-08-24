@@ -300,7 +300,7 @@ export default function ClockPanel() {
       )}
 
       {data.geofenced && !open && (
-        <p className="px-2 text-center text-xs leading-5 text-slate-500">
+        <p className="px-2 text-center text-xs leading-5 text-slate-600">
           RF Tools checks your location once when you clock in. It does not track you afterward.
         </p>
       )}

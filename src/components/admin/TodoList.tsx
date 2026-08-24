@@ -106,12 +106,12 @@ function Metric({
 
   return (
     <div className="border-t border-slate-200/80 px-4 py-3 even:border-l sm:border-l sm:border-t-0 sm:px-5 sm:py-4 sm:first:border-l-0">
-      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+      <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600">
         <span className={`h-1.5 w-1.5 rounded-full ${dotColor}`} aria-hidden="true" />
         {label}
       </div>
       <p className="mt-1.5 text-xl font-semibold tracking-tight text-slate-950 sm:mt-2 sm:text-2xl">{value}</p>
-      <p className="mt-1 text-[11px] text-slate-400 max-sm:truncate">{note}</p>
+      <p className="mt-1 text-[11px] text-slate-600 max-sm:truncate">{note}</p>
     </div>
   );
 }
@@ -127,11 +127,11 @@ function EmptyState({ filter }: { filter: Filter }) {
 
   return (
     <div className="px-5 py-14 text-center">
-      <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-400">
+      <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
         {filter === "completed" ? <CheckIcon className="h-5 w-5" /> : <TasksIcon />}
       </span>
       <p className="mt-3 text-sm font-semibold text-slate-700">{copy[filter].title}</p>
-      <p className="mt-1 text-xs text-slate-400">{copy[filter].description}</p>
+      <p className="mt-1 text-xs text-slate-600">{copy[filter].description}</p>
     </div>
   );
 }
@@ -319,7 +319,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                     className={`min-h-11 rounded-lg px-3 text-xs font-semibold transition sm:px-4 ${
                       scope === item
                         ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-400 hover:text-slate-700"
+                        : "text-slate-600 hover:text-slate-800"
                     }`}
                   >
                     {item === "mine" ? "My tasks" : "Team tasks"}
@@ -347,7 +347,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
           </span>
           <div>
             <h2 className="text-sm font-semibold text-slate-900">Add a task</h2>
-            <p className="mt-0.5 text-xs text-slate-400">
+            <p className="mt-0.5 text-xs text-slate-600">
               {scope === "all" ? "New tasks are added to your personal list." : "Add a due date now or leave it open-ended."}
             </p>
           </div>
@@ -391,7 +391,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <span className="mr-1 text-[11px] font-medium text-slate-400">Quick due date</span>
+            <span className="mr-1 text-[11px] font-medium text-slate-600">Quick due date</span>
             {[
               { label: "Today", value: today },
               { label: "Tomorrow", value: tomorrow },
@@ -446,7 +446,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                     ? urgent
                       ? "bg-red-50 text-red-700"
                       : "bg-slate-950 text-white shadow-sm"
-                    : "text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+                    : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
                 }`}
               >
                 {item.label}
@@ -465,7 +465,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
         <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3.5 sm:px-5">
           <div>
             <h2 className="text-sm font-semibold text-slate-900">{currentFilter} tasks</h2>
-            <p className="mt-0.5 text-xs text-slate-400">
+            <p className="mt-0.5 text-xs text-slate-600">
               {loading ? "Loading your list" : `${filtered.length} task${filtered.length === 1 ? "" : "s"} in this view`}
             </p>
           </div>
@@ -498,7 +498,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                       className={`mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition sm:mt-0 ${
                         todo.completed
                           ? "bg-emerald-50 text-emerald-700"
-                          : "bg-slate-50 text-slate-400 hover:bg-blue-50 hover:text-blue-600"
+                          : "bg-slate-50 text-slate-600 hover:bg-blue-50 hover:text-blue-700"
                       } ${updating ? "animate-pulse" : ""}`}
                     >
                       <span className={`flex h-6 w-6 items-center justify-center rounded-lg border-2 ${todo.completed ? "border-emerald-500 bg-emerald-500 text-white" : "border-slate-300 bg-white text-transparent"}`}>
@@ -507,10 +507,10 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                     </button>
 
                     <div className="min-w-0 flex-1">
-                      <p className={`text-sm leading-5 ${todo.completed ? "text-slate-400 line-through" : "font-medium text-slate-900"}`}>
+                      <p className={`text-sm leading-5 ${todo.completed ? "text-slate-600 line-through" : "font-medium text-slate-900"}`}>
                         {todo.title}
                       </p>
-                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600">
                         {scope === "all" && (
                           <span className="inline-flex items-center rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 font-semibold text-violet-700">
                             {todo.created_by_name}
@@ -537,7 +537,7 @@ export default function TodoList({ canSeeAll = false }: { canSeeAll?: boolean })
                       onClick={() => setConfirmingDelete(confirming ? null : todo.id)}
                       aria-label={`Delete ${todo.title}`}
                       aria-expanded={confirming}
-                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 ${confirming ? "bg-red-50 text-red-600 opacity-100" : ""}`}
+                      className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-slate-600 transition hover:bg-red-50 hover:text-red-700 focus:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 ${confirming ? "bg-red-50 text-red-700 opacity-100" : ""}`}
                     >
                       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-4 w-4" aria-hidden="true">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 7h15M9.5 11v5M14.5 11v5M6.5 7l.75 12h9.5l.75-12M9 7V4.75h6V7" />

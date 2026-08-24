@@ -80,7 +80,7 @@ export default function MobileTabBar() {
               href={tab.href}
               aria-current={active ? "page" : undefined}
               className={`flex min-h-11 flex-1 flex-col items-center gap-0.5 pb-1.5 pt-2 text-[10px] font-semibold transition-colors ${
-                active ? "text-blue-600" : "text-slate-400 hover:text-slate-600"
+                active ? "text-blue-700" : "text-slate-600 hover:text-slate-800"
               }`}
             >
               {tab.icon}

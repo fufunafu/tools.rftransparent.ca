@@ -60,6 +60,7 @@ followup-revert-backup-*.xlsx
 !/scripts/validate-ios-release.mjs
 !/scripts/validate-mobile-e2e-env.mjs
 !/scripts/validate-native-shell.mjs
+!/scripts/capture-app-store-screenshots.mjs
 /tmp/
 /output/
 
