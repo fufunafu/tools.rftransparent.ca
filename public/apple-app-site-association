@@ -1,0 +1,27 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "94BK7NCPL9.ca.rftransparent.tools"
+        ],
+        "components": [
+          { "/": "/", "comment": "Daily home" },
+          { "/": "/clock", "comment": "Personal clock" },
+          { "/": "/todos", "comment": "Personal tasks" },
+          { "/": "/more", "comment": "Native settings and tools" },
+          { "/": "/warehouse/report", "comment": "Personal warehouse report" },
+          { "/": "/customer-service", "comment": "Customer-service queue" },
+          { "/": "/customer-service/follow-up", "comment": "Follow-ups" },
+          { "/": "/customer-service/problems", "comment": "Problem tickets" },
+          { "/": "/sales", "comment": "Personal sales" },
+          { "/": "/dashboards/marketing", "comment": "Marketing summary" },
+          { "/": "/employees", "comment": "Employee management" },
+          { "/": "/warehouse", "comment": "Warehouse management" },
+          { "/": "/support", "comment": "Support" },
+          { "/": "/privacy", "comment": "Privacy" }
+        ]
+      }
+    ]
+  }
+}

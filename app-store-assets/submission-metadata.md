@@ -3,11 +3,45 @@
 Use these values for iOS version 1.0. Keep reviewer credentials out of this
 repository and enter them directly in App Store Connect.
 
+## Submission status
+
+- App Store Connect status: `Waiting for Review`
+- Submitted version and build: `1.0 (3)`
+- Apple app ID: `6803512772`
+- App Review submission ID: `774d4769-a7aa-49ed-91a3-ccc1cc6b863d`
+- Submitted: `August 24, 2026 at 11:29 PM EDT`
+- Submitted by: `Fuanne Gao`
+- Release behavior: Automatically release after approval
+- App Privacy answers: Published on August 24, 2026
+- Price: Free (`CAD $0.00`)
+- Availability: Canada
+- Distribution while under review: Public, Canada only
+- Unlisted distribution request: Submitted to Apple on August 24, 2026 and
+  awaiting Apple's decision
+- Dedicated review account: `app-review@glass-railing.com`, active warehouse
+  employee profile at RF/GRS Toronto. Its password is stored only in App Store
+  Connect and must not be added to this repository.
+
+Final release evidence collected immediately after submission:
+
+- Production iOS release validator passed.
+- ESLint and TypeScript checks passed.
+- All 888 Vitest tests passed across 121 files.
+- All 29 XCTest and XCUITest checks passed on the iPhone simulator.
+- The optimized Next.js production build passed.
+- The iOS Release simulator build passed.
+- The mobile browser release gate passed all 30 intended checks across iPhone
+  SE, standard iPhone, iPhone Pro Max, iPad, iPhone landscape, and iPad
+  landscape configurations. The remaining 60 matrix entries were intentionally
+  skipped because the complete authenticated workflow runs once on the
+  reference iPhone while shell and layout coverage runs on every configured
+  device.
+
 ## Product page
 
 - Primary language: `English (Canada)`
 - Bundle ID: `ca.rftransparent.tools`
-- SKU: `rf-tools-ios`
+- SKU: `rf-tools`
 - App name: `RF Transparent Tools`
 - Subtitle: `Workforce operations`
 - Primary category: `Business`
@@ -21,6 +55,9 @@ repository and enter them directly in App Store Connect.
 - Copyright: `2026 15041074 Canada Inc.`
 - Price: `Free`
 - Availability: `Canada`
+- Apple silicon Mac availability: Off. The native employee workflow is tested
+  for iPhone and iPad only.
+- Apple Vision Pro availability: Off.
 
 ### Description
 
@@ -145,3 +182,14 @@ Keep the App Store Connect distribution method set to Public, submit version
 Apple identifies employee-resource apps used on managed and unmanaged devices
 as suitable for an unlisted link. If the unlisted request is approved, Apple
 changes the app from Public to Unlisted while keeping the same app record.
+
+## Production native policy for version 1.0
+
+- `IOS_MINIMUM_BUILD=1`
+- `IOS_RECOMMENDED_BUILD=3`
+- `IOS_CURRENT_VERSION=1.0`
+- `IOS_UPDATE_URL=https://apps.apple.com/app/id6803512772`
+- `IOS_MAINTENANCE_MODE=0`
+
+The update URL uses the permanent Apple app ID. It becomes the public product
+page when Apple approves and releases version 1.0.

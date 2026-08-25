@@ -23,10 +23,11 @@ export function shiftNeedsReminder(shift: RemindableShift, now: Date): boolean {
 }
 
 export function clockReminderText(clockInAt: string, now: Date): { title: string; body: string } {
-  const hours = Math.floor((now.getTime() - Date.parse(clockInAt)) / 3_600_000);
+  void clockInAt;
+  void now;
   return {
-    title: "Still clocked in?",
-    body: `You've been on the clock for ${hours} hours. Tap to clock out if your shift is over.`,
+    title: "Check your clock status",
+    body: "A shift may still be running. Open RF Tools to review it.",
   };
 }
 
@@ -59,5 +60,38 @@ export function followupDigestText(
   return {
     title: "Follow-ups",
     body: `${parts.join(" · ")}. Open the app to see who's waiting.`,
+  };
+}
+
+export function taskDigestText(count: number): { title: string; body: string } | null {
+  if (count <= 0) return null;
+  return {
+    title: "Tasks due today",
+    body: `${count} assigned task${count === 1 ? " is" : "s are"} due today. Open RF Tools to review ${count === 1 ? "it" : "them"}.`,
+  };
+}
+
+export function overdueDigestText(count: number): { title: string; body: string } | null {
+  if (count <= 0) return null;
+  return {
+    title: "Overdue work needs attention",
+    body: `${count} task${count === 1 ? " is" : "s are"} overdue. Open RF Tools to review ${count === 1 ? "it" : "them"}.`,
+  };
+}
+
+export function taskDueBucket(
+  dueAt: string | null,
+  today: string,
+): "due" | "overdue" | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueAt ?? "")) return null;
+  if (dueAt! < today) return "overdue";
+  return dueAt === today ? "due" : null;
+}
+
+export function callbackDigestText(count: number): { title: string; body: string } | null {
+  if (count <= 0) return null;
+  return {
+    title: "Callbacks need attention",
+    body: `${count} callback${count === 1 ? " is" : "s are"} waiting. Open RF Tools to review the queue.`,
   };
 }

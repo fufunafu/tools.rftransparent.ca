@@ -2,6 +2,10 @@ import { expect, test, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
 const authenticated = Boolean(process.env.E2E_MOBILE_STORAGE_STATE || process.env.E2E_STORAGE_STATE);
+const REFERENCE_WORKFLOW_PROJECT = "webkit-iphone";
+const ALL_VIEWPORT_AUTHENTICATED_TESTS = new Set([
+  "restores the authenticated session and shows daily status with four primary tabs",
+]);
 
 const homeFixture = {
   profile: {
@@ -75,10 +79,37 @@ test("mobile login exposes labelled, keyboard-focusable controls", async ({ page
   await expectNoSeriousAccessibilityViolations(page);
 });
 
+test("mobile login supports reduced motion and larger text without overflow", async ({ page }) => {
+  await page.context().clearCookies();
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/login");
+  await page.getByRole("button", { name: "Sign in with email and password" }).click();
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = "20px";
+  });
+
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page.getByLabel("Password")).toBeVisible();
+  await expect.poll(() => page.evaluate(
+    () => getComputedStyle(document.documentElement).scrollBehavior,
+  )).toBe("auto");
+  await noPageOverflow(page);
+});
+
 test.describe("authenticated mobile shell", () => {
   test.skip(!authenticated, "Set E2E_MOBILE_STORAGE_STATE to a frontline employee storage-state file.");
 
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    // Run every authenticated workflow on one reference iPhone. Repeating all
+    // server-rendered workflows across six projects creates hundreds of
+    // redundant session validations and can trip the upstream auth rate limit.
+    // The daily shell still runs in every supported viewport, while the public
+    // accessibility tests and native iPad gate cover layout-specific behavior.
+    test.skip(
+      testInfo.project.name !== REFERENCE_WORKFLOW_PROJECT &&
+        !ALL_VIEWPORT_AUTHENTICATED_TESTS.has(testInfo.title),
+      "Full authenticated workflows run on the reference iPhone project.",
+    );
     await page.route("**/api/mobile/home", (route) => route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -248,7 +279,7 @@ test.describe("authenticated mobile shell", () => {
         postCount += 1;
         const body = route.request().postDataJSON();
         submitted.push(body);
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await new Promise((resolve) => setTimeout(resolve, 350));
         open = body.action === "in"
           ? { id: "shift", clockInAt: new Date().toISOString(), stale: false }
           : null;
@@ -259,8 +290,12 @@ test.describe("authenticated mobile shell", () => {
     });
     await page.goto("/clock");
     await page.getByRole("button", { name: "Clock In" }).click();
-    await page.getByRole("button", { name: "Continue" }).click();
+    await page.getByRole("button", { name: "Continue" }).evaluate((button) => {
+      (button as HTMLButtonElement).click();
+      (button as HTMLButtonElement).click();
+    });
     await expect(page.getByRole("button", { name: /One sec|Checking/ })).toBeDisabled();
+    await expect(page.getByText("Location acquired to about 10 m. Confirming clock-in with RF Tools.")).toBeVisible();
     await expect(page.getByText("Clock-in confirmed by RF Tools.")).toHaveCount(0);
     await expect(page.getByText("Clocked in", { exact: true })).toBeVisible();
     await expect(page.getByRole("status")).toContainText("Clock-in confirmed by RF Tools.");

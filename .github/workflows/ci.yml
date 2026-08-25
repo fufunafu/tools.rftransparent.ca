@@ -40,15 +40,16 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium and WebKit
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Browser smoke tests
-        # Chromium only: it is the only browser installed above. The webkit
-        # mobile projects need `playwright install webkit` plus device state
-        # and run through the dedicated test:e2e:mobile* scripts instead —
-        # without this scope they fail on a missing executable, not real bugs.
+        # Keep the broad browser smoke suite on Chromium. The dedicated mobile
+        # step below exercises WebKit across every supported viewport.
         run: npm run test:e2e -- --project=chromium
+
+      - name: Public mobile accessibility and layout tests
+        run: npm run test:e2e:mobile:public
 
       - name: Upload browser report
         if: failure()
@@ -56,4 +57,46 @@ jobs:
         with:
           name: playwright-report
           path: playwright-report/
+          retention-days: 7
+
+  native-ios:
+    # Release validation requires the iOS 26 SDK. Keep this pinned to the
+    # matching hosted image instead of relying on macos-latest drift.
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: npm run ios:project
+
+      - name: Sync production native configuration
+        run: npm run cap:sync:prod
+
+      - name: Build Release iOS Simulator app
+        run: npm run ios:build:sim:release
+
+      - name: Run native unit and UI tests
+        run: npm run ios:test:native
+
+      - name: Upload native test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: ${{ runner.temp }}/rf-tools-ios-tests-*/Logs/Test/
           retention-days: 7

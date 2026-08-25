@@ -20,8 +20,19 @@ export const metadata: Metadata = {
 // Numbers are live; nothing here should be prerendered or held.
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ native_link?: string | string[] }>;
+}) {
   if (!(await isAuthenticated())) redirect("/login");
+  const nativeLinkValue = (await searchParams).native_link;
+  const nativeLinkFallback =
+    nativeLinkValue === "unsupported" ||
+    nativeLinkValue === "expired" ||
+    nativeLinkValue === "unauthorized"
+      ? nativeLinkValue
+      : null;
 
   // The iOS app is a daily frontline tool even for management accounts. Keep
   // the dense operations dashboard on desktop, where its tables and analysis
@@ -30,7 +41,7 @@ export default async function HomePage() {
   if (isMobileRequest(userAgent)) {
     return (
       <SWRProvider>
-        <MobileHome />
+        <MobileHome nativeLinkFallback={nativeLinkFallback} />
       </SWRProvider>
     );
   }
@@ -46,7 +57,7 @@ export default async function HomePage() {
   if (!admin && !management) {
     return (
       <SWRProvider>
-        <MobileHome />
+        <MobileHome nativeLinkFallback={nativeLinkFallback} />
       </SWRProvider>
     );
   }

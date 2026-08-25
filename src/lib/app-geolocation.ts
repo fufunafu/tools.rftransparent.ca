@@ -4,6 +4,8 @@
 // Dynamically imported so the plugin never lands in the web bundle.
 
 import { isNativeApp } from "@/lib/app-biometrics";
+import { getNativeLocationAuthorizationStatus } from "@/lib/native-support";
+import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
 import {
   GEOFENCE_MAX_ACCEPTABLE_ACCURACY_M,
   isValidLatitude,
@@ -21,6 +23,8 @@ export type PositionResult =
   | { ok: true; position: AppPosition }
   | { ok: false; reason: "denied" | "restricted" | "timeout" | "unavailable" }
   | { ok: false; reason: "inaccurate"; accuracy: number };
+
+export type LocationProgress = "checking-permission" | "requesting-permission" | "acquiring-location";
 
 const OPTIONS = { enableHighAccuracy: true, timeout: 15_000, maximumAge: 0 };
 
@@ -51,16 +55,25 @@ function toResult(position: {
   };
 }
 
-export async function getCurrentPosition(): Promise<PositionResult> {
+export async function getCurrentPosition(
+  onProgress?: (progress: LocationProgress) => void,
+): Promise<PositionResult> {
   if (isNativeApp()) {
     try {
       const { Geolocation } = await import("@capacitor/geolocation");
+      onProgress?.("checking-permission");
+      const nativePermission = await getNativeLocationAuthorizationStatus();
+      if (nativePermission === "restricted") return { ok: false, reason: "restricted" };
+      if (nativePermission === "denied") return { ok: false, reason: "denied" };
+      if (nativePermission === "unavailable") return { ok: false, reason: "unavailable" };
       let permission = await Geolocation.checkPermissions();
       if (permission.location === "prompt" || permission.location === "prompt-with-rationale") {
+        onProgress?.("requesting-permission");
         permission = await Geolocation.requestPermissions({ permissions: ["location"] });
       }
       if (permission.location === "denied") return { ok: false, reason: "denied" };
       if (permission.location !== "granted") return { ok: false, reason: "restricted" };
+      onProgress?.("acquiring-location");
       const pos = await Geolocation.getCurrentPosition(OPTIONS);
       return toResult(pos);
     } catch (err) {
@@ -68,11 +81,13 @@ export async function getCurrentPosition(): Promise<PositionResult> {
       if (/denied|permission/i.test(message)) return { ok: false, reason: "denied" };
       if (/restricted/i.test(message)) return { ok: false, reason: "restricted" };
       if (/timeout|timed out/i.test(message)) return { ok: false, reason: "timeout" };
+      recordNativeDiagnosticEvent("plugin_failed");
       return { ok: false, reason: "unavailable" };
     }
   }
 
   return new Promise((resolve) => {
+    onProgress?.("acquiring-location");
     if (typeof navigator === "undefined" || !navigator.geolocation) {
       resolve({ ok: false, reason: "unavailable" });
       return;

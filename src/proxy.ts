@@ -73,6 +73,10 @@ export async function proxy(request: NextRequest) {
     // Safari fetches the PWA manifest without auth cookies when the user
     // adds the site to their home screen; it holds no sensitive data.
     pathname === "/manifest.webmanifest" ||
+    pathname === "/apple-app-site-association" ||
+    pathname === "/.well-known/apple-app-site-association" ||
+    pathname === "/api/native/version" ||
+    pathname === "/api/native/status" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/survey/") ||

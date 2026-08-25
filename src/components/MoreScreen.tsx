@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useNativeRuntime } from "@/components/NativeAppRuntime";
+import NativeSettingsPanel from "@/components/NativeSettingsPanel";
 import {
   NAV_ITEMS,
   SETTINGS_ITEM,
@@ -55,7 +55,7 @@ function Section({ title, items }: { title: string; items: Destination[] }) {
   if (items.length === 0) return null;
   return (
     <section aria-labelledby={`more-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`}>
-      <h2 id={`more-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`} className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+      <h2 id={`more-${title.toLowerCase().replace(/[^a-z]+/g, "-")}`} className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-600">
         {title}
       </h2>
       <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -95,7 +95,6 @@ export default function MoreScreen({
   viewerDepartment: string | null;
   avatarUrl?: string | null;
 }) {
-  const runtime = useNativeRuntime();
   const [avatarFailed, setAvatarFailed] = useState(false);
   const showAvatar = avatarUrl && !avatarFailed;
   const role = mobileRoleActions(viewerDepartment);
@@ -134,7 +133,7 @@ export default function MoreScreen({
       <Section title="Shared tools" items={shared} />
 
       <section aria-labelledby="more-account-help">
-        <h2 id="more-account-help" className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-500">Account and help</h2>
+        <h2 id="more-account-help" className="mb-2 px-1 text-[11px] font-bold uppercase tracking-wider text-slate-600">Account and help</h2>
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
           <Link href="/settings/account" className="flex min-h-16 items-center gap-3 border-b border-slate-100 px-4 py-3 active:bg-slate-50">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-blue-600 text-sm font-bold text-white">
@@ -159,13 +158,9 @@ export default function MoreScreen({
             Privacy <span className="text-lg text-slate-300" aria-hidden="true">›</span>
           </Link>
         </div>
-        <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs">
-          <div><dt className="text-slate-500">Connection</dt><dd className={`mt-0.5 font-bold ${runtime.connected ? "text-emerald-700" : "text-amber-800"}`}>{runtime.connected ? `Online${runtime.connectionType !== "unknown" ? ` · ${runtime.connectionType}` : ""}` : "Offline"}</dd></div>
-          <div><dt className="text-slate-500">Environment</dt><dd className="mt-0.5 font-bold capitalize text-slate-800">{runtime.environment}</dd></div>
-          <div><dt className="text-slate-500">App version</dt><dd className="mt-0.5 font-bold text-slate-800">{runtime.appVersion ?? (runtime.isNative ? "Unavailable" : "Web")}</dd></div>
-          <div><dt className="text-slate-500">Build</dt><dd className="mt-0.5 font-bold text-slate-800">{runtime.buildNumber ?? (runtime.isNative ? "Unavailable" : "Web")}</dd></div>
-        </dl>
       </section>
+
+      <NativeSettingsPanel />
 
       {(viewerAccess.isManagement || viewerAccess.isAdmin) && <Section title="Management" items={management} />}
 

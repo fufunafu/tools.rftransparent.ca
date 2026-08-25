@@ -7,6 +7,13 @@ expanding access.
 ## Automated gate
 
 - [ ] Apply all pending Supabase migrations in the target environment.
+- [ ] Confirm `IOS_UPDATE_URL` is the approved TestFlight or unlisted App Store
+  destination and the deployed minimum and recommended build values are correct.
+- [ ] Confirm `https://tools.rftransparent.ca/.well-known/apple-app-site-association`
+  returns the committed association JSON without a redirect.
+- [ ] Run `npm run ios:verify-deployment` after the production deployment. It
+  verifies both association files, the full supported-link allowlist, native
+  version policy, approved Apple update destination, and service status.
 - [ ] Deploy the matching web commit to `https://tools.rftransparent.ca` and
   verify Login, Home, Clock, Tasks, More, and each frontline role route before
   archiving the native shell. The native app loads this live deployment.
@@ -14,7 +21,8 @@ expanding access.
 - [ ] Run `npm run ios:release-check` with `E2E_MOBILE_STORAGE_STATE` and
   `E2E_MOBILE_DEPARTMENT=warehouse` set.
 - [ ] Generate the archive privacy report in Xcode and confirm its data types,
-  purposes, and tracking status match `app-store-assets/submission-metadata.md`.
+  purposes, tracking status, and the app-only UserDefaults reason `CA92.1`
+  match `app-store-assets/submission-metadata.md` and `PrivacyInfo.xcprivacy`.
 - [ ] Confirm the embedded `ios/App/App/capacitor.config.json` contains
   `https://tools.rftransparent.ca`, does not contain a local host, and does not
   enable cleartext traffic.
@@ -33,6 +41,15 @@ expanding access.
   frame.
 - [ ] Confirm an offline cold launch shows connection status, Retry, and the
   support link after the bounded launch fallback.
+- [ ] Open a supported universal link from Mail or Messages and confirm it opens
+  the authorized app destination. Confirm unsupported, expired, and
+  role-restricted links fall back safely to Home.
+- [ ] Verify each notification preference, generic lock-screen copy, and tap
+  destination for tasks, clock reminders, follow-ups, and callbacks.
+- [ ] Temporarily exercise recommended-update, required-update, and maintenance
+  policies against an internal test build.
+- [ ] Share diagnostics from More and confirm they contain no password, token,
+  session, customer, precise-location, or employee-content fields.
 - [ ] Confirm a returning signed-in user must unlock with Face ID, Touch ID, or
   the device passcode.
 - [ ] Cancel device authentication and confirm protected content stays covered.

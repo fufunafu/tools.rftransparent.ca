@@ -1,0 +1,128 @@
+name: App
+options:
+  minimumXcodeGenVersion: 2.45.0
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+configs:
+  Debug: debug
+  Release: release
+packages:
+  CapApp-SPM:
+    path: CapApp-SPM
+settings:
+  base:
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    SWIFT_VERSION: "5.0"
+targets:
+  App:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Assets.xcassets
+          - Base.lproj
+          - Info.plist
+          - PrivacyInfo.xcprivacy
+          - capacitor.config.json
+          - config.xml
+          - public
+      - path: App/Assets.xcassets
+        buildPhase: resources
+      - path: App/Base.lproj/LaunchScreen.storyboard
+        buildPhase: resources
+      - path: App/Base.lproj/Main.storyboard
+        buildPhase: resources
+      - path: App/PrivacyInfo.xcprivacy
+        buildPhase: resources
+      - path: App/capacitor.config.json
+        buildPhase: resources
+      - path: App/config.xml
+        buildPhase: resources
+      - path: App/public
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: CapApp-SPM
+    configFiles:
+      Debug: ../debug.xcconfig
+    preBuildScripts:
+      - name: Validate Release Server
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/App/capacitor.config.json
+        script: |
+          if [ "$CONFIGURATION" != "Release" ]; then
+            exit 0
+          fi
+          CONFIG_FILE="$SRCROOT/App/capacitor.config.json"
+          if ! /usr/bin/grep -Eq '"url"[[:space:]]*:[[:space:]]*"https://tools\.rftransparent\.ca"' "$CONFIG_FILE"; then
+            echo "error: Release builds must target https://tools.rftransparent.ca. Run npm run cap:sync:prod first."
+            exit 1
+          fi
+          if /usr/bin/grep -Eqi 'localhost|127\.0\.0\.1|"cleartext"[[:space:]]*:[[:space:]]*true' "$CONFIG_FILE"; then
+            echo "error: Release builds cannot contain a local server or cleartext setting. Run npm run cap:sync:prod first."
+            exit 1
+          fi
+    settings:
+      base:
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_STYLE: Automatic
+        CURRENT_PROJECT_VERSION: 3
+        DEVELOPMENT_TEAM: 94BK7NCPL9
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: App/Info.plist
+        MARKETING_VERSION: "1.0"
+        PRODUCT_BUNDLE_IDENTIFIER: ca.rftransparent.tools
+        PRODUCT_NAME: $(TARGET_NAME)
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          CODE_SIGN_ENTITLEMENTS: App/App.Debug.entitlements
+          OTHER_SWIFT_FLAGS: $(inherited) -D COCOAPODS -DDEBUG
+        Release:
+          CODE_SIGN_ENTITLEMENTS: App/App.entitlements
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: ""
+  AppTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - AppTests
+    dependencies:
+      - target: App
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 94BK7NCPL9
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ca.rftransparent.tools.tests
+  AppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - AppUITests
+    dependencies:
+      - target: App
+    settings:
+      base:
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: 94BK7NCPL9
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: ca.rftransparent.tools.uitests
+        TEST_TARGET_NAME: App
+schemes:
+  App:
+    shared: true
+    build:
+      targets:
+        App: all
+        AppTests: [test]
+        AppUITests: [test]
+    test:
+      config: Debug
+      gatherCoverageData: true
+      targets:
+        - name: AppTests
+        - name: AppUITests

@@ -47,6 +47,7 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 /playwright/.auth/
+/.artifacts/
 
 # Local design handoff/reference artifacts
 /Multi-store sales and operations dashboard.zip
@@ -61,6 +62,9 @@ followup-revert-backup-*.xlsx
 !/scripts/validate-mobile-e2e-env.mjs
 !/scripts/validate-native-shell.mjs
 !/scripts/capture-app-store-screenshots.mjs
+!/scripts/run-ios-tests.mjs
+!/scripts/archive-ios.mjs
+!/scripts/verify-ios-deployment.mjs
 /tmp/
 /output/
 

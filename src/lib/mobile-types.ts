@@ -11,6 +11,17 @@ export interface NativeRuntimeState {
   appVersion: string | null;
   buildNumber: string | null;
   environment: "production" | "development" | "web";
+  operatingSystem: string | null;
+  deviceModel: string | null;
+  nativeCrashCount?: number;
+  lastNativeCrashAt?: string | null;
+  lastNativeCrashSignature?: string | null;
+  webViewLoadFailureCount?: number;
+  lastWebViewLoadFailureAt?: string | null;
+  lastLifecycleError?: string | null;
+  updateState: "unknown" | "current" | "recommended" | "required";
+  updateUrl: string | null;
+  serviceState: "operational" | "maintenance" | "unavailable";
 }
 
 export type ClockErrorCode =

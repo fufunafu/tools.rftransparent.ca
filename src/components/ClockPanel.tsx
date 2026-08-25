@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useSWR from "swr";
 import { formatDuration, type WeekDay } from "@/lib/time-clock";
-import { getCurrentPosition, type AppPosition } from "@/lib/app-geolocation";
+import { getCurrentPosition, type AppPosition, type LocationProgress } from "@/lib/app-geolocation";
 import { hapticSuccess, hapticWarning } from "@/lib/app-haptics";
 import { useNativeRuntime } from "@/components/NativeAppRuntime";
+import { openNativeSettings } from "@/lib/native-support";
 
 interface ClockStatus {
   linked: boolean;
@@ -50,11 +51,15 @@ export default function ClockPanel() {
   const { data, error, mutate } = useSWR<ClockStatus>("/api/clock", { refreshInterval: 60_000 });
   const [pending, setPending] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [locationProgress, setLocationProgress] = useState<LocationProgress | "submitting" | null>(null);
+  const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
+  const [showLocationSettings, setShowLocationSettings] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [showLocationEducation, setShowLocationEducation] = useState(false);
   const [resolveValue, setResolveValue] = useState("");
   const [now, setNow] = useState(() => Date.now());
+  const actionInFlight = useRef(false);
 
   const running = !!data?.open && !data.open.stale;
 
@@ -66,11 +71,15 @@ export default function ClockPanel() {
   }, [running]);
 
   const acquireLocationAndClockIn = async () => {
+    if (actionInFlight.current) return;
+    actionInFlight.current = true;
     setPending(true);
     setLocating(true);
+    setLocationAccuracy(null);
     setActionError(null);
     setActionSuccess(null);
-    const result = await getCurrentPosition();
+    setShowLocationSettings(false);
+    const result = await getCurrentPosition(setLocationProgress);
     setLocating(false);
     if (!result.ok) {
       const message =
@@ -84,10 +93,17 @@ export default function ClockPanel() {
                 ? `Your location is only accurate to about ${result.accuracy} m. Move near a window or outdoors and try again.`
                 : "Couldn't get your location. Check that Location Services are on and try again.";
       setActionError(message);
+      setShowLocationSettings(result.reason === "denied" || result.reason === "restricted");
+      setLocationProgress(null);
+      setLocationAccuracy(null);
+      void hapticWarning();
       setPending(false);
+      actionInFlight.current = false;
       return;
     }
-    await post({ action: "in", position: result.position });
+    setLocationAccuracy(Math.round(result.position.accuracy));
+    setLocationProgress("submitting");
+    await post({ action: "in", position: result.position }, true);
   };
 
   const clockIn = async () => {
@@ -112,18 +128,19 @@ export default function ClockPanel() {
     action: string;
     clockOutAt?: string;
     position?: AppPosition;
-  }) => {
-    if (!connected || !navigator.onLine) {
-      setActionError("Clock actions need an internet connection. Reconnect and try again.");
-      setActionSuccess(null);
-      setLocating(false);
-      setPending(false);
-      return;
+  }, actionLockOwned = false) => {
+    if (!actionLockOwned) {
+      if (actionInFlight.current) return;
+      actionInFlight.current = true;
     }
     setPending(true);
     setActionError(null);
     setActionSuccess(null);
     try {
+      if (!connected || !navigator.onLine) {
+        setActionError("Clock actions need an internet connection. Reconnect and try again.");
+        return;
+      }
       const res = await fetch("/api/clock", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,7 +168,11 @@ export default function ClockPanel() {
     } catch {
       setActionError("Couldn't reach the server. Check your connection and try again.");
     } finally {
+      actionInFlight.current = false;
       setPending(false);
+      setLocating(false);
+      setLocationProgress(null);
+      setLocationAccuracy(null);
     }
   };
 
@@ -274,6 +295,7 @@ export default function ClockPanel() {
         <button
           onClick={() => (open ? post({ action: "out" }) : clockIn())}
           disabled={pending || !connected}
+          aria-busy={pending}
           className={`w-full rounded-2xl py-4 text-lg font-bold text-white shadow-lg transition-colors disabled:opacity-50 ${
             open
               ? "bg-stone-900 shadow-stone-900/20 hover:bg-stone-800"
@@ -293,7 +315,12 @@ export default function ClockPanel() {
       )}
 
       {actionError && (
-        <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" aria-live="assertive">{actionError}</p>
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert" aria-live="assertive">
+          <p>{actionError}</p>
+          {showLocationSettings && (
+            <button type="button" onClick={() => void openNativeSettings()} className="mt-2 min-h-11 rounded-xl border border-red-300 bg-white px-4 font-bold text-red-800">Open iPhone Settings</button>
+          )}
+        </div>
       )}
       {actionSuccess && (
         <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800" role="status" aria-live="polite">{actionSuccess}</p>
@@ -303,6 +330,13 @@ export default function ClockPanel() {
         <p className="px-2 text-center text-xs leading-5 text-slate-600">
           RF Tools checks your location once when you clock in. It does not track you afterward.
         </p>
+      )}
+
+      {locationProgress && (
+        <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3" role="status" aria-live="polite">
+          <div className="h-1.5 overflow-hidden rounded-full bg-blue-100"><div className={`h-full rounded-full bg-blue-600 transition-all ${locationProgress === "checking-permission" ? "w-1/4" : locationProgress === "requesting-permission" ? "w-1/2" : locationProgress === "acquiring-location" ? "w-3/4" : "w-full"}`} /></div>
+          <p className="mt-2 text-xs font-bold text-blue-900">{locationProgress === "checking-permission" ? "Checking location permission" : locationProgress === "requesting-permission" ? "Waiting for location permission" : locationProgress === "acquiring-location" ? "Finding an accurate location" : locationAccuracy === null ? "Confirming clock-in with RF Tools" : `Location acquired to about ${locationAccuracy} m. Confirming clock-in with RF Tools.`}</p>
+        </div>
       )}
 
       {/* This week */}
@@ -331,12 +365,13 @@ export default function ClockPanel() {
 
       {showLocationEducation && (
         <div
-          className="fixed inset-0 z-[90] flex items-end bg-slate-950/45 p-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:items-center sm:justify-center"
+          className="fixed inset-0 z-[90] flex items-start overflow-y-auto bg-slate-950/45 p-3 pb-[calc(env(safe-area-inset-bottom)+12px)] sm:justify-center"
           role="dialog"
           aria-modal="true"
           aria-labelledby="location-education-title"
+          aria-describedby="location-education-message"
         >
-          <div className="w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl">
+          <div className="mt-auto w-full max-w-sm rounded-3xl bg-white p-6 shadow-2xl sm:my-auto">
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-50 text-blue-600" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-6 w-6">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 21s6-5.25 6-11a6 6 0 1 0-12 0c0 5.75 6 11 6 11Z" />
@@ -346,10 +381,11 @@ export default function ClockPanel() {
             <h2 id="location-education-title" className="text-xl font-bold tracking-tight text-slate-950">
               Confirm you are at the store
             </h2>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
+            <p id="location-education-message" className="mt-2 text-sm leading-6 text-slate-600">
               RF Tools will request one fresh location to confirm you are near {data.locationName ?? "your assigned store"}. The reading is saved with this clock-in for audit purposes.
             </p>
             <button
+              autoFocus
               type="button"
               onClick={() => {
                 setShowLocationEducation(false);

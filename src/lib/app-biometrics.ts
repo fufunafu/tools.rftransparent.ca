@@ -2,6 +2,8 @@
 // authenticated session in WebView cookies. Biometrics only unlock the UI and
 // never release or store an account password.
 
+import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
+
 const LEGACY_CREDENTIALS_KEY = "rf-login-credentials";
 const FRESH_SESSION_KEY = "rf-native-session-fresh";
 
@@ -12,6 +14,15 @@ interface CapacitorGlobal {
 export type DeviceUnlockResult =
   | { ok: true }
   | { ok: false; reason: "cancelled" | "unavailable" | "locked" | "failed" };
+
+export type NativeSessionGateDecision = "authenticated" | "expired" | "unavailable";
+
+export function classifyNativeSessionResponse(
+  response: Pick<Response, "ok" | "status">,
+): NativeSessionGateDecision {
+  if (response.status === 401 || response.status === 403) return "expired";
+  return response.ok ? "authenticated" : "unavailable";
+}
 
 export function isNativeApp(): boolean {
   return (
@@ -39,6 +50,7 @@ export async function deviceUnlockAvailable(): Promise<boolean> {
     const result = await BiometricAuth.checkBiometry();
     return result.isAvailable || result.deviceIsSecure;
   } catch {
+    recordNativeDiagnosticEvent("plugin_failed");
     return false;
   }
 }
@@ -70,6 +82,7 @@ export async function authenticateAppSession(): Promise<DeviceUnlockResult> {
     if (["biometryNotAvailable", "biometryNotEnrolled", "passcodeNotSet"].includes(code)) {
       return { ok: false, reason: "unavailable" };
     }
+    recordNativeDiagnosticEvent("plugin_failed");
     return { ok: false, reason: "failed" };
   }
 }

@@ -19,6 +19,13 @@ html[data-native-app="true"] body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
 }
 
+@supports (font: -apple-system-body) {
+  html[data-native-app="true"] {
+    font: -apple-system-body;
+    -webkit-text-size-adjust: 100%;
+  }
+}
+
 @media (max-width: 1023px) {
   /* iOS auto-zooms the whole page when a focused input's font is under
      16px — the single biggest "this is a website" tell. Utility classes

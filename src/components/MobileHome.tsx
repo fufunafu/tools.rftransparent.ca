@@ -33,7 +33,11 @@ function HomeSkeleton() {
   );
 }
 
-export default function MobileHome() {
+export default function MobileHome({
+  nativeLinkFallback = null,
+}: {
+  nativeLinkFallback?: "unsupported" | "expired" | "unauthorized" | null;
+}) {
   const { connected } = useNativeRuntime();
   const { data, error, isLoading, mutate } = useSWR<MobileHomeState>("/api/mobile/home", {
     refreshInterval: 60_000,
@@ -71,6 +75,18 @@ export default function MobileHome() {
 
   return (
     <div className="mx-auto max-w-md space-y-5">
+      {nativeLinkFallback && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="alert">
+          <p className="font-bold">
+            {nativeLinkFallback === "unauthorized"
+              ? "That link is not available for your role."
+              : nativeLinkFallback === "expired"
+                ? "That link has expired."
+                : "That link is no longer available in RF Tools."}
+          </p>
+          <p className="mt-1 leading-5">You are safely back on Home. Choose one of your permitted work areas below.</p>
+        </div>
+      )}
       <header>
         <h1 className="text-2xl font-bold tracking-tight text-slate-950">
           {greeting(now)}{firstName ? `, ${firstName}` : ""}

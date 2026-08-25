@@ -11,12 +11,21 @@ export function isLocalDevelopmentOrigin(value: string | URL): boolean {
 export function isProtectedNativePath(pathname: string): boolean {
   return !(
     pathname === "/login" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
     pathname === "/privacy" ||
     pathname === "/support" ||
     pathname.startsWith("/print/") ||
     pathname.startsWith("/survey/") ||
     pathname.startsWith("/wall/")
   );
+}
+
+export function requiresNativeSessionUnlock(
+  pathname: string,
+  sessionUnlocked: boolean,
+): boolean {
+  return isProtectedNativePath(pathname) && !sessionUnlocked;
 }
 
 export function isTrustedAppUrl(value: string | URL, appOrigin: string): boolean {

@@ -15,6 +15,7 @@ vi.mock("@aparajita/capacitor-secure-storage", () => ({
 
 import {
   authenticateAppSession,
+  classifyNativeSessionResponse,
   clearLegacySavedCredentials,
   consumeFreshNativeSession,
   deviceUnlockAvailable,
@@ -41,18 +42,56 @@ beforeEach(() => {
 });
 
 describe("native session authentication", () => {
+  it.each([401, 403])("treats HTTP %s as an expired server session", (status) => {
+    expect(classifyNativeSessionResponse({ ok: false, status })).toBe("expired");
+  });
+
+  it("distinguishes a valid session from a temporary server failure", () => {
+    expect(classifyNativeSessionResponse({ ok: true, status: 200 })).toBe("authenticated");
+    expect(classifyNativeSessionResponse({ ok: false, status: 503 })).toBe("unavailable");
+  });
+
   it("unlocks an existing session after successful device authentication", async () => {
     await expect(deviceUnlockAvailable()).resolves.toBe(true);
     await expect(authenticateAppSession()).resolves.toEqual({ ok: true });
     expect(authenticate).toHaveBeenCalledWith(expect.objectContaining({
       allowDeviceCredential: true,
       reason: "Unlock RF Tools",
+      iosFallbackTitle: "Use Passcode",
     }));
   });
 
-  it("keeps the session locked when the person cancels Face ID", async () => {
-    authenticate.mockRejectedValue({ code: "userCancel" });
-    await expect(authenticateAppSession()).resolves.toEqual({ ok: false, reason: "cancelled" });
+  it.each(["appCancel", "systemCancel", "userCancel", "userFallback"])(
+    "keeps the session locked for cancellation outcome %s",
+    async (code) => {
+      authenticate.mockRejectedValue({ code });
+      await expect(authenticateAppSession()).resolves.toEqual({ ok: false, reason: "cancelled" });
+    },
+  );
+
+  it.each(["biometryNotAvailable", "biometryNotEnrolled", "passcodeNotSet"])(
+    "reports unavailable device authentication for %s",
+    async (code) => {
+      authenticate.mockRejectedValue({ code });
+      await expect(authenticateAppSession()).resolves.toEqual({ ok: false, reason: "unavailable" });
+    },
+  );
+
+  it("allows the device-passcode fallback when biometrics are not available", async () => {
+    checkBiometry.mockResolvedValue({ isAvailable: false, deviceIsSecure: true });
+
+    await expect(deviceUnlockAvailable()).resolves.toBe(true);
+    await expect(authenticateAppSession()).resolves.toEqual({ ok: true });
+
+    expect(authenticate).toHaveBeenCalledWith(expect.objectContaining({
+      allowDeviceCredential: true,
+      iosFallbackTitle: "Use Passcode",
+    }));
+  });
+
+  it("reports an unclassified authentication failure without unlocking", async () => {
+    authenticate.mockRejectedValue({ code: "authenticationFailed" });
+    await expect(authenticateAppSession()).resolves.toEqual({ ok: false, reason: "failed" });
   });
 
   it("reports when the device has no authentication configured", async () => {

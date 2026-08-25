@@ -2,7 +2,11 @@
 
 import { useEffect, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
-import { registerForPush, unregisterForPush } from "@/lib/app-push";
+import {
+  registerForPush,
+  shouldRegisterPushForPath,
+  unregisterForPush,
+} from "@/lib/app-push";
 import { isNativeApp } from "@/lib/app-biometrics";
 
 // The native flag never changes during a page's life; false on the server so
@@ -10,17 +14,13 @@ import { isNativeApp } from "@/lib/app-biometrics";
 const NEVER_CHANGES = () => () => {};
 const serverSaysNo = () => false;
 
-// Pages a signed-out visitor can reach; prompting for notifications there
-// would be rude and the register call would 401 anyway.
-const SIGNED_OUT_PATHS = ["/login", "/survey", "/forgot-password", "/reset-password"];
-
 // Renders nothing; asks for notification permission (once) and refreshes the
 // device-token registration on every app launch. Mounted app-wide, but only
 // acts inside the native shell on signed-in pages.
 export default function PushRegistrar() {
   const isNative = useSyncExternalStore(NEVER_CHANGES, isNativeApp, serverSaysNo);
   const pathname = usePathname();
-  const onAuthedPage = !SIGNED_OUT_PATHS.some((path) => pathname.startsWith(path));
+  const onAuthedPage = shouldRegisterPushForPath(pathname);
 
   useEffect(() => {
     if (!isNative || !onAuthedPage) return;

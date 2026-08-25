@@ -156,8 +156,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
     ?? "RF Tools";
 
   // Keep the touch-first shell through iPad portrait and landscape widths.
+  // The widest supported iPad viewport is 1194 points, so the desktop rail
+  // begins at Tailwind's xl breakpoint instead of lg.
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 1023px)");
+    const mq = window.matchMedia("(max-width: 1279px)");
     const update = () => setIsMobile(mq.matches);
     update();
     mq.addEventListener("change", update);
@@ -296,7 +298,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden lg:flex
+        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden xl:flex
           md:shrink-0 md:transition-[width] md:duration-200"
       >
         {/* Logo and collapse controls */}
@@ -465,7 +467,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       {/* Main column */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Tab roots keep the compact brand. Detail screens expose title and Back. */}
-        <div className="lg:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
+        <div className="xl:hidden flex items-center gap-3 min-h-14 px-4 pt-[env(safe-area-inset-top)] border-b border-slate-200 bg-white shrink-0">
           {tabRoot ? (
             <Link href={mobileHomePath} className="flex min-h-11 flex-1 items-center gap-3 min-w-0">
               <span className="w-7 h-7 rounded-lg bg-blue-700 flex items-center justify-center shrink-0">
@@ -499,7 +501,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         {/* Main content. Extra bottom padding on phones keeps the last of the
             page above the fixed tab bar. */}
         <main data-app-main className="min-h-0 flex-1 overflow-y-auto overscroll-y-none bg-slate-100">
-          <div className="p-4 pb-28 lg:p-8">
+          <div className="p-4 pb-28 xl:p-8">
             {children}
           </div>
         </main>

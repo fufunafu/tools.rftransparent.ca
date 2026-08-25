@@ -43,10 +43,11 @@ Internal operations software for RF Transparent. The application combines sales,
 | `npm run test:watch` | Run Vitest in watch mode |
 | `npm run build` | Create the production Next.js build |
 | `npm run test:e2e` | Run Playwright browser smoke tests against a built app |
-| `npm run test:e2e:mobile:public` | Run signed-out mobile login checks in four WebKit viewports |
-| `npm run test:e2e:mobile` | Run the authenticated frontline mobile suite in four WebKit viewports |
+| `npm run test:e2e:mobile:public` | Run signed-out mobile login checks in six WebKit viewports |
+| `npm run test:e2e:mobile` | Run the full authenticated workflow on a reference iPhone and the signed-in shell in six WebKit viewports |
 | `npm run check` | Run lint, typecheck, and unit tests |
 | `npm run ios:release-check` | Run every automated web and iOS release gate |
+| `npm run ios:test:native` | Run native policy tests plus iPhone and iPad XCTest UI gates |
 | `npm run ios:build:sim` | Build the Debug iOS app for the simulator |
 | `npm run ios:build:sim:release` | Build the Release iOS app and enforce the production-server guard |
 

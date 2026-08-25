@@ -3,6 +3,7 @@ import {
   isLocalDevelopmentOrigin,
   isProtectedNativePath,
   isTrustedAppUrl,
+  requiresNativeSessionUnlock,
 } from "@/lib/native-runtime";
 
 describe("native runtime boundaries", () => {
@@ -10,8 +11,14 @@ describe("native runtime boundaries", () => {
     expect(isProtectedNativePath(path)).toBe(true);
   });
 
-  it.each(["/login", "/privacy", "/support", "/print/po/1", "/survey/token", "/wall/token"])("does not lock public path %s", (path) => {
+  it.each(["/login", "/forgot-password", "/reset-password", "/privacy", "/support", "/print/po/1", "/survey/token", "/wall/token"])("does not lock public path %s", (path) => {
     expect(isProtectedNativePath(path)).toBe(false);
+  });
+
+  it("requires unlock when navigation moves from a public page into protected work", () => {
+    expect(requiresNativeSessionUnlock("/support", false)).toBe(false);
+    expect(requiresNativeSessionUnlock("/clock", false)).toBe(true);
+    expect(requiresNativeSessionUnlock("/clock", true)).toBe(false);
   });
 
   it("trusts only HTTPS navigation on the current RF Tools origin", () => {

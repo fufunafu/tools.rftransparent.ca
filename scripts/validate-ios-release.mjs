@@ -55,10 +55,40 @@ const evaluated = evaluatedResult.app?.extConfig;
 const embeddedPath = resolve(projectRoot, "ios/App/App/capacitor.config.json");
 const embedded = JSON.parse(readFileSync(embeddedPath, "utf8"));
 const infoPlist = readFileSync(resolve(projectRoot, "ios/App/App/Info.plist"), "utf8");
+const entitlements = readFileSync(resolve(projectRoot, "ios/App/App/App.entitlements"), "utf8");
+const debugEntitlements = readFileSync(resolve(projectRoot, "ios/App/App/App.Debug.entitlements"), "utf8");
 const projectFile = readFileSync(resolve(projectRoot, "ios/App/App.xcodeproj/project.pbxproj"), "utf8");
+const projectSpec = readFileSync(resolve(projectRoot, "ios/App/project.yml"), "utf8");
+const versionPolicyRoute = readFileSync(resolve(projectRoot, "src/app/api/native/version/route.ts"), "utf8");
+const nativeLinksSource = readFileSync(resolve(projectRoot, "src/lib/native-links.ts"), "utf8");
+const pushPreferencesMigration = readFileSync(
+  resolve(projectRoot, "supabase/migrations/20260824153000_push_preferences.sql"),
+  "utf8",
+);
 const privacyManifestPath = resolve(projectRoot, "ios/App/App/PrivacyInfo.xcprivacy");
 const privacyManifest = parsePlist(privacyManifestPath);
+const exportOptions = parsePlist(resolve(projectRoot, "ios/App/ExportOptions.plist"));
 const metadata = readFileSync(resolve(projectRoot, "app-store-assets/submission-metadata.md"), "utf8");
+const marketingVersion = projectSpec.match(/MARKETING_VERSION:\s*["']?([0-9]+(?:\.[0-9]+){1,2})["']?/)?.[1] ?? null;
+const nativeBuild = projectSpec.match(/CURRENT_PROJECT_VERSION:\s*["']?(\d+)["']?/)?.[1] ?? null;
+const policyBuild = versionPolicyRoute.match(/const CURRENT_NATIVE_BUILD = (\d+);/)?.[1] ?? null;
+
+if (!marketingVersion) fail("XcodeGen project.yml is missing a valid MARKETING_VERSION.");
+if (!nativeBuild) fail("XcodeGen project.yml is missing a valid CURRENT_PROJECT_VERSION.");
+if (!policyBuild) fail("the native version endpoint is missing CURRENT_NATIVE_BUILD.");
+if (nativeBuild && policyBuild && nativeBuild !== policyBuild) {
+  fail(`the Xcode build ${nativeBuild} does not match the native version endpoint build ${policyBuild}.`);
+}
+
+if (exportOptions.method !== "app-store-connect") {
+  fail("ExportOptions.plist must use the app-store-connect distribution method.");
+}
+if (exportOptions.destination !== "upload") {
+  fail("ExportOptions.plist must upload the validated archive to App Store Connect.");
+}
+if (exportOptions.manageAppVersionAndBuildNumber !== false) {
+  fail("ExportOptions.plist must preserve the validated version and build number during export.");
+}
 
 const sdkVersion = execFileSync("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"], {
   cwd: projectRoot,
@@ -122,8 +152,8 @@ for (const [label, limit, unit] of appStoreFields) {
 
 for (const [label, expected] of [
   ["Bundle ID", "ca.rftransparent.tools"],
-  ["Version", "1.0"],
-  ["Build", "3"],
+  ["Version", marketingVersion],
+  ["Build", nativeBuild],
   ["Support URL", "https://tools.rftransparent.ca/support"],
   ["Marketing URL", "https://rftransparent.ca/"],
 ]) {
@@ -133,8 +163,8 @@ for (const [label, expected] of [
 }
 
 for (const expected of [
-  "MARKETING_VERSION = 1.0;",
-  "CURRENT_PROJECT_VERSION = 3;",
+  `MARKETING_VERSION = ${marketingVersion};`,
+  `CURRENT_PROJECT_VERSION = ${nativeBuild};`,
   "PRODUCT_BUNDLE_IDENTIFIER = ca.rftransparent.tools;",
 ]) {
   if (!projectFile.includes(expected)) fail(`Xcode project is missing ${expected}`);
@@ -177,8 +207,13 @@ if ((privacyManifest.NSPrivacyTrackingDomains ?? []).length !== 0) {
   fail("the app privacy manifest contains tracking domains.");
 }
 
-if ((privacyManifest.NSPrivacyAccessedAPITypes ?? []).length !== 0) {
-  fail("review app-owned required-reason API declarations before release.");
+const accessedApiTypes = privacyManifest.NSPrivacyAccessedAPITypes ?? [];
+if (
+  accessedApiTypes.length !== 1 ||
+  accessedApiTypes[0]?.NSPrivacyAccessedAPIType !== "NSPrivacyAccessedAPICategoryUserDefaults" ||
+  JSON.stringify(accessedApiTypes[0]?.NSPrivacyAccessedAPITypeReasons) !== JSON.stringify(["CA92.1"])
+) {
+  fail("the app privacy manifest must declare app-only UserDefaults access with reason CA92.1.");
 }
 
 const expectedCollectedDataTypes = new Set([
@@ -217,8 +252,10 @@ const requiredPlugins = [
   "BiometricAuthNative",
   "CAPBrowserPlugin",
   "GeolocationPlugin",
+  "HapticsPlugin",
   "KeyboardPlugin",
   "CAPNetworkPlugin",
+  "PushNotificationsPlugin",
   "SecureStorage",
   "SplashScreenPlugin",
   "StatusBarPlugin",
@@ -226,6 +263,96 @@ const requiredPlugins = [
 const registered = new Set(embedded.packageClassList ?? []);
 for (const plugin of requiredPlugins) {
   if (!registered.has(plugin)) fail(`embedded iOS config is missing ${plugin}.`);
+}
+
+for (const preference of [
+  "task_updates",
+  "overdue_updates",
+  "clock_reminders",
+  "followup_updates",
+  "callback_updates",
+]) {
+  if (!pushPreferencesMigration.includes(preference)) {
+    fail(`the push preferences migration is missing ${preference}.`);
+  }
+}
+
+if (!entitlements.includes("applinks:tools.rftransparent.ca")) {
+  fail("the app is missing the production Associated Domains entitlement.");
+}
+if (!/<key>aps-environment<\/key>\s*<string>production<\/string>/.test(entitlements)) {
+  fail("the app is missing the production APNs entitlement.");
+}
+if (!/<key>aps-environment<\/key>\s*<string>development<\/string>/.test(debugEntitlements)) {
+  fail("the Debug app is missing the sandbox APNs entitlement.");
+}
+if (!debugEntitlements.includes("applinks:tools.rftransparent.ca")) {
+  fail("the Debug app is missing the production Associated Domains entitlement.");
+}
+if (!projectSpec.includes("CODE_SIGN_ENTITLEMENTS: App/App.Debug.entitlements")) {
+  fail("XcodeGen does not select the Debug APNs entitlements file.");
+}
+if (!projectSpec.includes("CODE_SIGN_ENTITLEMENTS: App/App.entitlements")) {
+  fail("XcodeGen does not select the Release APNs entitlements file.");
+}
+
+const associationRoot = readFileSync(resolve(projectRoot, "public/apple-app-site-association"), "utf8");
+const associationWellKnown = readFileSync(resolve(projectRoot, "public/.well-known/apple-app-site-association"), "utf8");
+if (associationRoot !== associationWellKnown) {
+  fail("the two apple-app-site-association files must be identical.");
+}
+const association = JSON.parse(associationRoot);
+const appIDs = association.applinks?.details?.flatMap((detail) => detail.appIDs ?? []) ?? [];
+if (!appIDs.includes("94BK7NCPL9.ca.rftransparent.tools")) {
+  fail("apple-app-site-association is missing the production app identifier.");
+}
+const destinationBlock = nativeLinksSource.match(
+  /const EXACT_DESTINATIONS = new Set\(\[([\s\S]*?)\]\);/,
+)?.[1];
+const nativeDestinations = destinationBlock
+  ? [...destinationBlock.matchAll(/"([^"\n]+)"/g)].map((match) => match[1]).sort()
+  : [];
+const associatedPaths = (association.applinks?.details ?? [])
+  .flatMap((detail) => detail.components ?? [])
+  .map((component) => component["/"])
+  .filter((path) => typeof path === "string")
+  .sort();
+if (
+  nativeDestinations.length === 0 ||
+  JSON.stringify(nativeDestinations) !== JSON.stringify(associatedPaths)
+) {
+  fail("the native route allowlist and apple-app-site-association paths must match exactly.");
+}
+
+if (process.env.IOS_UPDATE_URL) {
+  let updateURL;
+  try {
+    updateURL = new URL(process.env.IOS_UPDATE_URL);
+  } catch {
+    updateURL = null;
+  }
+  const appleHosts = new Set(["apps.apple.com", "itunes.apple.com", "testflight.apple.com"]);
+  if (!updateURL || updateURL.protocol !== "https:" || !appleHosts.has(updateURL.hostname.toLowerCase())) {
+    fail("IOS_UPDATE_URL must be an HTTPS TestFlight or App Store destination.");
+  }
+}
+
+if (process.env.IOS_CURRENT_VERSION && process.env.IOS_CURRENT_VERSION !== marketingVersion) {
+  fail(`IOS_CURRENT_VERSION must match Xcode MARKETING_VERSION ${marketingVersion}.`);
+}
+
+for (const name of ["IOS_MINIMUM_BUILD", "IOS_RECOMMENDED_BUILD"]) {
+  const value = process.env[name];
+  if (value && (!/^\d+$/.test(value) || Number(value) < 0)) {
+    fail(`${name} must be a non-negative integer.`);
+  }
+}
+if (
+  process.env.IOS_MINIMUM_BUILD &&
+  process.env.IOS_RECOMMENDED_BUILD &&
+  Number(process.env.IOS_RECOMMENDED_BUILD) < Number(process.env.IOS_MINIMUM_BUILD)
+) {
+  fail("IOS_RECOMMENDED_BUILD cannot be lower than IOS_MINIMUM_BUILD.");
 }
 
 if (!process.exitCode) {

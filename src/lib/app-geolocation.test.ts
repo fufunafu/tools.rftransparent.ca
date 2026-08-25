@@ -1,12 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { checkPermissions, requestPermissions, nativePosition } = vi.hoisted(() => ({
+const {
+  checkPermissions,
+  requestPermissions,
+  nativePosition,
+  nativeAuthorizationStatus,
+} = vi.hoisted(() => ({
   checkPermissions: vi.fn(),
   requestPermissions: vi.fn(),
   nativePosition: vi.fn(),
+  nativeAuthorizationStatus: vi.fn(),
 }));
 
 vi.mock("@/lib/app-biometrics", () => ({ isNativeApp: () => true }));
+vi.mock("@/lib/native-support", () => ({
+  getNativeLocationAuthorizationStatus: nativeAuthorizationStatus,
+}));
 vi.mock("@capacitor/geolocation", () => ({
   Geolocation: {
     checkPermissions,
@@ -19,6 +28,7 @@ import { getCurrentPosition } from "@/lib/app-geolocation";
 
 beforeEach(() => {
   vi.clearAllMocks();
+  nativeAuthorizationStatus.mockResolvedValue("granted");
   checkPermissions.mockResolvedValue({ location: "granted" });
   requestPermissions.mockResolvedValue({ location: "granted" });
   nativePosition.mockResolvedValue({
@@ -42,8 +52,15 @@ describe("native location permission handling", () => {
   });
 
   it("distinguishes a restricted permission state", async () => {
-    checkPermissions.mockResolvedValue({ location: "limited" });
+    nativeAuthorizationStatus.mockResolvedValue("restricted");
     await expect(getCurrentPosition()).resolves.toEqual({ ok: false, reason: "restricted" });
+    expect(checkPermissions).not.toHaveBeenCalled();
+  });
+
+  it("distinguishes disabled native location services", async () => {
+    nativeAuthorizationStatus.mockResolvedValue("unavailable");
+    await expect(getCurrentPosition()).resolves.toEqual({ ok: false, reason: "unavailable" });
+    expect(checkPermissions).not.toHaveBeenCalled();
   });
 
   it("recovers after location permission is changed in Settings", async () => {

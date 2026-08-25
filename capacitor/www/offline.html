@@ -31,21 +31,48 @@
   <body>
     <main>
       <div class="mark" aria-hidden="true">RF</div>
-      <h1>RF Tools cannot connect</h1>
-      <p>Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.</p>
+      <h1 id="title">RF Tools cannot connect</h1>
+      <p id="message">Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.</p>
       <div class="status" role="status"><span class="dot"></span><span id="connection">No connection</span></div>
       <button type="button" id="retry">Try again</button>
       <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20connection%20help">Contact support</a>
+      <p id="diagnostics" aria-label="App diagnostics"></p>
     </main>
     <script>
       const productionUrl = "https://tools.rftransparent.ca";
       const connection = document.getElementById("connection");
       const retry = document.getElementById("retry");
+      const title = document.getElementById("title");
+      const message = document.getElementById("message");
+      const diagnostics = document.getElementById("diagnostics");
 
-      function updateConnection() {
-        connection.textContent = navigator.onLine
-          ? "Connection available. Try again."
-          : "No connection";
+      function updateConnection(serviceStatus) {
+        if (!navigator.onLine || serviceStatus?.state === "offline") {
+          title.textContent = "You're offline";
+          message.textContent = "Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.";
+          connection.textContent = "No connection";
+        } else if (serviceStatus?.state === "maintenance") {
+          title.textContent = "Maintenance in progress";
+          message.textContent = serviceStatus.message || "RF Tools is temporarily unavailable while maintenance is completed. Your work has not been submitted.";
+          connection.textContent = "Internet available · planned maintenance";
+        } else {
+          title.textContent = "RF Tools is unavailable";
+          message.textContent = "The service could not load. Your work has not been submitted. Try again or contact support if the problem continues.";
+          connection.textContent = "Internet available · service unavailable";
+        }
+      }
+
+      async function refreshStatus() {
+        if (!navigator.onLine) {
+          updateConnection();
+          return;
+        }
+        try {
+          const serviceStatus = await window.Capacitor?.Plugins?.RFNativeSupport?.getServiceStatus?.();
+          updateConnection(serviceStatus);
+        } catch {
+          updateConnection();
+        }
       }
 
       function retryLoad() {
@@ -61,10 +88,25 @@
       }
 
       retry.addEventListener("click", retryLoad);
-      window.addEventListener("online", updateConnection);
-      window.addEventListener("offline", updateConnection);
-      updateConnection();
+      window.addEventListener("online", refreshStatus);
+      window.addEventListener("offline", () => updateConnection());
+      void refreshStatus();
 
+      window.Capacitor?.Plugins?.RFNativeSupport?.recordWebViewLoadFailure?.().catch(() => {});
+
+      window.Capacitor?.Plugins?.App?.getInfo?.().then((info) => {
+        diagnostics.textContent = `Version ${info.version ?? "unknown"} · build ${info.build ?? "unknown"}`;
+      }).catch(() => {
+        diagnostics.textContent = "App version unavailable";
+      });
+
+      // This bundled page contains no employee or customer content, so it is
+      // safe to replace the app-switcher privacy cover after the recovery UI
+      // has rendered. Production never removes that cover on a blind timer.
+      document.documentElement.dataset.rfAppReady = "true";
+      requestAnimationFrame(() => {
+        window.Capacitor?.Plugins?.RFNativeSupport?.hidePrivacyShield?.().catch(() => {});
+      });
       window.Capacitor?.Plugins?.SplashScreen?.hide?.();
     </script>
   </body>

@@ -8,14 +8,22 @@ import { SignJWT, importPKCS8 } from "jose";
 // fine; the JWT is cached for ~50 minutes (Apple allows 20–60).
 //
 // Env: APNS_TEAM_ID, APNS_KEY_ID, APNS_PRIVATE_KEY (the .p8 contents,
-// newlines as \n allowed), APNS_TOPIC (bundle id), APNS_USE_SANDBOX=1 for
-// Xcode dev builds. TestFlight and App Store builds use production APNs.
+// newlines as \n allowed), APNS_TOPIC (bundle id). Each registered token stores
+// whether it belongs to the sandbox or production gateway.
+
+export type ApnsEnvironment = "sandbox" | "production";
+
+export interface RegisteredPushToken {
+  token: string;
+  apns_environment: ApnsEnvironment;
+}
 
 export interface PushMessage {
   title: string;
   body: string;
   // Deep-link hint the app can read from the notification tap.
   url?: string;
+  category?: "RF_TASK" | "RF_OVERDUE" | "RF_CLOCK" | "RF_FOLLOW_UP" | "RF_CALLBACK";
 }
 
 export interface PushResult {
@@ -58,11 +66,29 @@ export function deadTokens(results: PushResult[]): string[] {
     .map((r) => r.token);
 }
 
-export async function sendPush(tokens: string[], message: PushMessage): Promise<PushResult[]> {
+export function groupRegisteredPushTokens(registrations: RegisteredPushToken[]): {
+  sandbox: string[];
+  production: string[];
+} {
+  return {
+    sandbox: registrations
+      .filter((registration) => registration.apns_environment === "sandbox")
+      .map((registration) => registration.token),
+    production: registrations
+      .filter((registration) => registration.apns_environment === "production")
+      .map((registration) => registration.token),
+  };
+}
+
+export async function sendPush(
+  tokens: string[],
+  message: PushMessage,
+  environment: ApnsEnvironment,
+): Promise<PushResult[]> {
   if (tokens.length === 0) return [];
   const jwt = await providerJwt();
   const topic = process.env.APNS_TOPIC ?? "ca.rftransparent.tools";
-  const host = process.env.APNS_USE_SANDBOX === "1"
+  const host = environment === "sandbox"
     ? "https://api.sandbox.push.apple.com"
     : "https://api.push.apple.com";
 
@@ -70,11 +96,15 @@ export async function sendPush(tokens: string[], message: PushMessage): Promise<
     aps: {
       alert: { title: message.title, body: message.body },
       sound: "default",
+      ...(message.category ? { category: message.category, "thread-id": message.category } : {}),
     },
-    ...(message.url ? { url: message.url } : {}),
+    ...(message.url ? { destination: message.url } : {}),
   });
 
   const client = http2.connect(host);
+  client.on("error", () => {
+    // Each request resolves its own failure through its request listeners.
+  });
   try {
     return await Promise.all(
       tokens.map(
@@ -91,6 +121,12 @@ export async function sendPush(tokens: string[], message: PushMessage): Promise<
             });
             let status = 0;
             let body = "";
+            let settled = false;
+            const finish = (result: PushResult) => {
+              if (settled) return;
+              settled = true;
+              resolve(result);
+            };
             req.on("response", (headers) => {
               status = Number(headers[":status"] ?? 0);
             });
@@ -104,10 +140,15 @@ export async function sendPush(tokens: string[], message: PushMessage): Promise<
               } catch {
                 // Non-JSON error body; the status code is enough.
               }
-              resolve({ token, ok: status === 200, status, reason });
+              finish({ token, ok: status === 200, status, reason });
             });
-            req.on("error", () => resolve({ token, ok: false, status: 0, reason: "network" }));
-            req.setTimeout(10_000, () => req.close());
+            req.on("error", () => finish({ token, ok: false, status: 0, reason: "network" }));
+            req.on("aborted", () => finish({ token, ok: false, status: 0, reason: "aborted" }));
+            req.on("close", () => finish({ token, ok: false, status: 0, reason: "closed" }));
+            req.setTimeout(10_000, () => {
+              finish({ token, ok: false, status: 0, reason: "timeout" });
+              req.close();
+            });
             req.end(payload);
           }),
       ),
@@ -115,4 +156,16 @@ export async function sendPush(tokens: string[], message: PushMessage): Promise<
   } finally {
     client.close();
   }
+}
+
+export async function sendRegisteredPush(
+  registrations: RegisteredPushToken[],
+  message: PushMessage,
+): Promise<PushResult[]> {
+  const { sandbox, production } = groupRegisteredPushTokens(registrations);
+  const batches = await Promise.all([
+    sendPush(sandbox, message, "sandbox"),
+    sendPush(production, message, "production"),
+  ]);
+  return batches.flat();
 }

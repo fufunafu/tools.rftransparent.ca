@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const externalBaseUrl = process.env.E2E_BASE_URL;
-const baseURL = externalBaseUrl ?? "http://127.0.0.1:3000";
+const localPort = process.env.E2E_PORT ?? "3107";
+if (!/^\d{2,5}$/.test(localPort) || Number(localPort) > 65_535) {
+  throw new Error("E2E_PORT must be a valid TCP port number.");
+}
+const baseURL = externalBaseUrl ?? `http://127.0.0.1:${localPort}`;
 const storageState = process.env.E2E_STORAGE_STATE || undefined;
 const mobileStorageState = process.env.E2E_MOBILE_STORAGE_STATE || storageState;
 
@@ -21,9 +25,9 @@ export default defineConfig({
   webServer: externalBaseUrl
     ? undefined
     : {
-        command: "npm run start -- --hostname 127.0.0.1",
+        command: `npm run start -- --hostname 127.0.0.1 --port ${localPort}`,
         url: baseURL,
-        reuseExistingServer: !process.env.CI,
+        reuseExistingServer: process.env.E2E_REUSE_SERVER === "1",
         timeout: 120_000,
       },
   projects: [
@@ -51,6 +55,24 @@ export default defineConfig({
       name: "webkit-ipad",
       testMatch: /mobile\.spec\.ts/,
       use: { ...devices["iPad (gen 11)"], storageState: mobileStorageState },
+    },
+    {
+      name: "webkit-iphone-landscape",
+      testMatch: /mobile\.spec\.ts/,
+      use: {
+        ...devices["iPhone 15"],
+        viewport: { width: 852, height: 393 },
+        storageState: mobileStorageState,
+      },
+    },
+    {
+      name: "webkit-ipad-landscape",
+      testMatch: /mobile\.spec\.ts/,
+      use: {
+        ...devices["iPad (gen 11)"],
+        viewport: { width: 1194, height: 834 },
+        storageState: mobileStorageState,
+      },
     },
   ],
 });

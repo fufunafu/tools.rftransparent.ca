@@ -33,9 +33,15 @@ describe("shiftNeedsReminder", () => {
 });
 
 describe("clockReminderText", () => {
-  it("reports whole elapsed hours", () => {
+  it("keeps shift details out of lock-screen copy", () => {
     const clockIn = new Date(NOW.getTime() - 10.7 * 3_600_000).toISOString();
-    expect(clockReminderText(clockIn, NOW).body).toContain("10 hours");
+    const text = clockReminderText(clockIn, NOW);
+    expect(text).toEqual({
+      title: "Check your clock status",
+      body: "A shift may still be running. Open RF Tools to review it.",
+    });
+    expect(JSON.stringify(text)).not.toContain(clockIn);
+    expect(JSON.stringify(text)).not.toMatch(/10\s*hours/i);
   });
 });
 
