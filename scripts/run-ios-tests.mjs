@@ -218,7 +218,11 @@ for (const requestedScope of requestedScopes) {
         // without letting xcodebuild exit. Bound every operation so CI can
         // retry the shard as a fresh Xcode process instead of hanging forever.
         timeout: operationTimeoutMs,
-        killSignal: "SIGTERM",
+        // xcodebuild can ignore SIGTERM while CoreSimulator is wedged, which
+        // defeats the operation timeout and can consume the entire CI job.
+        // SIGKILL makes the documented bound real; the UI shard is then
+        // retried as a fresh xcodebuild operation below.
+        killSignal: "SIGKILL",
       });
       status = result.status ?? 1;
       if (status === 0) break;

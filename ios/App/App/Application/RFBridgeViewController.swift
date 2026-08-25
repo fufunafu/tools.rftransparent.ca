@@ -3,6 +3,7 @@ import UIKit
 
 final class RFBridgeViewController: CAPBridgeViewController {
     private var loadFailureFallback: DispatchWorkItem?
+    private var failedRemoteURL: URL?
     #if DEBUG
     private var uiTestScenarioPresenter: RFUITestScenarioPresenter?
     #endif
@@ -67,6 +68,11 @@ final class RFBridgeViewController: CAPBridgeViewController {
                     RFMetricDiagnostics.shared.recordLifecycleError(.missingLoadFailurePage)
                     return
                 }
+                if let currentURL = webView.url,
+                   let scheme = currentURL.scheme?.lowercased(),
+                   scheme == "http" || scheme == "https" {
+                    self.failedRemoteURL = currentURL
+                }
                 webView.load(URLRequest(url: errorURL))
             }
         }
@@ -79,5 +85,47 @@ final class RFBridgeViewController: CAPBridgeViewController {
         let testDelay: TimeInterval? = nil
         #endif
         DispatchQueue.main.asyncAfter(deadline: .now() + (testDelay ?? 10), execute: item)
+    }
+
+    func retryRemoteLoad(completion: @escaping (Bool) -> Void) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let webView = self.webView else {
+                completion(false)
+                return
+            }
+
+            #if DEBUG
+            let testServerURL = ProcessInfo.processInfo.environment["RF_UI_TEST_SERVER_URL"]
+                .flatMap(URL.init(string:))
+            #else
+            let testServerURL: URL? = nil
+            #endif
+            guard let target = self.failedRemoteURL
+                ?? testServerURL
+                ?? self.bridge?.config.serverURL
+                ?? URL(string: "https://tools.rftransparent.ca") else {
+                completion(false)
+                return
+            }
+
+            // The bundled recovery document is marked ready so the privacy
+            // shield can be removed. Clear that marker before retrying, then
+            // arm a fresh fallback. Otherwise a failed provisional navigation
+            // can leave the old ready document visible long enough for the
+            // fallback check to exit early.
+            webView.evaluateJavaScript(
+                "document.documentElement && delete document.documentElement.dataset.rfAppReady"
+            ) { [weak self, weak webView] _, _ in
+                guard let self, let webView else {
+                    completion(false)
+                    return
+                }
+                self.scheduleLoadFailureFallback()
+                var request = URLRequest(url: target)
+                request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+                webView.load(request)
+                completion(true)
+            }
+        }
     }
 }

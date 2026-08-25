@@ -7,6 +7,7 @@ interface RFNativeSupportPlugin {
   getLocationAuthorizationStatus(): Promise<{ status: NativePermissionState }>;
   hidePrivacyShield(): Promise<void>;
   recordWebViewLoadFailure(): Promise<void>;
+  retryRemoteLoad(): Promise<void>;
   openSettings(): Promise<void>;
 }
 

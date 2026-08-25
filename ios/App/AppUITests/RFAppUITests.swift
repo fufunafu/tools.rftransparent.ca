@@ -21,7 +21,7 @@ final class RFAppUITests: XCTestCase {
         XCUIDevice.shared.press(.home)
         app.activate()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        XCTAssertTrue(app.webViews.firstMatch.exists)
+        XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 5))
     }
 
     func testReturningToForegroundRequestsFreshContent() {

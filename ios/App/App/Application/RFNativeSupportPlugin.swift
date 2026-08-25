@@ -12,6 +12,7 @@ final class RFNativeSupportPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getLocationAuthorizationStatus", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "recordWebViewLoadFailure", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "hidePrivacyShield", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "retryRemoteLoad", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "openSettings", returnType: CAPPluginReturnPromise)
     ]
 
@@ -75,6 +76,20 @@ final class RFNativeSupportPlugin: CAPPlugin, CAPBridgedPlugin {
             }
             sceneDelegate.webContentIsReadyForPrivacyShieldRemoval()
             call.resolve()
+        }
+    }
+
+    @objc func retryRemoteLoad(_ call: CAPPluginCall) {
+        guard let bridgeViewController = bridge?.viewController as? RFBridgeViewController else {
+            call.reject("The RF Tools recovery controller is unavailable.")
+            return
+        }
+        bridgeViewController.retryRemoteLoad { started in
+            if started {
+                call.resolve()
+            } else {
+                call.reject("RF Tools could not retry the remote service.")
+            }
         }
     }
 

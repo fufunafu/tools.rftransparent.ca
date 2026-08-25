@@ -75,19 +75,30 @@
         }
       }
 
-      function retryLoad() {
-        if (document.referrer.startsWith("http://") || document.referrer.startsWith("https://")) {
-          window.location.replace(document.referrer);
-          return;
+      async function retryLoad() {
+        retry.disabled = true;
+        try {
+          const nativeSupport = window.Capacitor?.Plugins?.RFNativeSupport;
+          if (nativeSupport?.retryRemoteLoad) {
+            await nativeSupport.retryRemoteLoad();
+            return;
+          }
+          if (document.referrer.startsWith("http://") || document.referrer.startsWith("https://")) {
+            window.location.replace(document.referrer);
+            return;
+          }
+          if (window.history.length > 1) {
+            window.history.back();
+            return;
+          }
+          window.location.replace(productionUrl);
+        } catch {
+          await refreshStatus();
+          retry.disabled = false;
         }
-        if (window.history.length > 1) {
-          window.history.back();
-          return;
-        }
-        window.location.replace(productionUrl);
       }
 
-      retry.addEventListener("click", retryLoad);
+      retry.addEventListener("click", () => void retryLoad());
       window.addEventListener("online", refreshStatus);
       window.addEventListener("offline", () => updateConnection());
       void refreshStatus();
