@@ -171,12 +171,36 @@ export function extractContactFields(payload: Record<string, unknown>): {
     "textarea-2",
   ]);
 
+  const resolvedEmail = cleanStr(mapped.email) ?? labeled.email ?? email;
+  const resolvedPhone = cleanStr(mapped.phone) ?? labeled.phone ?? phone;
+  // Last resort for forms whose keys and labels we do not recognise (e.g. a
+  // French form): find anything that looks like an email or phone number.
+  const scanned = resolvedEmail && resolvedPhone ? null : scanContactValues(fields);
+
   return {
     name: cleanStr(mapped.name) ?? labeled.name ?? heuristicName,
-    email: cleanStr(mapped.email) ?? labeled.email ?? email,
-    phone: cleanStr(mapped.phone) ?? labeled.phone ?? phone,
+    email: resolvedEmail ?? scanned?.email ?? null,
+    phone: resolvedPhone ?? scanned?.phone ?? null,
     message: cleanStr(mapped.message) ?? labeled.message ?? message,
   };
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+const PHONE_PATTERN = /^\+?[\d\s().-]{10,20}$/;
+
+function scanContactValues(
+  fields: Record<string, unknown>,
+): { email: string | null; phone: string | null } {
+  let email: string | null = null;
+  let phone: string | null = null;
+  for (const [key, raw] of Object.entries(fields)) {
+    if (key.startsWith("_")) continue;
+    const value = cleanStr(Array.isArray(raw) ? raw[0] : raw);
+    if (!value) continue;
+    if (!email && EMAIL_PATTERN.test(value)) email = value;
+    else if (!phone && PHONE_PATTERN.test(value) && value.replace(/\D/g, "").length >= 10) phone = value;
+  }
+  return { email, phone };
 }
 
 /**

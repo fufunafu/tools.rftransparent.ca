@@ -141,6 +141,16 @@ export async function POST(req: NextRequest) {
   }
 
   if ("skipped" in result) {
+    // Keys only (never values) so a misconfigured form can be diagnosed
+    // from the logs without exposing customer data.
+    const fields = isRecord(payload.fields) ? payload.fields : payload;
+    console.warn("[lead-ingestion] submission skipped", {
+      reason: result.skipped,
+      shop: verification.shop,
+      store: storeId,
+      fieldKeys: Object.keys(fields).slice(0, 40),
+      mappedKeys: isRecord(payload.mapped) ? Object.keys(payload.mapped) : [],
+    });
     await removePendingAttachments(pendingAttachments);
     return jsonResponse(result);
   }

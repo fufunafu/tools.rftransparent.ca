@@ -553,3 +553,20 @@ describe("findOrInsertLead", () => {
     expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
   });
 });
+
+describe("extractContactFields fallback scan", () => {
+  it("finds an email and phone under unrecognised French field keys", async () => {
+    const { extractContactFields } = await import("@/lib/customer-service/leads");
+    const result = extractContactFields({
+      fields: {
+        "text-7": "Sylvie",
+        "text-8": "Mayer",
+        "courriel-1": "sylvie@example.com",
+        "tel-9": "+1 819 629 7443",
+        "select-1": "Noir mat",
+      },
+    });
+    expect(result.email).toBe("sylvie@example.com");
+    expect(result.phone).toBe("+1 819 629 7443");
+  });
+});
