@@ -117,9 +117,13 @@ from its runner temporary directory.
   planned outage. The native app shows a blocking maintenance state and never
   represents work as submitted.
 
-Generate a signed archive with `npm run ios:archive`. After App Store Connect
-credentials and signing are available, `npm run ios:testflight` archives and
-uploads using `ios/App/ExportOptions.plist`.
+Generate a signed archive with `npm run ios:archive`. Archive staging defaults
+to the operating system temporary directory so Finder or FileProvider metadata
+cannot invalidate code signing when the repository is stored in iCloud Drive.
+Set `IOS_ARCHIVE_ROOT` to a non-FileProvider artifact directory when a stable
+custom location is required. After App Store Connect credentials and signing
+are available, `npm run ios:testflight` archives and uploads using
+`ios/App/ExportOptions.plist`.
 
 A clock-status widget or Live Activity is intentionally deferred. The first
 internal TestFlight group must validate server-confirmed clock-in, clock-out,
