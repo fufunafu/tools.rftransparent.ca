@@ -182,8 +182,14 @@ function needsPhone(lead: Lead): boolean {
     && !isCallablePhone(lead.phone);
 }
 
+// Historical imports were worked outside the tool; still show whatever the
+// phone and quote syncs recovered for them instead of "Not required".
+function isHistoricalImport(lead: Lead): boolean {
+  return Boolean(lead.raw_payload?.historical_import);
+}
+
 function LeadResponseSummary({ lead }: { lead: Lead }) {
-  if (lead.outcome === "not_applicable") {
+  if (lead.outcome === "not_applicable" && !isHistoricalImport(lead)) {
     return <span className="text-[11px] text-sand-400">Not required</span>;
   }
 
@@ -1798,7 +1804,7 @@ export default function LeadsDashboard({
                       <LeadResponseSummary lead={lead} />
                     </td>
                     <td className="px-4 py-3">
-                      {lead.outcome === "not_applicable" ? (
+                      {lead.outcome === "not_applicable" && !isHistoricalImport(lead) ? (
                         <span className="inline-block rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-600">
                           Not required
                         </span>

@@ -153,6 +153,28 @@ describe("matchDraftOrdersToLeads", () => {
     expect(matches.map((match) => match.leadId)).toEqual(["current"]);
   });
 
+  it("links a historical import when no live lead exists and re-opens it", () => {
+    const matches = matchDraftOrdersToLeads(
+      [
+        lead("historical", {
+          outcome: "not_applicable",
+          not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        }),
+      ],
+      [draft("D100", { shopify_status: "COMPLETED" })],
+    );
+
+    expect(matches.map((match) => [match.leadId, match.outcome, match.reopenHistorical]))
+      .toEqual([["historical", "won", true]]);
+  });
+
+  it("still skips leads closed as not applicable for other reasons", () => {
+    expect(matchDraftOrdersToLeads(
+      [lead("spam", { outcome: "not_applicable", not_applicable_reason: "Spam" })],
+      [draft("D100")],
+    )).toEqual([]);
+  });
+
   it("marks a completed draft as won", () => {
     const [match] = matchDraftOrdersToLeads(
       [lead("lead-1")],

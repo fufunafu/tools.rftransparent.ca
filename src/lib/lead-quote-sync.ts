@@ -36,6 +36,9 @@ export interface LeadQuoteMatch {
   quoteSentAt: string;
   outcome: "quoted" | "won";
   responsibleStaff: string | null;
+  // A historical import that this quote proves was actually worked; the
+  // sync re-opens it as a real quoted/won lead.
+  reopenHistorical?: boolean;
 }
 
 export interface LeadStaffMatch {
@@ -101,22 +104,34 @@ export function matchDraftOrdersToLeads(
   leads: LeadForQuoteSync[],
   drafts: DraftForLeadQuoteSync[],
 ): LeadQuoteMatch[] {
+  // Live leads are matched first. Historical imports (closed as
+  // not_applicable because their workflow was never tracked) are only used
+  // when no live lead exists for the contact, so a repeat customer's fresh
+  // submission always wins over their old record.
   const leadsByEmail = new Map<string, IndexedLead[]>();
   const leadsByPhone = new Map<string, IndexedLead[]>();
+  const historicalByEmail = new Map<string, IndexedLead[]>();
+  const historicalByPhone = new Map<string, IndexedLead[]>();
 
   for (const lead of leads) {
-    if (isHistoricalLead(lead)) continue;
     const submittedTime = new Date(lead.submitted_at).getTime();
     if (Number.isNaN(submittedTime)) continue;
 
     const indexed = { ...lead, submittedTime };
     const email = normalizedEmail(lead.email);
     const phone = normalizedPhone(lead.phone);
-    if (email) leadsByEmail.set(email, [...(leadsByEmail.get(email) ?? []), indexed]);
-    if (phone) leadsByPhone.set(phone, [...(leadsByPhone.get(phone) ?? []), indexed]);
+    const byEmail = isHistoricalLead(lead) ? historicalByEmail : leadsByEmail;
+    const byPhone = isHistoricalLead(lead) ? historicalByPhone : leadsByPhone;
+    if (email) byEmail.set(email, [...(byEmail.get(email) ?? []), indexed]);
+    if (phone) byPhone.set(phone, [...(byPhone.get(phone) ?? []), indexed]);
   }
 
-  for (const candidates of [...leadsByEmail.values(), ...leadsByPhone.values()]) {
+  for (const candidates of [
+    ...leadsByEmail.values(),
+    ...leadsByPhone.values(),
+    ...historicalByEmail.values(),
+    ...historicalByPhone.values(),
+  ]) {
     candidates.sort((a, b) => a.submittedTime - b.submittedTime);
   }
 
@@ -140,14 +155,17 @@ export function matchDraftOrdersToLeads(
     const phone = normalizedPhone(draft.customer_phone);
     const lead =
       latestLeadBeforeDraft(email ? leadsByEmail.get(email) : undefined, draftTime) ??
-      latestLeadBeforeDraft(phone ? leadsByPhone.get(phone) : undefined, draftTime);
+      latestLeadBeforeDraft(phone ? leadsByPhone.get(phone) : undefined, draftTime) ??
+      latestLeadBeforeDraft(email ? historicalByEmail.get(email) : undefined, draftTime) ??
+      latestLeadBeforeDraft(phone ? historicalByPhone.get(phone) : undefined, draftTime);
     if (!lead) continue;
+    const historical = isHistoricalLead(lead);
     if (
       matchedLeadIds.has(lead.id) ||
       lead.quote_number ||
       lead.outcome === "won" ||
       lead.outcome === "lost" ||
-      lead.outcome === "not_applicable"
+      (lead.outcome === "not_applicable" && !historical)
     ) continue;
 
     matchedLeadIds.add(lead.id);
@@ -160,6 +178,7 @@ export function matchDraftOrdersToLeads(
       quoteSentAt,
       outcome: draft.shopify_status === "COMPLETED" ? "won" : "quoted",
       responsibleStaff: responsibleStaff(draft),
+      ...(historical ? { reopenHistorical: true } : {}),
     });
   }
 
@@ -252,18 +271,21 @@ export async function syncLeadQuotesFromFollowups(
   for (let offset = 0; offset < matches.length; offset += WRITE_CONCURRENCY) {
     const batch = matches.slice(offset, offset + WRITE_CONCURRENCY);
     const results = await Promise.all(batch.map(async (match) => {
-      const { data, error } = await supabase
+      let query = supabase
         .from("leads")
         .update({
           quote_number: match.quoteNumber,
           quote_amount: match.quoteAmount,
           quote_sent_at: match.quoteSentAt,
           outcome: match.outcome,
+          ...(match.reopenHistorical ? { not_applicable_reason: null } : {}),
         })
         .eq("id", match.leadId)
-        .is("quote_number", null)
-        .not("outcome", "in", "(won,lost,not_applicable)")
-        .select("id");
+        .is("quote_number", null);
+      query = match.reopenHistorical
+        ? query.eq("not_applicable_reason", HISTORICAL_UNKNOWN_REASON)
+        : query.not("outcome", "in", "(won,lost,not_applicable)");
+      const { data, error } = await query.select("id");
       return { match, updated: data?.length ?? 0, error };
     }));
 
