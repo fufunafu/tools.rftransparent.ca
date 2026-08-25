@@ -12,6 +12,27 @@ export const LEAD_STORE_OPTIONS: { id: LeadStoreId; label: string }[] = [
   { id: "bc_transparent", label: "BC Transparent" },
 ];
 
+export type LeadStoreSlug = "rf" | "bc";
+
+const SLUG_TO_STORE: Record<LeadStoreSlug, LeadStoreId> = {
+  rf: "rf_transparent",
+  bc: "bc_transparent",
+};
+
+export function leadStoreFromSlug(slug: string | null | undefined): LeadStoreId | null {
+  return slug === "rf" || slug === "bc" ? SLUG_TO_STORE[slug] : null;
+}
+
+export function leadStoreSlug(storeId: LeadStoreId): LeadStoreSlug {
+  return storeId === "bc_transparent" ? "bc" : "rf";
+}
+
+/** URL for a store's leads page, e.g. /customer-service/leads/bc/analysis. */
+export function leadsPath(storeId: LeadStoreId, section?: "analysis"): string {
+  const base = `/customer-service/leads/${leadStoreSlug(storeId)}`;
+  return section ? `${base}/${section}` : base;
+}
+
 export function isLeadStoreId(value: unknown): value is LeadStoreId {
   return value === "rf_transparent" || value === "bc_transparent";
 }

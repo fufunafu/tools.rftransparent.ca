@@ -47,9 +47,10 @@ import {
   medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
 import { redirectOnUnauthorized } from "@/lib/client-auth";
+import { useRouter } from "next/navigation";
 import {
   LEAD_STORE_OPTIONS,
-  isLeadStoreId,
+  leadsPath,
   type LeadStoreId,
 } from "@/lib/customer-service/lead-store";
 
@@ -284,29 +285,19 @@ function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null, store: 
 
 const STORE_STORAGE_KEY = "cs_store";
 
-// Shared with the phone page so switching store on one page carries over.
-function useLeadStore(defaultStore: LeadStoreId, lockedByUrl: boolean) {
-  const [store, setStoreState] = useState<LeadStoreId>(defaultStore);
-  useEffect(() => {
-    if (lockedByUrl) return;
-    try {
-      const saved = window.localStorage.getItem(STORE_STORAGE_KEY);
-      // Restoring a saved preference after hydration, same as the phone page.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (isLeadStoreId(saved)) setStoreState(saved);
-    } catch {
-      // Storage may be unavailable; keep the server default.
-    }
-  }, [lockedByUrl]);
-  const setStore = (next: LeadStoreId) => {
-    setStoreState(next);
+// The store lives in the URL (/customer-service/leads/rf or /bc). Switching
+// navigates, and the choice is remembered for the phone page and for the
+// bare /customer-service/leads redirect.
+function useStoreNavigation(section?: "analysis") {
+  const router = useRouter();
+  return (next: LeadStoreId) => {
     try {
       window.localStorage.setItem(STORE_STORAGE_KEY, next);
     } catch {
-      // Ignore storage failures; the selection still applies to this page.
+      // Ignore storage failures; navigation still applies the selection.
     }
+    router.push(leadsPath(next, section));
   };
-  return [store, setStore] as const;
 }
 
 function StoreSelect({
@@ -1091,16 +1082,14 @@ export default function LeadsDashboard({
   initialLeads,
   initialNow,
   initialBounds,
-  defaultStore,
-  storeFromUrl = false,
+  store,
 }: {
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
-  defaultStore: LeadStoreId;
-  storeFromUrl?: boolean;
+  store: LeadStoreId;
 }) {
-  const [store, setStore] = useLeadStore(defaultStore, storeFromUrl);
+  const setStore = useStoreNavigation();
   // Only RF runs Meta lead ads; BC is website-only.
   const hasMeta = store === "rf_transparent";
   const [filter, setFilter] = useState<string>("all");
@@ -1140,7 +1129,7 @@ export default function LeadsDashboard({
     [trendRange, now, customFrom, customTo],
   );
   const leadsUrl = leadListUrl(requestedBounds, store);
-  const initialLeadsUrl = leadListUrl(initialBounds, defaultStore);
+  const initialLeadsUrl = leadListUrl(initialBounds, store);
   const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
     leadsUrl,
     fetcher,
@@ -1459,7 +1448,7 @@ export default function LeadsDashboard({
             </div>
           )}
           <Link
-            href={`/customer-service/leads/analysis?store=${store}`}
+            href={leadsPath(store, "analysis")}
             className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
           >
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-4 w-4" aria-hidden="true">

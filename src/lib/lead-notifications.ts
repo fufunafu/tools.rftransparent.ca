@@ -1,5 +1,5 @@
 import { getResend } from "@/lib/resend";
-import { type LeadStoreId, leadStoreLabel } from "@/lib/customer-service/lead-store";
+import { type LeadStoreId, leadStoreLabel, leadsPath } from "@/lib/customer-service/lead-store";
 
 const FROM = "RF Transparent <info@glass-railing.com>";
 export const LEAD_NOTIFICATION_RECIPIENT = "info@glass-railing.com";
@@ -8,7 +8,7 @@ const LEAD_NOTIFICATION_RECIPIENTS: Record<LeadStoreId, string> = {
   rf_transparent: LEAD_NOTIFICATION_RECIPIENT,
   bc_transparent: BC_LEAD_NOTIFICATION_RECIPIENT,
 };
-const LEADS_DASHBOARD_URL = "https://tools.rftransparent.ca/customer-service/leads";
+const TOOLS_ORIGIN = "https://tools.rftransparent.ca";
 
 export interface NewLeadNotification {
   leadId: string;
@@ -60,7 +60,7 @@ export async function sendNewLeadNotification(
 }
 
 function dashboardUrl(lead: NewLeadNotification): string {
-  return `${LEADS_DASHBOARD_URL}?store=${lead.storeId ?? "rf_transparent"}`;
+  return `${TOOLS_ORIGIN}${leadsPath(lead.storeId ?? "rf_transparent")}`;
 }
 
 function buildText(lead: NewLeadNotification, sourceLabel: string): string {
