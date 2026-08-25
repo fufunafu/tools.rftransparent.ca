@@ -38,8 +38,9 @@ run("/usr/bin/xcodebuild", [
 ]);
 
 if (process.env.IOS_EXPORT_ARCHIVE === "1" || process.env.IOS_UPLOAD_TESTFLIGHT === "1") {
+  const localExport = process.env.IOS_UPLOAD_TESTFLIGHT !== "1";
   let exportOptions = uploadExportOptions;
-  if (process.env.IOS_UPLOAD_TESTFLIGHT !== "1") {
+  if (localExport) {
     // Keep a local export local. The committed App Store Connect options use
     // destination=upload for the explicit TestFlight command, so derive a
     // temporary export-only plist instead of risking an unintended upload.
@@ -56,6 +57,13 @@ if (process.env.IOS_EXPORT_ARCHIVE === "1" || process.env.IOS_UPLOAD_TESTFLIGHT 
     "-exportOptionsPlist", exportOptions,
     "-allowProvisioningUpdates",
   ]);
+  if (localExport) {
+    run(process.execPath, [
+      "scripts/validate-ios-export.mjs",
+      exportPath,
+      archivePath,
+    ]);
+  }
 }
 
 console.log(`iOS archive created at ${archivePath}`);

@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 
 const projectRoot = resolve(import.meta.dirname, "..");
@@ -70,6 +70,7 @@ const privacyManifest = parsePlist(privacyManifestPath);
 const exportOptions = parsePlist(resolve(projectRoot, "ios/App/ExportOptions.plist"));
 const packageJson = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8"));
 const archiveScript = readFileSync(resolve(projectRoot, "scripts/archive-ios.mjs"), "utf8");
+const exportValidatorPath = resolve(projectRoot, "scripts/validate-ios-export.mjs");
 const metadata = readFileSync(resolve(projectRoot, "app-store-assets/submission-metadata.md"), "utf8");
 const marketingVersion = projectSpec.match(/MARKETING_VERSION:\s*["']?([0-9]+(?:\.[0-9]+){1,2})["']?/)?.[1] ?? null;
 const nativeBuild = projectSpec.match(/CURRENT_PROJECT_VERSION:\s*["']?(\d+)["']?/)?.[1] ?? null;
@@ -99,9 +100,11 @@ if (packageJson.scripts?.["ios:testflight"] !== "IOS_UPLOAD_TESTFLIGHT=1 node sc
 }
 if (
   !archiveScript.includes('process.env.IOS_UPLOAD_TESTFLIGHT !== "1"') ||
-  !archiveScript.includes('"-replace", "destination", "-string", "export"')
+  !archiveScript.includes('"-replace", "destination", "-string", "export"') ||
+  !archiveScript.includes('"scripts/validate-ios-export.mjs"') ||
+  !existsSync(exportValidatorPath)
 ) {
-  fail("the archive script must derive export-only options for local IPA exports.");
+  fail("the archive script must derive and validate local-only IPA exports.");
 }
 
 const sdkVersion = execFileSync("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"], {

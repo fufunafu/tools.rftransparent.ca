@@ -59,6 +59,7 @@ followup-revert-backup-*.pdf
 followup-revert-backup-*.xlsx
 /scripts/*
 !/scripts/validate-ios-release.mjs
+!/scripts/validate-ios-export.mjs
 !/scripts/validate-mobile-e2e-env.mjs
 !/scripts/validate-native-shell.mjs
 !/scripts/capture-app-store-screenshots.mjs
