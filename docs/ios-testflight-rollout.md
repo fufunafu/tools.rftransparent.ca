@@ -26,6 +26,9 @@ expanding access.
 - [ ] Confirm the embedded `ios/App/App/capacitor.config.json` contains
   `https://tools.rftransparent.ca`, does not contain a local host, and does not
   enable cleartext traffic.
+- [ ] Run `npm run ios:export` and inspect the exported IPA before uploading.
+  Confirm it has the production APNs entitlement, Associated Domains,
+  `beta-reports-active`, and `get-task-allow` set to false.
 - [ ] Start the built app locally with `ENABLE_TEST_LOGIN=1`, run
   `npm run ios:screenshots`, and review the generated iPhone 6.9-inch and iPad
   13-inch App Store screenshots before upload.

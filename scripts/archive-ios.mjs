@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { copyFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -16,6 +16,7 @@ const archiveBase = process.env.IOS_ARCHIVE_ROOT
 const archiveRoot = resolve(archiveBase, archiveRun);
 const archivePath = resolve(archiveRoot, "RFTools.xcarchive");
 const exportPath = resolve(archiveRoot, "export");
+const uploadExportOptions = resolve(root, "ios/App/ExportOptions.plist");
 
 mkdirSync(archiveRoot, { recursive: true });
 
@@ -37,13 +38,27 @@ run("/usr/bin/xcodebuild", [
 ]);
 
 if (process.env.IOS_EXPORT_ARCHIVE === "1" || process.env.IOS_UPLOAD_TESTFLIGHT === "1") {
+  let exportOptions = uploadExportOptions;
+  if (process.env.IOS_UPLOAD_TESTFLIGHT !== "1") {
+    // Keep a local export local. The committed App Store Connect options use
+    // destination=upload for the explicit TestFlight command, so derive a
+    // temporary export-only plist instead of risking an unintended upload.
+    exportOptions = resolve(archiveRoot, "ExportOptions.local.plist");
+    copyFileSync(uploadExportOptions, exportOptions);
+    run("/usr/bin/plutil", [
+      "-replace", "destination", "-string", "export", exportOptions,
+    ]);
+  }
   run("/usr/bin/xcodebuild", [
     "-exportArchive",
     "-archivePath", archivePath,
     "-exportPath", exportPath,
-    "-exportOptionsPlist", "ios/App/ExportOptions.plist",
+    "-exportOptionsPlist", exportOptions,
     "-allowProvisioningUpdates",
   ]);
 }
 
 console.log(`iOS archive created at ${archivePath}`);
+if (process.env.IOS_EXPORT_ARCHIVE === "1" && process.env.IOS_UPLOAD_TESTFLIGHT !== "1") {
+  console.log(`iOS App Store export created at ${exportPath}`);
+}

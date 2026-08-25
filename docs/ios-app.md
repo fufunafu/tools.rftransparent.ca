@@ -121,9 +121,11 @@ Generate a signed archive with `npm run ios:archive`. Archive staging defaults
 to the operating system temporary directory so Finder or FileProvider metadata
 cannot invalidate code signing when the repository is stored in iCloud Drive.
 Set `IOS_ARCHIVE_ROOT` to a non-FileProvider artifact directory when a stable
-custom location is required. After App Store Connect credentials and signing
-are available, `npm run ios:testflight` archives and uploads using
-`ios/App/ExportOptions.plist`.
+custom location is required. Run `npm run ios:export` to create a locally
+exported App Store IPA without uploading it. After App Store Connect credentials
+and signing are available, `npm run ios:testflight` archives and uploads using
+`ios/App/ExportOptions.plist`. Only the explicit TestFlight command uses the
+upload destination.
 
 A clock-status widget or Live Activity is intentionally deferred. The first
 internal TestFlight group must validate server-confirmed clock-in, clock-out,

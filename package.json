@@ -28,7 +28,8 @@
     "ios:build:sim:release": "xcodebuild -project ios/App/App.xcodeproj -scheme App -sdk iphonesimulator -configuration Release -derivedDataPath .artifacts/ios/derived-release CODE_SIGNING_ALLOWED=NO build",
     "ios:screenshots": "node scripts/capture-app-store-screenshots.mjs",
     "ios:archive": "node scripts/archive-ios.mjs",
-    "ios:testflight": "IOS_EXPORT_ARCHIVE=1 IOS_UPLOAD_TESTFLIGHT=1 node scripts/archive-ios.mjs",
+    "ios:export": "IOS_EXPORT_ARCHIVE=1 node scripts/archive-ios.mjs",
+    "ios:testflight": "IOS_UPLOAD_TESTFLIGHT=1 node scripts/archive-ios.mjs",
     "ios:release-check": "node scripts/validate-mobile-e2e-env.mjs && npm run check && npm run build && npm run ios:test:native && npm run cap:sync:prod && npm run ios:build:sim:release && npm run test:e2e:mobile",
     "check": "npm run lint && npm run typecheck && npm test"
   },

@@ -68,6 +68,8 @@ const pushPreferencesMigration = readFileSync(
 const privacyManifestPath = resolve(projectRoot, "ios/App/App/PrivacyInfo.xcprivacy");
 const privacyManifest = parsePlist(privacyManifestPath);
 const exportOptions = parsePlist(resolve(projectRoot, "ios/App/ExportOptions.plist"));
+const packageJson = JSON.parse(readFileSync(resolve(projectRoot, "package.json"), "utf8"));
+const archiveScript = readFileSync(resolve(projectRoot, "scripts/archive-ios.mjs"), "utf8");
 const metadata = readFileSync(resolve(projectRoot, "app-store-assets/submission-metadata.md"), "utf8");
 const marketingVersion = projectSpec.match(/MARKETING_VERSION:\s*["']?([0-9]+(?:\.[0-9]+){1,2})["']?/)?.[1] ?? null;
 const nativeBuild = projectSpec.match(/CURRENT_PROJECT_VERSION:\s*["']?(\d+)["']?/)?.[1] ?? null;
@@ -88,6 +90,18 @@ if (exportOptions.destination !== "upload") {
 }
 if (exportOptions.manageAppVersionAndBuildNumber !== false) {
   fail("ExportOptions.plist must preserve the validated version and build number during export.");
+}
+if (packageJson.scripts?.["ios:export"] !== "IOS_EXPORT_ARCHIVE=1 node scripts/archive-ios.mjs") {
+  fail("ios:export must use the local-only archive export path.");
+}
+if (packageJson.scripts?.["ios:testflight"] !== "IOS_UPLOAD_TESTFLIGHT=1 node scripts/archive-ios.mjs") {
+  fail("ios:testflight must be the only package command that requests a TestFlight upload.");
+}
+if (
+  !archiveScript.includes('process.env.IOS_UPLOAD_TESTFLIGHT !== "1"') ||
+  !archiveScript.includes('"-replace", "destination", "-string", "export"')
+) {
+  fail("the archive script must derive export-only options for local IPA exports.");
 }
 
 const sdkVersion = execFileSync("/usr/bin/xcrun", ["--sdk", "iphoneos", "--show-sdk-version"], {
