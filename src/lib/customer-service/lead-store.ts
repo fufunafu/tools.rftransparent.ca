@@ -7,6 +7,10 @@ export type LeadStoreId = "rf_transparent" | "bc_transparent";
 
 export const DEFAULT_LEAD_STORE: LeadStoreId = "rf_transparent";
 
+// Remembers the last store opened so /customer-service/leads can redirect
+// server-side. Mirrors the `cs_store` localStorage key the phone page uses.
+export const LEAD_STORE_COOKIE = "cs_store";
+
 export const LEAD_STORE_OPTIONS: { id: LeadStoreId; label: string }[] = [
   { id: "rf_transparent", label: "RF Transparent" },
   { id: "bc_transparent", label: "BC Transparent" },

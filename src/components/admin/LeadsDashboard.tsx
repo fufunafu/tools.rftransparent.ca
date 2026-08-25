@@ -49,6 +49,7 @@ import {
 import { redirectOnUnauthorized } from "@/lib/client-auth";
 import { useRouter } from "next/navigation";
 import {
+  LEAD_STORE_COOKIE,
   LEAD_STORE_OPTIONS,
   leadsPath,
   type LeadStoreId,
@@ -293,6 +294,7 @@ function useStoreNavigation(section?: "analysis") {
   return (next: LeadStoreId) => {
     try {
       window.localStorage.setItem(STORE_STORAGE_KEY, next);
+      document.cookie = `${LEAD_STORE_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
     } catch {
       // Ignore storage failures; navigation still applies the selection.
     }
