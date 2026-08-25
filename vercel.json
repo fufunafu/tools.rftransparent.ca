@@ -9,6 +9,10 @@
       "schedule": "0 12 * * *"
     },
     {
+      "path": "/api/cron/sync-lead-quotes",
+      "schedule": "40 * * * *"
+    },
+    {
       "path": "/api/cron/sync-emails",
       "schedule": "0 12 * * *"
     },
@@ -27,6 +31,10 @@
     {
       "path": "/api/cron/push-followup-digest",
       "schedule": "5 13 * * 1-5"
+    },
+    {
+      "path": "/api/cron/push-work-digest",
+      "schedule": "10 13 * * 1-5"
     },
     {
       "path": "/api/cron/send-employee-surveys",

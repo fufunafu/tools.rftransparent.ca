@@ -246,7 +246,7 @@ interface SyncAllResult {
   errors: string[];
 }
 
-type SyncAutomationJob = "sync-calls" | "sync-followup";
+type SyncAutomationJob = "sync-calls" | "sync-followup" | "sync-lead-quotes";
 
 interface SourceResponseMetrics {
   medianCallMs: number | null;
@@ -1213,7 +1213,10 @@ export default function LeadsDashboard({
 
       const automationResults = await Promise.allSettled([
         triggerSyncAutomation("sync-calls", "Phone"),
-        triggerSyncAutomation("sync-followup", "Shopify"),
+        // Quote matching runs on its own so a slow Shopify import cannot
+        // stop leads from being linked to their quotes.
+        triggerSyncAutomation("sync-followup", "Shopify")
+          .finally(() => triggerSyncAutomation("sync-lead-quotes", "Quotes")),
       ]);
       for (const [index, result] of automationResults.entries()) {
         const label = index === 0 ? "Phone" : "Shopify";
