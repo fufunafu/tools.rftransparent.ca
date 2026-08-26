@@ -1,11 +1,11 @@
 # Permissions
 
-Authorization has three independent levels. A person may be an admin without being management, or management without being an admin.
+Authorization has three levels. Management always implies admin (so managers can open every page); a person may be an admin without being management.
 
 | Level | Source | Typical capabilities |
 | --- | --- | --- |
 | Authenticated | Owner, allowed domain, active employee, or `admin_users` override | General operational dashboards and personal workflows |
-| Admin | Owner, allowed domain, or `admin_users` override | Access management, account provisioning, administrative mutations |
+| Admin | Owner, allowed domain, `admin_users` override, or active management employee | Access management, account provisioning, administrative mutations |
 | Management | Owner or active employee in the management department | Purchasing, reimbursement approval, and team-wide task oversight |
 
 ## Route expectations

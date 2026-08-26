@@ -51,12 +51,14 @@ export async function isAuthorizedEmail(raw: string | undefined | null): Promise
     // admin_users table may not exist yet
   }
 
-  return false;
+  // Management is the top operational role: everyone in that department gets
+  // full access, whether or not they sign in with a company-domain address.
+  return employeeMatches(email, { managementOnly: true });
 }
 
-// Admin = owner / allowed domain / admin_users override. Excludes the
-// employee-table path so we can distinguish "got in because they're an
-// active employee" from "got in because they're an admin."
+// Admin = owner / allowed domain / admin_users override / management
+// employee. Regular (non-management) employees are deliberately excluded so
+// "got in because they're an active employee" never implies admin.
 export async function isAdminEmail(raw: string | undefined | null): Promise<boolean> {
   const email = normalize(raw);
   if (!email) return false;
