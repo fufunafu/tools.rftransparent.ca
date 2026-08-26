@@ -1,7 +1,7 @@
 export type NativeLinkAccessRequirement =
   | "public"
   | "authenticated"
-  | "warehouse-employee"
+  | "warehouse-or-management"
   | "sales-or-management"
   | "customer-service-or-management"
   | "management";
@@ -16,7 +16,7 @@ export function nativeLinkAccessRequirement(
   pathname: string,
 ): NativeLinkAccessRequirement {
   if (pathname === "/privacy" || pathname === "/support") return "public";
-  if (pathname === "/warehouse/report") return "warehouse-employee";
+  if (pathname === "/warehouse/report") return "warehouse-or-management";
   if (pathname === "/sales") return "sales-or-management";
   if (pathname === "/customer-service") {
     return "customer-service-or-management";
@@ -38,8 +38,8 @@ export function canAccessNativeDestination(
   if (requirement === "public") return true;
   if (!viewer.authenticated) return false;
   if (requirement === "authenticated") return true;
-  if (requirement === "warehouse-employee") {
-    return viewer.department === "warehouse";
+  if (requirement === "warehouse-or-management") {
+    return viewer.department === "warehouse" || viewer.management;
   }
   if (requirement === "sales-or-management") {
     return viewer.department === "sales" || viewer.management;

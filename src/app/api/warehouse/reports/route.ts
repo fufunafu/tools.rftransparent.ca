@@ -10,6 +10,15 @@ function jsonError(error: string, status: number) {
   return NextResponse.json({ error }, { status, headers: NO_STORE });
 }
 
+// Personal reports belong to warehouse staff. Management may also file and
+// read their own report so the Daily Report page is never a dead end for them.
+async function reportingEmployee(email: string) {
+  const employee = await findActiveEmployeeByEmail(email);
+  if (!employee) return null;
+  if (employee.department === "warehouse") return employee;
+  return (await isManagementUser()) ? employee : null;
+}
+
 export async function GET(req: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user?.email) return jsonError("Unauthorized", 401);
@@ -26,8 +35,8 @@ export async function GET(req: NextRequest) {
     if (employeeId) {
       return jsonError("Employee identity cannot be selected for a personal report", 400);
     }
-    const employee = await findActiveEmployeeByEmail(user.email);
-    if (!employee || employee.department !== "warehouse") {
+    const employee = await reportingEmployee(user.email);
+    if (!employee) {
       return jsonError("Your login is not linked to an active warehouse employee", 403);
     }
     scopedEmployeeId = employee.id;
@@ -53,8 +62,8 @@ export async function POST(req: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user?.email) return jsonError("Unauthorized", 401);
 
-  const employee = await findActiveEmployeeByEmail(user.email);
-  if (!employee || employee.department !== "warehouse") {
+  const employee = await reportingEmployee(user.email);
+  if (!employee) {
     return jsonError("Your login is not linked to an active warehouse employee", 403);
   }
 

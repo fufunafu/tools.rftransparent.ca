@@ -18,7 +18,7 @@ Authorization has three independent levels. A person may be an admin without bei
 | Sales commissions (`/api/kpi/commissions`) | Authenticated | Commission rates edited via admin-only employee routes |
 | Personal customer-service queue (`/customer-service`) | Active customer-service employee | Assignment writes revalidate the employee role server-side |
 | Customer-service analytics | Authenticated | Admin checks for destructive or configuration actions |
-| Personal warehouse report | Active warehouse employee | Employee identity is resolved from the authenticated email |
+| Personal warehouse report | Active warehouse employee, or management with an employee profile | Employee identity is resolved from the authenticated email |
 | Warehouse dashboard | Management | Manager corrections use the separate management-only report endpoint |
 | Purchasing | Management | Management for all purchasing reads and writes |
 | Accounting and reimbursements | Authenticated | Management for approval and rejection |

@@ -25,7 +25,7 @@ describe("native destination access", () => {
     })).toBe(true);
   });
 
-  it("limits the personal warehouse report to warehouse employees", () => {
+  it("opens the personal warehouse report to warehouse staff and management", () => {
     expect(canAccessNativeDestination("/warehouse/report", {
       authenticated: true,
       department: "warehouse",
@@ -33,8 +33,13 @@ describe("native destination access", () => {
     })).toBe(true);
     expect(canAccessNativeDestination("/warehouse/report", {
       authenticated: true,
-      department: "sales",
+      department: "management",
       management: true,
+    })).toBe(true);
+    expect(canAccessNativeDestination("/warehouse/report", {
+      authenticated: true,
+      department: "sales",
+      management: false,
     })).toBe(false);
   });
 
