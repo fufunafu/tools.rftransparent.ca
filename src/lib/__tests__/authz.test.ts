@@ -112,7 +112,16 @@ describe("isAuthorizedEmail", () => {
   it("falls through domain check to employees then admin_users, and denies", async () => {
     process.env.ADMIN_ALLOWED_DOMAINS = "rftransparent.ca";
     expect(await isAuthorizedEmail("stranger@elsewhere.com")).toBe(false);
-    expect(queriedTables()).toEqual(["employees", "admin_users"]);
+    // The trailing employees lookup is the management check inside isAdminEmail.
+    expect(queriedTables()).toEqual(["employees", "admin_users", "employees"]);
+  });
+
+  it("treats an active management employee as an admin", async () => {
+    process.env.ADMIN_ALLOWED_DOMAINS = "rftransparent.ca";
+    state.results["employees"] = [{ data: { id: "mgr-1" }, error: null }];
+    expect(await isAdminEmail("boss@gmail.com")).toBe(true);
+    const empQuery = state.queries.find((q) => q.table === "employees")!;
+    expect(empQuery.filters.some((f) => f.method === "eq" && f.args[0] === "department" && f.args[1] === "management")).toBe(true);
   });
 
   it("authorizes an active employee via the primary/alt email OR filter", async () => {
