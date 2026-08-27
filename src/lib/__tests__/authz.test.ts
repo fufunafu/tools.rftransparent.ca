@@ -112,8 +112,7 @@ describe("isAuthorizedEmail", () => {
   it("falls through domain check to employees then admin_users, and denies", async () => {
     process.env.ADMIN_ALLOWED_DOMAINS = "rftransparent.ca";
     expect(await isAuthorizedEmail("stranger@elsewhere.com")).toBe(false);
-    // The trailing employees lookup is the management check inside isAdminEmail.
-    expect(queriedTables()).toEqual(["employees", "admin_users", "employees"]);
+    expect(queriedTables()).toEqual(["employees", "admin_users"]);
   });
 
   it("treats an active management employee as an admin", async () => {
@@ -179,11 +178,13 @@ describe("isAdminEmail", () => {
     expect(state.queries).toHaveLength(0);
   });
 
-  it("does NOT grant admin via the employees table", async () => {
-    // Even if the employees table would match, isAdminEmail must not consult it
-    state.results["employees"] = [{ data: { id: "emp-1" }, error: null }];
+  it("does NOT grant admin to a regular (non-management) employee", async () => {
+    // The only employees lookup isAdminEmail makes is scoped to management.
+    state.results["employees"] = [{ data: null, error: null }];
     expect(await isAdminEmail("worker@shop.com")).toBe(false);
-    expect(queriedTables()).toEqual(["admin_users"]);
+    expect(queriedTables()).toEqual(["admin_users", "employees"]);
+    const empQuery = state.queries.find((q) => q.table === "employees")!;
+    expect(empQuery.filters).toContainEqual({ method: "eq", args: ["department", "management"] });
   });
 
   it("grants admin via an admin_users override", async () => {

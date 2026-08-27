@@ -51,9 +51,7 @@ export async function isAuthorizedEmail(raw: string | undefined | null): Promise
     // admin_users table may not exist yet
   }
 
-  // Management is the top operational role: everyone in that department gets
-  // full access, whether or not they sign in with a company-domain address.
-  return employeeMatches(email, { managementOnly: true });
+  return false;
 }
 
 // Admin = owner / allowed domain / admin_users override / management
@@ -82,7 +80,9 @@ export async function isAdminEmail(raw: string | undefined | null): Promise<bool
     // admin_users table may not exist yet
   }
 
-  return false;
+  // Management is the top operational role: everyone in that department gets
+  // full access, whether or not they sign in with a company-domain address.
+  return employeeMatches(email, { managementOnly: true });
 }
 
 // Sign-off authority for the reimbursement workflow. Only people in the
