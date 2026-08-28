@@ -79,6 +79,17 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     scheduleDetail: "Keeps pipeline history local so dashboards avoid full Shopify downloads",
   },
   {
+    slug: "sync-shipping-quotes",
+    label: "Freightcom shipping quotes",
+    description: "Gets a default Freightcom rate for every new Shopify order that needs to ship.",
+    kind: "sync",
+    result: "Cheapest carrier and price on the Logistics > Shipping Quotes page",
+    staleAfterHours: 2,
+    cron: "*/15 * * * *",
+    schedule: "Every 15 minutes",
+    scheduleDetail: "Only quotes orders that don't have a quote yet; skipped until FREIGHTCOM_API_KEY and the ship-from address are set",
+  },
+  {
     slug: "followup-reminders",
     label: "Follow-up reminders",
     description: "Sends each store its leads due or overdue that day.",

@@ -365,6 +365,7 @@ export async function GET(req: NextRequest) {
     envCheck("Google Ads Env", ["GOOGLE_ADS_CLIENT_ID", "GOOGLE_ADS_CLIENT_SECRET", "GOOGLE_ADS_REFRESH_TOKEN", "GOOGLE_ADS_CUSTOMER_ID", "GOOGLE_ADS_DEVELOPER_TOKEN"]),
     envCheck("GA4 Env", ["GOOGLE_GA4_PROPERTY_ID"]),
     envCheck("Resend Env", ["RESEND_API_KEY"]),
+    envCheck("Freightcom Env", ["FREIGHTCOM_API_KEY"]),
     envCheck("Scraper Env", ["SCRAPER_URL", "SCRAPER_API_KEY"]),
     envCheck("Gmail Env", ["GMAIL_CLIENT_ID", "GMAIL_CLIENT_SECRET"]),
     envCheck("Meta Env", ["META_PAGE_ACCESS_TOKEN", "META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN"]),

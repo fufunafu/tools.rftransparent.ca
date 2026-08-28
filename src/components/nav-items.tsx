@@ -177,6 +177,7 @@ export const NAV_ITEMS: NavSection[] = [
     children: [
       { href: "/warehouse", label: "Dashboard", status: "done", access: "management" },
       { href: "/warehouse/report", label: "Daily Report", status: "done" },
+      { href: "/warehouse/shipping", label: "Shipping Quotes", status: "done" },
       { href: "/warehouse/purchasing", label: "Purchasing", status: "wip", access: "management" },
       {
         href: "https://orderstream-checker.vercel.app/",
