@@ -1,6 +1,9 @@
 import type { LeadSource } from "@/lib/customer-service/leads";
 
 export const LEAD_SPAM_REASON = "Spam: marketing solicitation";
+// Ontario installation requests are handled by the installation team without
+// a sales call, so staff can take them out of the call queue explicitly.
+export const LEAD_NO_CALL_INSTALLATION_REASON = "Ontario installation; handled without a direct call";
 
 export type LeadSpamCategory =
   | "search-engine-optimization"

@@ -280,6 +280,13 @@ export async function PATCH(req: NextRequest) {
   if (rest.installation_requested === null || typeof rest.installation_requested === "boolean") {
     update.installation_requested = rest.installation_requested;
   }
+  // "Send to BC" / "Send to RF": move the lead to the other store's queue.
+  if (rest.store_id !== undefined) {
+    if (!isLeadStoreId(rest.store_id)) {
+      return NextResponse.json({ error: "Invalid store" }, { status: 400 });
+    }
+    update.store_id = rest.store_id;
+  }
 
   if (Object.keys(update).length === 0) {
     return NextResponse.json({ error: "no valid fields to update" }, { status: 400 });

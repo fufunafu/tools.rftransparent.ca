@@ -38,6 +38,7 @@ import { formatCADShort, formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
 import { getAutomationDetailFailure } from "@/lib/automation-status";
 import {
+  LEAD_NO_CALL_INSTALLATION_REASON,
   LEAD_SPAM_REASON,
   isLeadSpamReason,
 } from "@/lib/customer-service/lead-spam";
@@ -51,6 +52,7 @@ import { useRouter } from "next/navigation";
 import {
   LEAD_STORE_COOKIE,
   LEAD_STORE_OPTIONS,
+  leadStoreLabel,
   leadsPath,
   type LeadStoreId,
 } from "@/lib/customer-service/lead-store";
@@ -481,10 +483,12 @@ function SubmissionCard({
 
 function LeadDetailPanel({
   lead,
+  store,
   onClose,
   onChanged,
 }: {
   lead: Lead;
+  store: LeadStoreId;
   onClose: () => void;
   onChanged: () => void | Promise<unknown>;
 }) {
@@ -512,10 +516,13 @@ function LeadDetailPanel({
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
   const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
   const [savingSpam, setSavingSpam] = useState(false);
+  const [savingQuickAction, setSavingQuickAction] = useState<"called" | "no_call" | "transfer" | null>(null);
   const [savingInstallation, setSavingInstallation] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const phoneIsCallable = isCallablePhone(lead.phone);
   const spamMarked = isLeadSpamReason(lead.not_applicable_reason);
+  const noCallMarked = lead.not_applicable_reason === LEAD_NO_CALL_INSTALLATION_REASON;
+  const otherStore: LeadStoreId = store === "rf_transparent" ? "bc_transparent" : "rf_transparent";
   const displayName = lead.name?.trim() || lead.email?.split("@")[0] || lead.phone || "Lead";
   const submissions = useMemo(
     () => {
@@ -605,6 +612,41 @@ function LeadDetailPanel({
       ? { outcome: "new", not_applicable_reason: null }
       : { outcome: "not_applicable", not_applicable_reason: LEAD_SPAM_REASON }, true);
     setSavingSpam(false);
+  };
+
+  // Quick actions requested by the sales team: record a call the phone sync
+  // missed, park an Ontario installation request that needs no sales call,
+  // or hand the lead to the other store's queue.
+  const handleMarkCalled = async () => {
+    if (savingQuickAction) return;
+    setSavingQuickAction("called");
+    await patchLead({
+      call_status: "called",
+      ...(lead.outcome === "new" ? { outcome: "contacted" } : {}),
+    }, true);
+    setSavingQuickAction(null);
+  };
+
+  const handleNoCallToggle = async () => {
+    if (savingQuickAction) return;
+    setSavingQuickAction("no_call");
+    await patchLead(noCallMarked
+      ? { outcome: "new", not_applicable_reason: null }
+      : {
+          outcome: "not_applicable",
+          not_applicable_reason: LEAD_NO_CALL_INSTALLATION_REASON,
+          installation_requested: true,
+        }, true);
+    setSavingQuickAction(null);
+  };
+
+  const handleTransfer = async () => {
+    if (savingQuickAction) return;
+    setSavingQuickAction("transfer");
+    const saved = await patchLead({ store_id: otherStore }, true);
+    setSavingQuickAction(null);
+    // The lead now lives in the other store's list, so this panel is stale.
+    if (saved) onClose();
   };
 
   const handleSaveQuote = async () => {
@@ -1023,6 +1065,39 @@ function LeadDetailPanel({
               }`}
             >
               {savingSpam ? "Saving..." : spamMarked ? "Restore from spam" : "Mark as spam"}
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleMarkCalled}
+              disabled={savingQuickAction !== null || groupPending || lead.call_status === "called"}
+              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              title="Record that this lead was called when the phone sync did not catch it"
+            >
+              {savingQuickAction === "called" ? "Saving..." : lead.call_status === "called" ? "Marked as called" : "Mark as called"}
+            </button>
+            <button
+              type="button"
+              onClick={handleNoCallToggle}
+              disabled={savingQuickAction !== null || groupPending}
+              className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:cursor-wait disabled:opacity-60 ${
+                noCallMarked
+                  ? "border-teal-500 bg-teal-50 text-teal-800"
+                  : "border-teal-200 bg-white text-teal-700 hover:bg-teal-50"
+              }`}
+              title="Ontario installation request handled by the installation team; no sales call needed"
+            >
+              {savingQuickAction === "no_call" ? "Saving..." : noCallMarked ? "Ontario installation (no call) ✓" : "Ontario installation, no call"}
+            </button>
+            <button
+              type="button"
+              onClick={handleTransfer}
+              disabled={savingQuickAction !== null || groupPending}
+              className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
+              title={`Move this lead to the ${leadStoreLabel(otherStore)} leads page`}
+            >
+              {savingQuickAction === "transfer" ? "Sending..." : `Send to ${otherStore === "bc_transparent" ? "BC" : "RF"}`}
             </button>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
@@ -1868,6 +1943,7 @@ export default function LeadsDashboard({
 
       {selectedLead && (
         <LeadDetailPanel
+          store={store}
           lead={selectedLead}
           onClose={() => setSelectedLeadId(null)}
           onChanged={refresh}
