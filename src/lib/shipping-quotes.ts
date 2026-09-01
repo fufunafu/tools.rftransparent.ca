@@ -26,6 +26,9 @@ export interface ShippingQuoteSettings {
     name: string;
     contact_name: string;
     phone: string;
+    // Freightcom requires an origin email for international (e.g. US-bound)
+    // rate requests.
+    email: string;
     address_line_1: string;
     address_line_2: string;
     city: string;
@@ -44,6 +47,10 @@ export interface ShippingQuoteSettings {
   skip_shipping_methods: string[];
   // Only orders newer than this many days get auto-quoted by the cron.
   lookback_days: number;
+  // Courier per-package weight ceiling. Orders heavier than this are split
+  // across several packages — Freightcom rejects a single package above the
+  // carrier max ("weight-exceeds-max-weight").
+  max_package_weight_lb: number;
 }
 
 export const SHIPPING_QUOTE_DEFAULTS: ShippingQuoteSettings = {
@@ -51,6 +58,7 @@ export const SHIPPING_QUOTE_DEFAULTS: ShippingQuoteSettings = {
     name: "RF Transparent",
     contact_name: "Warehouse",
     phone: "",
+    email: "",
     address_line_1: "",
     address_line_2: "",
     city: "",
@@ -61,6 +69,7 @@ export const SHIPPING_QUOTE_DEFAULTS: ShippingQuoteSettings = {
   default_package: { weight_lb: 30, length_in: 48, width_in: 12, height_in: 12 },
   skip_shipping_methods: ["pickup", "pick up", "pick-up", "local delivery"],
   lookback_days: 14,
+  max_package_weight_lb: 150,
 };
 
 export async function getShippingQuoteSettings(): Promise<ShippingQuoteSettings> {
@@ -75,6 +84,10 @@ export async function getShippingQuoteSettings(): Promise<ShippingQuoteSettings>
       typeof stored.lookback_days === "number" && stored.lookback_days > 0
         ? stored.lookback_days
         : SHIPPING_QUOTE_DEFAULTS.lookback_days,
+    max_package_weight_lb:
+      typeof stored.max_package_weight_lb === "number" && stored.max_package_weight_lb > 0
+        ? stored.max_package_weight_lb
+        : SHIPPING_QUOTE_DEFAULTS.max_package_weight_lb,
   };
 }
 
@@ -191,7 +204,7 @@ export function buildPackages(
   if (lb <= 0 && order.totalWeight && order.totalWeight > 0) lb = order.totalWeight / 453.592;
 
   const weightSource = lb > 0 ? "shopify" : "default";
-  const weight = Math.max(1, Math.round((lb > 0 ? lb : dp.weight_lb) * 10) / 10);
+  const total = Math.max(1, Math.round((lb > 0 ? lb : dp.weight_lb) * 10) / 10);
   const description =
     order.lineItems.nodes
       .filter((i) => i.requiresShipping)
@@ -199,10 +212,18 @@ export function buildPackages(
       .join(", ")
       .slice(0, 100) || "Order";
 
-  return {
-    packages: [{ measurements: { weight: { unit: "lb", value: weight }, cuboid }, description }],
-    weightSource,
-  };
+  // Carriers cap a single package (Freightcom rejects the request outright),
+  // so heavy orders ship as several boxes of equal weight. This is still a
+  // ballpark — the warehouse decides the real packing.
+  const maxLb = settings.max_package_weight_lb;
+  const count = Math.max(1, Math.ceil(total / maxLb));
+  const per = Math.max(1, Math.round((total / count) * 10) / 10);
+  const packages: FreightcomPackage[] = Array.from({ length: count }, (_, i) => ({
+    measurements: { weight: { unit: "lb", value: per }, cuboid },
+    description: count > 1 ? `${description} (${i + 1} of ${count})`.slice(0, 100) : description,
+  }));
+
+  return { packages, weightSource };
 }
 
 function digits(phone: string | null | undefined): string | undefined {
@@ -247,6 +268,8 @@ function buildOrigin(settings: ShippingQuoteSettings): FreightcomLocation {
     },
     residential: false,
     phone_number: phone ? { number: phone } : undefined,
+    // Freightcom requires an origin email for international rate requests.
+    email_addresses: o.email ? [o.email] : undefined,
   };
 }
 

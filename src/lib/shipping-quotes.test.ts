@@ -16,6 +16,7 @@ const settings = {
     city: "Toronto",
     postal_code: "M5V 1A1",
     phone: "+1 (416) 555-0100",
+    email: "warehouse@example.com",
   },
 };
 
@@ -70,6 +71,21 @@ describe("buildPackages", () => {
     expect(packages[0].description).toBe("2× Post");
   });
 
+  it("splits orders heavier than the per-package max into equal boxes", () => {
+    const o = order({
+      lineItems: {
+        nodes: [
+          { title: "Glass panel", quantity: 4, requiresShipping: true, variant: { sku: "G1", inventoryItem: { measurement: { weight: { value: 100, unit: "POUNDS" } } } } },
+        ],
+      },
+    });
+    const { packages } = buildPackages(o, settings); // 400 lb, max 150
+    expect(packages).toHaveLength(3);
+    expect(packages[0].measurements.weight.value).toBeCloseTo(133.3, 1);
+    expect(packages[0].description).toContain("(1 of 3)");
+    expect(packages[2].description).toContain("(3 of 3)");
+  });
+
   it("uses Shopify totalWeight (grams) when line items carry no weight", () => {
     const { packages, weightSource } = buildPackages(order({ totalWeight: 4536 }), settings);
     expect(weightSource).toBe("shopify");
@@ -90,6 +106,7 @@ describe("buildDestination / buildRateRequest", () => {
     expect(request.details.packaging_type).toBe("package");
     expect(request.details.origin.address.postal_code).toBe("M5V 1A1");
     expect(request.details.origin.phone_number).toEqual({ number: "4165550100" });
+    expect(request.details.origin.email_addresses).toEqual(["warehouse@example.com"]);
     expect(request.details.destination.signature_requirement).toBe("not-required");
     expect(request.details.reference_codes).toEqual(["#1001"]);
     expect(request.details.shipment_classification).toBe("B2C");

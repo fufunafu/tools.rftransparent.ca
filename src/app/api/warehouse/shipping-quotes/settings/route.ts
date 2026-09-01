@@ -46,6 +46,7 @@ export async function PUT(req: NextRequest) {
       name: str(o.name) || d.origin.name,
       contact_name: str(o.contact_name),
       phone: str(o.phone, 30),
+      email: str(o.email),
       address_line_1: str(o.address_line_1),
       address_line_2: str(o.address_line_2),
       city: str(o.city),
@@ -63,6 +64,7 @@ export async function PUT(req: NextRequest) {
       ? incoming.skip_shipping_methods.map((m: unknown) => str(m, 60)).filter(Boolean).slice(0, 20)
       : d.skip_shipping_methods,
     lookback_days: Math.min(60, Math.round(num(incoming.lookback_days, d.lookback_days))),
+    max_package_weight_lb: Math.min(500, num(incoming.max_package_weight_lb, d.max_package_weight_lb)),
   };
 
   await putShippingQuoteSettings(clean);

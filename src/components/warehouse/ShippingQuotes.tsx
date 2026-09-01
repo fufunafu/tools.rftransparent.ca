@@ -151,6 +151,7 @@ function SettingsPanel({
             <input className={fieldClass} placeholder="Postal" value={o.postal_code} disabled={ro} onChange={(e) => setOrigin("postal_code", e.target.value)} />
           </div>
           <input className={fieldClass} placeholder="Phone" value={o.phone} disabled={ro} onChange={(e) => setOrigin("phone", e.target.value)} />
+          <input className={fieldClass} placeholder="Email (needed for US-bound quotes)" value={o.email} disabled={ro} onChange={(e) => setOrigin("email", e.target.value)} />
         </div>
       </div>
 
@@ -197,6 +198,18 @@ function SettingsPanel({
                 skip_shipping_methods: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
               })
             }
+          />
+        </label>
+        <label className="text-xs text-slate-500">
+          Max weight per package (lb) — heavier orders are split into several boxes
+          <input
+            type="number"
+            min={1}
+            max={500}
+            className={`${fieldClass} mt-1`}
+            value={settings.max_package_weight_lb}
+            disabled={ro}
+            onChange={(e) => setSettings({ ...settings, max_package_weight_lb: Number(e.target.value) })}
           />
         </label>
         <label className="text-xs text-slate-500">
