@@ -249,6 +249,7 @@ export default function ShippingQuotes({ canEdit }: { canEdit: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
+  const [storeFilter, setStoreFilter] = useState<string>("all");
   const [showSettings, setShowSettings] = useState(false);
   const [syncMessage, setSyncMessage] = useState("");
 
@@ -310,7 +311,12 @@ export default function ShippingQuotes({ canEdit }: { canEdit: boolean }) {
     }
   };
 
-  const quotes = data?.quotes ?? [];
+  const allQuotes = data?.quotes ?? [];
+  // One tab per store that actually has quotes, in stable store-id order.
+  const stores = [...new Map(allQuotes.map((q) => [q.store_id, q.store_label])).entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([id, label]) => ({ id, label, count: allQuotes.filter((q) => q.store_id === id).length }));
+  const quotes = storeFilter === "all" ? allQuotes : allQuotes.filter((q) => q.store_id === storeFilter);
 
   return (
     <div className="space-y-6">
@@ -363,6 +369,28 @@ export default function ShippingQuotes({ canEdit }: { canEdit: boolean }) {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <SettingsPanel canEdit={canEdit} onSaved={load} />
         </section>
+      )}
+
+      {stores.length > 1 && (
+        <div className="flex rounded-lg border border-slate-200 bg-white overflow-hidden w-fit">
+          {[{ id: "all", label: "All stores", count: allQuotes.length }, ...stores].map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              onClick={() => setStoreFilter(s.id)}
+              className={`px-4 py-2 text-sm font-medium transition-colors ${
+                storeFilter === s.id
+                  ? "bg-slate-900 text-white"
+                  : "text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {s.label}
+              <span className={`ml-1.5 text-xs ${storeFilter === s.id ? "text-slate-300" : "text-slate-400"}`}>
+                {s.count}
+              </span>
+            </button>
+          ))}
+        </div>
       )}
 
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
