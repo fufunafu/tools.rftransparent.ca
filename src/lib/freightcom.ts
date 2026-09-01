@@ -5,7 +5,14 @@ import { fetchWithRetry } from "@/lib/fetch-retry";
 // is polled until status.done is true. The API key is generated in the
 // Freightcom customer portal and sent as-is in the Authorization header.
 
-const BASE_URL = "https://external-api.freightcom.com";
+// Freightcom provides a sandbox (e.g. https://customer-external-api.ssd-test.freightcom.com)
+// with its own short-lived test tokens before issuing a production token.
+// FREIGHTCOM_API_URL switches environments; unset means live.
+const DEFAULT_BASE_URL = "https://external-api.freightcom.com";
+
+function baseUrl(): string {
+  return (process.env.FREIGHTCOM_API_URL || DEFAULT_BASE_URL).replace(/\/+$/, "");
+}
 
 export interface FreightcomAddress {
   address_line_1: string;
@@ -94,7 +101,7 @@ function apiKey(): string {
 }
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetchWithRetry(`${BASE_URL}${path}`, {
+  const res = await fetchWithRetry(`${baseUrl()}${path}`, {
     ...init,
     headers: {
       Authorization: apiKey(),
