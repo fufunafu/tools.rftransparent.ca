@@ -10,6 +10,7 @@ const protectedRoutes = [
   "/customer-service/problems",
   "/warehouse/purchasing",
   "/settings/access",
+  "/employees/new",
 ];
 
 for (const route of protectedRoutes) {
