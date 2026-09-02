@@ -73,6 +73,8 @@ export async function proxy(request: NextRequest) {
     // Safari fetches the PWA manifest without auth cookies when the user
     // adds the site to their home screen; it holds no sensitive data.
     pathname === "/manifest.webmanifest" ||
+    // Lead-capture script loaded by the Shopify storefront themes.
+    pathname === "/rf-lead-capture.js" ||
     pathname === "/apple-app-site-association" ||
     pathname === "/.well-known/apple-app-site-association" ||
     pathname === "/api/native/version" ||
