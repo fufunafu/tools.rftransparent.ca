@@ -221,6 +221,66 @@
     logForms("+3s");
   }, 3000);
 
+  // A click and a real submit event can both fire for one submission, and a
+  // visitor can retry after a validation error. One signature per minute is
+  // enough; the webhook's own 24-hour dedupe catches anything slower.
+  var recentSends = [];
+
+  function alreadySent(signature, now) {
+    recentSends = recentSends.filter(function (entry) {
+      return now - entry.at < 60000;
+    });
+    for (var i = 0; i < recentSends.length; i++) {
+      if (recentSends[i].signature === signature) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function captureForm(form, via) {
+    console.log("[RF Leads] Submit captured on form:", form, "via", via);
+
+    var fields = {};
+    var drawings = [];
+
+    try {
+      new FormData(form).forEach(function (value, key) {
+        if (typeof File !== "undefined" && value instanceof File) {
+          if (value.size > 0) {
+            drawings.push({ fieldName: key, file: value });
+            addField(fields, key, value.name);
+          }
+          return;
+        }
+        addField(fields, key, value);
+      });
+    } catch (error) {
+      console.error("[RF Leads] FormData error:", error);
+    }
+
+    var mapped = mapContact(fields);
+    if (!mapped.email && !mapped.phone) {
+      // A wizard step or an empty click; the final page carries the contact.
+      console.log("[RF Leads] No contact fields yet; not sending.");
+      return;
+    }
+
+    var signature = JSON.stringify(mapped);
+    var now = Date.now();
+    if (alreadySent(signature, now)) {
+      console.log("[RF Leads] Duplicate capture ignored.");
+      return;
+    }
+    recentSends.push({ signature: signature, at: now });
+
+    console.log("[RF Leads] Drawing files:", drawings.map(function (drawing) {
+      return drawing.file.name;
+    }));
+
+    sendLead(form, fields, mapped, drawings);
+  }
+
   document.addEventListener(
     "submit",
     function (event) {
@@ -235,32 +295,32 @@
         return;
       }
 
-      console.log("[RF Leads] Submit captured on form:", form);
+      captureForm(form, "submit event");
+    },
+    true
+  );
 
-      var fields = {};
-      var drawings = [];
-
-      try {
-        new FormData(form).forEach(function (value, key) {
-          if (typeof File !== "undefined" && value instanceof File) {
-            if (value.size > 0) {
-              drawings.push({ fieldName: key, file: value });
-              addField(fields, key, value.name);
-            }
-            return;
-          }
-          addField(fields, key, value);
-        });
-      } catch (error) {
-        console.error("[RF Leads] FormData error:", error);
+  // Powerful Form Builder's wizard submits over AJAX without dispatching a
+  // DOM submit event, so the listener above never fires for it (verified on
+  // the BC form, 2026-09-02). Reading the form when its submit button is
+  // pressed catches those; the signature guard keeps the two paths from
+  // sending twice.
+  document.addEventListener(
+    "click",
+    function (event) {
+      var target = event.target;
+      if (!target || typeof target.closest !== "function") {
+        return;
       }
-
-      console.log("[RF Leads] Drawing files:", drawings.map(function (drawing) {
-        return drawing.file.name;
-      }));
-
-      var mapped = mapContact(fields);
-      sendLead(form, fields, mapped, drawings);
+      var button = target.closest("button[type=\"submit\"], input[type=\"submit\"], .globo-form-submit");
+      if (!button || !button.closest(".globo-form-app")) {
+        return;
+      }
+      var form = button.closest("form");
+      if (!form) {
+        return;
+      }
+      captureForm(form, "submit button click");
     },
     true
   );
