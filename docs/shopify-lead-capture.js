@@ -1,9 +1,13 @@
 (function () {
   // Paste this into Powerful Form Builder's "After form loaded" script.
   // Configure /apps/rf-leads as a Shopify App Proxy for the RF Tools endpoint.
-  if (window.__rfLeadCaptureInstalled) {
+  // Versioned so a stale copy of the old script (another form's saved
+  // config, a cached page) can never block this one from installing.
+  if (window.__rfLeadCaptureV2Installed) {
     return;
   }
+  window.__rfLeadCaptureV2Installed = true;
+  // Also claim the old flag so an old copy that runs later stays inert.
   window.__rfLeadCaptureInstalled = true;
 
   console.log("[RF Leads] Script loaded at", new Date().toISOString());
