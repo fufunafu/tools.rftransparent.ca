@@ -666,6 +666,36 @@ export default function ShippingQuotes({ canEdit }: { canEdit: boolean }) {
     }
   };
 
+  const runRequoteAll = async () => {
+    if (
+      !window.confirm(
+        "Clear every stored quote and requote all orders with the current packing rules? This takes a few minutes.",
+      )
+    )
+      return;
+    setBusy("requote_all");
+    setSyncMessage("");
+    setError("");
+    try {
+      const response = await fetch("/api/warehouse/shipping-quotes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "requote_all" }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, "Requote failed"));
+      const { cleared, summary } = await response.json();
+      setSyncMessage(
+        summary.reason ??
+          `${cleared} old quotes cleared | ${summary.quoted} requoted so far | the automation finishes the rest within 15 minutes`,
+      );
+      await load();
+    } catch (requoteError) {
+      setError(requoteError instanceof Error ? requoteError.message : "Requote failed");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const allQuotes = useMemo(() => data?.quotes ?? [], [data?.quotes]);
   const stores = useMemo(() => {
     const counts = new Map<string, { label: string; count: number }>();
@@ -768,6 +798,16 @@ export default function ShippingQuotes({ canEdit }: { canEdit: boolean }) {
                 className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {busy === "sync" ? "Checking..." : "Find new orders"}
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={() => void runRequoteAll()}
+                disabled={busy !== null || refreshing}
+                className={secondaryButtonClass}
+              >
+                {busy === "requote_all" ? "Requoting..." : "Requote all"}
               </button>
             )}
             <button

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isManagementUser } from "@/lib/admin-auth";
+import { getSupabase } from "@/lib/supabase";
 import { canViewShippingQuotes } from "@/lib/shipping-quotes-access";
 import { isFreightcomConfigured } from "@/lib/freightcom";
 import { getStores } from "@/lib/shopify";
@@ -60,6 +61,21 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
       const summary = await syncShippingQuotes({ maxQuotes: 10 });
       return NextResponse.json({ summary }, { headers: NO_STORE });
+    }
+    // Clears every stored quote and starts requoting from scratch — for when
+    // the packing rules or crate size change and old quotes no longer reflect
+    // reality. The cron finishes whatever this request doesn't get to.
+    if (body?.action === "requote_all") {
+      if (!(await isManagementUser()))
+        return NextResponse.json({ error: "Forbidden" }, { status: 403, headers: NO_STORE });
+      const { error, count } = await getSupabase()
+        .from("shipping_quotes")
+        .delete({ count: "exact" })
+        .neq("order_id", "");
+      if (error)
+        return NextResponse.json({ error: error.message }, { status: 500, headers: NO_STORE });
+      const summary = await syncShippingQuotes({ maxQuotes: 8 });
+      return NextResponse.json({ cleared: count ?? 0, summary }, { headers: NO_STORE });
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400, headers: NO_STORE });
   } catch (err) {
