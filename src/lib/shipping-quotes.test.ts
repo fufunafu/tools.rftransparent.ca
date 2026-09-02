@@ -158,6 +158,17 @@ describe("crate shipping for glass orders", () => {
     expect(props.pallets[0].measurements.cuboid).toEqual({ unit: "in", l: 72, w: 30, h: 48 });
   });
 
+  it("caps a rate request at Freightcom's 6-pallet maximum, keeping full weight", () => {
+    // 100 glass × 50 lb = 7 real crates, but the request may only carry 6.
+    const o = order({ lineItems: { nodes: [glassItem(100)] } });
+    const built = buildRateRequest(o, settings, { freightClass: "70" });
+    const pallets = built.stored as FreightcomPallet[];
+    expect(pallets).toHaveLength(6);
+    // 5000 lb / 6 crates + 80 tare ≈ 913.3 each — total weight preserved.
+    expect(pallets[0].measurements.weight.value).toBeCloseTo(913.3, 1);
+    expect(pallets[0].description).toContain("actually 7 crates");
+  });
+
   it("3 glass is still one crate; hardware-only orders stay parcels", () => {
     const glass = order({ lineItems: { nodes: [glassItem(3)] } });
     const glassBuilt = buildRateRequest(glass, settings, { freightClass: "70" });

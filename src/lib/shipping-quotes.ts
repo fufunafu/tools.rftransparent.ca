@@ -266,14 +266,23 @@ export function buildCrates(
   freightClass: string,
 ): { crates: FreightcomPallet[]; weightSource: "shopify" | "default"; crateCount: number } {
   const c = settings.crate;
-  const crateCount = Math.max(1, Math.ceil(glassUnits / Math.max(1, c.glass_per_crate)));
+  const realCrates = Math.max(1, Math.ceil(glassUnits / Math.max(1, c.glass_per_crate)));
+  // Freightcom rejects rate requests with more than 6 non-stackable pallets
+  // ("non-stackable pallets can have a maximum of 6 pallets"). A monster
+  // order still deserves a ballpark, so the request is capped at 6 crates
+  // carrying the full weight — the description notes the real count.
+  const crateCount = Math.min(6, realCrates);
   const lb = orderWeightLb(order);
   const weightSource = lb > 0 ? "shopify" : "default";
   // No Shopify weights: assume the default box weight of cargo per crate
   // rather than inventing a per-panel figure.
-  const cargo = lb > 0 ? lb : settings.default_package.weight_lb * crateCount;
+  const cargo = lb > 0 ? lb : settings.default_package.weight_lb * realCrates;
   const per = Math.max(1, Math.round((cargo / crateCount + c.tare_lb) * 10) / 10);
-  const description = orderDescription(order);
+  const baseDescription = orderDescription(order);
+  const description =
+    realCrates > crateCount
+      ? `${baseDescription} (actually ${realCrates} crates, quoted as 6)`.slice(0, 100)
+      : baseDescription;
   const crates: FreightcomPallet[] = Array.from({ length: crateCount }, (_, i) => ({
     measurements: {
       weight: { unit: "lb", value: per },
