@@ -2,6 +2,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getSetting, putSetting } from "@/lib/settings";
 import { fetchAllPages, getStores } from "@/lib/shopify";
 import {
+  calculateFreightClass,
   cheapestRate,
   isFreightcomConfigured,
   moneyToNumber,
@@ -10,6 +11,7 @@ import {
   type FreightcomAddress,
   type FreightcomLocation,
   type FreightcomPackage,
+  type FreightcomPallet,
   type FreightcomRate,
   type FreightcomRateRequest,
 } from "@/lib/freightcom";
@@ -51,6 +53,22 @@ export interface ShippingQuoteSettings {
   // across several packages — Freightcom rejects a single package above the
   // carrier max ("weight-exceeds-max-weight").
   max_package_weight_lb: number;
+  // How glass ships: any order containing glass goes LTL in wooden crates,
+  // ceil(glass count / glass_per_crate) of them, hardware packed inside the
+  // crates. Orders without glass ship as parcels.
+  crate: {
+    glass_per_crate: number;
+    length_in: number;
+    width_in: number;
+    height_in: number;
+    // Empty crate weight, added per crate on top of the product weight.
+    tare_lb: number;
+    // A line item counts as glass when its SKU starts with one of these
+    // (inventory convention: GP{height}X{width}) …
+    glass_sku_prefixes: string[];
+    // … or, for items with no SKU, when its title contains one of these.
+    glass_title_keywords: string[];
+  };
 }
 
 export const SHIPPING_QUOTE_DEFAULTS: ShippingQuoteSettings = {
@@ -70,6 +88,17 @@ export const SHIPPING_QUOTE_DEFAULTS: ShippingQuoteSettings = {
   skip_shipping_methods: ["pickup", "pick up", "pick-up", "local delivery"],
   lookback_days: 14,
   max_package_weight_lb: 150,
+  crate: {
+    glass_per_crate: 15,
+    // PLACEHOLDER dimensions — set the real usual crate size in Settings
+    // (read it off any past LTL booking in the Freightcom dashboard).
+    length_in: 72,
+    width_in: 30,
+    height_in: 48,
+    tare_lb: 80,
+    glass_sku_prefixes: ["GP"],
+    glass_title_keywords: ["glass"],
+  },
 };
 
 export async function getShippingQuoteSettings(): Promise<ShippingQuoteSettings> {
@@ -88,6 +117,7 @@ export async function getShippingQuoteSettings(): Promise<ShippingQuoteSettings>
       typeof stored.max_package_weight_lb === "number" && stored.max_package_weight_lb > 0
         ? stored.max_package_weight_lb
         : SHIPPING_QUOTE_DEFAULTS.max_package_weight_lb,
+    crate: { ...SHIPPING_QUOTE_DEFAULTS.crate, ...(stored.crate ?? {}) },
   };
 }
 
@@ -185,16 +215,9 @@ function toLb(value: number, unit: string): number {
   }
 }
 
-export function buildPackages(
-  order: ShopifyOrderNode,
-  settings: ShippingQuoteSettings,
-): { packages: FreightcomPackage[]; weightSource: "shopify" | "default" } {
-  const dp = settings.default_package;
-  const cuboid = { unit: "in" as const, l: dp.length_in, w: dp.width_in, h: dp.height_in };
-
-  // Sum the product weights Shopify knows about; fall back to totalWeight
-  // (grams), then to the default box. Everything ships as one package with
-  // the default dimensions — the goal is a ballpark, not a packing plan.
+// Sum the product weights Shopify knows about; fall back to the order's
+// totalWeight (grams). 0 means Shopify has no weight data for this order.
+function orderWeightLb(order: ShopifyOrderNode): number {
   let lb = 0;
   for (const item of order.lineItems.nodes) {
     if (!item.requiresShipping) continue;
@@ -202,15 +225,79 @@ export function buildPackages(
     if (w && w.value > 0) lb += toLb(w.value, w.unit) * item.quantity;
   }
   if (lb <= 0 && order.totalWeight && order.totalWeight > 0) lb = order.totalWeight / 453.592;
+  return lb;
+}
 
-  const weightSource = lb > 0 ? "shopify" : "default";
-  const total = Math.max(1, Math.round((lb > 0 ? lb : dp.weight_lb) * 10) / 10);
-  const description =
+function orderDescription(order: ShopifyOrderNode): string {
+  return (
     order.lineItems.nodes
       .filter((i) => i.requiresShipping)
       .map((i) => `${i.quantity}× ${i.title}`)
       .join(", ")
-      .slice(0, 100) || "Order";
+      .slice(0, 100) || "Order"
+  );
+}
+
+/** Number of glass panels on the order, per the SKU/title conventions. */
+export function countGlassUnits(order: ShopifyOrderNode, settings: ShippingQuoteSettings): number {
+  const prefixes = settings.crate.glass_sku_prefixes.map((p) => p.toUpperCase()).filter(Boolean);
+  const keywords = settings.crate.glass_title_keywords.map((k) => k.toLowerCase()).filter(Boolean);
+  let units = 0;
+  for (const item of order.lineItems.nodes) {
+    if (!item.requiresShipping) continue;
+    const sku = (item.variant?.sku ?? "").toUpperCase();
+    const isGlass = sku
+      ? prefixes.some((p) => sku.startsWith(p))
+      : keywords.some((k) => item.title.toLowerCase().includes(k));
+    if (isGlass) units += item.quantity;
+  }
+  return units;
+}
+
+/**
+ * Crates for a glass order: ceil(glass / glass_per_crate) crates, the whole
+ * order's product weight (hardware ships inside the crates) split evenly,
+ * plus the empty-crate weight on each.
+ */
+export function buildCrates(
+  order: ShopifyOrderNode,
+  settings: ShippingQuoteSettings,
+  glassUnits: number,
+  freightClass: string,
+): { crates: FreightcomPallet[]; weightSource: "shopify" | "default"; crateCount: number } {
+  const c = settings.crate;
+  const crateCount = Math.max(1, Math.ceil(glassUnits / Math.max(1, c.glass_per_crate)));
+  const lb = orderWeightLb(order);
+  const weightSource = lb > 0 ? "shopify" : "default";
+  // No Shopify weights: assume the default box weight of cargo per crate
+  // rather than inventing a per-panel figure.
+  const cargo = lb > 0 ? lb : settings.default_package.weight_lb * crateCount;
+  const per = Math.max(1, Math.round((cargo / crateCount + c.tare_lb) * 10) / 10);
+  const description = orderDescription(order);
+  const crates: FreightcomPallet[] = Array.from({ length: crateCount }, (_, i) => ({
+    measurements: {
+      weight: { unit: "lb", value: per },
+      cuboid: { unit: "in", l: c.length_in, w: c.width_in, h: c.height_in },
+    },
+    description:
+      crateCount > 1 ? `${description} (crate ${i + 1} of ${crateCount})`.slice(0, 100) : description,
+    freight_class: freightClass,
+    num_pieces: 1,
+  }));
+  return { crates, weightSource, crateCount };
+}
+
+export function buildPackages(
+  order: ShopifyOrderNode,
+  settings: ShippingQuoteSettings,
+): { packages: FreightcomPackage[]; weightSource: "shopify" | "default" } {
+  const dp = settings.default_package;
+  const cuboid = { unit: "in" as const, l: dp.length_in, w: dp.width_in, h: dp.height_in };
+
+  const lb = orderWeightLb(order);
+  const weightSource = lb > 0 ? "shopify" : "default";
+  const total = Math.max(1, Math.round((lb > 0 ? lb : dp.weight_lb) * 10) / 10);
+  const description = orderDescription(order);
 
   // Carriers cap a single package (Freightcom rejects the request outright),
   // so heavy orders ship as several boxes of equal weight. This is still a
@@ -280,14 +367,46 @@ function nextBusinessDay(): { year: number; month: number; day: number } {
   return { year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate() };
 }
 
+export interface BuiltRateRequest {
+  request: FreightcomRateRequest;
+  weightSource: "shopify" | "default";
+  kind: "crate" | "parcel";
+  // What lands in the shipping_quotes.packages column.
+  stored: FreightcomPackage[] | FreightcomPallet[];
+}
+
 export function buildRateRequest(
   order: ShopifyOrderNode,
   settings: ShippingQuoteSettings,
-): { request: FreightcomRateRequest; weightSource: "shopify" | "default" } {
-  const { packages, weightSource } = buildPackages(order, settings);
+  opts: { freightClass?: string } = {},
+): BuiltRateRequest {
+  const glassUnits = countGlassUnits(order, settings);
+  const kind: BuiltRateRequest["kind"] = glassUnits > 0 ? "crate" : "parcel";
+
+  let weightSource: "shopify" | "default";
+  let stored: FreightcomPackage[] | FreightcomPallet[];
+  let packaging: FreightcomRateRequest["details"]["packaging_properties"];
+  let packagingType: "package" | "pallet";
+
+  if (kind === "crate") {
+    const built = buildCrates(order, settings, glassUnits, opts.freightClass ?? "70");
+    weightSource = built.weightSource;
+    stored = built.crates;
+    packagingType = "pallet";
+    packaging = { pallet_type: "ltl", pallets: built.crates, has_stackable_pallets: false };
+  } else {
+    const built = buildPackages(order, settings);
+    weightSource = built.weightSource;
+    stored = built.packages;
+    packagingType = "package";
+    packaging = { packages: built.packages, includes_return_label: false, has_dangerous_goods: false };
+  }
+
   const destination = buildDestination(order);
   return {
     weightSource,
+    kind,
+    stored,
     request: {
       details: {
         origin: buildOrigin(settings),
@@ -298,13 +417,32 @@ export function buildRateRequest(
           signature_requirement: "not-required",
         },
         expected_ship_date: nextBusinessDay(),
-        packaging_type: "package",
-        packaging_properties: { packages, includes_return_label: false, has_dangerous_goods: false },
+        packaging_type: packagingType,
+        packaging_properties: packaging,
         reference_codes: [order.name],
         shipment_classification: destination.residential ? "B2C" : "B2B",
       },
     },
   };
+}
+
+/**
+ * Freight class for a glass order's crates, computed by Freightcom from the
+ * crate's dims and weight. Falls back to class 70 if the calculator is
+ * unavailable — a slightly-off class still returns usable LTL rates.
+ */
+export async function crateFreightClass(
+  order: ShopifyOrderNode,
+  settings: ShippingQuoteSettings,
+  glassUnits: number,
+): Promise<string> {
+  try {
+    const { crates } = buildCrates(order, settings, glassUnits, "70");
+    return await calculateFreightClass(crates[0].measurements);
+  } catch (err) {
+    console.error("[shipping-quotes] freight-class calculate failed:", err instanceof Error ? err.message : err);
+    return "70";
+  }
 }
 
 export function shouldSkipMethod(title: string | null | undefined, settings: ShippingQuoteSettings): boolean {
@@ -332,7 +470,9 @@ export interface ShippingQuoteRow {
   customer_name: string | null;
   shipping_method: string | null;
   destination: FreightcomLocation;
-  packages: FreightcomPackage[];
+  // Parcel boxes, or LTL crates when the order contains glass (crate entries
+  // carry a freight_class).
+  packages: FreightcomPackage[] | FreightcomPallet[];
   weight_source: "shopify" | "default";
   status: "pending" | "quoted" | "no_rates" | "error";
   rate_request_id: string | null;
@@ -369,7 +509,10 @@ export async function quoteOrder(
   settings: ShippingQuoteSettings,
 ): Promise<ShippingQuoteRow["status"]> {
   const supabase = getSupabase();
-  const { request, weightSource } = buildRateRequest(order, settings);
+  const glassUnits = countGlassUnits(order, settings);
+  const freightClass =
+    glassUnits > 0 ? await crateFreightClass(order, settings, glassUnits) : undefined;
+  const { request, weightSource, stored } = buildRateRequest(order, settings, { freightClass });
   const now = new Date().toISOString();
   const base = {
     store_id: storeId,
@@ -379,7 +522,7 @@ export async function quoteOrder(
     customer_name: order.shippingAddress?.name || order.customer?.displayName || null,
     shipping_method: order.shippingLine?.title ?? null,
     destination: request.details.destination,
-    packages: request.details.packaging_properties.packages,
+    packages: stored,
     weight_source: weightSource,
     requested_at: now,
     updated_at: now,

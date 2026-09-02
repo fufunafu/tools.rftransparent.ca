@@ -3,9 +3,11 @@ import {
   buildDestination,
   buildPackages,
   buildRateRequest,
+  countGlassUnits,
   SHIPPING_QUOTE_DEFAULTS,
   shouldSkipMethod,
 } from "@/lib/shipping-quotes";
+import type { FreightcomPallet } from "@/lib/freightcom";
 import { cheapestRate } from "@/lib/freightcom";
 
 const settings = {
@@ -110,6 +112,62 @@ describe("buildDestination / buildRateRequest", () => {
     expect(request.details.destination.signature_requirement).toBe("not-required");
     expect(request.details.reference_codes).toEqual(["#1001"]);
     expect(request.details.shipment_classification).toBe("B2C");
+  });
+});
+
+describe("crate shipping for glass orders", () => {
+  const glassItem = (qty: number, lbEach = 50) => ({
+    title: "Glass Panel 40x61",
+    quantity: qty,
+    requiresShipping: true,
+    variant: { sku: "GP40X61", inventoryItem: { measurement: { weight: { value: lbEach, unit: "POUNDS" } } } },
+  });
+  const hardwareItem = {
+    title: "Spigot SS",
+    quantity: 10,
+    requiresShipping: true,
+    variant: { sku: "SP-SS", inventoryItem: { measurement: { weight: { value: 2, unit: "POUNDS" } } } },
+  };
+
+  it("counts glass by SKU prefix, ignoring hardware", () => {
+    const o = order({ lineItems: { nodes: [glassItem(20), hardwareItem] } });
+    expect(countGlassUnits(o, settings)).toBe(20);
+  });
+
+  it("falls back to title keywords when the item has no SKU", () => {
+    const o = order({
+      lineItems: { nodes: [{ title: "Custom Glass Panel", quantity: 3, requiresShipping: true, variant: null }] },
+    });
+    expect(countGlassUnits(o, settings)).toBe(3);
+  });
+
+  it("quotes glass orders as LTL crates: 20 glass -> 2 crates, hardware inside", () => {
+    const o = order({ lineItems: { nodes: [glassItem(20), hardwareItem] } });
+    const built = buildRateRequest(o, settings, { freightClass: "65" });
+    expect(built.kind).toBe("crate");
+    expect(built.request.details.packaging_type).toBe("pallet");
+    const props = built.request.details.packaging_properties as {
+      pallet_type: string;
+      pallets: FreightcomPallet[];
+    };
+    expect(props.pallet_type).toBe("ltl");
+    expect(props.pallets).toHaveLength(2);
+    // (20×50 lb glass + 10×2 lb hardware) / 2 crates + 80 lb tare = 590 each
+    expect(props.pallets[0].measurements.weight.value).toBeCloseTo(590, 0);
+    expect(props.pallets[0].freight_class).toBe("65");
+    expect(props.pallets[0].measurements.cuboid).toEqual({ unit: "in", l: 72, w: 30, h: 48 });
+  });
+
+  it("3 glass is still one crate; hardware-only orders stay parcels", () => {
+    const glass = order({ lineItems: { nodes: [glassItem(3)] } });
+    const glassBuilt = buildRateRequest(glass, settings, { freightClass: "70" });
+    expect(glassBuilt.kind).toBe("crate");
+    expect((glassBuilt.stored as FreightcomPallet[]).length).toBe(1);
+
+    const hardware = order({ lineItems: { nodes: [hardwareItem] } });
+    const hardwareBuilt = buildRateRequest(hardware, settings);
+    expect(hardwareBuilt.kind).toBe("parcel");
+    expect(hardwareBuilt.request.details.packaging_type).toBe("package");
   });
 });
 

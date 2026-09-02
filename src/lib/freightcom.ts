@@ -35,13 +35,24 @@ export interface FreightcomLocation {
   email_addresses?: string[];
 }
 
+export interface FreightcomMeasurements {
+  weight: { unit: "kg" | "lb" | "g" | "oz"; value: number };
+  cuboid: { unit: "mm" | "cm" | "m" | "in" | "ft"; l: number; w: number; h: number };
+}
+
 export interface FreightcomPackage {
-  measurements: {
-    weight: { unit: "kg" | "lb" | "g" | "oz"; value: number };
-    cuboid: { unit: "mm" | "cm" | "m" | "in" | "ft"; l: number; w: number; h: number };
-  };
+  measurements: FreightcomMeasurements;
   description: string;
   special_handling_required?: boolean;
+}
+
+export interface FreightcomPallet {
+  measurements: FreightcomMeasurements;
+  description: string;
+  freight_class: string;
+  nmfc?: string;
+  contents_type?: string;
+  num_pieces?: number;
 }
 
 export interface FreightcomRateRequest {
@@ -55,12 +66,18 @@ export interface FreightcomRateRequest {
       signature_requirement: "not-required" | "required" | "adult-required";
     };
     expected_ship_date: { year: number; month: number; day: number };
-    packaging_type: "package";
-    packaging_properties: {
-      packages: FreightcomPackage[];
-      includes_return_label?: boolean;
-      has_dangerous_goods?: boolean;
-    };
+    packaging_type: "package" | "pallet";
+    packaging_properties:
+      | {
+          packages: FreightcomPackage[];
+          includes_return_label?: boolean;
+          has_dangerous_goods?: boolean;
+        }
+      | {
+          pallet_type: "ltl";
+          pallets: FreightcomPallet[];
+          has_stackable_pallets?: boolean;
+        };
     reference_codes?: string[];
     shipment_classification?: "B2B" | "B2C" | "C2B" | "C2C";
   };
@@ -152,6 +169,19 @@ export async function waitForRate(
     last = await getRate(requestId);
   }
   return last;
+}
+
+/**
+ * Freightcom computes the LTL freight class from a crate's dimensions and
+ * weight, so nobody has to know NMFC classes by heart.
+ */
+export async function calculateFreightClass(box: FreightcomMeasurements): Promise<string> {
+  const data = await call<{ freight_class?: string }>("/freight-class/calculate", {
+    method: "POST",
+    body: JSON.stringify({ box }),
+  });
+  if (!data.freight_class) throw new Error("Freightcom returned no freight_class");
+  return data.freight_class;
 }
 
 export async function listServices(): Promise<{ id: string; carrier_name: string; service_name: string }[]> {

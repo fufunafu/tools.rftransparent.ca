@@ -41,6 +41,7 @@ export async function PUT(req: NextRequest) {
   const d = SHIPPING_QUOTE_DEFAULTS;
   const o = incoming.origin ?? {};
   const p = incoming.default_package ?? {};
+  const c = incoming.crate ?? {};
   const clean: ShippingQuoteSettings = {
     origin: {
       name: str(o.name) || d.origin.name,
@@ -65,6 +66,19 @@ export async function PUT(req: NextRequest) {
       : d.skip_shipping_methods,
     lookback_days: Math.min(60, Math.round(num(incoming.lookback_days, d.lookback_days))),
     max_package_weight_lb: Math.min(500, num(incoming.max_package_weight_lb, d.max_package_weight_lb)),
+    crate: {
+      glass_per_crate: Math.min(100, Math.round(num(c.glass_per_crate, d.crate.glass_per_crate))),
+      length_in: num(c.length_in, d.crate.length_in),
+      width_in: num(c.width_in, d.crate.width_in),
+      height_in: num(c.height_in, d.crate.height_in),
+      tare_lb: num(c.tare_lb, d.crate.tare_lb),
+      glass_sku_prefixes: Array.isArray(c.glass_sku_prefixes)
+        ? c.glass_sku_prefixes.map((v: unknown) => str(v, 20).toUpperCase()).filter(Boolean).slice(0, 20)
+        : d.crate.glass_sku_prefixes,
+      glass_title_keywords: Array.isArray(c.glass_title_keywords)
+        ? c.glass_title_keywords.map((v: unknown) => str(v, 40).toLowerCase()).filter(Boolean).slice(0, 20)
+        : d.crate.glass_title_keywords,
+    },
   };
 
   await putShippingQuoteSettings(clean);
