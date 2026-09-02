@@ -1,4 +1,6 @@
 export interface WarehouseReportInput {
+  // Selected on the shared-station form; null means "the signed-in employee".
+  employeeId: string | null;
   reportDate: string;
   boxesBuilt: number;
   ordersPacked: number;
@@ -33,8 +35,8 @@ export function validateWarehouseReport(value: unknown): WarehouseReportValidati
     return { ok: false, error: "Invalid request body" };
   }
   const body = value as Record<string, unknown>;
-  if ("employee_id" in body || "employeeId" in body) {
-    return { ok: false, error: "Employee identity must not be supplied by the client" };
+  if (body.employee_id != null && typeof body.employee_id !== "string") {
+    return { ok: false, error: "employee_id must be an employee id" };
   }
   if (!validDate(body.report_date)) {
     return { ok: false, error: "report_date must be a valid date" };
@@ -58,6 +60,7 @@ export function validateWarehouseReport(value: unknown): WarehouseReportValidati
   return {
     ok: true,
     value: {
+      employeeId: typeof body.employee_id === "string" && body.employee_id ? body.employee_id : null,
       reportDate: body.report_date,
       boxesBuilt,
       ordersPacked,

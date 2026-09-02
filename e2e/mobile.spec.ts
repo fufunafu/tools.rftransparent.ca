@@ -207,8 +207,13 @@ test.describe("authenticated mobile shell", () => {
     await expectNoSeriousAccessibilityViolations(page);
   });
 
-  test("warehouse reporting never sends a client-selected employee identity", async ({ page }) => {
+  test("warehouse reporting submits the name picked on the shared station", async ({ page }) => {
     test.skip(process.env.E2E_MOBILE_DEPARTMENT !== "warehouse", "Use a warehouse employee storage state and set E2E_MOBILE_DEPARTMENT=warehouse.");
+    await page.route("**/api/warehouse/employees", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify([{ id: "employee-a", name: "Worker A" }, { id: "employee-b", name: "Worker B" }]),
+    }));
     await page.route("**/api/warehouse/reports?**", (route) => route.fulfill({ status: 200, contentType: "application/json", body: "[]" }));
     let requestBody: Record<string, unknown> | null = null;
     await page.route("**/api/warehouse/reports", async (route) => {
@@ -221,14 +226,13 @@ test.describe("authenticated mobile shell", () => {
       });
     });
     await page.goto("/warehouse/report");
-    await expect(page.getByLabel("Your Name")).toHaveCount(0);
+    await page.getByLabel("Your name").selectOption("employee-b");
     await page.getByLabel("Boxes built").fill("1");
     await page.getByLabel("Orders packed").fill("2");
     await page.getByLabel("Walk-in and pick-up").fill("3");
     await page.getByRole("button", { name: "Submit my report" }).click();
     await expect(page.getByText("Report submitted.")).toBeVisible();
-    expect(requestBody).not.toHaveProperty("employee_id");
-    expect(requestBody).not.toHaveProperty("employeeId");
+    expect(requestBody).toMatchObject({ employee_id: "employee-b" });
   });
 
   test("explains location use and handles permission denial", async ({ page }) => {

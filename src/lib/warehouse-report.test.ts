@@ -14,6 +14,7 @@ describe("validateWarehouseReport", () => {
     expect(validateWarehouseReport(valid)).toEqual({
       ok: true,
       value: {
+        employeeId: null,
         reportDate: "2026-08-13",
         boxesBuilt: 12,
         ordersPacked: 8,
@@ -23,11 +24,16 @@ describe("validateWarehouseReport", () => {
     });
   });
 
-  it.each(["employee_id", "employeeId"])("rejects the client identity field %s", (field) => {
-    const result = validateWarehouseReport({ ...valid, [field]: "other-employee" });
-    expect(result).toEqual({
+  it("passes through a selected employee identity", () => {
+    const result = validateWarehouseReport({ ...valid, employee_id: "other-employee" });
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value.employeeId).toBe("other-employee");
+  });
+
+  it("rejects a non-string employee identity", () => {
+    expect(validateWarehouseReport({ ...valid, employee_id: 42 })).toEqual({
       ok: false,
-      error: "Employee identity must not be supplied by the client",
+      error: "employee_id must be an employee id",
     });
   });
 

@@ -50,8 +50,14 @@ beforeEach(() => {
   });
   const select = vi.fn(() => ({ single }));
   upsertMock.mockReturnValue({ select });
+  // employees lookup used when a different name is selected on the shared form
+  const employeeLookup = {
+    select: vi.fn(() => employeeLookup),
+    eq: vi.fn(() => employeeLookup),
+    maybeSingle: vi.fn().mockResolvedValue({ data: { id: "employee-other" }, error: null }),
+  };
   getSupabaseMock.mockReturnValue({
-    from: vi.fn(() => ({ upsert: upsertMock })),
+    from: vi.fn((table: string) => table === "employees" ? employeeLookup : ({ upsert: upsertMock })),
   });
 });
 
@@ -73,7 +79,7 @@ describe("frontline warehouse reports", () => {
     );
   });
 
-  it("rejects a spoofed employee identity without writing", async () => {
+  it("files for another warehouse employee selected on the shared station", async () => {
     const response = await POST(postRequest({
       report_date: "2026-08-13",
       boxes_built: 4,
@@ -82,21 +88,36 @@ describe("frontline warehouse reports", () => {
       employee_id: "employee-other",
     }));
 
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: "Employee identity must not be supplied by the client",
-    });
-    expect(upsertMock).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(upsertMock).toHaveBeenCalledWith(
+      expect.objectContaining({ employee_id: "employee-other" }),
+      { onConflict: "employee_id,report_date" },
+    );
   });
 
-  it("rejects selecting another employee while reading personal reports", async () => {
-    const request = new NextRequest(
-      "https://tools.rftransparent.ca/api/warehouse/reports?employeeId=employee-other",
-    );
-    const response = await GET(request);
+  it("refuses a selected identity that is not an active warehouse employee", async () => {
+    const employeeLookup = {
+      select: vi.fn(() => employeeLookup),
+      eq: vi.fn(() => employeeLookup),
+      maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null }),
+    };
+    getSupabaseMock.mockReturnValue({
+      from: vi.fn((table: string) => table === "employees" ? employeeLookup : ({ upsert: upsertMock })),
+    });
+
+    const response = await POST(postRequest({
+      report_date: "2026-08-13",
+      boxes_built: 4,
+      orders_packed: 5,
+      walkin_pickup: 6,
+      employee_id: "employee-ghost",
+    }));
 
     expect(response.status).toBe(400);
-    expect(getSupabaseMock).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toEqual({
+      error: "That name is not an active warehouse employee",
+    });
+    expect(upsertMock).not.toHaveBeenCalled();
   });
 
   it("requires management authorization for all-employee reporting", async () => {

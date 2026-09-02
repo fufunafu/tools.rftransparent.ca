@@ -17,5 +17,10 @@ export default async function WarehouseReportPage() {
   const employee = await findActiveEmployeeByEmail(user.email);
   const isWarehouse = employee?.department === "warehouse";
   if (!isWarehouse && !(await isManagementUser())) redirect("/access-denied");
-  return <WarehouseReportForm employeeName={employee?.name ?? user.email} />;
+  return (
+    <WarehouseReportForm
+      employeeName={employee?.name ?? user.email}
+      defaultEmployeeId={employee?.department === "warehouse" ? employee.id : null}
+    />
+  );
 }

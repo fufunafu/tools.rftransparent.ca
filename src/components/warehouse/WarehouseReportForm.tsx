@@ -4,6 +4,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useNativeRuntime } from "@/components/NativeAppRuntime";
 import { dayKeyInTimeZone } from "@/lib/time-clock";
 
+interface Employee {
+  id: string;
+  name: string;
+}
+
 interface Report {
   id: string;
   report_date: string;
@@ -27,8 +32,18 @@ function numericValue(value: string): number | null {
     : null;
 }
 
-export default function WarehouseReportForm({ employeeName }: { employeeName: string }) {
+const STORAGE_KEY = "warehouse_report_employee_id";
+
+export default function WarehouseReportForm({
+  employeeName,
+  defaultEmployeeId,
+}: {
+  employeeName: string;
+  defaultEmployeeId: string | null;
+}) {
   const { connected } = useNativeRuntime();
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [employeeId, setEmployeeId] = useState<string>(defaultEmployeeId ?? "");
   const [date, setDate] = useState(() => dayKeyInTimeZone(new Date()));
   const [boxesBuilt, setBoxesBuilt] = useState("");
   const [ordersPacked, setOrdersPacked] = useState("");
@@ -40,14 +55,39 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
   const [existingReport, setExistingReport] = useState<Report | null>(null);
   const [loadingReport, setLoadingReport] = useState(true);
 
+  // The warehouse floor shares one station, so the form asks who is reporting.
+  // Signed-in warehouse staff start on their own name; the last choice is
+  // remembered for the shared terminal.
+  useEffect(() => {
+    fetch("/api/warehouse/employees", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((list: Employee[]) => {
+        if (!Array.isArray(list)) return;
+        setEmployees(list);
+        setEmployeeId((current) => {
+          if (current && list.some((e) => e.id === current)) return current;
+          let stored: string | null = null;
+          try {
+            stored = window.localStorage.getItem(STORAGE_KEY);
+          } catch {
+            // Storage unavailable; fall through to the first entry.
+          }
+          if (stored && list.some((e) => e.id === stored)) return stored;
+          return current;
+        });
+      })
+      .catch(() => setError("Could not load the warehouse team list."));
+  }, []);
+
   const loadExisting = useCallback(async () => {
-    if (!date) return;
+    if (!date || !employeeId) return;
     setLoadingReport(true);
     setError("");
     try {
-      const response = await fetch(`/api/warehouse/reports?from=${date}&to=${date}`, {
-        cache: "no-store",
-      });
+      const response = await fetch(
+        `/api/warehouse/reports?employeeId=${encodeURIComponent(employeeId)}&from=${date}&to=${date}`,
+        { cache: "no-store" },
+      );
       if (!response.ok) throw new Error(await responseError(response, "Could not load your report."));
       const reports: Report[] = await response.json();
       const report = reports[0] ?? null;
@@ -62,7 +102,7 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
     } finally {
       setLoadingReport(false);
     }
-  }, [date]);
+  }, [date, employeeId]);
 
   useEffect(() => {
     void loadExisting();
@@ -70,6 +110,10 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    if (!employeeId) {
+      setError("Pick whose report this is first.");
+      return;
+    }
     if (!connected || !navigator.onLine) {
       setError("Reports require an internet connection. Reconnect and try again.");
       return;
@@ -92,6 +136,7 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          employee_id: employeeId,
           report_date: date,
           boxes_built: counts[0],
           orders_packed: counts[1],
@@ -123,9 +168,33 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
           <p className="text-xs font-bold uppercase tracking-[0.12em] text-blue-600">Warehouse</p>
           <h1 className="mt-1 text-2xl font-bold tracking-tight text-slate-950">Daily report</h1>
           <p className="mt-2 text-sm leading-6 text-slate-500">
-            Report your own production for the selected day. You are signed in as {employeeName}.
+            Report the day&rsquo;s production. You are signed in as {employeeName}.
           </p>
         </header>
+
+        <label className="block text-sm font-semibold text-slate-700">
+          Your name
+          <select
+            value={employeeId}
+            required
+            onChange={(event) => {
+              const next = event.target.value;
+              setEmployeeId(next);
+              setSuccess("");
+              try {
+                if (next) window.localStorage.setItem(STORAGE_KEY, next);
+              } catch {
+                // Storage unavailable; the selection still applies.
+              }
+            }}
+            className={`${fieldClass} mt-1.5`}
+          >
+            <option value="">Select your name...</option>
+            {employees.map((employee) => (
+              <option key={employee.id} value={employee.id}>{employee.name}</option>
+            ))}
+          </select>
+        </label>
 
         <label className="block text-sm font-semibold text-slate-700">
           Date
@@ -141,7 +210,11 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
           />
         </label>
 
-        {loadingReport ? (
+        {!employeeId ? (
+          <p className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600" role="status">
+            Pick a name to load that person&rsquo;s report.
+          </p>
+        ) : loadingReport ? (
           <div className="h-16 animate-pulse rounded-2xl bg-slate-100" aria-label="Loading report" />
         ) : existingReport ? (
           <p className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-800" role="status">
@@ -199,7 +272,7 @@ export default function WarehouseReportForm({ employeeName }: { employeeName: st
 
         <button
           type="submit"
-          disabled={saving || loadingReport || !connected}
+          disabled={saving || (loadingReport && !!employeeId) || !connected || !employeeId}
           className="min-h-12 w-full rounded-2xl bg-blue-600 px-5 py-3 text-base font-bold text-white shadow-lg shadow-blue-600/20 transition active:scale-[0.99] disabled:opacity-50"
         >
           {saving ? "Saving..." : existingReport ? "Update my report" : "Submit my report"}

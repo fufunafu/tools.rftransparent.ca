@@ -19,6 +19,24 @@ async function reportingEmployee(email: string) {
   return (await isManagementUser()) ? employee : null;
 }
 
+// The warehouse floor shares one station, so the form has a name selector
+// (restored 2026-09-02 on owner request, reverting the Aug 20 lockdown).
+// A selected identity must still be a real, active warehouse employee.
+async function resolveSelectedEmployee(
+  sessionEmployeeId: string,
+  requestedId: string | null,
+): Promise<string | null> {
+  if (!requestedId || requestedId === sessionEmployeeId) return sessionEmployeeId;
+  const { data } = await getSupabase()
+    .from("employees")
+    .select("id")
+    .eq("id", requestedId)
+    .eq("department", "warehouse")
+    .eq("active", true)
+    .maybeSingle();
+  return data ? data.id : null;
+}
+
 export async function GET(req: NextRequest) {
   const user = await getAuthenticatedUser();
   if (!user?.email) return jsonError("Unauthorized", 401);
@@ -32,14 +50,14 @@ export async function GET(req: NextRequest) {
     if (!(await isManagementUser())) return jsonError("Forbidden", 403);
     scopedEmployeeId = employeeId;
   } else {
-    if (employeeId) {
-      return jsonError("Employee identity cannot be selected for a personal report", 400);
-    }
     const employee = await reportingEmployee(user.email);
     if (!employee) {
       return jsonError("Your login is not linked to an active warehouse employee", 403);
     }
-    scopedEmployeeId = employee.id;
+    scopedEmployeeId = await resolveSelectedEmployee(employee.id, employeeId);
+    if (!scopedEmployeeId) {
+      return jsonError("That name is not an active warehouse employee", 400);
+    }
   }
 
   const from = searchParams.get("from");
@@ -77,11 +95,15 @@ export async function POST(req: NextRequest) {
   if (!parsed.ok) return jsonError(parsed.error, 400);
 
   const { value } = parsed;
+  const targetEmployeeId = await resolveSelectedEmployee(employee.id, value.employeeId);
+  if (!targetEmployeeId) {
+    return jsonError("That name is not an active warehouse employee", 400);
+  }
   const { data, error } = await getSupabase()
     .from("warehouse_daily_reports")
     .upsert(
       {
-        employee_id: employee.id,
+        employee_id: targetEmployeeId,
         report_date: value.reportDate,
         boxes_built: value.boxesBuilt,
         orders_packed: value.ordersPacked,
