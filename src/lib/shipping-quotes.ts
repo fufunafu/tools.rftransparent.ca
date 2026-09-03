@@ -267,11 +267,14 @@ export function buildCrates(
 ): { crates: FreightcomPallet[]; weightSource: "shopify" | "default"; crateCount: number } {
   const c = settings.crate;
   const realCrates = Math.max(1, Math.ceil(glassUnits / Math.max(1, c.glass_per_crate)));
-  // Freightcom rejects rate requests with more than 6 non-stackable pallets
-  // ("non-stackable pallets can have a maximum of 6 pallets"). A monster
-  // order still deserves a ballpark, so the request is capped at 6 crates
-  // carrying the full weight — the description notes the real count.
-  const crateCount = Math.min(6, realCrates);
+  // Freightcom limits (probed against the live API, 2026-09-03): at most 6
+  // non-stackable pallets per request, and when a request has 5+ pallets,
+  // every pallet must be under 48" long. Glass crates are long, so oversized
+  // crates cap at 4 per request. A monster order still deserves a ballpark:
+  // the request carries the full weight on the capped count and the
+  // description notes the real crate count.
+  const maxPerRequest = c.length_in >= 48 ? 4 : 6;
+  const crateCount = Math.min(maxPerRequest, realCrates);
   const lb = orderWeightLb(order);
   const weightSource = lb > 0 ? "shopify" : "default";
   // No Shopify weights: assume the default box weight of cargo per crate
@@ -281,7 +284,7 @@ export function buildCrates(
   const baseDescription = orderDescription(order);
   const description =
     realCrates > crateCount
-      ? `${baseDescription} (actually ${realCrates} crates, quoted as 6)`.slice(0, 100)
+      ? `${baseDescription} (actually ${realCrates} crates, quoted as ${crateCount})`.slice(0, 100)
       : baseDescription;
   const crates: FreightcomPallet[] = Array.from({ length: crateCount }, (_, i) => ({
     measurements: {
@@ -412,6 +415,12 @@ export function buildRateRequest(
   }
 
   const destination = buildDestination(order);
+  // Freightcom requires a destination email on international shipments; when
+  // the Shopify order has none, the warehouse email stands in (rating sends
+  // no notifications).
+  if (!destination.email_addresses?.length && settings.origin.email) {
+    destination.email_addresses = [settings.origin.email];
+  }
   return {
     weightSource,
     kind,

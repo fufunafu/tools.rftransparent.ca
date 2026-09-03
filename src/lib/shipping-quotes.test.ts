@@ -158,15 +158,28 @@ describe("crate shipping for glass orders", () => {
     expect(props.pallets[0].measurements.cuboid).toEqual({ unit: "in", l: 72, w: 30, h: 48 });
   });
 
-  it("caps a rate request at Freightcom's 6-pallet maximum, keeping full weight", () => {
-    // 100 glass × 50 lb = 7 real crates, but the request may only carry 6.
+  it("caps oversized-crate requests at 4 pallets (5+ pallets must be under 48 in long)", () => {
+    // 100 glass × 50 lb = 7 real crates of 72 in — capped at 4 per request.
     const o = order({ lineItems: { nodes: [glassItem(100)] } });
     const built = buildRateRequest(o, settings, { freightClass: "70" });
     const pallets = built.stored as FreightcomPallet[];
-    expect(pallets).toHaveLength(6);
-    // 5000 lb / 6 crates + 80 tare ≈ 913.3 each — total weight preserved.
-    expect(pallets[0].measurements.weight.value).toBeCloseTo(913.3, 1);
-    expect(pallets[0].description).toContain("actually 7 crates");
+    expect(pallets).toHaveLength(4);
+    // 5000 lb / 4 crates + 80 tare = 1330 each — total weight preserved.
+    expect(pallets[0].measurements.weight.value).toBeCloseTo(1330, 0);
+    expect(pallets[0].description).toContain("actually 7 crates, quoted as 4");
+  });
+
+  it("short crates may go up to Freightcom's 6-pallet maximum", () => {
+    const shortCrates = { ...settings, crate: { ...settings.crate, length_in: 40 } };
+    const o = order({ lineItems: { nodes: [glassItem(100)] } });
+    const built = buildRateRequest(o, shortCrates, { freightClass: "70" });
+    expect((built.stored as FreightcomPallet[]).length).toBe(6);
+  });
+
+  it("falls back to the warehouse email when the order has none (international rating)", () => {
+    const o = order({ email: null, lineItems: { nodes: [glassItem(3)] } });
+    const built = buildRateRequest(o, settings, { freightClass: "70" });
+    expect(built.request.details.destination.email_addresses).toEqual(["warehouse@example.com"]);
   });
 
   it("3 glass is still one crate; hardware-only orders stay parcels", () => {
