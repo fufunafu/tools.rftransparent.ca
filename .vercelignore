@@ -2,7 +2,7 @@
 .next
 node_modules
 .artifacts
-tmp
+/tmp
 coverage
 playwright-report
 test-results
