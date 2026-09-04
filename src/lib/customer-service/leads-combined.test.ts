@@ -121,6 +121,14 @@ describe("buildCombinedRows", () => {
     expect(row.tabs).not.toContain("open");
   });
 
+  it("stops asking for a call once an uncalled lead is over 30 days old", () => {
+    const [row] = buildCombinedRows([lead({ submitted_at: "2026-06-01T00:00:00Z" })], [], OPTS);
+    expect(row.stage).toBe("new");
+    expect(row.next).toMatchObject({ kind: "call", urgency: "none", label: "Never called" });
+    expect(row.tabs).not.toContain("todo");
+    expect(summarize([row], OPTS).needCall.total).toBe(0);
+  });
+
   it("takes the stage and due date from the linked quote", () => {
     const l = lead({ id: "a", email: "jl@example.com", call_status: "called", outcome: "quoted", submitted_at: "2026-08-30T13:12:00Z", first_call_at: "2026-08-30T14:20:00Z" });
     const [row] = buildCombinedRows([l], [quote({})], OPTS);

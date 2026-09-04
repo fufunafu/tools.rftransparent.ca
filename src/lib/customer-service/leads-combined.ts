@@ -127,6 +127,9 @@ const CLOSED_STAGES = new Set<CombinedStage>(["won", "lost", "not_applicable", "
 // A lead submitted this long after a quote is still treated as the same
 // inquiry (form filled after a phone quote). Anything later is a new inquiry.
 const LEAD_AFTER_QUOTE_WINDOW_MS = 30 * DAY_MS;
+// Uncalled leads older than this are no longer a "call now" task — they stay
+// visible as New in All, but they don't crowd the To do list or the KPI.
+const CALL_WINDOW_MS = 30 * DAY_MS;
 
 function normalizedEmail(raw: string | null | undefined): string | null {
   const email = raw?.replace(/\s+/g, "").toLowerCase() ?? "";
@@ -299,15 +302,18 @@ function deriveNext(
     return { kind: "none", label: "Quote not tracked", urgency: "none", dueAt: null };
   }
 
+  const waitingMs = nowMs - new Date(receivedAt).getTime();
+  const stale = waitingMs > CALL_WINDOW_MS;
   switch (callState) {
     case "no_phone":
       return { kind: "call", label: "No phone number", urgency: "none", dueAt: null };
     case "not_called": {
-      const waitingMs = nowMs - new Date(receivedAt).getTime();
+      if (stale) return { kind: "call", label: "Never called", urgency: "none", dueAt: null };
       const label = waitingMs >= DAY_MS ? `Call now · waiting ${Math.floor(waitingMs / DAY_MS)}d` : "Call now";
       return { kind: "call", label, urgency: "now", dueAt: null };
     }
     case "no_answer":
+      if (stale) return { kind: "call", label: "No answer, not retried", urgency: "none", dueAt: null };
       return { kind: "call", label: "Call again", urgency: "now", dueAt: null };
     case "called":
       return { kind: "quote", label: "Send quote", urgency: "later", dueAt: null };
