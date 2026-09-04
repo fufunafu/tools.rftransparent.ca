@@ -209,6 +209,8 @@ export const NAV_ITEMS: NavSection[] = [
       { href: "/customer-service/emails", label: "Emails", status: "done" },
       { href: "/customer-service/follow-up", label: "Follow-up", status: "done" },
       { href: "/customer-service/leads", label: "Leads", status: "wip" },
+      // TEMPORARY mockup of Leads + Follow-up combined; remove with src/app/customer-service/tmp.
+      { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
       { href: "/customer-service/problems", label: "Problem Tickets", status: "done" },
     ],
   },
