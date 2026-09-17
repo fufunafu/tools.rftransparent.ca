@@ -24,21 +24,22 @@ export default function PrivacyPage() {
       intro="RF Transparent Tools is a private workforce and operations application provided by 15041074 Canada Inc., operating as RF Transparent. This policy explains what the app processes, why it is needed, and the choices available to authorized users."
     >
       <p className="rounded-2xl border border-blue-100 bg-blue-50 px-5 py-4 text-sm text-blue-950">
-        Effective August 23, 2026. RF Tools does not sell personal information, show advertising, or track users across other companies&apos; apps and websites.
+        Effective September 17, 2026. RF Tools does not sell personal information, show advertising, or track users across other companies&apos; apps and websites.
       </p>
 
       <Section title="Information we process">
         <ul className="list-disc space-y-2 pl-5">
           <li><strong>Account and profile information:</strong> name, work email, employee profile, department, location, role, profile image, access permissions, and authentication session.</li>
           <li><strong>Work activity:</strong> time entries, assigned tasks, warehouse reports, sales and customer-service activity, performance information, survey responses, reimbursement requests, bug reports, comments, and files submitted through authorized workflows.</li>
-          <li><strong>Location at clock-in:</strong> latitude, longitude, reported accuracy, capture time, and distance from the configured workplace. RF Tools requests location only when a user starts a location-protected clock-in. It does not continuously monitor location.</li>
+          <li><strong>Location at clock-in or customer visit check-in:</strong> latitude, longitude, reported accuracy, capture time, and distance from the configured workplace or saved customer site. RF Tools requests location only after the user starts a location-protected check-in. It does not continuously monitor location.</li>
+          <li><strong>Field-sales information:</strong> customer appointments, store visits, odometer readings, calculated mileage, visit outcomes, notes, business contacts, and optional business-card images submitted by the user.</li>
           <li><strong>Device and app information:</strong> iOS push-notification token, app version, build number, notification preference, and limited technical information needed to deliver notifications and diagnose availability problems.</li>
         </ul>
       </Section>
 
       <Section title="How information is used">
         <p>We use this information to authenticate authorized personnel, enforce role-based access, record attendance, coordinate work, provide operational reporting, deliver requested notifications, protect company systems, investigate problems, and meet employment, accounting, security, and legal obligations.</p>
-        <p>Location is used only to confirm that a clock-in was attempted near an approved workplace and to retain an attendance audit record. A denied or inaccurate location prevents the location-protected clock-in rather than starting background tracking.</p>
+        <p>Location is used to confirm that a clock-in or customer visit check-in was attempted near an approved workplace or saved customer site and to retain an audit record. For a customer site without a saved location, a user can choose to establish the site pin during the first confirmed visit. An inaccurate or denied location prevents the protected check-in rather than starting background tracking.</p>
       </Section>
 
       <Section title="Service providers and disclosure">
@@ -52,7 +53,7 @@ export default function PrivacyPage() {
       </Section>
 
       <Section title="Choices and requests">
-        <p>Users can decline location or notification access in iOS Settings. Declining notifications does not prevent normal app use. Declining location prevents location-protected clock-in, and the user should contact a manager for the approved attendance process.</p>
+        <p>Users can decline location or notification access in device settings. Declining notifications does not prevent normal app use. Declining location prevents location-protected clock-ins and field-sales visit check-ins, and the user should contact a manager for the approved alternative process.</p>
         <p>Authorized users may request access, correction, or deletion of eligible personal information. Accounts are provisioned by the company rather than created publicly, so account closure requests are handled by an administrator.</p>
       </Section>
 

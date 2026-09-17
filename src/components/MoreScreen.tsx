@@ -99,7 +99,7 @@ export default function MoreScreen({
   const showAvatar = avatarUrl && !avatarFailed;
   const role = mobileRoleActions(viewerDepartment);
   const rolePaths = new Set(role.map((item) => item.href));
-  const personalRolePaths = new Set(["/sales", "/warehouse/report"]);
+  const personalRolePaths = new Set(["/sales", "/field-sales", "/warehouse/report"]);
   const primaryPaths = new Set(["/", "/clock", "/todos", "/more"]);
   const accountPaths = new Set(["/settings/account", "/bugs"]);
 

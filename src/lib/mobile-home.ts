@@ -3,6 +3,7 @@ import type { MobileRoleAction } from "@/lib/mobile-types";
 const actions = {
   sales: [
     { id: "sales", label: "My sales", description: "Quotes and results", href: "/sales" },
+    { id: "field-sales", label: "Field sales", description: "Visits, mileage, and contacts", href: "/field-sales" },
     { id: "followups", label: "My follow-ups", description: "Customers waiting for you", href: "/customer-service/follow-up" },
   ],
   warehouse: [
@@ -21,6 +22,7 @@ const actions = {
   ],
   management: [
     { id: "employees", label: "Employees", description: "People and performance", href: "/employees" },
+    { id: "field-sales", label: "Field sales", description: "Rep visits and outcomes", href: "/field-sales" },
     { id: "warehouse", label: "Warehouse", description: "Daily operational summary", href: "/warehouse" },
   ],
 } satisfies Record<string, MobileRoleAction[]>;

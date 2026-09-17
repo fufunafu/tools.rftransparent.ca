@@ -17,7 +17,7 @@ export function nativeLinkAccessRequirement(
 ): NativeLinkAccessRequirement {
   if (pathname === "/privacy" || pathname === "/support") return "public";
   if (pathname === "/warehouse/report") return "warehouse-or-management";
-  if (pathname === "/sales") return "sales-or-management";
+  if (pathname === "/sales" || pathname === "/field-sales") return "sales-or-management";
   if (pathname === "/customer-service") {
     return "customer-service-or-management";
   }
