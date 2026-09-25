@@ -81,6 +81,19 @@ if (!["all", "unit", "ui"].includes(scope)) {
 
 const requestedScopes = scope === "all" ? ["unit", "ui"] : [scope];
 
+// Finish cold simulator startup before the bounded build/test operation.
+// Otherwise first boot and testmanagerd setup consume the test timeout.
+if (selected.state !== "Booted") {
+  execFileSync("/usr/bin/xcrun", ["simctl", "boot", selected.udid], {
+    stdio: "inherit",
+    timeout: operationTimeoutMs,
+  });
+}
+execFileSync("/usr/bin/xcrun", ["simctl", "bootstatus", selected.udid, "-b"], {
+  stdio: "inherit",
+  timeout: operationTimeoutMs,
+});
+
 // Xcode 26's UI-test runner is terminated by the simulator after several
 // consecutive WebKit app launches, even though the individual tests pass.
 // Keep each operation below that threshold. Reusing the same DerivedData path

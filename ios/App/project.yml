@@ -122,6 +122,9 @@ schemes:
         AppUITests: [test]
     test:
       config: Debug
+      # Hosted simulators can stall waiting for LLDB before XCTest starts.
+      # Test execution and coverage do not require debugger attachment.
+      debugEnabled: false
       gatherCoverageData: true
       targets:
         - name: AppTests
