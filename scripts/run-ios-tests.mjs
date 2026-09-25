@@ -81,6 +81,28 @@ if (!["all", "unit", "ui"].includes(scope)) {
 
 const requestedScopes = scope === "all" ? ["unit", "ui"] : [scope];
 
+const buildArgs = [
+  "-project", project,
+  "-scheme", "App",
+  "-configuration", "Debug",
+  "-destination", `id=${selected.udid}`,
+  // FileProvider-backed paths can break ad hoc simulator code signing.
+  "-derivedDataPath", derivedDataPath,
+  // XCTest does not need editor indexing, which can stall Xcode 26 builds.
+  "COMPILER_INDEX_STORE_ENABLE=NO",
+];
+
+// Compilation and package resolution can consume most of a cold CI operation.
+// Give the build its own bound so it cannot exhaust the test execution budget.
+// Build before booting the simulator to avoid competing for runner resources.
+console.log("Building native test bundles before simulator startup.");
+execFileSync("/usr/bin/xcodebuild", [...buildArgs, "build-for-testing"], {
+  cwd: root,
+  stdio: "inherit",
+  timeout: operationTimeoutMs,
+  killSignal: "SIGKILL",
+});
+
 // Finish cold simulator startup before the bounded build/test operation.
 // Otherwise first boot and testmanagerd setup consume the test timeout.
 if (selected.state !== "Booted") {
@@ -177,27 +199,13 @@ for (const requestedScope of requestedScopes) {
   // bundle path and producing an early-exit failure despite passing assertions.
   for (const [index, onlyTesting] of testShards.entries()) {
     const shard = requestedScope === "ui" ? ` shard ${index + 1}/${testShards.length}` : "";
-    const action = requestedScope === "ui" && index > 0
-      ? "test-without-building"
-      : "test";
     console.log(
       `Running ${requestedScope} native tests${shard} on ${selected.name} (${selected.runtime}).`,
     );
 
     const args = [
-      "-project", project,
-      "-scheme", "App",
-      "-configuration", "Debug",
-      "-destination", `id=${selected.udid}`,
-      // Keep DerivedData outside FileProvider-backed workspaces such as iCloud
-      // Drive. FileProvider metadata breaks ad hoc simulator code signing, and
-      // disabling signing prevents XCTest from installing a valid hosted app.
-      "-derivedDataPath", derivedDataPath,
-      // Index data is an editor feature and is not used by XCTest. Disabling it
-      // avoids an Xcode 26 command-line deadlock while indexing Swift package
-      // dependencies and makes the same runner reliable on hosted CI machines.
-      "COMPILER_INDEX_STORE_ENABLE=NO",
-        action,
+      ...buildArgs,
+      "test-without-building",
       ...onlyTesting,
       ...uiTestStabilityOptions,
     ];
