@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { isProblemType } from "@/lib/problem-tickets";
+import { PROBLEM_ATTACHMENT_BUCKET, PROBLEM_ATTACHMENT_COLUMNS } from "@/lib/problem-attachments";
 
 const COLUMNS =
-  "id, client_name, ticket_date, person, status, type, issue, resolution, store, created_by, created_at, updated_at, resolved_at";
+  `id, client_name, ticket_date, person, status, type, issue, resolution, store, created_by, created_at, updated_at, resolved_at, attachments:problem_attachments(${PROBLEM_ATTACHMENT_COLUMNS})`;
 
 function todayToronto(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "America/Toronto" });
@@ -120,7 +121,16 @@ export async function DELETE(req: NextRequest) {
   const id = req.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
-  const { error } = await getSupabase().from("problem_tickets").delete().eq("id", id);
+  const supabase = getSupabase();
+  const { data: photos, error: photoError } = await supabase.from("problem_attachments")
+    .select("path").eq("ticket_id", id);
+  if (photoError) return NextResponse.json({ error: "Could not load ticket pictures. Please try again." }, { status: 500 });
+  const { error } = await supabase.from("problem_tickets").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (photos?.length) {
+    const paths = photos.map((photo) => photo.path);
+    const { error: cleanupError } = await supabase.storage.from(PROBLEM_ATTACHMENT_BUCKET).remove(paths);
+    if (cleanupError) console.error("[problem photos] Orphaned ticket pictures", { paths, error: cleanupError });
+  }
   return NextResponse.json({ ok: true });
 }

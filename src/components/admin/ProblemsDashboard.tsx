@@ -9,6 +9,8 @@ import {
   typeColor,
 } from "@/lib/problem-tickets";
 import type { MonthlyTypeRow, YearlyRow } from "./ProblemsCharts";
+import ProblemPictures, { type PendingProblemPicture } from "./ProblemPictures";
+import { problemPhotoError, type ProblemAttachment } from "@/lib/problem-attachments";
 
 const MonthlyByTypeChart = dynamic(
   () => import("./ProblemsCharts").then((m) => ({ default: m.MonthlyByTypeChart })),
@@ -78,9 +80,11 @@ function daysToResolve(t: ProblemTicket): number | null {
 export default function ProblemsDashboard({
   stores,
   canDelete,
+  currentUserEmail,
 }: {
   stores: StoreOption[];
   canDelete: boolean;
+  currentUserEmail: string;
 }) {
   const currentYear = useMemo(() => parseISO(todayToronto()).year, []);
   const [tickets, setTickets] = useState<ProblemTicket[]>([]);
@@ -94,12 +98,17 @@ export default function ProblemsDashboard({
   const [form, setForm] = useState<FormState>(emptyForm);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pictures, setPictures] = useState<ProblemAttachment[]>([]);
+  const [pendingPictures, setPendingPictures] = useState<PendingProblemPicture[]>([]);
+  const [removingPicture, setRemovingPicture] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const busy = saving || removingPicture;
 
   const closeForm = useCallback(() => {
-    if (saving) return;
+    if (busy) return;
     setShowForm(false);
     setEditingId(null);
-  }, [saving]);
+  }, [busy]);
 
   useEffect(() => {
     if (!showForm) return;
@@ -128,6 +137,8 @@ export default function ProblemsDashboard({
             setError("Could not load tickets");
           }
         }
+      } catch {
+        if (!cancelled) setError("Could not load tickets. Please refresh and try again.");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -215,12 +226,16 @@ export default function ProblemsDashboard({
 
   const openNew = useCallback(() => {
     setForm(emptyForm());
+    setPictures([]);
+    setPendingPictures([]);
     setEditingId(null);
     setShowForm(true);
     setError(null);
   }, []);
 
   const openEdit = useCallback((t: ProblemTicket, status?: "resolved") => {
+    setPictures(t.attachments ?? []);
+    setPendingPictures([]);
     setForm({
       client_name: t.client_name,
       ticket_date: t.ticket_date,
@@ -236,11 +251,43 @@ export default function ProblemsDashboard({
     setError(null);
   }, []);
 
+  function choosePictures(files: File[]) {
+    const errors: string[] = [];
+    const selected: PendingProblemPicture[] = [];
+    for (const file of files) {
+      const message = problemPhotoError(file);
+      if (message) errors.push(message);
+      else selected.push({ id: crypto.randomUUID(), file });
+    }
+    setPendingPictures((previous) => [...previous, ...selected]);
+    setError(errors.length ? errors.join(" ") : null);
+  }
+
+  async function removePicture(photo: ProblemAttachment) {
+    if (busy || !window.confirm(`Remove ${photo.filename} from this ticket?`)) return;
+    setRemovingPicture(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/problems/attachments?id=${photo.id}`, { method: "DELETE" });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(result?.error || "Could not remove the picture. Please try again.");
+      setPictures((previous) => previous.filter((item) => item.id !== photo.id));
+      setTickets((previous) => previous.map((ticket) => ticket.id === editingId
+        ? { ...ticket, attachments: ticket.attachments?.filter((item) => item.id !== photo.id) }
+        : ticket));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not remove the picture.");
+    } finally {
+      setRemovingPicture(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.client_name.trim()) return;
+    if (busy || !form.client_name.trim()) return;
     setSaving(true);
     setError(null);
+    let savedTicketId: string | null = null;
     try {
       const res = await fetch("/api/problems", {
         method: editingId ? "PATCH" : "POST",
@@ -253,18 +300,48 @@ export default function ProblemsDashboard({
         return;
       }
       const ticket: ProblemTicket = json.ticket;
+      savedTicketId = ticket.id;
+      setEditingId(ticket.id);
+      let uploaded = ticket.attachments ?? pictures;
+      setPictures(uploaded);
+      const savedTicket = { ...ticket, attachments: uploaded };
       setTickets((prev) =>
-        editingId ? prev.map((t) => (t.id === editingId ? ticket : t)) : [ticket, ...prev]
+        prev.some((t) => t.id === ticket.id)
+          ? prev.map((t) => (t.id === ticket.id ? savedTicket : t))
+          : [savedTicket, ...prev]
       );
+      setYear(parseISO(ticket.ticket_date).year);
+      for (let index = 0; index < pendingPictures.length; index++) {
+        const pending = pendingPictures[index];
+        setUploadProgress(`Uploading picture ${index + 1} of ${pendingPictures.length}...`);
+        const body = new FormData();
+        body.set("ticket_id", ticket.id);
+        body.set("id", pending.id);
+        body.set("file", pending.file);
+        const response = await fetch("/api/problems/attachments", { method: "POST", body });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.attachment) {
+          throw new Error(result?.error || `Could not upload ${pending.file.name}.`);
+        }
+        uploaded = [...uploaded.filter((photo) => photo.id !== result.attachment.id), result.attachment];
+        const attachments = uploaded;
+        setPictures(attachments);
+        setPendingPictures((previous) => previous.filter((photo) => photo.id !== pending.id));
+        setTickets((previous) => previous.map((item) => item.id === ticket.id ? { ...item, attachments } : item));
+      }
       setShowForm(false);
       setEditingId(null);
       // Jump the year filter to the saved ticket so it doesn't silently
       // disappear behind a different year.
       setYear(parseISO(ticket.ticket_date).year);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Save failed");
+      const message = cause instanceof Error ? cause.message : "Save failed";
+      setError(savedTicketId
+        ? `Ticket saved. ${message} Your remaining pictures are still here. Save again to retry, or remove them.`
+        : message);
     } finally {
       setSaving(false);
+      setUploadProgress(null);
     }
   }
 
@@ -348,7 +425,7 @@ export default function ProblemsDashboard({
               <button
                 type="button"
                 onClick={closeForm}
-                disabled={saving}
+                disabled={busy}
                 aria-label="Close ticket editor"
                 title="Close"
                 className="flex h-8 w-8 items-center justify-center rounded-md text-sand-400 hover:bg-sand-100 hover:text-sand-700 disabled:opacity-40"
@@ -363,7 +440,7 @@ export default function ProblemsDashboard({
                 {error}
               </div>
             )}
-            <div className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
+            <fieldset disabled={busy} className="grid grid-cols-1 gap-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-5">
             <div className="lg:col-span-2">
               <label className={labelClass}>Client name *</label>
               <input
@@ -460,19 +537,30 @@ export default function ProblemsDashboard({
                 />
               </div>
             )}
-            </div>
+            <ProblemPictures
+              attachments={pictures}
+              pending={pendingPictures}
+              disabled={busy}
+              currentUserEmail={currentUserEmail}
+              canDelete={canDelete}
+              onChoose={choosePictures}
+              onRemovePending={(id) => setPendingPictures((previous) => previous.filter((photo) => photo.id !== id))}
+              onRemoveSaved={removePicture}
+            />
+            </fieldset>
             <div className="sticky bottom-0 flex justify-end gap-2 border-t border-sand-200 bg-white px-5 py-3">
+              <span role="status" className="min-w-0 flex-1 self-center text-xs text-sand-500">{uploadProgress || (removingPicture ? "Removing picture..." : "")}</span>
               <button
                 type="button"
                 onClick={closeForm}
-                disabled={saving}
+                disabled={busy}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-sand-600 hover:bg-sand-100 disabled:opacity-40"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                disabled={saving || !form.client_name.trim()}
+                disabled={busy || !form.client_name.trim()}
                 className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
               >
                 {saving ? "Saving..." : editingId ? "Save changes" : "Add ticket"}
@@ -659,6 +747,17 @@ export default function ProblemsDashboard({
                   </td>
                   <td className="px-4 py-3 text-sand-600 whitespace-pre-wrap">
                     {t.issue || "—"}
+                    {!!t.attachments?.length && (
+                      <button
+                        type="button"
+                        onClick={() => openEdit(t)}
+                        aria-label={`View ${t.attachments.length} picture${t.attachments.length === 1 ? "" : "s"} for ${t.client_name}`}
+                        className="mt-2 flex items-center gap-1.5 rounded-md bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="h-4 w-4" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="8" cy="8" r="1.5" /><path d="m3 17 6-6 4 4 3-3 5 5" /></svg>
+                        {t.attachments.length} picture{t.attachments.length === 1 ? "" : "s"}
+                      </button>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-sand-600 whitespace-pre-wrap">
                     {t.resolution || "—"}

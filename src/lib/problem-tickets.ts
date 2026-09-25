@@ -3,6 +3,8 @@
 // route (validation) and the dashboard/charts (labels, colors), so the
 // category list lives in exactly one place.
 
+import type { ProblemAttachment } from "@/lib/problem-attachments";
+
 export interface ProblemTicket {
   id: string;
   client_name: string;
@@ -17,6 +19,7 @@ export interface ProblemTicket {
   created_at: string;
   updated_at: string;
   resolved_at: string | null;
+  attachments?: ProblemAttachment[];
 }
 
 // Fixed order — chart colors are assigned by this order and must never be
