@@ -17,7 +17,6 @@ import {
   classifyNativeSessionResponse,
   clearLegacySavedCredentials,
   consumeFreshNativeSession,
-  deviceUnlockAvailable,
   isNativeApp,
 } from "@/lib/app-biometrics";
 import type { NativeRuntimeState } from "@/lib/mobile-types";
@@ -26,6 +25,7 @@ import {
   isProtectedNativePath,
   isTrustedAppUrl,
   requiresNativeSessionUnlock,
+  shouldRelockNativeSession,
 } from "@/lib/native-runtime";
 import { resolveAuthorizedNativeLink } from "@/lib/native-links";
 import { checkNativeUpdate, normalizeNativeUpdateUrl } from "@/lib/native-update";
@@ -97,10 +97,11 @@ function UnlockOverlay({
         </button>
         <a
           href="/api/logout"
-          className="mt-3 flex min-h-11 items-center justify-center rounded-xl text-sm font-semibold text-slate-500"
+          className="mt-3 flex min-h-12 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-sm font-bold text-red-700 active:bg-red-100"
         >
-          Sign out instead
+          Log out
         </a>
+        <p className="mt-2 text-xs leading-5 text-slate-500">Log out to sign in again with your email and password.</p>
       </div>
     </div>
   );
@@ -139,6 +140,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const authenticating = useRef(false);
+  const unlockAttempt = useRef(0);
   const backgrounded = useRef(false);
   const readyRecorded = useRef(false);
   const policyRequest = useRef(0);
@@ -245,11 +247,18 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       return;
     }
     authenticating.current = true;
+    const attempt = ++unlockAttempt.current;
+    const controller = new AbortController();
+    const sessionTimeout = window.setTimeout(() => controller.abort(), 10_000);
     setLocked(true);
     setUnlockBusy(true);
     setUnlockError(null);
     try {
-      const session = await fetch("/api/admin/me", { cache: "no-store" });
+      // Keep recovery controls visible even if the session request stalls.
+      void hideSplash();
+      const session = await fetch("/api/admin/me", { cache: "no-store", signal: controller.signal });
+      window.clearTimeout(sessionTimeout);
+      if (attempt !== unlockAttempt.current) return;
       const sessionDecision = classifyNativeSessionResponse(session);
       if (sessionDecision === "expired") {
         window.location.replace("/login?error=session_expired");
@@ -262,19 +271,10 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
         return;
       }
 
-      if (!(await deviceUnlockAvailable())) {
-        recordNativeDiagnosticEvent("device_unlock_failed");
-        await hideSplash();
-        setUnlockError(
-          "Device authentication is unavailable. Set up Face ID, Touch ID, or a device passcode, then try again.",
-        );
-        return;
-      }
-
-      await hideSplash();
       const result = await authenticateAppSession();
+      if (attempt !== unlockAttempt.current) return;
       if (result.ok) {
-        await clearLegacySavedCredentials();
+        void clearLegacySavedCredentials();
         setSessionUnlocked(true);
         setLocked(false);
         setUnlockError(null);
@@ -282,7 +282,9 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       }
       setLocked(true);
       recordNativeDiagnosticEvent("device_unlock_failed");
-      if (result.reason === "locked") {
+      if (result.reason === "timed_out") {
+        setUnlockError("Unlock timed out. Try again, or log out to sign in with your email and password.");
+      } else if (result.reason === "locked") {
         setUnlockError("Device authentication is temporarily locked. Use your device passcode or try again later.");
       } else if (result.reason === "cancelled") {
         setUnlockError("Unlock was canceled. Authenticate when you are ready to continue.");
@@ -292,13 +294,17 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
         setUnlockError("RF Tools could not verify your identity. Try again.");
       }
     } catch {
+      if (attempt !== unlockAttempt.current) return;
       setLocked(true);
       recordNativeDiagnosticEvent("session_check_failed");
-      setUnlockError("RF Tools is offline. Reconnect before unlocking.");
+      setUnlockError("RF Tools could not verify your session. Check your connection and try again, or log out.");
     } finally {
-      authenticating.current = false;
-      setUnlockBusy(false);
-      await hideSplash();
+      window.clearTimeout(sessionTimeout);
+      if (attempt === unlockAttempt.current) {
+        authenticating.current = false;
+        setUnlockBusy(false);
+        void hideSplash();
+      }
     }
   }, [hideSplash, localPreview, native]);
 
@@ -352,34 +358,43 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
         await App.addListener("appUrlOpen", ({ url }) => void routeNativeUrl(url)),
       );
       handles.push(
+        await App.addListener("pause", () => {
+          // Capacitor emits appStateChange(false) whenever iOS merely becomes
+          // inactive, including while Face ID is on screen. The pause event is
+          // the separate signal that the app actually entered the background.
+          backgrounded.current = true;
+          // Ignore a late authentication result from before this background.
+          unlockAttempt.current += 1;
+          authenticating.current = false;
+          setUnlockBusy(false);
+          setAppIsActive(false);
+          setSessionUnlocked(false);
+        }),
+      );
+      handles.push(
         await App.addListener("appStateChange", ({ isActive }) => {
-          if (!isActive) {
-            setAppIsActive(false);
-            backgrounded.current = true;
+          // Do not revoke an unlock for a temporary inactive state. Face ID,
+          // Control Center, and other system overlays all produce this event.
+          if (!isActive) return;
+          window.requestAnimationFrame(() => void hideNativePrivacyShield());
+          // Dismissing Face ID must not start another policy check or refresh.
+          if (!backgrounded.current) return;
+          const shouldUnlock =
+            !localPreview() &&
+            shouldRelockNativeSession(
+              backgrounded.current,
+              window.location.pathname,
+            );
+          backgrounded.current = false;
+          if (shouldUnlock) {
             setSessionUnlocked(false);
-            if (
-              !localPreview() &&
-              !authenticating.current &&
-              isProtectedNativePath(window.location.pathname)
-            ) {
-              setLocked(true);
-            }
-            return;
+            setLocked(true);
           }
           setAppIsActive(true);
           router.refresh();
           void mutate(() => true);
           window.dispatchEvent(new Event("rf:app-resume"));
           void refreshNativePolicy(info.build);
-          const shouldUnlock =
-            !localPreview() &&
-            backgrounded.current &&
-            isProtectedNativePath(window.location.pathname);
-          backgrounded.current = false;
-          if (shouldUnlock) {
-            void unlock();
-          }
-          window.requestAnimationFrame(() => void hideNativePrivacyShield());
         }),
       );
     })().catch(() => {
@@ -394,7 +409,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       delete document.documentElement.dataset.rfAppReady;
       for (const handle of handles) void handle.remove();
     };
-  }, [localPreview, native, refreshNativePolicy, routeNativeUrl, router, unlock]);
+  }, [localPreview, native, refreshNativePolicy, routeNativeUrl, router]);
 
   useEffect(() => {
     document.documentElement.dataset.network = connected ? "online" : "offline";
@@ -456,10 +471,8 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
 
   useEffect(() => {
     if (!native) return;
-    // Clearing the in-memory unlock on background is intentional, but that
-    // state change must not launch the system authentication prompt while the
-    // app is inactive. The foreground callback below performs the retry once
-    // iOS has made the app active again.
+    // An actual background event clears the in-memory unlock. Temporary
+    // inactive transitions, including Face ID itself, leave it intact.
     if (!appIsActive) return;
     if (localPreview()) {
       setSessionUnlocked(true);

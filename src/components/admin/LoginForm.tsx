@@ -83,7 +83,7 @@ export default function LoginForm({
         return;
       }
       if (inApp) {
-        await clearLegacySavedCredentials();
+        void clearLegacySavedCredentials();
         markNativeSessionFresh();
       }
       // Full reload so the proxy re-runs and lands them on the home page.
@@ -115,7 +115,7 @@ export default function LoginForm({
         return;
       }
       if (inApp) {
-        await clearLegacySavedCredentials();
+        void clearLegacySavedCredentials();
         markNativeSessionFresh();
       }
       window.location.href = nextPath;

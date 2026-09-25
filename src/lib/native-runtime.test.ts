@@ -4,6 +4,7 @@ import {
   isProtectedNativePath,
   isTrustedAppUrl,
   requiresNativeSessionUnlock,
+  shouldRelockNativeSession,
 } from "@/lib/native-runtime";
 
 describe("native runtime boundaries", () => {
@@ -19,6 +20,12 @@ describe("native runtime boundaries", () => {
     expect(requiresNativeSessionUnlock("/support", false)).toBe(false);
     expect(requiresNativeSessionUnlock("/clock", false)).toBe(true);
     expect(requiresNativeSessionUnlock("/clock", true)).toBe(false);
+  });
+
+  it("relocks only after the app actually entered the background", () => {
+    expect(shouldRelockNativeSession(false, "/clock")).toBe(false);
+    expect(shouldRelockNativeSession(true, "/clock")).toBe(true);
+    expect(shouldRelockNativeSession(true, "/support")).toBe(false);
   });
 
   it("trusts only HTTPS navigation on the current RF Tools origin", () => {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const { checkBiometry, authenticate, remove } = vi.hoisted(() => ({
   checkBiometry: vi.fn(),
@@ -41,7 +41,26 @@ beforeEach(() => {
   remove.mockResolvedValue(undefined);
 });
 
+afterEach(() => vi.useRealTimers());
+
 describe("native session authentication", () => {
+  it.each(["availability", "authentication"])("times out a stalled %s callback without accepting late success", async (stage) => {
+    vi.useFakeTimers();
+    let complete!: (value: unknown) => void;
+    const pending = new Promise((resolve) => { complete = resolve; });
+    if (stage === "availability") checkBiometry.mockReturnValue(pending);
+    else authenticate.mockReturnValue(pending);
+
+    const result = authenticateAppSession();
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expect(result).resolves.toEqual({ ok: false, reason: "timed_out" });
+    complete({ isAvailable: true, deviceIsSecure: true });
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(result).resolves.toEqual({ ok: false, reason: "timed_out" });
+    if (stage === "availability") expect(authenticate).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each([401, 403])("treats HTTP %s as an expired server session", (status) => {
     expect(classifyNativeSessionResponse({ ok: false, status })).toBe("expired");
   });

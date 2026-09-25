@@ -28,6 +28,13 @@ export function requiresNativeSessionUnlock(
   return isProtectedNativePath(pathname) && !sessionUnlocked;
 }
 
+export function shouldRelockNativeSession(
+  enteredBackground: boolean,
+  pathname: string,
+): boolean {
+  return enteredBackground && isProtectedNativePath(pathname);
+}
+
 export function isTrustedAppUrl(value: string | URL, appOrigin: string): boolean {
   const url = value instanceof URL ? value : new URL(value, appOrigin);
   if (url.protocol === "https:" && url.origin === RF_TOOLS_ORIGIN) return true;
