@@ -59,11 +59,21 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-  native-ios:
+  native-ios-tests:
     # Release validation requires the iOS 26 SDK. Keep this pinned to the
     # matching hosted image instead of relying on macos-latest drift.
     runs-on: macos-26
     timeout-minutes: 40
+    # Isolate device families so the iPad starts on a fresh runner and does
+    # not inherit the iPhone simulator's resource use or elapsed job budget.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: iphone
+            scope: all
+          - family: ipad
+            scope: ui
 
     steps:
       - name: Check out repository
@@ -90,13 +100,31 @@ jobs:
       - name: Build Release iOS Simulator app
         run: npm run ios:build:sim:release
 
-      - name: Run native unit and UI tests
-        run: npm run ios:test:native
+      - name: Validate native runtime
+        run: npm run ios:native-smoke
+
+      - name: Run native tests (${{ matrix.family }})
+        env:
+          IOS_TEST_FAMILY: ${{ matrix.family }}
+          IOS_TEST_SCOPE: ${{ matrix.scope }}
+        run: node scripts/run-ios-tests.mjs
 
       - name: Upload native test results
-        if: failure()
+        if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: ios-test-results
+          name: ios-test-results-${{ matrix.family }}
           path: ${{ runner.temp }}/rf-tools-ios-tests-*/Logs/Test/
           retention-days: 7
+
+  native-ios:
+    # Preserve the required status name, and fail if either device family
+    # failed, was cancelled, or did not run.
+    needs: native-ios-tests
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all native test jobs to pass
+        env:
+          NATIVE_RESULT: ${{ needs.native-ios-tests.result }}
+        run: test "$NATIVE_RESULT" = success
