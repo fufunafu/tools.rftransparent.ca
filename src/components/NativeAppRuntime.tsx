@@ -18,6 +18,11 @@ import {
   clearLegacySavedCredentials,
   consumeFreshNativeSession,
   isNativeApp,
+  getBiometricLabel,
+  getBiometricPreference,
+  setBiometricPreference,
+  type BiometricLabel,
+  type BiometricPreference,
 } from "@/lib/app-biometrics";
 import type { NativeRuntimeState } from "@/lib/mobile-types";
 import {
@@ -47,6 +52,17 @@ const RuntimeContext = createContext<NativeRuntimeState>({
   serviceState: "operational",
 });
 
+const BiometricSettingsContext = createContext({
+  preference: "unset" as BiometricPreference,
+  message: null as string | null,
+  configure: () => {},
+  disable: () => {},
+});
+
+export function useBiometricSettings() {
+  return useContext(BiometricSettingsContext);
+}
+
 const NEVER_CHANGES = () => () => {};
 const serverIsNotNative = () => false;
 
@@ -58,10 +74,14 @@ function UnlockOverlay({
   busy,
   error,
   onUnlock,
+  setupLabel,
+  onDecline,
 }: {
   busy: boolean;
   error: string | null;
   onUnlock: () => void;
+  setupLabel?: BiometricLabel;
+  onDecline?: () => void;
 }) {
   return (
     <div
@@ -76,10 +96,12 @@ function UnlockOverlay({
           RF
         </div>
         <h1 id="native-unlock-title" className="text-2xl font-bold tracking-tight text-slate-950">
-          RF Tools is locked
+          {setupLabel ? `Enable ${setupLabel}?` : "RF Tools is locked"}
         </h1>
         <p id="native-unlock-message" className="mt-2 text-sm leading-6 text-slate-500">
-          Use Face ID, Touch ID, or your device passcode to continue.
+          {setupLabel
+            ? `Use ${setupLabel} to unlock RF Tools when you return. Your device passcode can be used as a fallback. This is optional, and you can change it in App settings.`
+            : "Use Face ID, Touch ID, or your device passcode to continue."}
         </p>
         {error && (
           <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
@@ -93,8 +115,13 @@ function UnlockOverlay({
           onClick={onUnlock}
           className="mt-6 min-h-12 w-full rounded-2xl bg-blue-600 px-5 py-3 text-base font-bold text-white shadow-lg shadow-blue-600/20 transition active:scale-[0.99] disabled:opacity-60"
         >
-          {busy ? "Unlocking..." : "Unlock RF Tools"}
+          {busy ? "Please wait..." : setupLabel ? `Enable ${setupLabel}` : "Unlock RF Tools"}
         </button>
+        {setupLabel && (
+          <button type="button" disabled={busy} onClick={onDecline} className="mt-3 min-h-12 w-full rounded-xl border border-slate-300 text-sm font-bold text-slate-700 disabled:opacity-60">
+            No thanks
+          </button>
+        )}
         <a
           href="/api/logout"
           className="mt-3 flex min-h-12 items-center justify-center rounded-xl border border-red-200 bg-red-50 text-sm font-bold text-red-700 active:bg-red-100"
@@ -114,9 +141,9 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
   // hydration would render web diagnostics on the server and native
   // diagnostics on the first client pass.
   const native = useSyncExternalStore(NEVER_CHANGES, isNativeApp, serverIsNotNative);
-  const [connected, setConnected] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  // Node also exposes navigator, but not navigator.onLine. Keep the server
+  // and first client render identical, then read connectivity after hydration.
+  const [connected, setConnected] = useState(true);
   const [connectionType, setConnectionType] = useState<NativeRuntimeState["connectionType"]>("unknown");
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [buildNumber, setBuildNumber] = useState<string | null>(null);
@@ -139,6 +166,9 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
   const [sessionUnlocked, setSessionUnlocked] = useState(false);
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [unlockError, setUnlockError] = useState<string | null>(null);
+  const [biometricSettingsMessage, setBiometricSettingsMessage] = useState<string | null>(null);
+  const [biometricPreference, setPreference] = useState<BiometricPreference>("unset");
+  const [enrollment, setEnrollment] = useState<{ account: string; label: BiometricLabel } | null>(null);
   const authenticating = useRef(false);
   const unlockAttempt = useRef(0);
   const backgrounded = useRef(false);
@@ -237,7 +267,10 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
     }
   }, [buildNumber, refreshNativePolicy, router]);
 
-  const unlock = useCallback(async () => {
+  const unlock = useCallback(async (
+    action?: "enable" | "disable" | "configure",
+    expectedAccount?: string,
+  ) => {
     if (!native || authenticating.current) return;
     if (localPreview()) {
       setSessionUnlocked(true);
@@ -247,6 +280,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       return;
     }
     authenticating.current = true;
+    setBiometricSettingsMessage(null);
     const attempt = ++unlockAttempt.current;
     const controller = new AbortController();
     const sessionTimeout = window.setTimeout(() => controller.abort(), 10_000);
@@ -271,13 +305,67 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
         return;
       }
 
-      const result = await authenticateAppSession();
+      const profile = await session.json() as { email?: string };
       if (attempt !== unlockAttempt.current) return;
-      if (result.ok) {
-        void clearLegacySavedCredentials();
+      const account = profile.email?.trim().toLowerCase();
+      if (!account) throw new Error("Missing session account");
+      const preference = getBiometricPreference(account);
+      setPreference(preference);
+      // A choice made for an earlier account must not enroll a different one.
+      if (expectedAccount && expectedAccount !== account) action = undefined;
+      const fresh = consumeFreshNativeSession();
+      const allowSession = () => {
+        setEnrollment(null);
         setSessionUnlocked(true);
         setLocked(false);
         setUnlockError(null);
+        void clearLegacySavedCredentials();
+      };
+      if (action === "disable") {
+        try {
+          setBiometricPreference(account, "disabled");
+        } catch {
+          setUnlockError("Could not save your choice on this device. Please try again.");
+          return;
+        }
+        setPreference("disabled");
+        allowSession();
+        return;
+      }
+      if (action !== "enable" && (preference === "unset" || action === "configure")) {
+        const label = await getBiometricLabel();
+        if (attempt !== unlockAttempt.current) return;
+        if (label) {
+          setEnrollment({ account, label });
+          return;
+        }
+        // No enrolled biometrics means ordinary account sign-in remains usable.
+        // Do not silently enable a passcode-only lock or remember a refusal.
+        if (action === "configure") {
+          allowSession();
+          setBiometricSettingsMessage("Face ID or Touch ID is unavailable. Set it up or allow access in device Settings, then try again.");
+          return;
+        }
+        allowSession();
+        return;
+      }
+      if (action !== "enable" && (preference === "disabled" || fresh)) {
+        allowSession();
+        return;
+      }
+      const result = await authenticateAppSession();
+      if (attempt !== unlockAttempt.current) return;
+      if (result.ok) {
+        if (action === "enable") {
+          try {
+            setBiometricPreference(account, "enabled");
+          } catch {
+            setUnlockError("Could not save your choice on this device. Please try again.");
+            return;
+          }
+          setPreference("enabled");
+        }
+        allowSession();
         return;
       }
       setLocked(true);
@@ -367,6 +455,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
           unlockAttempt.current += 1;
           authenticating.current = false;
           setUnlockBusy(false);
+          setEnrollment(null);
           setAppIsActive(false);
           setSessionUnlocked(false);
         }),
@@ -429,6 +518,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
 
   useEffect(() => {
     const updateBrowserConnection = () => setConnected(navigator.onLine);
+    updateBrowserConnection();
     window.addEventListener("online", updateBrowserConnection);
     window.addEventListener("offline", updateBrowserConnection);
     return () => {
@@ -490,13 +580,6 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       void hideSplash();
       return;
     }
-    if (consumeFreshNativeSession()) {
-      setSessionUnlocked(true);
-      setLocked(false);
-      void clearLegacySavedCredentials();
-      void hideSplash();
-      return;
-    }
     void unlock();
   }, [appIsActive, hideSplash, localPreview, native, pathname, sessionUnlocked, unlock]);
 
@@ -540,6 +623,12 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
 
   return (
     <RuntimeContext.Provider value={value}>
+      <BiometricSettingsContext.Provider value={{
+        preference: biometricPreference,
+        message: biometricSettingsMessage,
+        configure: () => void unlock("configure"),
+        disable: () => void unlock("disable"),
+      }}>
       <div
         className="contents"
         inert={contentBlocked ? true : undefined}
@@ -612,7 +701,14 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
           </div>
         </div>
       )}
-      {unlockRequired && <UnlockOverlay busy={unlockBusy} error={unlockError} onUnlock={() => void unlock()} />}
+      {unlockRequired && <UnlockOverlay
+        busy={unlockBusy}
+        error={unlockError}
+        setupLabel={enrollment?.label}
+        onUnlock={() => void unlock(enrollment ? "enable" : undefined, enrollment?.account)}
+        onDecline={() => void unlock("disable", enrollment?.account)}
+      />}
+      </BiometricSettingsContext.Provider>
     </RuntimeContext.Provider>
   );
 }

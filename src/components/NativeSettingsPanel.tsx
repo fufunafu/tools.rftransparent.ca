@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useNativeRuntime } from "@/components/NativeAppRuntime";
+import { useBiometricSettings, useNativeRuntime } from "@/components/NativeAppRuntime";
 import {
   getNativePermissionSnapshot,
   openNativeSettings,
@@ -35,6 +35,7 @@ function PermissionValue({ value }: { value: string }) {
 
 export default function NativeSettingsPanel() {
   const runtime = useNativeRuntime();
+  const biometrics = useBiometricSettings();
   const [permissions, setPermissions] = useState(DEFAULT_PERMISSIONS);
   const [preferences, setPreferences] = useState<PushPreferences | null>(null);
   const [loading, setLoading] = useState(false);
@@ -131,6 +132,14 @@ export default function NativeSettingsPanel() {
 
         {runtime.isNative && (
           <>
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <h3 className="text-sm font-bold text-slate-900">Face ID / Touch ID</h3>
+              <p className="mt-2 leading-5 text-slate-600">{biometrics.preference === "enabled" ? "App unlock is enabled for your account on this device." : "App unlock is off. You can continue using your email and password."}</p>
+              <button type="button" onClick={biometrics.preference === "enabled" ? biometrics.disable : biometrics.configure} className="mt-3 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 font-bold text-slate-700">
+                {biometrics.preference === "enabled" ? "Turn off app unlock" : "Set up app unlock"}
+              </button>
+              {biometrics.message && <p className="mt-2 leading-5 text-slate-600" role="status">{biometrics.message}</p>}
+            </div>
             <div className="mt-4 border-t border-slate-200 pt-4">
               <h3 className="text-sm font-bold text-slate-900">Notification preferences</h3>
               {permissions.notifications !== "granted" ? (

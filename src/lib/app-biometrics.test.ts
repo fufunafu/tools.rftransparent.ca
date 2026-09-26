@@ -8,6 +8,7 @@ const { checkBiometry, authenticate, remove } = vi.hoisted(() => ({
 
 vi.mock("@aparajita/capacitor-biometric-auth", () => ({
   BiometricAuth: { checkBiometry, authenticate },
+  BiometryType: { faceId: 2, touchId: 1 },
 }));
 vi.mock("@aparajita/capacitor-secure-storage", () => ({
   SecureStorage: { remove },
@@ -19,12 +20,19 @@ import {
   clearLegacySavedCredentials,
   consumeFreshNativeSession,
   deviceUnlockAvailable,
+  getBiometricLabel,
+  getBiometricPreference,
+  setBiometricPreference,
   markNativeSessionFresh,
 } from "@/lib/app-biometrics";
 
 function nativeWindow() {
   const values = new Map<string, string>();
   vi.stubGlobal("window", { Capacitor: { isNativePlatform: () => true } });
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
   vi.stubGlobal("sessionStorage", {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => values.set(key, value),
@@ -134,5 +142,48 @@ describe("native session authentication", () => {
   it("deletes the credential key written by older releases", async () => {
     await clearLegacySavedCredentials();
     expect(remove).toHaveBeenCalledWith("rf-login-credentials");
+  });
+});
+
+
+describe("biometric setup preferences", () => {
+  it("requires an explicit choice per account and normalizes account identity", () => {
+    expect(getBiometricPreference("person@example.com")).toBe("unset");
+    setBiometricPreference(" Person@Example.com ", "enabled");
+    expect(getBiometricPreference("person@example.com")).toBe("enabled");
+    expect(getBiometricPreference("another@example.com")).toBe("unset");
+    setBiometricPreference("person@example.com", "disabled");
+    expect(getBiometricPreference("person@example.com")).toBe("disabled");
+  });
+
+  it.each([[2, "Face ID"], [1, "Touch ID"]])("uses enrolled biometry type %s without requesting authentication", async (biometryType, label) => {
+    checkBiometry.mockResolvedValue({ isAvailable: true, biometryType });
+    await expect(getBiometricLabel()).resolves.toBe(label);
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("does not offer Face ID merely because the device supports it", async () => {
+    checkBiometry.mockResolvedValue({ isAvailable: false, biometryType: 2, deviceIsSecure: true });
+    await expect(getBiometricLabel()).resolves.toBeNull();
+    expect(authenticate).not.toHaveBeenCalled();
+  });
+
+  it("does not block sign-in on a stalled capability check", async () => {
+    vi.useFakeTimers();
+    checkBiometry.mockReturnValue(new Promise(() => {}));
+    const label = getBiometricLabel();
+    await vi.advanceTimersByTimeAsync(8_000);
+    await expect(label).resolves.toBeNull();
+    expect(authenticate).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not infer consent from unavailable storage", () => {
+    vi.stubGlobal("localStorage", {
+      getItem: () => { throw new Error("unavailable"); },
+      setItem: () => { throw new Error("unavailable"); },
+    });
+    expect(getBiometricPreference("person@example.com")).toBe("unset");
+    expect(() => setBiometricPreference("person@example.com", "enabled")).toThrow();
   });
 });
