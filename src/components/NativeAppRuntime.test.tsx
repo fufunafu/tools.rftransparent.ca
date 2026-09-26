@@ -3,6 +3,7 @@
 
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -62,7 +63,7 @@ vi.mock("@capacitor/status-bar", () => ({
 }));
 
 import { getBiometricPreference, setBiometricPreference } from "@/lib/app-biometrics";
-import NativeAppRuntime, { useBiometricSettings } from "@/components/NativeAppRuntime";
+import NativeAppRuntime, { useBiometricSettings, useNativeRuntime } from "@/components/NativeAppRuntime";
 
 function SettingsControls() {
   const settings = useBiometricSettings();
@@ -398,4 +399,13 @@ describe("opt-in failure recovery", () => {
     await clickText("Enable Face ID");
     expect(getBiometricPreference("other@example.com")).toBe("enabled");
   });
+});
+
+
+it("uses a stable server connectivity snapshot when Node exposes navigator without onLine", () => {
+  vi.stubGlobal("navigator", {});
+  function ConnectionStatus() {
+    return <p>{useNativeRuntime().connected ? "Online" : "Offline"}</p>;
+  }
+  expect(renderToString(<NativeAppRuntime><ConnectionStatus /></NativeAppRuntime>)).toContain("Online");
 });

@@ -141,9 +141,9 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
   // hydration would render web diagnostics on the server and native
   // diagnostics on the first client pass.
   const native = useSyncExternalStore(NEVER_CHANGES, isNativeApp, serverIsNotNative);
-  const [connected, setConnected] = useState(() =>
-    typeof navigator === "undefined" ? true : navigator.onLine,
-  );
+  // Node also exposes navigator, but not navigator.onLine. Keep the server
+  // and first client render identical, then read connectivity after hydration.
+  const [connected, setConnected] = useState(true);
   const [connectionType, setConnectionType] = useState<NativeRuntimeState["connectionType"]>("unknown");
   const [appVersion, setAppVersion] = useState<string | null>(null);
   const [buildNumber, setBuildNumber] = useState<string | null>(null);
@@ -518,6 +518,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
 
   useEffect(() => {
     const updateBrowserConnection = () => setConnected(navigator.onLine);
+    updateBrowserConnection();
     window.addEventListener("online", updateBrowserConnection);
     window.addEventListener("offline", updateBrowserConnection);
     return () => {
