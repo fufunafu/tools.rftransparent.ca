@@ -6,6 +6,47 @@ import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
 
 const LEGACY_CREDENTIALS_KEY = "rf-login-credentials";
 const FRESH_SESSION_KEY = "rf-native-session-fresh";
+const UNLOCK_PREFERENCE_KEY = "rf-device-unlock-v1:";
+
+export type BiometricPreference = "enabled" | "disabled" | "unset";
+export type BiometricLabel = "Face ID" | "Touch ID";
+
+// This is a device-local preference, never an account credential. Separate
+// accounts on a shared device must each make their own choice.
+export function getBiometricPreference(account: string): BiometricPreference {
+  try {
+    const value = localStorage.getItem(UNLOCK_PREFERENCE_KEY + account.trim().toLowerCase());
+    return value === "enabled" || value === "disabled" ? value : "unset";
+  } catch {
+    return "unset";
+  }
+}
+
+export function setBiometricPreference(account: string, value: "enabled" | "disabled"): void {
+  localStorage.setItem(UNLOCK_PREFERENCE_KEY + account.trim().toLowerCase(), value);
+}
+
+export async function getBiometricLabel(): Promise<BiometricLabel | null> {
+  if (!isNativeApp()) return null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      (async () => {
+        const { BiometricAuth, BiometryType } = await import("@aparajita/capacitor-biometric-auth");
+        const result = await BiometricAuth.checkBiometry();
+        if (!result.isAvailable) return null;
+        if (result.biometryType === BiometryType.faceId) return "Face ID" as const;
+        if (result.biometryType === BiometryType.touchId) return "Touch ID" as const;
+        return null;
+      })(),
+      new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8_000); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 interface CapacitorGlobal {
   Capacitor?: { isNativePlatform?: () => boolean };

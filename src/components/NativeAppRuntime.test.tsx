@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   refresh: vi.fn(),
   policy: vi.fn(),
   hidePrivacy: vi.fn(),
+  label: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => {
@@ -25,6 +26,7 @@ vi.mock("@/lib/app-biometrics", async (importOriginal) => ({
   isNativeApp: () => true,
   authenticateAppSession: mocks.authenticate,
   deviceUnlockAvailable: async () => true,
+  getBiometricLabel: mocks.label,
   clearLegacySavedCredentials: mocks.cleanup,
   consumeFreshNativeSession: mocks.fresh,
 }));
@@ -59,7 +61,13 @@ vi.mock("@capacitor/status-bar", () => ({
   Style: { Light: "LIGHT", Dark: "DARK" },
 }));
 
-import NativeAppRuntime from "@/components/NativeAppRuntime";
+import { getBiometricPreference, setBiometricPreference } from "@/lib/app-biometrics";
+import NativeAppRuntime, { useBiometricSettings } from "@/components/NativeAppRuntime";
+
+function SettingsControls() {
+  const settings = useBiometricSettings();
+  return <><button onClick={settings.configure}>Configure unlock</button><button onClick={settings.disable}>Disable unlock</button><p>{settings.message}</p></>;
+}
 
 let root: Root;
 let container: HTMLDivElement;
@@ -84,7 +92,7 @@ function expectLocked() {
 
 async function mount() {
   await act(async () => {
-    root.render(<NativeAppRuntime><p>Protected work</p></NativeAppRuntime>);
+    root.render(<NativeAppRuntime><p>Protected work</p><SettingsControls /></NativeAppRuntime>);
     // Drain native module imports and their startup promises.
     await new Promise((resolve) => setTimeout(resolve, 20));
   });
@@ -98,12 +106,15 @@ async function emit(name: string, event = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.listeners.clear();
+  localStorage.clear();
+  setBiometricPreference("review@example.com", "enabled");
+  mocks.label.mockResolvedValue("Face ID");
   mocks.authenticate.mockResolvedValue({ ok: true });
   mocks.cleanup.mockResolvedValue(undefined);
   mocks.fresh.mockReturnValue(false);
   mocks.policy.mockResolvedValue({ state: "current", updateUrl: null });
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ state: "operational" }), { status: 200 })));
+  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ state: "operational", email: "review@example.com" }), { status: 200 })));
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -227,5 +238,164 @@ describe("native unlock recovery", () => {
     } finally {
       vi.restoreAllMocks();
     }
+  });
+});
+
+
+async function clickText(text: string) {
+  const button = Array.from(container.querySelectorAll("button")).find((item) => item.textContent === text);
+  expect(button).toBeDefined();
+  await act(async () => { button!.click(); });
+}
+
+describe("biometric opt-in", () => {
+  it.each(["Face ID", "Touch ID"])("asks before calling %s, including immediately after password sign-in", async (label) => {
+    localStorage.clear();
+    mocks.fresh.mockReturnValueOnce(true);
+    mocks.label.mockResolvedValue(label);
+    await mount();
+    expect(container.textContent).toContain(`Enable ${label}?`);
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expectLocked();
+    await clickText(`Enable ${label}`);
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+    expect(getBiometricPreference("review@example.com")).toBe("enabled");
+    expect(container.querySelector("[inert]")).toBeNull();
+    await emit("pause");
+    await emit("appStateChange", { isActive: true });
+    expect(mocks.authenticate).toHaveBeenCalledTimes(2);
+  });
+
+  it("remembers No thanks after backgrounding and a cold launch", async () => {
+    localStorage.clear();
+    await mount();
+    await clickText("No thanks");
+    expect(getBiometricPreference("review@example.com")).toBe("disabled");
+    expect(container.querySelector("[inert]")).toBeNull();
+    await emit("pause");
+    await emit("appStateChange", { isActive: true });
+    await act(async () => root.unmount());
+    root = createRoot(container);
+    await mount();
+    expect(container.querySelector("[role=dialog]")).toBeNull();
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+  });
+
+  it("does not persist consent when authentication is cancelled or fails", async () => {
+    localStorage.clear();
+    mocks.authenticate.mockResolvedValueOnce({ ok: false, reason: "cancelled" });
+    await mount();
+    await clickText("Enable Face ID");
+    expect(getBiometricPreference("review@example.com")).toBe("unset");
+    expect(container.textContent).toContain("Enable Face ID?");
+    expectLocked();
+    await clickText("No thanks");
+    expect(container.querySelector("[inert]")).toBeNull();
+  });
+
+  it("does not adopt another account's saved choice", async () => {
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ email: "other@example.com", state: "operational" })));
+    await mount();
+    expect(container.textContent).toContain("Enable Face ID?");
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    await clickText("No thanks");
+    expect(getBiometricPreference("review@example.com")).toBe("enabled");
+    expect(getBiometricPreference("other@example.com")).toBe("disabled");
+  });
+
+  it("keeps ordinary sign-in working when biometrics are unavailable", async () => {
+    localStorage.clear();
+    mocks.label.mockResolvedValue(null);
+    await mount();
+    expect(container.querySelector("[inert]")).toBeNull();
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(getBiometricPreference("review@example.com")).toBe("unset");
+  });
+
+  it("lets a user enable later and turn it off from settings", async () => {
+    setBiometricPreference("review@example.com", "disabled");
+    await mount();
+    await clickText("Configure unlock");
+    expect(container.textContent).toContain("Enable Face ID?");
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    await clickText("Enable Face ID");
+    await clickText("Disable unlock");
+    expect(getBiometricPreference("review@example.com")).toBe("disabled");
+    await emit("pause");
+    await emit("appStateChange", { isActive: true });
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+    expect(container.querySelector("[inert]")).toBeNull();
+  });
+
+  it("reports unavailable setup in settings without blocking the signed-in user", async () => {
+    setBiometricPreference("review@example.com", "disabled");
+    mocks.label.mockResolvedValue(null);
+    await mount();
+    await clickText("Configure unlock");
+    expect(container.textContent).toContain("Set it up or allow access in device Settings");
+    expect(container.querySelector("[inert]")).toBeNull();
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+  });
+
+  it("does not enable from a success arriving after backgrounding", async () => {
+    localStorage.clear();
+    const authentication = deferred<{ ok: true }>();
+    mocks.authenticate.mockReturnValueOnce(authentication.promise);
+    await mount();
+    await clickText("Enable Face ID");
+    await emit("pause");
+    await act(async () => { authentication.resolve({ ok: true }); });
+    expect(getBiometricPreference("review@example.com")).toBe("unset");
+    await emit("appStateChange", { isActive: true });
+    expect(container.textContent).toContain("Enable Face ID?");
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+  });
+});
+
+
+describe("opt-in failure recovery", () => {
+  it("still verifies the server session when biometric unlock is off", async () => {
+    setBiometricPreference("review@example.com", "disabled");
+    vi.mocked(fetch).mockImplementation(async (url) => url === "/api/admin/me"
+      ? new Response("unavailable", { status: 503 })
+      : new Response(JSON.stringify({ state: "operational" })));
+    await mount();
+    expectLocked();
+    expect(container.textContent).toContain("could not verify your session");
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(mocks.label).not.toHaveBeenCalled();
+  });
+
+  it("does not claim a saved opt-in if device storage fails", async () => {
+    localStorage.clear();
+    await mount();
+    const storage = localStorage;
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.getItem(key),
+      setItem: () => { throw new Error("full"); },
+    });
+    try {
+      await clickText("Enable Face ID");
+      expect(getBiometricPreference("review@example.com")).toBe("unset");
+      expect(container.textContent).toContain("Could not save your choice");
+      expectLocked();
+    } finally {
+      vi.stubGlobal("localStorage", storage);
+    }
+    await clickText("No thanks");
+    expect(container.querySelector("[inert]")).toBeNull();
+  });
+
+  it("asks the new account again when the account changes while the prompt is open", async () => {
+    localStorage.clear();
+    await mount();
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ email: "other@example.com", state: "operational" })));
+    await clickText("Enable Face ID");
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(getBiometricPreference("review@example.com")).toBe("unset");
+    expect(getBiometricPreference("other@example.com")).toBe("unset");
+    expect(container.textContent).toContain("Enable Face ID?");
+    await clickText("Enable Face ID");
+    expect(getBiometricPreference("other@example.com")).toBe("enabled");
   });
 });

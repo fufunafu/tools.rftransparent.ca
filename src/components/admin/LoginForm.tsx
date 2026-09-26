@@ -32,8 +32,8 @@ export default function LoginForm({
   const [password, setPassword] = useState("");
 
   // Google OAuth is blocked in embedded web views, so the iOS app uses the
-  // password form. Once signed in, the persisted session is protected by the
-  // app-level Face ID or device-passcode gate.
+  // password form. After signing in, users can opt in to protecting their
+  // persisted session with Face ID or Touch ID and device-passcode fallback.
   const inApp = useSyncExternalStore(NEVER_CHANGES, isNativeApp, serverSaysNo);
   const passwordFormVisible = showPassword || inApp;
 
