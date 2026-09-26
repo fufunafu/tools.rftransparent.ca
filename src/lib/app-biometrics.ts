@@ -13,7 +13,7 @@ interface CapacitorGlobal {
 
 export type DeviceUnlockResult =
   | { ok: true }
-  | { ok: false; reason: "cancelled" | "unavailable" | "locked" | "failed" };
+  | { ok: false; reason: "cancelled" | "unavailable" | "locked" | "failed" | "timed_out" };
 
 export type NativeSessionGateDecision = "authenticated" | "expired" | "unavailable";
 
@@ -56,10 +56,31 @@ export async function deviceUnlockAvailable(): Promise<boolean> {
 }
 
 export async function authenticateAppSession(): Promise<DeviceUnlockResult> {
+  // A missing native callback must leave a way to retry or sign out. A late
+  // success only settles the abandoned promise and cannot unlock the UI.
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  try {
+    return await Promise.race([
+      authenticateDevice(controller.signal),
+      new Promise<DeviceUnlockResult>((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve({ ok: false, reason: "timed_out" });
+        }, 60_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function authenticateDevice(signal: AbortSignal): Promise<DeviceUnlockResult> {
   if (!isNativeApp()) return { ok: false, reason: "unavailable" };
   try {
     const { BiometricAuth } = await import("@aparajita/capacitor-biometric-auth");
     const available = await BiometricAuth.checkBiometry();
+    if (signal.aborted) return { ok: false, reason: "timed_out" };
     if (!available.isAvailable && !available.deviceIsSecure) {
       return { ok: false, reason: "unavailable" };
     }

@@ -60,6 +60,7 @@ const checks = [
   ["ios\/App\/App\.xcodeproj\/project\.pbxproj", /AppUITests/, "Xcode UI-test target"],
   ["ios\/App\/App\.xcodeproj\/project\.pbxproj", /AppTests/, "Xcode unit-test target"],
   ["src\/components\/NativeAppRuntime.tsx", /appStateChange/, "foreground refresh and re-lock"],
+  ["src\/components\/NativeAppRuntime.tsx", /App\.addListener\(["']pause["']/, "actual-background session re-lock"],
   ["src\/components\/NativeAppRuntime.tsx", /isTrustedAppUrl/, "external navigation boundary"],
   ["src\/components\/NativeAppRuntime.tsx", /Browser\.open/, "external system-browser handoff"],
   ["src\/components\/NativeAppRuntime.tsx", /networkStatusChange/, "native network recovery"],

@@ -36,7 +36,9 @@ final class RFAppUITests: XCTestCase {
 
     func testPrivacyShieldCoversProtectedContentDuringLifecycleTransition() {
         let app = XCUIApplication()
-        app.launchEnvironment["RF_UI_TEST_PRIVACY_SHIELD_DELAY_SECONDS"] = "1.5"
+        // Keep the test-only cover visible while hosted XCTest waits for
+        // activation and queries accessibility. Release behavior is unchanged.
+        app.launchEnvironment["RF_UI_TEST_PRIVACY_SHIELD_DELAY_SECONDS"] = "10"
         app.launch()
         XCTAssertTrue(app.webViews.firstMatch.waitForExistence(timeout: 15))
 
@@ -46,7 +48,7 @@ final class RFAppUITests: XCTestCase {
         let shield = app.descendants(matching: .any)["rf-privacy-shield"]
         XCTAssertTrue(shield.waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["RF Tools is locked"].exists)
-        XCTAssertTrue(shield.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(shield.waitForNonExistence(timeout: 15))
     }
 
     func testFaceIDSuccessUncoversProtectedContent() {
