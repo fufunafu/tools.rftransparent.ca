@@ -15,21 +15,37 @@
     "src/components/admin/SalesRecordsTable.test.tsx": "042f581db635d9e059edf54a34f3981f0f834420d02e5f657732d3b336b34d04",
     "src/components/admin/SalesRecordsTable.tsx": "93c18d5f8b4ba15431736b5926865da12e46ccd4b899f0759983e5cda25104b0",
     "src/components/admin/dashboard/PerformersSection.test.tsx": "81da6250de886ae19c81880dd798d8b663d684e0de18d4f80154fccbf4985ab7",
-    "src/components/admin/dashboard/PerformersSection.tsx": "c3c58045b43487098518d3b7d967937a365b318efbd92213f6c991d313b16842",
+    "src/components/admin/dashboard/PerformersSection.tsx": "c42ff526dde64b137d13adda3c54b2defbac3557cc1ec76a17001226be165608",
     "src/components/admin/dashboard/SalesRecordsDialog.tsx": "85b78e21cee5824463ff45ed8d86bbfe8b70f738ee28f234fb6feb2d70f75fe5",
-    "src/components/admin/dashboard/SalesTeamTable.test.tsx": "2f44d05d6107450b4ff5b8dd15e00ec0bb2463598db67b756c85814f89eca383",
-    "src/components/admin/dashboard/SalesTeamTable.tsx": "659e7f95c9260f5942827c3e87edf14c5a9010376e2dd7353eec0d07c1b2f1f3",
+    "src/components/admin/dashboard/SalesTeamTable.test.tsx": "e71133c7911afeff1acc9bef2a7bf7b22bd0da39e9ba864d2275d6c3688c935a",
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "45189c808d132bbdb07322e0aa2d15bdbb049f42071fe4b247a7d2b0f4dd6c8b",
     "src/lib/__tests__/kpi-sales.test.ts": "0c2f5ec6ed71915edfbb6d75dc8c748297cea51399a7596e9ce341b4a1a366db",
     "src/lib/dashboard-sales-records.test.ts": "fbc2e1ea7fdd8bb70541cc475e867b9a4de1c1258d5fd0df5f6fdebf140b4b84",
     "src/lib/dashboard-sales-records.ts": "6ca23d0d4f04e8735138abdf1211e2f952cdf515751b72e963af736eb46fd8bd",
     "src/lib/dashboard-sales.test.ts": "b4a824e95cbbecf9b06e0e57ec1a2f1754c099c8fa10fec093500cbe03692806",
-    "src/lib/dashboard-sales.ts": "3683f961ab62b5f9e18237ce36089170ffa609e24fbca7a2e45381c1af543e2e",
+    "src/lib/dashboard-sales.ts": "cf059f804dbbe49bd7c8fc7ea5e02d3944ce01048bc63bcdf801a079bb7a66a6",
     "src/lib/kpi-sales.ts": "aec92e63d9d09ca84945b0bbfb1c20aaacca0e4c0a2d725935ef02c843bd3d13",
     "src/lib/ops-dashboard-sales.test.ts": "c5d3241d7497b6efb336f86c1ccd5a6e37dee28807257c53ca0941a12c9bb176",
-    "src/lib/ops-dashboard.ts": "649548547e793645e8d8cf882a77fa2e1c35671b0a780c19427a58dc6c184e4d",
+    "src/lib/ops-dashboard.ts": "7e22e306f99ab748aa641b901f3466911ebc203c1266b8d2d1a44958a5e3a95e",
     "src/lib/sales-periods.test.ts": "70972e2e4855c73e2ea5e6c998f25827edb71b37bbd4bd1bde83d7694a3db144",
     "src/lib/sales-periods.ts": "18a304edf4b2cde63d3634580b9f1fa598fd5544f8924087d95ac3747596f3d3",
     "src/lib/sales-record-details.test.ts": "3bba47ee3fa4bf29ab3c51e48d721b43eb00a287d906656281c1a3a52e9c5580",
-    "src/lib/sales-record-details.ts": "66d07a5656cfbd53f234cd8605613a66b01e2f88c3cf26afad9c060d20b8e630"
-  }
+    "src/lib/sales-record-details.ts": "66d07a5656cfbd53f234cd8605613a66b01e2f88c3cf26afad9c060d20b8e630",
+    "src/components/admin/dashboard/SalesRepName.tsx": "c129bf280d6187a095a1865b228de735668850bf5c1c869c79d66200c94bc98f"
+  },
+  "intentionalUpdates": [
+    {
+      "date": "2026-09-29",
+      "change": "Per-rep hover explanations with keyboard and touch access; attribution and financial calculations unchanged. Cache versions bumped to include explanations.",
+      "reviewedFiles": [
+        "src/components/admin/dashboard/PerformersSection.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.test.tsx",
+        "src/lib/dashboard-sales.ts",
+        "src/lib/ops-dashboard.ts",
+        "src/components/admin/dashboard/SalesRepName.tsx"
+      ],
+      "regressionEvidence": "npm run check: lint and typecheck passed, 1051 tests passed in 138 files, including tooltip content and Escape dismissal plus existing sales attribution, five-period table, records and authorization suites."
+    }
+  ]
 }

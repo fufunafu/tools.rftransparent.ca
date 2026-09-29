@@ -17,7 +17,16 @@ export interface DashboardSalesRep {
   placeholder: boolean;
   province?: string;
   hasEmployeeProfile: boolean;
+  attributionExplanation?: string;
 }
+
+const ATTRIBUTION_EXPLANATIONS: Record<string, string> = {
+  Rob: "RF orders and quotes matching Rob's configured name tags. Daniel's Quebec, Nova Scotia, New Brunswick and PEI territory takes priority. In British Columbia, Rob-tagged records stay with Rob instead of Aaron. Other records matching multiple reps are excluded.",
+  Daniel: "All RF orders and quotes in Quebec, Nova Scotia, New Brunswick and PEI, including untagged records and records tagged to another rep. Territory takes priority over tags. Uses the shipping address, or billing address when shipping is absent.",
+  Craig: "RF orders and quotes matching Craig's configured name tags. Daniel's Quebec, Nova Scotia, New Brunswick and PEI territory takes priority. British Columbia records created July 16, 2026 onward go to Aaron, or Rob when Rob-tagged. Other records matching multiple reps are excluded.",
+  Marie: "BC Transparent orders and quotes carrying the exact Marijac tag, ignoring letter case and surrounding spaces. Marie name tags alone do not qualify.",
+  Aaron: "RF orders and quotes in British Columbia created July 16, 2026 onward, starting at midnight Toronto time. Includes untagged records; Rob-tagged records stay with Rob. Uses the shipping address, or billing address when shipping is absent.",
+};
 
 // Store IDs follow SHOPIFY_STORE_*: RF, Glass Railing Store, BC.
 const ROSTER = [
@@ -49,6 +58,7 @@ export function dashboardSalesReps(employees: SalesEmployee[]): DashboardSalesRe
       storeId: config.storeId,
       province: config.province,
       hasEmployeeProfile: !!employee,
+      attributionExplanation: ATTRIBUTION_EXPLANATIONS[config.name],
       territory: config.name === "Daniel" || config.name === "Aaron",
       placeholder: false,
     };

@@ -17,6 +17,7 @@ it("shows all date ranges and five reps together, with per-column totals", async
   for (const period of SALES_PERIODS) {
     periods[period.id] = ["Rob", "Daniel", "Craig", "Marie", "Aaron"].map((name, index) => ({
       id: name, name, hasEmployeeProfile: name !== "Aaron", value: index === 3 ? 0 : period.days, previous: 1,
+      attributionExplanation: `${name} attribution rules`,
       metrics: { sold: index === 3 ? 0 : period.days, quoted: 10, conversion: 50 }, meta: "1 order",
     }));
   }
@@ -31,6 +32,13 @@ it("shows all date ranges and five reps together, with per-column totals", async
     expect(container.querySelector('[aria-label="Sales date range"]')).toBeNull();
     expect([...container.querySelectorAll("tbody a")].some((link) => link.textContent?.includes("Aaron"))).toBe(false);
     expect(container.textContent).toContain("Aaron");
+    const aaronInfo = container.querySelector<HTMLButtonElement>(`button[aria-label="How Aaron's totals are calculated"]`)!;
+    await act(async () => aaronInfo.click());
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain("Aaron attribution rules");
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain("Tax and shipping are removed proportionally");
+    expect(aaronInfo.getAttribute("aria-describedby")).toBe(document.querySelector('[role="tooltip"]')?.id);
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(document.querySelector('[role="tooltip"]')).toBeNull();
     const select = container.querySelector("select")!;
     await act(async () => { select.value = "conversion"; select.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(container.querySelectorAll("thead th")).toHaveLength(7);

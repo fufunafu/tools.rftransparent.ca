@@ -30,6 +30,7 @@ export function PerformerLink({ person, children, ...props }: {
   person: Performer;
   children: ReactNode;
   className?: string;
+  "aria-describedby"?: string;
   "data-label"?: string;
   "data-calc"?: string;
   "data-src"?: string;

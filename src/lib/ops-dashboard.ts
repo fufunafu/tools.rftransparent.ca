@@ -814,6 +814,7 @@ export interface Performer {
   id: string;
   name: string;
   hasEmployeeProfile?: boolean;
+  attributionExplanation?: string;
   locationSlug?: string;
   /** Headline value for the currently selected ranking metric. */
   value: number;
@@ -851,7 +852,7 @@ export async function getTopPerformers(salesPeriod: SalesPeriod = "30d"): Promis
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
       // Invalidate the previous tag-only, order-date sales totals.
-      `ops:performers:v9:${salesPeriod}:${dayKey}`,
+      `ops:performers:v10:${salesPeriod}:${dayKey}`,
       OPS_TTL_MS,
       () => computeTopPerformers(salesPeriod)
     );
@@ -872,7 +873,7 @@ export async function getSalesTeamOverview(): Promise<Result<SalesTeamOverview>>
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
-      `ops:sales-team:v5:${dayKey}`,
+      `ops:sales-team:v6:${dayKey}`,
       OPS_TTL_MS,
       async () => {
         const result = await computeTopPerformers("1y", true);
@@ -1044,6 +1045,7 @@ async function computeTopPerformers(salesPeriod: SalesPeriod, allSalesPeriods = 
             id,
             name: rep.name,
             hasEmployeeProfile: rep.hasEmployeeProfile,
+            attributionExplanation: rep.attributionExplanation,
             locationSlug: slugFor(employeeById.get(id)),
             value: Math.round(total.sold * 100) / 100,
             previous: Math.round(total.soldPrev * 100) / 100,

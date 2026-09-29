@@ -5,7 +5,8 @@ import { formatCAD, formatCADShort } from "@/lib/format";
 import { SALES_PERIODS } from "@/lib/sales-periods";
 import type { SalesTeamOverview } from "@/lib/ops-dashboard";
 import { delta } from "./widgets";
-import { PerformerLink, RANKINGS } from "./PerformersSection";
+import { RANKINGS } from "./PerformersSection";
+import { SalesRepName } from "./SalesRepName";
 import { SalesRecordsDialog, type SalesRecordsSelection } from "./SalesRecordsDialog";
 
 const ROWS = [
@@ -52,10 +53,7 @@ export function SalesTeamTable({ data }: { data: SalesTeamOverview }) {
               {ROWS.map((row, rowIndex) => (
                 <tr key={row.metric}>
                   {rowIndex === 0 && <th scope="rowgroup" rowSpan={2} className="px-4 py-3 align-middle font-normal">
-                    <PerformerLink person={person} className="flex items-center gap-2.5 text-[13px] font-semibold text-slate-900 hover:text-blue-700">
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-slate-100 text-[10px] font-medium text-slate-500">{index + 1}</span>
-                      <span>{person.name}</span>
-                    </PerformerLink>
+                    <SalesRepName person={person} rank={index + 1} />
                     {person.meta === "$0 for now" && <span className="ml-[30px] mt-1 block text-[10px] text-slate-400">$0 for now</span>}
                   </th>}
                   <th scope="row" className={`px-2 text-[11px] font-medium whitespace-nowrap ${row.tone} ${rowIndex === 0 ? "pt-3 pb-1" : "pt-1 pb-3"}`}>{row.label}</th>
