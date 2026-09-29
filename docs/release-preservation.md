@@ -72,8 +72,14 @@ Regression coverage includes `SalesTeamTable.test.tsx`,
 ## Limits
 
 This check detects source drift, not whether every intentional change is correct.
-It does not retroactively protect an older checkout that lacks the guard, and it
-does not restore the already-regressed production site. Remote deployment rules
-and repository contents have not been changed by adding this local safeguard.
+On September 29, Vercel project `prj_twZOObjT1WQMMy7dQJCWQW6sM1am` was configured
+to run `node scripts/verify-sales-preservation.mjs && npm run build`. An older
+checkout lacking the guard will now fail its Vercel build. Do not remove or
+override this project setting to make an old checkout deploy.
+
+The restored source is saved in PR #9. Main requires independent review before
+merge; do not bypass that protection. Until merged, future main builds missing
+the guard are expected to fail and leave the active production deployment intact.
+The guard alone does not restore the site; that requires a verified deployment.
 The source recovery archive is listed in the baseline manifest and contains no
 environment files or credentials.
