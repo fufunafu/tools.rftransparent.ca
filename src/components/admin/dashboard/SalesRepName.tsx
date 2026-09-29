@@ -10,7 +10,7 @@ export function SalesRepName({ person, rank }: { person: Performer; rank: number
   const anchor = useRef<HTMLDivElement>(null);
   const tooltip = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const [position, setPosition] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
 
   function cancelClose() {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -21,7 +21,15 @@ export function SalesRepName({ person, rank }: { person: Performer; rank: number
     const box = anchor.current?.getBoundingClientRect();
     if (!box) return;
     const width = Math.min(360, window.innerWidth - 24);
-    setPosition({ left: Math.max(12, Math.min(box.left, window.innerWidth - width - 12)), top: box.bottom + 8 });
+    const below = window.innerHeight - box.bottom - 20;
+    const above = box.top - 20;
+    const placeBelow = below >= Math.min(320, above);
+    const maxHeight = Math.max(40, Math.min(320, placeBelow ? below : above));
+    setPosition({
+      left: Math.max(12, Math.min(box.left, window.innerWidth - width - 12)),
+      top: placeBelow ? box.bottom + 8 : Math.max(12, box.top - maxHeight - 8),
+      maxHeight,
+    });
   }
 
   function scheduleClose() {
@@ -73,7 +81,7 @@ export function SalesRepName({ person, rank }: { person: Performer; rank: number
       {position && createPortal(
         <div ref={tooltip} id={id} role="tooltip" onMouseEnter={cancelClose} onMouseLeave={scheduleClose}
           className="fixed z-[60] w-[360px] max-w-[calc(100vw-24px)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 text-xs font-normal leading-relaxed text-slate-600 shadow-xl"
-          style={{ left: position.left, top: Math.min(position.top, Math.max(12, window.innerHeight - 340)), maxHeight: "min(320px, calc(100dvh - 24px))" }}>
+          style={position}>
           <p className="font-semibold text-slate-900">{person.name}: how totals are calculated</p>
           <p className="mt-2">{person.attributionExplanation ?? "Uses this rep's configured sales attribution rules."}</p>
           <p className="mt-2"><strong>Net sales:</strong> successful payments minus refunds, by transaction date within each column&apos;s period. Tax and shipping are removed proportionally from each payment or refund.</p>
