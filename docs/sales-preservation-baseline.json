@@ -1,0 +1,79 @@
+{
+  "recordedAt": "2026-09-29T14:05:04.919390+00:00",
+  "purpose": "Preserve local sales updates; not a production deployment receipt",
+  "recoveryArchive": "backups/sales-preservation/2026-09-29/sales-source.tar.gz",
+  "recoveryArchiveSha256": "6948dc65042d4c1ae092c04917634813c2f3b62875d9e4ae5f7e3703d5e4c663",
+  "sourceHashes": {
+    "src/app/api/dashboards/sales/records/route.test.ts": "e48552ca3bf3b2aab916f525c46d65fa78ff918174731b37ad47b02389c0cadc",
+    "src/app/api/dashboards/sales/records/route.ts": "03ddb96aed778bb1d515ec1b0353126fea9c2239544a07b922a4ed97a34b622a",
+    "src/app/api/kpi/metrics/route.test.ts": "e7778df34da68f7b88901b5ddb67d9f85d8dd105accc1ce54697e55a493b2e21",
+    "src/app/api/kpi/metrics/route.ts": "b9db2e81673102e5e464d6ca059cb5e835165775e36588bacb7618bf41709e26",
+    "src/app/dashboards/sales/page.tsx": "e9cea428b32265beed944a00acc4e07b3c6ea904b868f50578e9c593bdce1011",
+    "src/components/admin/EmployeeDetail.test.tsx": "309621f7361ed7149a8a63313a19dba73e45aac9af00ee0b26f4207d47133fc0",
+    "src/components/admin/EmployeeDetail.tsx": "c2bb6eb8cee6c8b4952601a5c6fb0b31f60a2c9b94e4d19426b3c524c1f06cd5",
+    "src/components/admin/SalesManagerDashboard.tsx": "d87f0e148cee8ea2726d411d46afc014906df532b41d2e624fa69dddaf9185e1",
+    "src/components/admin/SalesRecordsTable.test.tsx": "042f581db635d9e059edf54a34f3981f0f834420d02e5f657732d3b336b34d04",
+    "src/components/admin/SalesRecordsTable.tsx": "93c18d5f8b4ba15431736b5926865da12e46ccd4b899f0759983e5cda25104b0",
+    "src/components/admin/dashboard/PerformersSection.test.tsx": "81da6250de886ae19c81880dd798d8b663d684e0de18d4f80154fccbf4985ab7",
+    "src/components/admin/dashboard/PerformersSection.tsx": "43c1fc4f219c7753abf3c51a5912968b80d9b3bbcd8a6d11ff62571d06d864f6",
+    "src/components/admin/dashboard/SalesRecordsDialog.tsx": "85b78e21cee5824463ff45ed8d86bbfe8b70f738ee28f234fb6feb2d70f75fe5",
+    "src/components/admin/dashboard/SalesTeamTable.test.tsx": "e71133c7911afeff1acc9bef2a7bf7b22bd0da39e9ba864d2275d6c3688c935a",
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "fb2ba8f884f70510e3bbb923b2bcb04a0cc2ca061e2e31a66d2f3b6a4674df2d",
+    "src/lib/__tests__/kpi-sales.test.ts": "0c2f5ec6ed71915edfbb6d75dc8c748297cea51399a7596e9ce341b4a1a366db",
+    "src/lib/dashboard-sales-records.test.ts": "d494c7346e2c2dfe67faf6a163216b8952830c1941e01e8cb29654137e3df944",
+    "src/lib/dashboard-sales-records.ts": "6ca23d0d4f04e8735138abdf1211e2f952cdf515751b72e963af736eb46fd8bd",
+    "src/lib/dashboard-sales.test.ts": "23fcd23c56f50fc0fe925dcf047a25ab8acfe55ab4caedc68329e0f5c1ee1440",
+    "src/lib/dashboard-sales.ts": "1ed265a4de34ef4d8f303975a261556ce27cd8478fb9798a9e5fd74aa818373c",
+    "src/lib/kpi-sales.ts": "aec92e63d9d09ca84945b0bbfb1c20aaacca0e4c0a2d725935ef02c843bd3d13",
+    "src/lib/ops-dashboard-sales.test.ts": "811093dc8481b4684f96238fe4ba1797314debc1f8b0d3ea87f8ba2671fe45bb",
+    "src/lib/ops-dashboard.ts": "31e3de5999728bf4e0a3db1aec28d405529d379b0d55160096a0771ec807a798",
+    "src/lib/sales-periods.test.ts": "70972e2e4855c73e2ea5e6c998f25827edb71b37bbd4bd1bde83d7694a3db144",
+    "src/lib/sales-periods.ts": "18a304edf4b2cde63d3634580b9f1fa598fd5544f8924087d95ac3747596f3d3",
+    "src/lib/sales-record-details.test.ts": "3bba47ee3fa4bf29ab3c51e48d721b43eb00a287d906656281c1a3a52e9c5580",
+    "src/lib/sales-record-details.ts": "66d07a5656cfbd53f234cd8605613a66b01e2f88c3cf26afad9c060d20b8e630",
+    "src/components/admin/dashboard/SalesRepName.tsx": "ffbd7c8cd33b1ab0e541296a569b1108f1e579f5ef32d3a8d9287a394fcb1774"
+  },
+  "intentionalUpdates": [
+    {
+      "date": "2026-09-29",
+      "change": "Per-rep hover explanations with keyboard and touch access; attribution and financial calculations unchanged. Cache versions bumped to include explanations.",
+      "reviewedFiles": [
+        "src/components/admin/dashboard/PerformersSection.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.test.tsx",
+        "src/lib/dashboard-sales.ts",
+        "src/lib/ops-dashboard.ts",
+        "src/components/admin/dashboard/SalesRepName.tsx"
+      ],
+      "regressionEvidence": "npm run check: lint and typecheck passed, 1051 tests passed in 138 files, including tooltip content and Escape dismissal plus existing sales attribution, five-period table, records and authorization suites."
+    },
+    {
+      "date": "2026-09-29",
+      "change": "Add exact normalized Aaron and Aron tags as an additional RF attribution route, including outside BC and before the territory start date. Preserve existing BC territory, Daniel territory priority and Rob tag priority. Refresh dashboard cache versions and explanatory text.",
+      "reviewedFiles": [
+        "src/components/admin/dashboard/PerformersSection.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.tsx",
+        "src/lib/dashboard-sales-records.test.ts",
+        "src/lib/dashboard-sales.test.ts",
+        "src/lib/dashboard-sales.ts",
+        "src/lib/ops-dashboard-sales.test.ts",
+        "src/lib/ops-dashboard.ts"
+      ],
+      "regressionEvidence": "npm run check passed: lint, typecheck, 1057 tests in 138 files. Added alias, old/outside-BC, collision, double-counting and quote record coverage; existing territory and authorization suites retained."
+    },
+    {
+      "date": "2026-09-29",
+      "change": "Add exact normalized Daniel tag as an RF attribution route alongside QC/NS/NB/PE territory. Preserve territory priorities, including Aaron BC. Exclude conflicting rep tags outside territories. Update tooltip and help, refresh cache versions.",
+      "reviewedFiles": [
+        "src/components/admin/dashboard/PerformersSection.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.tsx",
+        "src/lib/dashboard-sales-records.test.ts",
+        "src/lib/dashboard-sales.test.ts",
+        "src/lib/dashboard-sales.ts",
+        "src/lib/ops-dashboard-sales.test.ts",
+        "src/lib/ops-dashboard.ts"
+      ],
+      "regressionEvidence": "npm run check passed: lint, typecheck, 1063 tests in 138 files. Daniel tag tests cover normalization, exact matching, conflicts, store/territory priorities, order and quote details, and aggregate totals without double counting."
+    }
+  ]
+}

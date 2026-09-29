@@ -1,4 +1,5 @@
 import { getSupabase } from "@/lib/supabase";
+import { PERFORMER_ORDERS_QUERY, PERFORMER_DRAFTS_QUERY } from "@/lib/dashboard-sales-records";
 import {
   getStores,
   fetchAllPages,
@@ -14,10 +15,14 @@ import { getSalesTargets } from "@/lib/settings";
 import { type Result } from "@/lib/home-dashboard";
 import { fetchUnpaidOrders } from "@/lib/collection";
 import {
-  configuredSalesReps,
-  resolveSalesAttribution,
-} from "@/lib/sales-attribution";
+  dashboardSalesReps,
+  resolveDashboardSalesAttribution, dashboardSalesSearchFilter,
+  salesInPeriod,
+  type DashboardSalesOrder,
+  type DashboardSalesRecord,
+} from "@/lib/dashboard-sales";
 import { scopeForShopifyStoreIds, type StoreScope } from "@/lib/store-scopes";
+import { SALES_PERIODS, getSalesPeriod, type SalesPeriod } from "@/lib/sales-periods";
 
 // Data behind the operations dashboard. Same contract as home-dashboard.ts:
 // every getter resolves to a value OR an error string and never throws, so one
@@ -808,10 +813,12 @@ async function computeCustomerServiceOps(scope?: StoreScope): Promise<CustomerSe
 export interface Performer {
   id: string;
   name: string;
+  hasEmployeeProfile?: boolean;
+  attributionExplanation?: string;
   locationSlug?: string;
   /** Headline value for the currently selected ranking metric. */
   value: number;
-  /** Same metric over the previous 30 days, for the delta. Null when unknown. */
+  /** Same metric over the preceding equal-length period. Null when unknown. */
   previous: number | null;
   /** Everything the UI can rank by, so switching the dropdown needs no refetch. */
   metrics: Record<string, number>;
@@ -834,51 +841,20 @@ interface EmployeeRow {
   locations: { shopify_store_ids: string[] | null } | null;
 }
 
-const PERFORMER_ORDERS_QUERY = `
-  query($after: String, $filter: String!) {
-    orders(first: 250, after: $after, query: $filter) {
-      edges {
-        node { createdAt cancelledAt tags ${REVENUE_FIELDS} }
-        cursor
-      }
-      pageInfo { hasNextPage }
-    }
-  }
-`;
-
-const PERFORMER_DRAFTS_QUERY = `
-  query($after: String, $filter: String!) {
-    draftOrders(first: 250, after: $after, query: $filter) {
-      edges {
-        node { createdAt status tags ${REVENUE_FIELDS} }
-        cursor
-      }
-      pageInfo { hasNextPage }
-    }
-  }
-`;
-
-interface TaggedOrder extends RevenueFields {
-  createdAt: string;
-  cancelledAt: string | null;
-  tags: string[];
-}
-
-interface TaggedDraft extends RevenueFields {
+interface TaggedDraft extends RevenueFields, DashboardSalesRecord {
   createdAt: string;
   status: string;
   tags: string[];
 }
 
-export async function getTopPerformers(): Promise<Result<TopPerformers>> {
+export async function getTopPerformers(salesPeriod: SalesPeriod = "30d"): Promise<Result<TopPerformers>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
-      // v3: rows now carry locationSlug — the bump keeps stale cached rows
-      // (which lack the field) from feeding the store dashboards.
-      `ops:performers:v3:${dayKey}`,
+      // Invalidate the previous tag-only, order-date sales totals.
+      `ops:performers:v12:${salesPeriod}:${dayKey}`,
       OPS_TTL_MS,
-      computeTopPerformers
+      () => computeTopPerformers(salesPeriod)
     );
     return ok({ ...data, cachedAt });
   } catch (err) {
@@ -886,12 +862,40 @@ export async function getTopPerformers(): Promise<Result<TopPerformers>> {
   }
 }
 
-async function computeTopPerformers(): Promise<TopPerformers> {
+export interface SalesTeamOverview {
+  periods: Record<SalesPeriod, Performer[]>;
+  warnings: string[];
+  cachedAt: string | null;
+}
+
+/** Download the longest history once, then calculate every visible column in memory. */
+export async function getSalesTeamOverview(): Promise<Result<SalesTeamOverview>> {
+  try {
+    const dayKey = businessDayKey(new Date().toISOString());
+    const { data, cachedAt } = await cached(
+      `ops:sales-team:v8:${dayKey}`,
+      OPS_TTL_MS,
+      async () => {
+        const result = await computeTopPerformers("1y", true);
+        return { periods: result.salesByPeriod, warnings: result.warnings };
+      },
+    );
+    return ok({ ...data, cachedAt });
+  } catch (err) {
+    return fail(err, "Could not read sales team data.");
+  }
+}
+
+async function computeTopPerformers(salesPeriod: SalesPeriod, allSalesPeriods = false): Promise<TopPerformers & { salesByPeriod: Record<SalesPeriod, Performer[]> }> {
   {
     const now = new Date();
     const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29);
     const start60 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -59);
     const start30Iso = start30.toISOString();
+    const end = new Date(now.getTime() + 1);
+    const salesDays = getSalesPeriod(salesPeriod).days;
+    const salesStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 1 - salesDays);
+    const previousSalesStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 1 - salesDays * 2);
 
     const { data: employeeData, error: employeeError } = await getSupabase()
       .from("employees")
@@ -900,25 +904,32 @@ async function computeTopPerformers(): Promise<TopPerformers> {
       .order("name");
     if (employeeError) throw new Error(employeeError.message);
     const employees = (employeeData ?? []) as unknown as EmployeeRow[];
+    const reps = dashboardSalesReps(employees);
 
-    // One Shopify pull covering both 30-day windows, then attribute in memory.
+    // One Shopify pull covering the current and previous sales periods.
     // Calling the per-employee helpers would re-download every order once per
     // person — fine for a report, far too slow for a dashboard.
-    const filter = `created_at:>='${start60.toISOString()}'`;
-    const stores = getStores();
+    const filter = `created_at:>='${salesStart.toISOString()}'`;
+    // Older orders can receive payments or refunds in these reporting windows.
+    const orderFilter = `updated_at:>='${previousSalesStart.toISOString()}'`;
+    const requiredStoreIds = [...new Set(reps.filter((rep) => !rep.placeholder).map((rep) => rep.storeId))];
+    const stores = getStores().filter((store) => requiredStoreIds.includes(store.id));
+    if (requiredStoreIds.some((id) => !stores.some((store) => store.id === id))) {
+      throw new Error("A required Shopify connection is missing for sales rep totals.");
+    }
 
     const [orderResults, draftResults, warehouseRows, followupLogs] = await Promise.all([
       Promise.allSettled(
         stores.map((s) =>
-          fetchAllPages<TaggedOrder, { orders: { edges: { node: TaggedOrder; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
-            { storeId: s.id, query: PERFORMER_ORDERS_QUERY, variables: { filter }, getConnection: (d) => d.orders, maxPages: 40 }
+          fetchAllPages<DashboardSalesOrder, { orders: { edges: { node: DashboardSalesOrder; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+            { storeId: s.id, query: PERFORMER_ORDERS_QUERY, variables: { filter: dashboardSalesSearchFilter(s.id, reps, orderFilter) }, getConnection: (d) => d.orders, maxPages: 2000 }
           )
         )
       ),
       Promise.allSettled(
         stores.map((s) =>
           fetchAllPages<TaggedDraft, { draftOrders: { edges: { node: TaggedDraft; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
-            { storeId: s.id, query: PERFORMER_DRAFTS_QUERY, variables: { filter }, getConnection: (d) => d.draftOrders, maxPages: 40 }
+            { storeId: s.id, query: PERFORMER_DRAFTS_QUERY, variables: { filter: dashboardSalesSearchFilter(s.id, reps, filter) }, getConnection: (d) => d.draftOrders, maxPages: 200 }
           )
         )
       ),
@@ -941,8 +952,10 @@ async function computeTopPerformers(): Promise<TopPerformers> {
       ),
     ]);
 
-    const orders = orderResults.flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []));
-    const drafts = draftResults.flatMap((r) => (r.status === "fulfilled" ? r.value.nodes : []));
+    const orders = orderResults.flatMap((r, index) => r.status === "fulfilled"
+      ? r.value.nodes.map((order) => ({ ...order, storeId: stores[index].id })) : []);
+    const drafts = draftResults.flatMap((r, index) => r.status === "fulfilled"
+      ? r.value.nodes.map((draft) => ({ ...draft, storeId: stores[index].id })) : []);
 
     const warnings = [
       ...stores.flatMap((store, index) => {
@@ -963,82 +976,89 @@ async function computeTopPerformers(): Promise<TopPerformers> {
 
     const inCurrent = (iso: string) => iso >= start30Iso;
 
-    // Sales records are counted once only when configured employee tags point
-    // to exactly one sales rep. Location tags such as "laval", unassigned
-    // records, and records carrying tags for multiple reps are excluded.
-    const reps = configuredSalesReps(employees);
     const employeeById = new Map(employees.map((employee) => [employee.id, employee]));
     // Which store dashboard a person belongs on, via their location's stores.
     const slugFor = (employee: EmployeeRow | undefined): string | undefined =>
       employee?.locations?.shopify_store_ids
         ? scopeForShopifyStoreIds(employee.locations.shopify_store_ids)?.slug
         : undefined;
-    const salesTotals = new Map<
-      string,
-      { sold: number; soldPrev: number; orderCount: number; quoted: number; total: number; won: number }
-    >(
-      reps.map((rep) => [
-        rep.id,
-        { sold: 0, soldPrev: 0, orderCount: 0, quoted: 0, total: 0, won: 0 },
-      ])
-    );
-    let ambiguousRecords = 0;
-
-    for (const order of orders) {
-      if (order.cancelledAt) continue;
-      const attribution = resolveSalesAttribution(order.tags, reps);
-      if (attribution.status === "ambiguous") {
-        ambiguousRecords += 1;
-        continue;
-      }
-      if (attribution.status !== "unique") continue;
-      const total = salesTotals.get(attribution.employeeId);
-      if (!total) continue;
-      const revenue = calcNetRevenue(order);
-      if (inCurrent(order.createdAt)) {
-        total.sold += revenue;
-        total.orderCount += 1;
-      } else {
-        total.soldPrev += revenue;
-      }
-    }
-
-    for (const draft of drafts) {
-      if (draft.status === "OPEN") continue;
-      const attribution = resolveSalesAttribution(draft.tags, reps);
-      if (attribution.status === "ambiguous") {
-        ambiguousRecords += 1;
-        continue;
-      }
-      if (attribution.status !== "unique" || !inCurrent(draft.createdAt)) continue;
-      const total = salesTotals.get(attribution.employeeId);
-      if (!total) continue;
-      total.quoted += calcNetRevenue(draft);
-      total.total += 1;
-      if (draft.status === "COMPLETED") total.won += 1;
-    }
-
-    if (ambiguousRecords > 0) {
-      warnings.push(
-        `${ambiguousRecords} sales record${ambiguousRecords === 1 ? "" : "s"} matched multiple reps and were excluded`
+    const salesByPeriod = {} as Record<SalesPeriod, Performer[]>;
+    for (const period of allSalesPeriods ? SALES_PERIODS : [getSalesPeriod(salesPeriod)]) {
+      const salesStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 1 - period.days);
+      const previousSalesStart = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, 1 - period.days * 2);
+      const salesTotals = new Map<
+        string,
+        { sold: number; soldPrev: number; orderCount: number; quoted: number; total: number; won: number }
+      >(
+        reps.map((rep) => [
+          rep.id,
+          { sold: 0, soldPrev: 0, orderCount: 0, quoted: 0, total: 0, won: 0 },
+        ])
       );
-    }
+      let ambiguousRecords = 0;
 
-    const sales: Performer[] = [...salesTotals.entries()]
-      .map(([id, total]) => {
-        const conversion = total.total > 0 ? (total.won / total.total) * 100 : 0;
-        return {
-          id,
-          name: employeeById.get(id)?.name ?? "Unknown employee",
-          locationSlug: slugFor(employeeById.get(id)),
-          value: total.sold,
-          previous: total.soldPrev,
-          metrics: { sold: total.sold, quoted: total.quoted, conversion },
-          meta: `${total.orderCount} order${total.orderCount === 1 ? "" : "s"} · ${conversion.toFixed(1)}% conv`,
-        };
-      })
-      .filter((p) => p.metrics.sold > 0 || p.metrics.quoted > 0)
-      .sort((a, b) => b.value - a.value);
+      for (const order of orders) {
+        const attribution = resolveDashboardSalesAttribution(order, reps);
+        if (attribution.status === "ambiguous") {
+          ambiguousRecords += 1;
+          continue;
+        }
+        if (attribution.status !== "unique") continue;
+        const total = salesTotals.get(attribution.employeeId);
+        if (!total) continue;
+        if (order.transactions.length >= 50) {
+          warnings.push(`${stores.find((store) => store.id === order.storeId)?.label} order reached the 50-transaction limit; sales may be incomplete`);
+        }
+        const revenue = salesInPeriod(order, salesStart, end);
+        total.sold += revenue;
+        total.soldPrev += salesInPeriod(order, previousSalesStart, salesStart);
+        if (Math.abs(revenue) > 0.005) total.orderCount += 1;
+      }
+
+      for (const draft of drafts) {
+        if (draft.status === "OPEN") continue;
+        const attribution = resolveDashboardSalesAttribution(draft, reps);
+        if (attribution.status === "ambiguous") {
+          ambiguousRecords += 1;
+          continue;
+        }
+        const draftDate = new Date(draft.createdAt);
+        if (attribution.status !== "unique" || draftDate < salesStart || draftDate >= end) continue;
+        const total = salesTotals.get(attribution.employeeId);
+        if (!total) continue;
+        total.quoted += calcNetRevenue(draft);
+        total.total += 1;
+        if (draft.status === "COMPLETED") total.won += 1;
+      }
+
+      if (ambiguousRecords > 0) {
+        warnings.push(
+          `${ambiguousRecords} sales record${ambiguousRecords === 1 ? "" : "s"} matched multiple reps and were excluded`
+        );
+      }
+
+      salesByPeriod[period.id] = [...salesTotals.entries()]
+        .map(([id, total]) => {
+          const conversion = total.total > 0 ? (total.won / total.total) * 100 : 0;
+          const rep = reps.find((rep) => rep.id === id)!;
+          return {
+            id,
+            name: rep.name,
+            hasEmployeeProfile: rep.hasEmployeeProfile,
+            attributionExplanation: rep.attributionExplanation,
+            locationSlug: slugFor(employeeById.get(id)),
+            value: Math.round(total.sold * 100) / 100,
+            previous: Math.round(total.soldPrev * 100) / 100,
+            metrics: { sold: Math.round(total.sold * 100) / 100, quoted: total.quoted, conversion },
+            meta: rep.placeholder
+              ? "$0 for now"
+              : `${total.orderCount} order${total.orderCount === 1 ? "" : "s"} · ${conversion.toFixed(1)}% conv`,
+          };
+        })
+        .sort((a, b) => b.value - a.value);
+
+    }
+    const sales = salesByPeriod[salesPeriod];
 
     // ── Warehouse: units built/packed/walk-in ──
     const nameById = new Map(employees.map((e) => [e.id, e.name]));
@@ -1105,7 +1125,7 @@ async function computeTopPerformers(): Promise<TopPerformers> {
       .filter((p) => p.value > 0)
       .sort((a, b) => b.value - a.value);
 
-    return { sales, warehouse, customerService, warnings, cachedAt: null };
+    return { sales, salesByPeriod, warehouse, customerService, warnings: [...new Set(warnings)], cachedAt: null };
   }
 }
 

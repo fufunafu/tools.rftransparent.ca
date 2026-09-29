@@ -45,7 +45,7 @@ vi.mock("@/lib/shopify", () => {
   };
 });
 
-import { getEmployeeSalesMetrics, getEmployeeDraftMetrics, getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics, getPipelineDashboardData } from "@/lib/kpi-sales";
+import { getMonthlyConversionHistory, getEmployeeSalesMetrics, getEmployeeDraftMetrics, getFullPipelineData, getPipelinePrediction, getOrderChannelMetrics, getPipelineDashboardData } from "@/lib/kpi-sales";
 import { getStores, shopifyGraphQL } from "@/lib/shopify";
 
 const mockShopifyGraphQL = vi.mocked(shopifyGraphQL);
@@ -666,5 +666,33 @@ describe("getPipelineDashboardData", () => {
 
     expect(result.metrics.totalDrafts).toBe(1);
     expect(result.metrics.pipelineValue).toBe(100);
+  });
+});
+
+
+describe("employee monthly chart data", () => {
+  it("returns chart fields, excludes unsent quotes, and computes conversion from completed quotes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-16T12:00:00Z"));
+    try {
+      mockOrderResponse([
+        makeOrder({ createdAt: "2026-09-05T12:00:00Z", amount: "5000", tags: ["Rob"] }),
+        makeOrder({ createdAt: "2026-09-05T12:00:00Z", amount: "9000", tags: ["Craig"] }),
+      ]);
+      mockDraftResponse([
+        makeDraft({ createdAt: "2026-09-01T12:00:00Z", status: "COMPLETED", amount: "1000", tags: ["ROB"] }),
+        makeDraft({ createdAt: "2026-09-02T12:00:00Z", status: "INVOICE_SENT", amount: "1000", tags: ["rob"] }),
+        makeDraft({ createdAt: "2026-09-03T12:00:00Z", status: "OPEN", amount: "9000", tags: ["rob"] }),
+      ]);
+      const history = await getMonthlyConversionHistory([" rob "], ["store1"], 12);
+      expect(history).toHaveLength(12);
+      expect(history.at(-1)).toEqual({ month: "2026-09", quoted: 2000, quote_count: 2, sold: 5000, orders: 1, aov: 5000, conversion_rate: 50 });
+      expect(history[0]).toMatchObject({ month: "2025-10", quoted: 0, sold: 0, conversion_rate: 0 });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("rejects unavailable history instead of returning a zero chart", async () => {
+    mockShopifyGraphQL.mockRejectedValue(new Error("Unavailable"));
+    await expect(getMonthlyConversionHistory(["rob"], ["store1"])).rejects.toThrow("incomplete");
   });
 });
