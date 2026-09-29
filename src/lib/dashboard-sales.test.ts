@@ -31,21 +31,35 @@ describe("dashboard sales ownership", () => {
     expect(owner({ tags: [tag, "Aaron", "Craig"], shippingAddress: address("BC") })).toEqual({ status: "unique", employeeId: "rob" });
   });
 
-  it("enforces Aaron's fixed July 16 start date", () => {
-    expect(owner({ tags: ["Aaron"], shippingAddress: address("BC"), createdAt: "2026-07-16T03:59:59Z" })).toEqual({ status: "unassigned" });
+  it("enforces the July 16 start date for untagged BC territory records", () => {
+    expect(owner({ tags: [], shippingAddress: address("BC"), createdAt: "2026-07-16T03:59:59Z" })).toEqual({ status: "unassigned" });
     expect(owner({ tags: ["Rob"], shippingAddress: address("BC"), createdAt: "2026-07-16T03:59:59Z" })).toEqual({ status: "unique", employeeId: "rob" });
     expect(owner({ shippingAddress: address("BC"), createdAt: "2026-07-16T04:00:00Z" })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
     expect(owner({ shippingAddress: address("BC"), createdAt: undefined })).toEqual({ status: "unassigned" });
   });
 
-  it("requires the RF store and BC destination for Aaron", () => {
-    expect(owner({ tags: ["Aaron"] })).toEqual({ status: "unassigned" });
+  it("requires RF for Aaron and BC for his untagged territory records", () => {
+    expect(owner({ tags: [] })).toEqual({ status: "unassigned" });
     expect(owner({ storeId: "store3", tags: ["Aaron"], shippingAddress: address("BC") })).toEqual({ status: "unassigned" });
     expect(owner({ storeId: "store2", tags: ["Aron"], shippingAddress: address("BC") })).toEqual({ status: "unassigned" });
-    expect(owner({ tags: ["Aron"], shippingAddress: { ...address("BC"), countryCodeV2: "US" } })).toEqual({ status: "unassigned" });
+    expect(owner({ tags: [], shippingAddress: { ...address("BC"), countryCodeV2: "US" } })).toEqual({ status: "unassigned" });
     expect(owner({ shippingAddress: address(null, "British Columbia") })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
     expect(owner({ shippingAddress: null, billingAddress: address("BC") })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
-    expect(owner({ tags: ["Aaron"], billingAddress: address("BC") })).toEqual({ status: "unassigned" });
+    expect(owner({ tags: [], billingAddress: address("BC") })).toEqual({ status: "unassigned" });
+  });
+
+  it.each(["Aaron", "Aron", " AARON ", " aRoN "])("credits exact Aaron alias %s outside BC and before his territory start", (tag) => {
+    expect(owner({ tags: [tag], createdAt: "2026-01-01T12:00:00Z" })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
+    expect(owner({ tags: [tag], shippingAddress: null, billingAddress: null })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
+    expect(owner({ tags: [tag], shippingAddress: address("BC"), createdAt: "2026-01-01T12:00:00Z" })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
+    expect(owner({ tags: [tag], shippingAddress: address("QC") })).toEqual({ status: "unique", employeeId: "daniel" });
+    expect(owner({ tags: [tag, "Rob"] })).toEqual({ status: "unique", employeeId: "rob" });
+    expect(owner({ tags: [tag, "Craig"] })).toEqual({ status: "ambiguous" });
+  });
+
+  it("does not double-count Aaron aliases or accept partial tags", () => {
+    expect(owner({ tags: ["Aaron", "Aron"] })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
+    expect(owner({ tags: ["Aaron follow-up", "Aronson"] })).toEqual({ status: "unassigned" });
   });
 
   it("links Aaron to an existing sales employee when present", () => {

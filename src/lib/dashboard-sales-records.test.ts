@@ -33,11 +33,11 @@ it("lists older paid orders and refund-only orders using the dashboard ownership
   expect(vi.mocked(fetchAllPages).mock.calls[0][0].variables?.filter).toBe("updated_at:>='2026-09-10T04:00:00.000Z'");
 });
 
-it("assigns untagged BC records after Aaron's start date and excludes older records", async () => {
-  vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [{ ...order("1", [], "BC"), createdAt: "2026-08-01T12:00:00Z" }, order("2", ["Aaron"], "ON"), order("3", ["Aaron"], "BC"), { ...order("4", ["Rob"], "BC"), createdAt: "2026-08-01T12:00:00Z" }], truncated: false });
+it("includes Aaron-tagged records outside BC and before the territory start alongside eligible untagged BC records", async () => {
+  vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [{ ...order("1", [], "BC"), createdAt: "2026-08-01T12:00:00Z" }, order("2", ["Aaron"], "ON"), order("3", ["Aron"], "BC"), order("5", [], "BC"), { ...order("4", ["Rob"], "BC"), createdAt: "2026-08-01T12:00:00Z" }], truncated: false });
   const result = await getSalesRepRecords("sales-agent-aaron", "30d", "orders");
-  expect(result.records.map((entry) => entry.name)).toEqual(["#1"]);
-  expect(result.total).toBe(100);
+  expect(result.records.map((entry) => entry.name)).toEqual(["#1", "#2", "#3"]);
+  expect(result.total).toBe(300);
   expect(vi.mocked(fetchAllPages).mock.calls[0][0].storeId).toBe("store1");
 });
 
@@ -73,4 +73,12 @@ it("lists Marie's Marijac-tagged BC orders and quotes", async () => {
 it("rejects incomplete lists", async () => {
   vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [], truncated: true });
   await expect(getSalesRepRecords("rob", "1y", "orders")).rejects.toThrow("incomplete");
+});
+
+it("includes Aaron and Aron tagged quotes outside BC while retaining territory and Rob priority", async () => {
+  const quote = (id: string, tags: string[], province = "ON", status = "INVOICE_SENT") => ({ ...order(id, tags, province), id: `gid://shopify/DraftOrder/${id}`, createdAt: "2026-09-14T12:00:00Z", status, subtotalPriceSet: money(200) });
+  vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [quote("1", ["Aaron"]), quote("2", [" Aron "]), quote("3", ["Aaron"], "QC"), quote("4", ["Aaron", "Rob"]), quote("5", ["Aron"], "ON", "OPEN")], truncated: false });
+  const result = await getSalesRepRecords("sales-agent-aaron", "30d", "quotes");
+  expect(result.records.map((entry) => entry.name)).toEqual(["#1", "#2"]);
+  expect(result.total).toBe(400);
 });

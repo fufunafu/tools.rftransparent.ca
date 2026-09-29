@@ -55,7 +55,7 @@ that every shared-file change has been approved for deployment.
 - Net sales and quoted rows, all-rep totals, compact layout, optional details.
 - Clickable amounts, searchable order/quote records, customer names, Shopify links.
 - Daniel: RF orders and quotes in QC, NS, NB, and PE; territory takes priority.
-- Aaron: eligible RF BC records created July 16, 2026 onward; Rob tags take priority.
+- Aaron: RF records tagged Aaron or Aron, plus eligible RF BC records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Tags qualify outside BC and before the territory start date; other conflicting rep tags are excluded.
 - Marie: BC Transparent records carrying the exact normalized Marijac tag.
 - Preserve authorization checks on the dashboard, record endpoint, and employee
   metrics. Preserve the distinction between dashboard transaction-based net sales

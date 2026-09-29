@@ -852,7 +852,7 @@ export async function getTopPerformers(salesPeriod: SalesPeriod = "30d"): Promis
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
       // Invalidate the previous tag-only, order-date sales totals.
-      `ops:performers:v10:${salesPeriod}:${dayKey}`,
+      `ops:performers:v11:${salesPeriod}:${dayKey}`,
       OPS_TTL_MS,
       () => computeTopPerformers(salesPeriod)
     );
@@ -873,7 +873,7 @@ export async function getSalesTeamOverview(): Promise<Result<SalesTeamOverview>>
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
-      `ops:sales-team:v6:${dayKey}`,
+      `ops:sales-team:v7:${dayKey}`,
       OPS_TTL_MS,
       async () => {
         const result = await computeTopPerformers("1y", true);

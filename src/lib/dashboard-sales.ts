@@ -25,7 +25,7 @@ const ATTRIBUTION_EXPLANATIONS: Record<string, string> = {
   Daniel: "All RF orders and quotes in Quebec, Nova Scotia, New Brunswick and PEI, including untagged records and records tagged to another rep. Territory takes priority over tags. Uses the shipping address, or billing address when shipping is absent.",
   Craig: "RF orders and quotes matching Craig's configured name tags. Daniel's Quebec, Nova Scotia, New Brunswick and PEI territory takes priority. British Columbia records created July 16, 2026 onward go to Aaron, or Rob when Rob-tagged. Other records matching multiple reps are excluded.",
   Marie: "BC Transparent orders and quotes carrying the exact Marijac tag, ignoring letter case and surrounding spaces. Marie name tags alone do not qualify.",
-  Aaron: "RF orders and quotes in British Columbia created July 16, 2026 onward, starting at midnight Toronto time. Includes untagged records; Rob-tagged records stay with Rob. Uses the shipping address, or billing address when shipping is absent.",
+  Aaron: "RF orders and quotes tagged Aaron or Aron, ignoring case and surrounding spaces, plus British Columbia records created July 16, 2026 onward at midnight Toronto time, even without a tag. Tagged records can be outside BC or older than that date. Daniel's territory takes priority; Rob-tagged records stay with Rob. Other conflicting rep tags are excluded. Territory uses shipping, or billing when shipping is absent.",
 };
 
 // Store IDs follow SHOPIFY_STORE_*: RF, Glass Railing Store, BC.
@@ -101,12 +101,12 @@ export function resolveDashboardSalesAttribution(
   reps: DashboardSalesRep[],
 ): SalesAttribution {
   const province = salesProvince(record);
-  const storeReps = reps.filter((rep) => rep.storeId === record.storeId && !rep.placeholder &&
-    (!rep.province || ["bc", "british columbia", "colombie-britannique"].includes(province)));
+  const storeReps = reps.filter((rep) => rep.storeId === record.storeId && !rep.placeholder);
   // Aaron's BC territory starts July 16, 2026, at Toronto midnight.
   // This is a fixed start date, not a rolling two-month window.
   const territoryRep = storeReps.find((rep) => rep.territory && (rep.province === "BC"
-    ? !!record.createdAt && new Date(record.createdAt) >= new Date("2026-07-16T04:00:00.000Z")
+    ? ["bc", "british columbia", "colombie-britannique"].includes(province) &&
+      !!record.createdAt && new Date(record.createdAt) >= new Date("2026-07-16T04:00:00.000Z")
     : ["qc", "pq", "quebec", "ns", "nova scotia", "nouvelle-ecosse", "nb", "new brunswick", "nouveau-brunswick", "pe", "pei", "prince edward island", "ile-du-prince-edouard"].includes(province)));
   if (territoryRep) {
     if (territoryRep.province === "BC") {
@@ -117,7 +117,16 @@ export function resolveDashboardSalesAttribution(
     }
     return { status: "unique", employeeId: territoryRep.id };
   }
-  return resolveSalesAttribution(record.tags, storeReps.filter((rep) => !rep.territory));
+  // Aaron's exact tags are an additional route, independent of his BC start date.
+  const aaron = storeReps.find((rep) => rep.province === "BC");
+  const taggedAaron = aaron && record.tags.some((tag) => ["aaron", "aron"].includes(normalize(tag)));
+  if (taggedAaron) {
+    const rob = storeReps.find((rep) => rep.tags.includes("rob"));
+    if (rob && record.tags.some((tag) => rob.tags.includes(normalize(tag)))) {
+      return { status: "unique", employeeId: rob.id };
+    }
+  }
+  return resolveSalesAttribution(record.tags, storeReps.filter((rep) => !rep.territory || (taggedAaron && rep.id === aaron.id)));
 }
 
 type MoneySet = { shopMoney: { amount: string } } | null;

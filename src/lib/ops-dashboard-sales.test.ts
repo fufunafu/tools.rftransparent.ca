@@ -62,7 +62,7 @@ describe("sales dashboard data integration", () => {
     expect(result.value.periods["1y"].find((rep) => rep.id === "rob")).toMatchObject({ value: 200, previous: 0 });
     for (const people of Object.values(result.value.periods)) {
       expect(people).toHaveLength(5);
-      expect(people.find((rep) => rep.id === "sales-agent-aaron")?.value).toBe(200);
+      expect(people.find((rep) => rep.id === "sales-agent-aaron")?.value).toBe(300);
       expect(people.find((rep) => rep.id === "marie")?.value).toBe(-100);
     }
   });
@@ -75,7 +75,7 @@ describe("sales dashboard data integration", () => {
     const byId = Object.fromEntries(result.value.sales.map((rep) => [rep.id, rep]));
     expect(byId.rob).toMatchObject({ value: 100, previous: 100 });
     expect(byId.daniel).toMatchObject({ value: 100, metrics: { quoted: 100, conversion: 100 } });
-    expect(byId["sales-agent-aaron"]).toMatchObject({ name: "Aaron", value: 200, hasEmployeeProfile: false });
+    expect(byId["sales-agent-aaron"]).toMatchObject({ name: "Aaron", value: 300, hasEmployeeProfile: false });
     expect(byId.craig).toMatchObject({ value: 0, previous: 0 });
     expect(byId.marie).toMatchObject({ value: -100, metrics: { quoted: 100, conversion: 100 }, meta: "1 order · 100.0% conv" });
     expect(result.value.warnings).toEqual([]);

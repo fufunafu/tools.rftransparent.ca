@@ -15,18 +15,18 @@
     "src/components/admin/SalesRecordsTable.test.tsx": "042f581db635d9e059edf54a34f3981f0f834420d02e5f657732d3b336b34d04",
     "src/components/admin/SalesRecordsTable.tsx": "93c18d5f8b4ba15431736b5926865da12e46ccd4b899f0759983e5cda25104b0",
     "src/components/admin/dashboard/PerformersSection.test.tsx": "81da6250de886ae19c81880dd798d8b663d684e0de18d4f80154fccbf4985ab7",
-    "src/components/admin/dashboard/PerformersSection.tsx": "c42ff526dde64b137d13adda3c54b2defbac3557cc1ec76a17001226be165608",
+    "src/components/admin/dashboard/PerformersSection.tsx": "3b32cf902d913f1d3558210fa7bb2d202da744db934ec823a900b547f0077c61",
     "src/components/admin/dashboard/SalesRecordsDialog.tsx": "85b78e21cee5824463ff45ed8d86bbfe8b70f738ee28f234fb6feb2d70f75fe5",
     "src/components/admin/dashboard/SalesTeamTable.test.tsx": "e71133c7911afeff1acc9bef2a7bf7b22bd0da39e9ba864d2275d6c3688c935a",
-    "src/components/admin/dashboard/SalesTeamTable.tsx": "45189c808d132bbdb07322e0aa2d15bdbb049f42071fe4b247a7d2b0f4dd6c8b",
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "9fa2b19cafc8846daba41325ecf8a88a0ea4dbbf443921e38205f1c480e280e8",
     "src/lib/__tests__/kpi-sales.test.ts": "0c2f5ec6ed71915edfbb6d75dc8c748297cea51399a7596e9ce341b4a1a366db",
-    "src/lib/dashboard-sales-records.test.ts": "fbc2e1ea7fdd8bb70541cc475e867b9a4de1c1258d5fd0df5f6fdebf140b4b84",
+    "src/lib/dashboard-sales-records.test.ts": "bc7b27d45e1f10828b87d09c276384d32cc98bdfbcd18153a9f4c8f7b1570a0d",
     "src/lib/dashboard-sales-records.ts": "6ca23d0d4f04e8735138abdf1211e2f952cdf515751b72e963af736eb46fd8bd",
-    "src/lib/dashboard-sales.test.ts": "b4a824e95cbbecf9b06e0e57ec1a2f1754c099c8fa10fec093500cbe03692806",
-    "src/lib/dashboard-sales.ts": "cf059f804dbbe49bd7c8fc7ea5e02d3944ce01048bc63bcdf801a079bb7a66a6",
+    "src/lib/dashboard-sales.test.ts": "01c0ec790ab4ef145c9c827311252f172304f88a1500f73fa48fae7734b6f5ae",
+    "src/lib/dashboard-sales.ts": "7da65fb291f1c1d2ecbe3e5857e1b514887d99e52716581cefc6b72c6da3ca66",
     "src/lib/kpi-sales.ts": "aec92e63d9d09ca84945b0bbfb1c20aaacca0e4c0a2d725935ef02c843bd3d13",
-    "src/lib/ops-dashboard-sales.test.ts": "c5d3241d7497b6efb336f86c1ccd5a6e37dee28807257c53ca0941a12c9bb176",
-    "src/lib/ops-dashboard.ts": "7e22e306f99ab748aa641b901f3466911ebc203c1266b8d2d1a44958a5e3a95e",
+    "src/lib/ops-dashboard-sales.test.ts": "82823121eeb39fd38526783fcb606f3589bf1a0b450221ff0142b5218b2216cb",
+    "src/lib/ops-dashboard.ts": "26a17dbeb0339793bdd172f58b16c1705241eeb8306230f5f6cf0063d0bdec51",
     "src/lib/sales-periods.test.ts": "70972e2e4855c73e2ea5e6c998f25827edb71b37bbd4bd1bde83d7694a3db144",
     "src/lib/sales-periods.ts": "18a304edf4b2cde63d3634580b9f1fa598fd5544f8924087d95ac3747596f3d3",
     "src/lib/sales-record-details.test.ts": "3bba47ee3fa4bf29ab3c51e48d721b43eb00a287d906656281c1a3a52e9c5580",
@@ -46,6 +46,20 @@
         "src/components/admin/dashboard/SalesRepName.tsx"
       ],
       "regressionEvidence": "npm run check: lint and typecheck passed, 1051 tests passed in 138 files, including tooltip content and Escape dismissal plus existing sales attribution, five-period table, records and authorization suites."
+    },
+    {
+      "date": "2026-09-29",
+      "change": "Add exact normalized Aaron and Aron tags as an additional RF attribution route, including outside BC and before the territory start date. Preserve existing BC territory, Daniel territory priority and Rob tag priority. Refresh dashboard cache versions and explanatory text.",
+      "reviewedFiles": [
+        "src/components/admin/dashboard/PerformersSection.tsx",
+        "src/components/admin/dashboard/SalesTeamTable.tsx",
+        "src/lib/dashboard-sales-records.test.ts",
+        "src/lib/dashboard-sales.test.ts",
+        "src/lib/dashboard-sales.ts",
+        "src/lib/ops-dashboard-sales.test.ts",
+        "src/lib/ops-dashboard.ts"
+      ],
+      "regressionEvidence": "npm run check passed: lint, typecheck, 1057 tests in 138 files. Added alias, old/outside-BC, collision, double-counting and quote record coverage; existing territory and authorization suites retained."
     }
   ]
 }
