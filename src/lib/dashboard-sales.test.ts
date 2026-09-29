@@ -102,13 +102,29 @@ describe("dashboard sales ownership", () => {
     expect(owner({ shippingAddress: address(null, "Québec") })).toEqual({ status: "unique", employeeId: "daniel" });
     expect(owner({ shippingAddress: null, billingAddress: address("NB") })).toEqual({ status: "unique", employeeId: "daniel" });
     expect(owner({ billingAddress: address("QC") })).toEqual({ status: "unassigned" });
-    expect(owner({ shippingAddress: null, billingAddress: null, tags: ["daniel"] })).toEqual({ status: "unassigned" });
+    expect(owner({ shippingAddress: null, billingAddress: null, tags: ["daniel"] })).toEqual({ status: "unique", employeeId: "daniel" });
   });
 
   it("keeps Daniel's territory to Quebec and the three Maritime provinces", () => {
-    expect(owner({ tags: ["daniel"] })).toEqual({ status: "unassigned" });
+    expect(owner({ tags: [] })).toEqual({ status: "unassigned" });
     expect(owner({ shippingAddress: address("NL") })).toEqual({ status: "unassigned" });
     expect(owner({ shippingAddress: { ...address("QC"), countryCodeV2: "US" } })).toEqual({ status: "unassigned" });
+  });
+
+  it.each(["Daniel", " DANIEL ", "dAnIeL"])("adds exact Daniel tag %s outside his territory", (tag) => {
+    expect(owner({ tags: [tag] })).toEqual({ status: "unique", employeeId: "daniel" });
+    expect(owner({ tags: [tag], shippingAddress: address("NL") })).toEqual({ status: "unique", employeeId: "daniel" });
+    expect(owner({ tags: [tag], storeId: "store3" })).toEqual({ status: "unassigned" });
+    expect(owner({ tags: [tag], shippingAddress: address("BC") })).toEqual({ status: "unique", employeeId: "sales-agent-aaron" });
+    expect(owner({ tags: [tag], shippingAddress: address("BC"), createdAt: "2026-01-01T12:00:00Z" })).toEqual({ status: "unique", employeeId: "daniel" });
+    for (const other of ["Craig", "Rob", "Aron"]) {
+      expect(owner({ tags: [tag, other] })).toEqual({ status: "ambiguous" });
+    }
+  });
+
+  it("counts Daniel once across territory and tag matches and rejects partial tags", () => {
+    expect(owner({ tags: ["Daniel", "DANIEL"], shippingAddress: address("QC") })).toEqual({ status: "unique", employeeId: "daniel" });
+    expect(owner({ tags: ["Daniel follow-up", "Danielson"] })).toEqual({ status: "unassigned" });
   });
 
   it("enforces the RF and BC store boundaries", () => {

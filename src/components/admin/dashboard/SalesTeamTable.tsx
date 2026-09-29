@@ -98,7 +98,7 @@ export function SalesTeamTable({ data }: { data: SalesTeamOverview }) {
           <summary className="cursor-pointer text-slate-500 hover:text-slate-700">How totals are calculated</summary>
           <div className="mt-2 space-y-1 leading-relaxed">
             <p>Net sales are payments received less refunds, excluding tax and shipping. Changes compare with the preceding period of the same length.</p>
-            <p>Rob and Craig: tagged RF orders. Daniel: RF orders in Quebec, Nova Scotia, New Brunswick and PEI, with territory taking priority over tags. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac.</p>
+            <p>Rob and Craig: tagged RF orders. Daniel: RF orders and quotes tagged Daniel, plus Quebec, Nova Scotia, New Brunswick and PEI territory records. Territory rules take priority over tags. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac.</p>
           </div>
         </details>
       </div>

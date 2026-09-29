@@ -22,7 +22,7 @@ export interface DashboardSalesRep {
 
 const ATTRIBUTION_EXPLANATIONS: Record<string, string> = {
   Rob: "RF orders and quotes matching Rob's configured name tags. Daniel's Quebec, Nova Scotia, New Brunswick and PEI territory takes priority. In British Columbia, Rob-tagged records stay with Rob instead of Aaron. Other records matching multiple reps are excluded.",
-  Daniel: "All RF orders and quotes in Quebec, Nova Scotia, New Brunswick and PEI, including untagged records and records tagged to another rep. Territory takes priority over tags. Uses the shipping address, or billing address when shipping is absent.",
+  Daniel: "RF orders and quotes tagged Daniel, ignoring case and surrounding spaces, plus all RF records in Quebec, Nova Scotia, New Brunswick and PEI, even without a tag. Territory rules take priority over tags, including Aaron's eligible BC territory. Outside those territories, conflicting rep tags are excluded. Territory uses shipping, or billing when shipping is absent.",
   Craig: "RF orders and quotes matching Craig's configured name tags. Daniel's Quebec, Nova Scotia, New Brunswick and PEI territory takes priority. British Columbia records created July 16, 2026 onward go to Aaron, or Rob when Rob-tagged. Other records matching multiple reps are excluded.",
   Marie: "BC Transparent orders and quotes carrying the exact Marijac tag, ignoring letter case and surrounding spaces. Marie name tags alone do not qualify.",
   Aaron: "RF orders and quotes tagged Aaron or Aron, ignoring case and surrounding spaces, plus British Columbia records created July 16, 2026 onward at midnight Toronto time, even without a tag. Tagged records can be outside BC or older than that date. Daniel's territory takes priority; Rob-tagged records stay with Rob. Other conflicting rep tags are excluded. Territory uses shipping, or billing when shipping is absent.",
@@ -126,7 +126,10 @@ export function resolveDashboardSalesAttribution(
       return { status: "unique", employeeId: rob.id };
     }
   }
-  return resolveSalesAttribution(record.tags, storeReps.filter((rep) => !rep.territory || (taggedAaron && rep.id === aaron.id)));
+  const daniel = storeReps.find((rep) => rep.territory && !rep.province);
+  const taggedDaniel = daniel && record.tags.some((tag) => normalize(tag) === "daniel");
+  return resolveSalesAttribution(record.tags, storeReps.filter((rep) => !rep.territory ||
+    (taggedAaron && rep.id === aaron.id) || (taggedDaniel && rep.id === daniel.id)));
 }
 
 type MoneySet = { shopMoney: { amount: string } } | null;

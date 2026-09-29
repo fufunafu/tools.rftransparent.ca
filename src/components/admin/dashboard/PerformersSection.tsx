@@ -124,7 +124,7 @@ const LIST_META: Record<keyof typeof RANKINGS, { title: string; dataCalc: string
   sales: {
     title: "Sales",
     dataCalc:
-      "Net sales use successful payments less refunds, excluding tax and shipping proportionally, by payment date. Rob and Craig: RF name tags. Daniel: RF shipping province in Quebec, Nova Scotia, New Brunswick or PEI, with billing fallback for pickup orders and territory taking priority over tags. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac. Quotes use the same ownership rules and quote creation date. Delta compares the preceding period of the same length.",
+      "Net sales use successful payments less refunds, excluding tax and shipping proportionally, by payment date. Rob and Craig: RF name tags. Daniel: RF records tagged Daniel, plus Quebec, Nova Scotia, New Brunswick and PEI territory records. Territory rules take priority over tags; territory uses shipping with billing fallback when absent. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac. Quotes use the same ownership rules and quote creation date. Delta compares the preceding period of the same length.",
     dataSrc: "Shopify Admin API · orders + draftOrders",
   },
   warehouse: {
@@ -183,7 +183,7 @@ export function PerformersSection({
       {sections.includes("sales") && (
         <div className="text-[11px] leading-relaxed text-slate-500 space-y-1">
           <p>Net sales are payments received less refunds, excluding tax and shipping, by payment date. Compared with the previous {period.days} days.</p>
-          <p>Rob and Craig: tagged RF orders. Daniel: RF orders in Quebec, Nova Scotia, New Brunswick and PEI, including orders tagged to another rep. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac.</p>
+          <p>Rob and Craig: tagged RF orders. Daniel: RF orders and quotes tagged Daniel, plus Quebec, Nova Scotia, New Brunswick and PEI territory records. Territory rules take priority over tags. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac.</p>
         </div>
       )}
       {p.warnings.length > 0 && (

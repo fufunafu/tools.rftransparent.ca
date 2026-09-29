@@ -54,7 +54,7 @@ that every shared-file change has been approved for deployment.
 - Columns: 7 days, 30 days, 90 days, 180 days, and 1 year together.
 - Net sales and quoted rows, all-rep totals, compact layout, optional details.
 - Clickable amounts, searchable order/quote records, customer names, Shopify links.
-- Daniel: RF orders and quotes in QC, NS, NB, and PE; territory takes priority.
+- Daniel: RF records tagged Daniel, plus RF orders and quotes in QC, NS, NB, and PE. Territory rules retain priority, including Aaron's eligible BC territory. Outside territories, conflicting rep tags are excluded.
 - Aaron: RF records tagged Aaron or Aron, plus eligible RF BC records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Tags qualify outside BC and before the territory start date; other conflicting rep tags are excluded.
 - Marie: BC Transparent records carrying the exact normalized Marijac tag.
 - Preserve authorization checks on the dashboard, record endpoint, and employee

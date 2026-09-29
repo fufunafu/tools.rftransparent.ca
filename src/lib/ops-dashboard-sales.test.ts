@@ -52,6 +52,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
 
 describe("sales dashboard data integration", () => {
+  it("combines Daniel's tag and territory records once in every sales period", async () => {
+    vi.mocked(fetchAllPages).mockImplementation(async ({ storeId, query }) => ({
+      nodes: storeId === "store1" && !query.includes("draftOrders(")
+        ? [order(["Daniel"], "ON"), order(["Daniel"], "QC"), order(["Daniel", "Craig"], "ON")]
+        : [],
+      truncated: false,
+    }));
+    const result = await getSalesTeamOverview();
+    if (!result.ok) throw new Error(result.error);
+    for (const people of Object.values(result.value.periods)) {
+      expect(people.find((rep) => rep.id === "daniel")?.value).toBe(200);
+    }
+  });
+
   it("computes all five visible periods from a single Shopify history fetch", async () => {
     const result = await getSalesTeamOverview();
     if (!result.ok) throw new Error(result.error);

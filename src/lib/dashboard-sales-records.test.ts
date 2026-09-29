@@ -82,3 +82,15 @@ it("includes Aaron and Aron tagged quotes outside BC while retaining territory a
   expect(result.records.map((entry) => entry.name)).toEqual(["#1", "#2"]);
   expect(result.total).toBe(400);
 });
+
+it("adds Daniel-tagged orders and quotes outside his territory and excludes conflicting tags", async () => {
+  vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [order("1", ["Daniel"]), order("2", [], "QC"), order("3", ["Daniel", "Craig"]), order("4", ["Daniel follow-up"])], truncated: false });
+  const orders = await getSalesRepRecords("daniel", "30d", "orders");
+  expect(orders.records.map((entry) => entry.name)).toEqual(["#1", "#2"]);
+  expect(orders.total).toBe(200);
+  const quote = (id: string, tags: string[], province = "ON", status = "INVOICE_SENT") => ({ ...order(id, tags, province), id: `gid://shopify/DraftOrder/${id}`, createdAt: "2026-09-14T12:00:00Z", status, subtotalPriceSet: money(200) });
+  vi.mocked(fetchAllPages).mockResolvedValue({ nodes: [quote("5", [" DANIEL "]), quote("6", [], "QC"), quote("7", ["Daniel", "Rob"]), quote("8", ["Daniel"], "ON", "OPEN")], truncated: false });
+  const quotes = await getSalesRepRecords("daniel", "30d", "quotes");
+  expect(quotes.records.map((entry) => entry.name)).toEqual(["#5", "#6"]);
+  expect(quotes.total).toBe(400);
+});
