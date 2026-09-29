@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/verify-sales-preservation.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
@@ -31,7 +31,8 @@
     "ios:export": "IOS_EXPORT_ARCHIVE=1 node scripts/archive-ios.mjs",
     "ios:testflight": "IOS_UPLOAD_TESTFLIGHT=1 node scripts/archive-ios.mjs",
     "ios:release-check": "node scripts/validate-mobile-e2e-env.mjs && npm run check && npm run build && npm run ios:test:native && npm run cap:sync:prod && npm run ios:build:sim:release && npm run test:e2e:mobile",
-    "check": "npm run lint && npm run typecheck && npm test"
+    "check": "npm run lint && npm run typecheck && npm test",
+    "verify:sales-preservation": "node scripts/verify-sales-preservation.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",

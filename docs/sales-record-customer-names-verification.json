@@ -1,0 +1,46 @@
+{
+  "baseline": "dpl_8oUJS9SaaEnojHZCtRvy7TtX8AWb",
+  "release": "/var/folders/_j/8clxzk097214s755hdhmg5hr0000gn/T/rf-record-names-y9k_f3ja",
+  "baselineFilesVerified": 821,
+  "changed": [
+    "src/lib/sales-record-details.ts",
+    "src/lib/sales-record-details.test.ts",
+    "src/lib/dashboard-sales-records.ts",
+    "src/lib/dashboard-sales-records.test.ts",
+    "src/lib/ops-dashboard-sales.test.ts",
+    "src/components/admin/SalesRecordsTable.tsx",
+    "src/components/admin/SalesRecordsTable.test.tsx",
+    "src/app/api/kpi/metrics/route.ts",
+    "src/app/api/kpi/metrics/route.test.ts"
+  ],
+  "sourceHashes": {
+    "src/lib/sales-record-details.ts": "66d07a5656cfbd53f234cd8605613a66b01e2f88c3cf26afad9c060d20b8e630",
+    "src/lib/sales-record-details.test.ts": "3bba47ee3fa4bf29ab3c51e48d721b43eb00a287d906656281c1a3a52e9c5580",
+    "src/lib/dashboard-sales-records.ts": "6ca23d0d4f04e8735138abdf1211e2f952cdf515751b72e963af736eb46fd8bd",
+    "src/lib/dashboard-sales-records.test.ts": "fbc2e1ea7fdd8bb70541cc475e867b9a4de1c1258d5fd0df5f6fdebf140b4b84",
+    "src/lib/ops-dashboard-sales.test.ts": "c5d3241d7497b6efb336f86c1ccd5a6e37dee28807257c53ca0941a12c9bb176",
+    "src/components/admin/SalesRecordsTable.tsx": "93c18d5f8b4ba15431736b5926865da12e46ccd4b899f0759983e5cda25104b0",
+    "src/components/admin/SalesRecordsTable.test.tsx": "042f581db635d9e059edf54a34f3981f0f834420d02e5f657732d3b336b34d04",
+    "src/app/api/kpi/metrics/route.ts": "b9db2e81673102e5e464d6ca059cb5e835165775e36588bacb7618bf41709e26",
+    "src/app/api/kpi/metrics/route.test.ts": "e7778df34da68f7b88901b5ddb67d9f85d8dd105accc1ce54697e55a493b2e21"
+  },
+  "deploymentId": "dpl_5EQoVfwUkUseMpKLTZ2kZ6BJCztP",
+  "state": "READY",
+  "url": "https://tools.rftransparent.ca/dashboards/sales",
+  "verifiedAt": "2026-09-16T15:59:49.746128+00:00",
+  "checks": {
+    "tests": 62,
+    "testFiles": 10,
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed"
+  },
+  "liveVerification": [
+    "Customer names visible in Craig 30-day quote list; total unchanged at 50702.60",
+    "Name search filters two matching quotes and keeps full-period total",
+    "Aaron order list displays customer name and unchanged 7444 total",
+    "Aaron three-quote list displays all customer names; layout screenshot verified",
+    "Reloaded the user dashboard tab to the new production version"
+  ],
+  "coverage": "Shared record table and dashboard plus employee metrics API include customerName with shipping/billing contact or company fallback."
+}

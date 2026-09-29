@@ -352,52 +352,58 @@ export async function getMonthlyConversionHistory(
   employeeTags: string[],
   storeIds: string[],
   months: number = 12
-): Promise<{ month: string; totalDrafts: number; completedDrafts: number; conversionRate: number }[]> {
+): Promise<{ month: string; quoted: number; quote_count: number; sold: number; orders: number; aov: number; conversion_rate: number }[]> {
   const now = new Date();
-  const startDate = new Date(now.getFullYear(), now.getMonth() - months + 1, 1);
+  const count = Math.min(24, Math.max(1, Math.trunc(months) || 12));
+  const startDate = new Date(now.getFullYear(), now.getMonth() - count + 1, 1);
   const endDate = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+  const tags = new Set(employeeTags.map((tag) => tag.trim().toLowerCase()).filter(Boolean));
+  if (tags.size === 0) return [];
 
-  const lowerTags = employeeTags.map((t) => t.toLowerCase()).filter(Boolean);
-  if (lowerTags.length === 0) return [];
-
-  const { data: allDrafts } = await fetchAllDraftOrders(storeIds, toDateStr(startDate));
-
-  // Group by month
-  const monthMap = new Map<string, { total: number; completed: number }>();
-
-  // Initialize all months
-  for (let i = 0; i < months; i++) {
-    const d = new Date(startDate.getFullYear(), startDate.getMonth() + i, 1);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    monthMap.set(key, { total: 0, completed: 0 });
+  const [orders, drafts] = await Promise.all([
+    fetchAllOrders(storeIds, toDateStr(startDate), toDateStr(endDate)),
+    fetchAllDraftOrders(storeIds, toDateStr(startDate), toDateStr(endDate)),
+  ]);
+  if (orders.warnings.length || drafts.warnings.length) {
+    throw new Error("Employee history is incomplete. Please try again.");
   }
 
-  for (const draft of allDrafts) {
-    const draftDate = new Date(draft.createdAt);
-    if (draftDate < startDate || draftDate >= endDate) continue;
-
-    const draftTags = draft.tags.map((t) => t.toLowerCase());
-    if (!lowerTags.some((et) => draftTags.includes(et))) continue;
-
-    const key = `${draftDate.getFullYear()}-${String(draftDate.getMonth() + 1).padStart(2, "0")}`;
-    const entry = monthMap.get(key);
-    if (entry) {
-      entry.total++;
-      if (draft.status === "COMPLETED") entry.completed++;
+  const monthKey = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  const monthMap = new Map<string, { quoted: number; quote_count: number; sold: number; orders: number; completed: number }>();
+  for (let i = 0; i < count; i++) {
+    monthMap.set(monthKey(new Date(startDate.getFullYear(), startDate.getMonth() + i, 1)),
+      { quoted: 0, quote_count: 0, sold: 0, orders: 0, completed: 0 });
+  }
+  const matches = (record: { tags: string[] }) => record.tags.some((tag) => tags.has(tag.trim().toLowerCase()));
+  for (const order of orders.data) {
+    const date = new Date(order.createdAt);
+    if (order.cancelledAt || date < startDate || date >= endDate || !matches(order)) continue;
+    const row = monthMap.get(monthKey(date));
+    if (row) {
+      // Match the employee KPI cards: order subtotal, by order creation date.
+      row.sold += Number(order.subtotalPriceSet.shopMoney.amount) || 0;
+      row.orders++;
     }
   }
-
-  return [...monthMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([month, data]) => ({
-      month,
-      totalDrafts: data.total,
-      completedDrafts: data.completed,
-      conversionRate:
-        data.total > 0
-          ? Math.round((data.completed / data.total) * 1000) / 10
-          : 0,
-    }));
+  for (const draft of drafts.data) {
+    const date = new Date(draft.createdAt);
+    if (draft.status === "OPEN" || date < startDate || date >= endDate || !matches(draft)) continue;
+    const row = monthMap.get(monthKey(date));
+    if (row) {
+      row.quoted += Number(draft.subtotalPriceSet.shopMoney.amount) || 0;
+      row.quote_count++;
+      if (draft.status === "COMPLETED") row.completed++;
+    }
+  }
+  return [...monthMap.entries()].map(([month, row]) => ({
+    month,
+    quoted: Math.round(row.quoted * 100) / 100,
+    quote_count: row.quote_count,
+    sold: Math.round(row.sold * 100) / 100,
+    orders: row.orders,
+    aov: row.orders ? Math.round(row.sold / row.orders * 100) / 100 : 0,
+    conversion_rate: row.quote_count ? Math.round(row.completed / row.quote_count * 1000) / 10 : 0,
+  }));
 }
 
 // --------------- Pipeline Metrics ---------------
