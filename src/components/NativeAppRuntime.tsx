@@ -540,7 +540,9 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
   }, []);
 
   useEffect(() => {
-    if (!native) return;
+    // Android owns its neutral system-bar margins and contrast natively,
+    // including the bundled recovery page where no JavaScript bridge exists.
+    if (!native || getNativePlatform() === "android") return;
     void (async () => {
       const { StatusBar, Style } = await import("@capacitor/status-bar");
       await StatusBar.setStyle({ style: locked ? Style.Light : Style.Dark });

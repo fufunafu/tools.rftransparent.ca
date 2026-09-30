@@ -43,6 +43,10 @@ const config: CapacitorConfig = {
     webContentsDebuggingEnabled: localDevelopmentUrl,
   },
   plugins: {
+    SystemBars: {
+      // Android uses one native inset owner, including on the offline page.
+      insetsHandling: "disable",
+    },
     SplashScreen: {
       // The web runtime hides this as soon as the first view is ready. The
       // bounded fallback prevents a failed remote load from covering the

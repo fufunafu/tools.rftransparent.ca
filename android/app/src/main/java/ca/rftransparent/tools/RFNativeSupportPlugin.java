@@ -2,6 +2,7 @@ package ca.rftransparent.tools;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.Context;
 import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
@@ -78,14 +79,18 @@ public class RFNativeSupportPlugin extends Plugin {
 
     @PluginMethod
     public void recordWebViewLoadFailure(PluginCall call) {
+        recordLoadFailure(getContext());
+        call.resolve();
+    }
+
+    static void recordLoadFailure(Context context) {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("UTC"));
-        SharedPreferences preferences = diagnostics();
+        SharedPreferences preferences = context.getSharedPreferences("rf-native-diagnostics", 0);
         preferences.edit()
             .putInt("loadFailures", preferences.getInt("loadFailures", 0) + 1)
             .putString("lastLoadFailure", format.format(new Date()))
             .apply();
-        call.resolve();
     }
 
     @PluginMethod

@@ -12,6 +12,7 @@ assert.deepEqual(config.server?.allowNavigation, []);
 assert.equal(config.server?.errorPath, "offline.html");
 assert.equal(config.android?.allowMixedContent, false);
 assert.equal(config.android?.webContentsDebuggingEnabled, false);
+assert.equal(config.plugins?.SystemBars?.insetsHandling, "disable");
 const manifest = read("android/app/src/main/AndroidManifest.xml");
 assert.match(manifest, /android:allowBackup="false"/);
 assert.match(manifest, /android:usesCleartextTraffic="false"/);

@@ -142,7 +142,9 @@ export default function NativeSettingsPanel() {
             </div>
             <div className="mt-4 border-t border-slate-200 pt-4">
               <h3 className="text-sm font-bold text-slate-900">Notification preferences</h3>
-              {permissions.notifications !== "granted" ? (
+              {permissions.notifications === "unavailable" ? (
+                <p className="mt-2 leading-5 text-slate-600">Notifications are unavailable in this app version.</p>
+              ) : permissions.notifications !== "granted" ? (
                 <div className="mt-2 space-y-2">
                   <p className="leading-5 text-slate-600">Notifications are {permissions.notifications}. Enable them here or recover denied access in device Settings.</p>
                   <div className="grid grid-cols-2 gap-2">

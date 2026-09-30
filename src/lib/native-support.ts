@@ -99,9 +99,12 @@ export async function getNativePermissionSnapshot(): Promise<NativePermissionSna
   if (!isNativeApp()) return unavailable;
 
   const [notifications, location, authentication] = await Promise.allSettled([
-    import("@capacitor/push-notifications").then(({ PushNotifications }) =>
-      PushNotifications.checkPermissions(),
-    ),
+    getNativeDeviceInfo().then(async (device) => {
+      // Do not offer permission controls when this binary has no push provider.
+      if (!device?.pushEnvironment) return { receive: "unavailable" };
+      const { PushNotifications } = await import("@capacitor/push-notifications");
+      return PushNotifications.checkPermissions();
+    }),
     getNativeLocationAuthorizationStatus(),
     deviceUnlockAvailable(),
   ]);

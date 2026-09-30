@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@color/ic_launcher_background" />
-    <item android:width="128dp" android:height="128dp" android:gravity="center">
-        <bitmap android:src="@drawable/rf_tools_icon" android:gravity="fill" />
-    </item>
-</layer-list>
