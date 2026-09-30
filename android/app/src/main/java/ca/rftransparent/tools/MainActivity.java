@@ -28,6 +28,7 @@ public class MainActivity extends BridgeActivity {
     private final Handler recoveryHandler = new Handler(Looper.getMainLooper());
     private Runnable loadTimeout;
     private boolean recoveryReady;
+    private boolean recoveryLoading;
 
     private boolean isRecoveryPage(String url) {
         return getBridge() != null && getBridge().getErrorUrl() != null &&
@@ -39,9 +40,10 @@ public class MainActivity extends BridgeActivity {
         loadTimeout = null;
     }
 
-    private void showRecovery(WebView webView) {
+    void showRecovery(WebView webView) {
         cancelLoadTimeout();
-        if (isFinishing() || isDestroyed() || isRecoveryPage(webView.getUrl())) return;
+        if (isFinishing() || isDestroyed() || recoveryLoading) return;
+        recoveryLoading = true;
         RFNativeSupportPlugin.recordLoadFailure(this);
         webView.stopLoading();
         webView.loadUrl(getBridge().getErrorUrl());
@@ -58,11 +60,24 @@ public class MainActivity extends BridgeActivity {
         // must work natively even when the hosted runtime never loads.
         getBridge().setWebViewClient(new BridgeWebViewClient(getBridge()) {
             @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                boolean handledExternally = super.shouldOverrideUrlLoading(view, request);
+                if (!handledExternally && request.isForMainFrame() && !isRecoveryPage(request.getUrl().toString())) {
+                    // A failed retry can report its error before WebView.getUrl()
+                    // changes away from the old error document.
+                    recoveryLoading = false;
+                    recoveryReady = false;
+                }
+                return handledExternally;
+            }
+
+            @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 super.onPageStarted(view, url, favicon);
                 cancelLoadTimeout();
                 recoveryReady = false;
-                if (!isRecoveryPage(url)) {
+                recoveryLoading = isRecoveryPage(url);
+                if (!recoveryLoading) {
                     loadTimeout = () -> showRecovery(view);
                     recoveryHandler.postDelayed(loadTimeout, 20000);
                 }
@@ -71,11 +86,14 @@ public class MainActivity extends BridgeActivity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (!url.equals(view.getUrl())) return;
                 cancelLoadTimeout();
                 if (isRecoveryPage(url)) {
                     recoveryReady = true;
                     configureSystemBarContrast();
-                    hidePrivacyShield();
+                    if (getLifecycle().getCurrentState().isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                        hidePrivacyShield();
+                    }
                 }
             }
 

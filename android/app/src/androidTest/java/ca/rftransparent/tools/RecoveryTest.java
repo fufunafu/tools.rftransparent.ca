@@ -27,7 +27,7 @@ public class RecoveryTest {
     }
 
     private void openRecovery(ActivityScenario<MainActivity> scenario) throws Exception {
-        scenario.onActivity(activity -> activity.getBridge().getWebView().loadUrl(activity.getBridge().getErrorUrl()));
+        scenario.onActivity(activity -> activity.showRecovery(activity.getBridge().getWebView()));
         awaitRecovery(scenario);
     }
 
@@ -36,7 +36,14 @@ public class RecoveryTest {
         while (System.currentTimeMillis() < deadline) {
             String ready = evaluate(scenario,
                 "document.readyState === 'complete' && !!document.getElementById('retry') && !document.getElementById('retry').disabled");
-            if ("true".equals(ready)) return;
+            if ("true".equals(ready)) {
+                AtomicReference<Boolean> visible = new AtomicReference<>(false);
+                scenario.onActivity(activity -> {
+                    View shield = activity.getWindow().getDecorView().findViewWithTag("rf-privacy-shield");
+                    visible.set(shield != null && shield.getVisibility() == View.GONE);
+                });
+                if (visible.get()) return;
+            }
             Thread.sleep(100);
         }
         fail("Bundled recovery page did not render without a network response");
@@ -84,6 +91,7 @@ public class RecoveryTest {
                 assertEquals(View.VISIBLE, shield.getVisibility());
             });
             scenario.moveToState(Lifecycle.State.RESUMED);
+            awaitRecovery(scenario);
             scenario.onActivity(activity -> {
                 View shield = activity.getWindow().getDecorView().findViewWithTag("rf-privacy-shield");
                 assertEquals(View.GONE, shield.getVisibility());
