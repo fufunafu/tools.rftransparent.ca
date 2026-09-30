@@ -69,7 +69,7 @@ export default function NativeSettingsPanel() {
     if (status === "registered") {
       setMessage("Notifications are registered on this device.");
     } else if (status === "denied") {
-      setMessage("Notification access is off. Enable it in iPhone Settings.");
+      setMessage("Notification access is off. Enable it in device Settings.");
     } else if (status === "failed") {
       setMessage("RF Tools could not register this device. Check your connection and try again.");
     } else {
@@ -133,7 +133,7 @@ export default function NativeSettingsPanel() {
         {runtime.isNative && (
           <>
             <div className="mt-4 border-t border-slate-200 pt-4">
-              <h3 className="text-sm font-bold text-slate-900">Face ID / Touch ID</h3>
+              <h3 className="text-sm font-bold text-slate-900">Biometric unlock</h3>
               <p className="mt-2 leading-5 text-slate-600">{biometrics.preference === "enabled" ? "App unlock is enabled for your account on this device." : "App unlock is off. You can continue using your email and password."}</p>
               <button type="button" onClick={biometrics.preference === "enabled" ? biometrics.disable : biometrics.configure} className="mt-3 min-h-11 w-full rounded-xl border border-slate-300 bg-white px-3 font-bold text-slate-700">
                 {biometrics.preference === "enabled" ? "Turn off app unlock" : "Set up app unlock"}
@@ -144,7 +144,7 @@ export default function NativeSettingsPanel() {
               <h3 className="text-sm font-bold text-slate-900">Notification preferences</h3>
               {permissions.notifications !== "granted" ? (
                 <div className="mt-2 space-y-2">
-                  <p className="leading-5 text-slate-600">Notifications are {permissions.notifications}. Enable them here or recover denied access in iPhone Settings.</p>
+                  <p className="leading-5 text-slate-600">Notifications are {permissions.notifications}. Enable them here or recover denied access in device Settings.</p>
                   <div className="grid grid-cols-2 gap-2">
                     <button type="button" disabled={loading} onClick={() => void enableNotifications()} className="min-h-11 rounded-xl bg-blue-600 px-3 font-bold text-white disabled:opacity-50">Enable</button>
                     <button type="button" onClick={() => void openNativeSettings()} className="min-h-11 rounded-xl border border-slate-300 bg-white px-3 font-bold text-slate-700">Open Settings</button>
@@ -171,7 +171,7 @@ export default function NativeSettingsPanel() {
               <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20support" className="flex min-h-11 items-center justify-center rounded-xl border border-slate-300 bg-white px-3 font-bold text-slate-700">Contact support</a>
             </div>
             {(["denied", "restricted"].includes(permissions.location) || ["denied", "restricted"].includes(permissions.notifications)) && (
-              <button type="button" onClick={() => void openNativeSettings()} className="mt-3 min-h-11 w-full rounded-xl bg-slate-900 px-3 font-bold text-white">Open iPhone Settings</button>
+              <button type="button" onClick={() => void openNativeSettings()} className="mt-3 min-h-11 w-full rounded-xl bg-slate-900 px-3 font-bold text-white">Open device Settings</button>
             )}
             {runtime.updateState !== "current" && runtime.updateState !== "unknown" && runtime.updateUrl && (
               <a href={runtime.updateUrl} className="mt-3 flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-3 font-bold text-white">Update RF Tools</a>

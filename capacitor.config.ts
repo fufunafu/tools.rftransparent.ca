@@ -30,6 +30,11 @@ const config: CapacitorConfig = {
     allowNavigation: [],
     errorPath: "offline.html",
   },
+  android: {
+    backgroundColor: "#1e3a8a",
+    allowMixedContent: false,
+    webContentsDebuggingEnabled: localDevelopmentUrl,
+  },
   ios: {
     backgroundColor: "#1e3a8a",
     contentInset: "never",

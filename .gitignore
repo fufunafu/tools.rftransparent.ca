@@ -74,3 +74,6 @@ supabase/.temp/
 !/scripts/freightcom-smoke.mjs
 
 !/scripts/verify-sales-preservation.mjs
+
+!/scripts/validate-android-release.mjs
+!/scripts/build-android-bundle.mjs

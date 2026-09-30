@@ -1,3 +1,5 @@
+import { getNativePlatform, type NativePlatform } from "@/lib/native-platform";
+
 export interface NativeVersionPolicy {
   minimumBuild: number;
   recommendedBuild: number;
@@ -16,11 +18,14 @@ const APPLE_UPDATE_HOSTS = new Set([
   "testflight.apple.com",
 ]);
 
-export function normalizeNativeUpdateUrl(value: string | null | undefined): string | null {
+export function normalizeNativeUpdateUrl(value: string | null | undefined, platform: NativePlatform = "ios"): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && APPLE_UPDATE_HOSTS.has(url.hostname.toLowerCase())
+    const trustedHost = platform === "android"
+      ? url.hostname === "play.google.com" && url.pathname === "/store/apps/details" && url.searchParams.get("id") === "ca.rftransparent.tools"
+      : APPLE_UPDATE_HOSTS.has(url.hostname.toLowerCase());
+    return url.protocol === "https:" && !url.username && !url.password && !url.port && trustedHost
       ? url.toString()
       : null;
   } catch {
@@ -37,11 +42,12 @@ function parseBuild(value: string | number): number | null {
 export function evaluateNativeUpdate(
   installedBuild: string | number,
   policy: NativeVersionPolicy,
+  platform: NativePlatform = "ios",
 ): NativeUpdateDecision {
   const installed = parseBuild(installedBuild);
   const minimum = parseBuild(policy.minimumBuild);
   const recommended = parseBuild(policy.recommendedBuild);
-  const validUpdateUrl = normalizeNativeUpdateUrl(policy.updateUrl);
+  const validUpdateUrl = normalizeNativeUpdateUrl(policy.updateUrl, platform);
 
   if (installed === null || minimum === null || recommended === null) {
     return { state: "current", updateUrl: null };
@@ -62,8 +68,9 @@ export async function checkNativeUpdate(
   installedBuild: string,
   signal?: AbortSignal,
 ): Promise<NativeUpdateDecision> {
-  const response = await fetch("/api/native/version", { cache: "no-store", signal });
+  const platform = getNativePlatform();
+  const response = await fetch(`/api/native/version?platform=${platform}`, { cache: "no-store", signal });
   if (!response.ok) throw new Error("Native version policy is unavailable.");
   const policy = (await response.json()) as NativeVersionPolicy;
-  return evaluateNativeUpdate(installedBuild, policy);
+  return evaluateNativeUpdate(installedBuild, policy, platform);
 }

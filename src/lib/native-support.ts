@@ -17,7 +17,7 @@ export interface NativeDeviceInfo {
   operatingSystem: string;
   deviceModel: string;
   locale: string;
-  pushEnvironment: "sandbox" | "production";
+  pushEnvironment: "sandbox" | "production" | null;
   nativeCrashCount: number;
   lastNativeCrashAt: string | null;
   lastNativeCrashSignature: string | null;

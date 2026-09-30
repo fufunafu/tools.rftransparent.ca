@@ -34,6 +34,7 @@ import {
 } from "@/lib/native-runtime";
 import { resolveAuthorizedNativeLink } from "@/lib/native-links";
 import { checkNativeUpdate, normalizeNativeUpdateUrl } from "@/lib/native-update";
+import { getNativePlatform } from "@/lib/native-platform";
 import { getNativeDeviceInfo, hideNativePrivacyShield } from "@/lib/native-support";
 import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
 
@@ -101,7 +102,7 @@ function UnlockOverlay({
         <p id="native-unlock-message" className="mt-2 text-sm leading-6 text-slate-500">
           {setupLabel
             ? `Use ${setupLabel} to unlock RF Tools when you return. Your device passcode can be used as a fallback. This is optional, and you can change it in App settings.`
-            : "Use Face ID, Touch ID, or your device passcode to continue."}
+            : "Use biometrics or your device passcode to continue."}
         </p>
         {error && (
           <p className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
@@ -343,7 +344,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
         // Do not silently enable a passcode-only lock or remember a refusal.
         if (action === "configure") {
           allowSession();
-          setBiometricSettingsMessage("Face ID or Touch ID is unavailable. Set it up or allow access in device Settings, then try again.");
+          setBiometricSettingsMessage("Biometric unlock is unavailable. Set it up or allow access in device Settings, then try again.");
           return;
         }
         allowSession();
@@ -445,26 +446,37 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       handles.push(
         await App.addListener("appUrlOpen", ({ url }) => void routeNativeUrl(url)),
       );
+      if (getNativePlatform() === "android") {
+        handles.push(await App.addListener("backButton", ({ canGoBack }) => {
+          if (canGoBack) window.history.back();
+          else void App.minimizeApp();
+        }));
+      }
+      const enterBackground = () => {
+        backgrounded.current = true;
+        // Ignore a late authentication result from before this background.
+        unlockAttempt.current += 1;
+        authenticating.current = false;
+        setUnlockBusy(false);
+        setEnrollment(null);
+        setAppIsActive(false);
+        setSessionUnlocked(false);
+      };
       handles.push(
         await App.addListener("pause", () => {
-          // Capacitor emits appStateChange(false) whenever iOS merely becomes
-          // inactive, including while Face ID is on screen. The pause event is
-          // the separate signal that the app actually entered the background.
-          backgrounded.current = true;
-          // Ignore a late authentication result from before this background.
-          unlockAttempt.current += 1;
-          authenticating.current = false;
-          setUnlockBusy(false);
-          setEnrollment(null);
-          setAppIsActive(false);
-          setSessionUnlocked(false);
+          // iOS pause means background. Android pause also occurs for system
+          // authentication overlays; Android's appStateChange(false) is onStop.
+          if (getNativePlatform() !== "android") enterBackground();
         }),
       );
       handles.push(
         await App.addListener("appStateChange", ({ isActive }) => {
           // Do not revoke an unlock for a temporary inactive state. Face ID,
           // Control Center, and other system overlays all produce this event.
-          if (!isActive) return;
+          if (!isActive) {
+            if (getNativePlatform() === "android") enterBackground();
+            return;
+          }
           window.requestAnimationFrame(() => void hideNativePrivacyShield());
           // Dismissing Face ID must not start another policy check or refresh.
           if (!backgrounded.current) return;
@@ -549,7 +561,7 @@ export default function NativeAppRuntime({ children }: { children: React.ReactNo
       if (!["http:", "https:"].includes(url.protocol) || isTrustedAppUrl(url, window.location.origin)) return;
       // Let the native navigation guard hand approved update destinations to
       // iOS directly so App Store and TestFlight links open in their apps.
-      if (normalizeNativeUpdateUrl(url.toString())) return;
+      if (normalizeNativeUpdateUrl(url.toString(), getNativePlatform())) return;
       event.preventDefault();
       void import("@capacitor/browser").then(({ Browser }) =>
         Browser.open({ url: url.toString(), presentationStyle: "popover", toolbarColor: "#1e3a8a" }),

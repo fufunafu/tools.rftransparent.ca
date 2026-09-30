@@ -32,11 +32,16 @@
     "ios:testflight": "IOS_UPLOAD_TESTFLIGHT=1 node scripts/archive-ios.mjs",
     "ios:release-check": "node scripts/validate-mobile-e2e-env.mjs && npm run check && npm run build && npm run ios:test:native && npm run cap:sync:prod && npm run ios:build:sim:release && npm run test:e2e:mobile",
     "check": "npm run lint && npm run typecheck && npm test",
-    "verify:sales-preservation": "node scripts/verify-sales-preservation.mjs"
+    "verify:sales-preservation": "node scripts/verify-sales-preservation.mjs",
+    "cap:sync:android": "CI=1 CAPACITOR_SERVER_URL=https://tools.rftransparent.ca CAPACITOR_ALLOW_CLEARTEXT=0 cap sync android && node scripts/validate-android-release.mjs",
+    "android:open": "cap open android",
+    "android:build:debug": "npm run cap:sync:android && cd android && ./gradlew assembleDebug lintDebug testDebugUnitTest",
+    "android:bundle": "npm run cap:sync:android && node scripts/build-android-bundle.mjs"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",
     "@aparajita/capacitor-secure-storage": "^8.0.0",
+    "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/browser": "^8.0.4",
     "@capacitor/core": "^8.5.0",
