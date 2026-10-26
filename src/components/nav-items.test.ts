@@ -4,6 +4,7 @@ import {
   SETTINGS_ITEM,
   filterNavItem,
   getSearchTargets,
+  activeChildHref,
   matchesItem,
   type NavItem,
   type ViewerAccess,
@@ -75,5 +76,12 @@ describe("section highlighting", () => {
   it("still highlights Dashboard after its href is swapped for the viewer's own", () => {
     const dashboard = { ...section("Dashboard"), href: "/dashboards/sales" };
     expect(matchesItem(dashboard, "/dashboards/sales")).toBe(true);
+  });
+
+  it("lights up only the most specific child row", () => {
+    expect(activeChildHref("/warehouse/purchasing/inventory")).toBe("/warehouse/purchasing");
+    expect(activeChildHref("/warehouse/report")).toBe("/warehouse/report");
+    expect(activeChildHref("/warehouse")).toBe("/warehouse");
+    expect(activeChildHref("/customer-service/leads/rf")).toBe("/customer-service/leads");
   });
 });

@@ -332,6 +332,22 @@ function owningSectionLabel(pathname: string): string | null {
   return best?.label ?? null;
 }
 
+// The one child row that should light up for `pathname`: the longest matching
+// child href across every section. Without this, Logistics > Dashboard
+// ("/warehouse") would also light up on /warehouse/report and on
+// /warehouse/purchasing, which lives under Work in progress.
+export function activeChildHref(pathname: string): string | null {
+  let best: string | null = null;
+  for (const section of [...NAV_ITEMS, SETTINGS_ITEM]) {
+    for (const child of section.children ?? []) {
+      if (!child.external && matchesPrefix(child.href, pathname) && (!best || child.href.length > best.length)) {
+        best = child.href;
+      }
+    }
+  }
+  return best;
+}
+
 // True when `pathname` is the section itself or a page inside it. "/" is
 // matched exactly — as a prefix it would swallow every route and light up
 // Today on every page.
