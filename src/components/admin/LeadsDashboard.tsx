@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type {
   CallStatus,
@@ -122,6 +122,11 @@ const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string 
   { value: "all", label: "All time", metricLabel: "all time" },
   { value: "custom", label: "Custom", metricLabel: "custom" },
 ];
+
+// The table draws this many leads at first and adds the same number each
+// time the reader scrolls near the end, so a long range doesn't render
+// hundreds of rows up front.
+export const LEAD_ROWS_PER_PAGE = 50;
 
 const subscribeToHydration = () => () => {};
 const hydratedSnapshot = () => true;
@@ -1159,6 +1164,44 @@ function LeadDetailPanel({
   );
 }
 
+function LoadMoreRows({
+  shown,
+  total,
+  onLoadMore,
+}: {
+  shown: number;
+  total: number;
+  onLoadMore: () => void;
+}) {
+  const sentinel = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const element = sentinel.current;
+    if (!element || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) onLoadMore();
+      },
+      { rootMargin: "200px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [onLoadMore]);
+
+  return (
+    <div ref={sentinel} className="flex items-center justify-center gap-3 py-4 text-xs text-sand-400">
+      <span>Showing {shown} of {total} leads</span>
+      <button
+        type="button"
+        onClick={onLoadMore}
+        className="font-medium text-blue-600 hover:text-blue-800"
+      >
+        Show more
+      </button>
+    </div>
+  );
+}
+
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
 export default function LeadsDashboard({
@@ -1221,6 +1264,9 @@ export default function LeadsDashboard({
       fallbackData: initialLeads && leadsUrl === initialLeadsUrl
         ? { leads: initialLeads }
         : undefined,
+      // The server just rendered this list, so don't download it again on
+      // load. Polling and focus still refresh it, and other ranges fetch.
+      revalidateOnMount: initialLeads && leadsUrl === initialLeadsUrl ? false : undefined,
     },
   );
   const {
@@ -1363,6 +1409,18 @@ export default function LeadsDashboard({
       return sortOrder === "newest" ? difference : -difference;
     });
   }, [sourceLeads, filter, search, sortOrder]);
+
+  // Changing what the list shows starts it again from the first page.
+  const listKey = [leadsUrl, filter, sourceFilter, search, sortOrder].join("|");
+  const [rowPaging, setRowPaging] = useState({ key: listKey, count: LEAD_ROWS_PER_PAGE });
+  const visibleRowCount = rowPaging.key === listKey ? rowPaging.count : LEAD_ROWS_PER_PAGE;
+  const visibleLeads = filtered.slice(0, visibleRowCount);
+  const showMoreRows = useCallback(() => {
+    setRowPaging((current) => ({
+      key: listKey,
+      count: (current.key === listKey ? current.count : LEAD_ROWS_PER_PAGE) + LEAD_ROWS_PER_PAGE,
+    }));
+  }, [listKey]);
 
   const queueResponseMetrics = useMemo(() => {
     const visibleLeads = filtered.filter(isLeadIncludedInPerformance);
@@ -1842,7 +1900,7 @@ export default function LeadsDashboard({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((lead) => (
+                {visibleLeads.map((lead) => (
                   <tr
                     key={lead.id}
                     onClick={() => setSelectedLeadId(lead.id)}
@@ -1936,6 +1994,13 @@ export default function LeadsDashboard({
                 ))}
               </tbody>
             </table>
+            {visibleLeads.length < filtered.length && (
+              <LoadMoreRows
+                shown={visibleLeads.length}
+                total={filtered.length}
+                onLoadMore={showMoreRows}
+              />
+            )}
           </div>
         )}
         </section>
