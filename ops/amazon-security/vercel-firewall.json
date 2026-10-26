@@ -1,0 +1,52 @@
+{
+  "firewallEnabled": true,
+  "rules": [
+    {
+      "name": "RF Amazon restricted network",
+      "description": "Restrict Amazon UI and API to the initial operator network. Update after verification when the operator changes networks. MFA and approved-user checks remain mandatory.",
+      "active": true,
+      "conditionGroup": [
+        {
+          "conditions": [
+            {
+              "type": "path",
+              "op": "re",
+              "value": "^/(api/)?amazon(/|$)"
+            },
+            {
+              "type": "ip_address",
+              "op": "neq",
+              "value": "66.205.13.56"
+            }
+          ]
+        }
+      ],
+      "action": {
+        "mitigate": {
+          "action": "deny"
+        }
+      }
+    },
+    {
+      "name": "RF Amazon firewall verification",
+      "description": "Deny the dedicated Amazon security verification path. Does not match application operations.",
+      "active": true,
+      "conditionGroup": [
+        {
+          "conditions": [
+            {
+              "type": "path",
+              "op": "eq",
+              "value": "/api/amazon/__firewall_probe_20261003__"
+            }
+          ]
+        }
+      ],
+      "action": {
+        "mitigate": {
+          "action": "deny"
+        }
+      }
+    }
+  ]
+}

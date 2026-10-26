@@ -335,3 +335,38 @@ export function extractEmail(raw: string): string {
   const match = raw.match(/<([^>]+)>/);
   return match ? match[1].toLowerCase() : raw.toLowerCase().trim();
 }
+
+export interface GmailConversationMessage {
+  id: string; threadId: string; from: string; to: string; subject: string;
+  receivedAt: string; body: string; automatic: boolean;
+}
+
+// A message-server ID anchors the exact conversation. Never match a sales
+// conversation using the prospect address alone.
+export async function readGmailConversation(inbox: GmailInbox, messageId: string): Promise<GmailConversationMessage[]> {
+  if (!/^[^\s<>"{}]{3,998}$/.test(messageId.replace(/^<|>$/g,''))) throw new Error('Invalid email message ID');
+  const token = await getAccessToken(await getRefreshToken(inbox));
+  if ((await getGmailProfileEmail(token)).toLowerCase() !== inbox.email.toLowerCase()) throw new Error('Gmail account mismatch');
+  const headers = { Authorization: `Bearer ${token}` };
+  async function read(path: string) {
+    const response = await fetch(`${GMAIL_API}/${path}`, { headers, cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(12000) });
+    if (!response.ok) throw new Error(`Gmail conversation unavailable (${response.status})`);
+    return response.json();
+  }
+  const query = new URLSearchParams({ q: `rfc822msgid:${messageId.replace(/^<|>$/g,'')}`, maxResults: '2', includeSpamTrash: 'false' });
+  const matches = await read(`messages?${query}`);
+  if (matches.messages?.length !== 1 || matches.nextPageToken) throw new Error('Original reply not found uniquely in general inbox');
+  const thread = await read(`threads/${encodeURIComponent(matches.messages[0].threadId)}?format=full`);
+  if (!Array.isArray(thread.messages) || thread.messages.length > 100) throw new Error('Conversation needs manual review');
+  type Part = { mimeType?: string; body?: { data?: string }; parts?: Part[]; headers?: {name:string;value:string}[] };
+  function body(part: Part): string {
+    if (part.mimeType === 'text/plain' && part.body?.data) return Buffer.from(part.body.data,'base64url').toString('utf8');
+    return (part.parts ?? []).map(body).filter(Boolean).join('\n');
+  }
+  return thread.messages.map((message: {id:string;threadId:string;internalDate:string;payload:Part}) => {
+    const header=(name:string)=>message.payload.headers?.find(h=>h.name.toLowerCase()===name.toLowerCase())?.value??'';
+    return {id:message.id,threadId:message.threadId,from:header('From'),to:header('To'),subject:header('Subject'),
+      receivedAt:new Date(Number(message.internalDate)).toISOString(),body:body(message.payload).slice(0,20000),
+      automatic:Boolean(header('Auto-Submitted') && header('Auto-Submitted').toLowerCase()!=='no') || /^(bulk|list|junk)$/i.test(header('Precedence'))};
+  });
+}

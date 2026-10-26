@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdminUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
+import { passwordStrengthProblem } from "@/lib/password-policy";
 
 // Provisions or rotates the Supabase password credential for an employee.
 // The username they'll type at the login screen is the employee's work
@@ -25,9 +26,10 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  if (password.length < 8) {
+  const passwordProblem = passwordStrengthProblem(password);
+  if (passwordProblem) {
     return NextResponse.json(
-      { error: "Password must be at least 8 characters" },
+      { error: passwordProblem },
       { status: 400 }
     );
   }

@@ -1,0 +1,30 @@
+{
+  "submittedAt": "2026-10-03T19:41:47.644166+00:00",
+  "organization": "15041074 Canada Inc.",
+  "contact": "Fu Gao",
+  "solutionType": "private",
+  "roles": [
+    "Product Listing"
+  ],
+  "securityAnswers": {
+    "usesNetworkControls": "No",
+    "usesDataRestrictions": "Yes",
+    "usesDataEncryption": "Yes",
+    "hasIncidentManagementPolicy": "Yes",
+    "reportsIncidentsToAmazon": "Yes",
+    "requireMinPassword": "No",
+    "credentialStoredSecurely": "Yes"
+  },
+  "result": "Not eligible for SP-API access",
+  "productionAppCreation": "Not eligible following developer profile assessment",
+  "confirmationUrl": "https://solutionproviderportal.amazon.com/sellingpartner/developerconsole",
+  "amazonListingsSubmitted": 0,
+  "caseId": "22404325731",
+  "caseUrl": "https://solutionproviderportal.amazon.com/cu/case-dashboard/view-case?caseID=22404325731",
+  "decisionCheckedAt": "2026-10-03T19:46:12.028046+00:00",
+  "decisionReasons": [
+    "Full network security controls",
+    "Password requirements including MFA and annual rotation"
+  ],
+  "appealInstructions": "Update Developer Profile responses with corrected or additional information to create a new case; do not reopen the answered case."
+}

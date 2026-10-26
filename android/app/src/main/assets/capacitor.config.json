@@ -1,0 +1,48 @@
+{
+	"appId": "ca.rftransparent.tools",
+	"appName": "RF Tools",
+	"webDir": "capacitor/www",
+	"backgroundColor": "#1e3a8a",
+	"server": {
+		"url": "https://tools.rftransparent.ca",
+		"cleartext": false,
+		"allowNavigation": [],
+		"errorPath": "offline.html"
+	},
+	"android": {
+		"backgroundColor": "#1e3a8a",
+		"allowMixedContent": false,
+		"webContentsDebuggingEnabled": false
+	},
+	"ios": {
+		"backgroundColor": "#1e3a8a",
+		"contentInset": "never",
+		"preferredContentMode": "mobile",
+		"allowsLinkPreview": false,
+		"webContentsDebuggingEnabled": false
+	},
+	"plugins": {
+		"SplashScreen": {
+			"launchAutoHide": true,
+			"launchShowDuration": 10000,
+			"backgroundColor": "#1e3a8aff",
+			"showSpinner": false
+		},
+		"Keyboard": {
+			"resize": "native",
+			"resizeOnFullScreen": true
+		},
+		"StatusBar": {
+			"overlaysWebView": true,
+			"style": "DEFAULT"
+		},
+		"PushNotifications": {
+			"presentationOptions": [
+				"badge",
+				"sound",
+				"banner",
+				"list"
+			]
+		}
+	}
+}

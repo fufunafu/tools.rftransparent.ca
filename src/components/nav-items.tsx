@@ -213,6 +213,7 @@ export const NAV_ITEMS: NavSection[] = [
       { href: "/customer-service/emails", label: "Emails", status: "done" },
       { href: "/customer-service/follow-up", label: "Follow-up", status: "done" },
       { href: "/customer-service/leads", label: "Leads", status: "wip" },
+      { href: "/customer-service/outreach/leads", label: "Outreach leads", status: "done" },
       // TEMPORARY mockup of Leads + Follow-up combined; remove with src/app/customer-service/tmp.
       { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
       { href: "/customer-service/problems", label: "Problem Tickets", status: "done" },
@@ -249,6 +250,19 @@ export const NAV_ITEMS: NavSection[] = [
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+      </svg>
+    ),
+  },
+  {
+    href: "/amazon",
+    label: "Amazon hardware",
+    tint: "#B87519",
+    status: "wip",
+    access: "admin",
+    group: "finance",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="m3 7 9-4 9 4v10l-9 4-9-4V7Zm0 0 9 4 9-4M12 11v10M7.5 5l9 4" />
       </svg>
     ),
   },

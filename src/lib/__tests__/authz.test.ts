@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from "vitest";
 
 // ─── Supabase mock ───────────────────────────────────────────────────────────
 // authz builds chains like:
@@ -57,12 +57,18 @@ vi.mock("@/lib/supabase", () => ({
   getSupabase: () => ({ from: (table: string) => makeChain(table) }),
 }));
 
-import { isAuthorizedEmail, isAdminEmail, isManagementEmail } from "@/lib/authz";
+import {
+  clearAuthorizationCache,
+  isAuthorizedEmail,
+  isAdminEmail,
+  isManagementEmail,
+} from "@/lib/authz";
 
 const OWNER = "fuannegao25@gmail.com";
 const ORIGINAL_DOMAINS = process.env.ADMIN_ALLOWED_DOMAINS;
 
 beforeEach(() => {
+  clearAuthorizationCache();
   state.queries = [];
   state.results = {};
   state.throwTables = new Set();
@@ -240,5 +246,55 @@ describe("isManagementEmail", () => {
     const empQueries = state.queries.filter((q) => q.table === "employees");
     expect(empQueries).toHaveLength(2);
     expect(empQueries[1].filters).toContainEqual({ method: "eq", args: ["department", "management"] });
+  });
+});
+
+describe("grant cache", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("reuses a grant instead of querying again", async () => {
+    state.results["employees"] = [{ data: { id: "emp-1" }, error: null }];
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(true);
+    expect(await isAuthorizedEmail(" Staff@Shop.com ")).toBe(true);
+    expect(queriedTables()).toEqual(["employees"]);
+  });
+
+  it("re-checks a denial every time", async () => {
+    expect(await isAuthorizedEmail("stranger@x.com")).toBe(false);
+    state.results["employees"] = [{ data: { id: "emp-2" }, error: null }];
+    expect(await isAuthorizedEmail("stranger@x.com")).toBe(true);
+    expect(queriedTables()).toEqual(["employees", "admin_users", "employees"]);
+  });
+
+  it("does not cache a failed lookup as a denial", async () => {
+    state.throwTables.add("admin_users");
+    state.results["employees"] = [
+      { data: null, error: { message: "timeout" } },
+      { data: null, error: { message: "timeout" } },
+      { data: { id: "emp-3" }, error: null },
+    ];
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(false);
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(true);
+  });
+
+  it("expires grants so revoked users lose access", async () => {
+    vi.useFakeTimers();
+    state.results["employees"] = [{ data: { id: "emp-1" }, error: null }];
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(true);
+    vi.advanceTimersByTime(61_000);
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(false);
+  });
+
+  it("keeps site access, admin, and management grants separate", async () => {
+    state.results["employees"] = [
+      { data: { id: "emp-1" }, error: null },
+      { data: null, error: null },
+      { data: null, error: null },
+    ];
+    expect(await isAuthorizedEmail("staff@shop.com")).toBe(true);
+    expect(await isAdminEmail("staff@shop.com")).toBe(false);
+    expect(await isManagementEmail("staff@shop.com")).toBe(false);
   });
 });

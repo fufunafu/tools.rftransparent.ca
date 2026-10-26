@@ -65,7 +65,13 @@ export default function LoginForm({
   };
 
   const signInWithPassword = async (loginEmail: string, loginPassword: string): Promise<boolean> => {
-    const { error: signInError } = await supabase().auth.signInWithPassword({
+    const reviewEmail = process.env.NEXT_PUBLIC_RF_REVIEW_EMAIL;
+    const reviewUrl = process.env.NEXT_PUBLIC_RF_REVIEW_AUTH_URL;
+    const reviewKey = process.env.NEXT_PUBLIC_RF_REVIEW_AUTH_KEY;
+    const client = reviewEmail && reviewUrl && reviewKey && loginEmail.trim().toLowerCase() === reviewEmail
+      ? createBrowserClient(reviewUrl, reviewKey, { isSingleton: false })
+      : supabase();
+    const { error: signInError } = await client.auth.signInWithPassword({
       email: loginEmail.trim().toLowerCase(),
       password: loginPassword,
     });

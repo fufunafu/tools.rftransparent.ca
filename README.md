@@ -138,6 +138,8 @@ Missing optional credentials should affect only the corresponding integration. T
 
 ## Deployment
 
+Read [release preservation](docs/release-preservation.md) before preparing a release. Previously published sales updates are not all present in older Git checkouts. `npm run build` checks the preserved sales source before building; check separate release candidates from this preserved checkout.
+
 Production is deployed through Vercel. `vercel.json` defines scheduled jobs. Configure all required environment variables in the deployment environment, then verify:
 
 ```bash

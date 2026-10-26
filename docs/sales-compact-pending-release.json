@@ -1,0 +1,32 @@
+{
+  "baseline": "dpl_8krfp3K9rCQvou69gzwc62pveYba",
+  "release": "/var/folders/_j/8clxzk097214s755hdhmg5hr0000gn/T/rf-sales-compact-sepn4jmn",
+  "baselineFilesVerified": 821,
+  "changed": [
+    "src/components/admin/dashboard/SalesTeamTable.tsx",
+    "src/components/admin/dashboard/SalesTeamTable.test.tsx",
+    "src/components/admin/dashboard/PerformersSection.tsx",
+    "src/lib/dashboard-sales.ts",
+    "src/lib/dashboard-sales.test.ts",
+    "src/lib/dashboard-sales-records.test.ts",
+    "src/lib/ops-dashboard.ts"
+  ],
+  "sourceHashes": {
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "13c2f1234efed159298e41458ff4d40bec1b29466ff65ad941ae686efaa485af",
+    "src/components/admin/dashboard/SalesTeamTable.test.tsx": "2f44d05d6107450b4ff5b8dd15e00ec0bb2463598db67b756c85814f89eca383",
+    "src/components/admin/dashboard/PerformersSection.tsx": "4c741a74a3080fd796ab9f31df4c3133e39591513e15a2012dfb2ac415598bd1",
+    "src/lib/dashboard-sales.ts": "3be833522e00787c7f66eb7730bbb1773772bcf8b6e82cd35e23cce7202e5c36",
+    "src/lib/dashboard-sales.test.ts": "59e0ce0676db805f14e2d830f9661eedb67c3a02fdc95f8d869c27b80ce5c9dd",
+    "src/lib/dashboard-sales-records.test.ts": "d6c081a99722a391b4b019e643e8a2b02a96b3f9e102280e851a2dce572bc117",
+    "src/lib/ops-dashboard.ts": "5eaa0a7dfa59c1289bd077f917dc0aea6b5cc4f50ffead748469515202fbd875"
+  },
+  "checks": {
+    "tests": 83,
+    "testFiles": 11,
+    "typecheck": "passed",
+    "lint": "passed"
+  },
+  "publicationStatus": "published and verified",
+  "verifiedAt": "2026-09-16T14:23:45.215291+00:00",
+  "deploymentId": "dpl_DhpPPzVZsG1Zkx8eoxjVmKpLC8jc"
+}

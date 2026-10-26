@@ -30,6 +30,11 @@ const config: CapacitorConfig = {
     allowNavigation: [],
     errorPath: "offline.html",
   },
+  android: {
+    backgroundColor: "#1e3a8a",
+    allowMixedContent: false,
+    webContentsDebuggingEnabled: localDevelopmentUrl,
+  },
   ios: {
     backgroundColor: "#1e3a8a",
     contentInset: "never",
@@ -38,6 +43,10 @@ const config: CapacitorConfig = {
     webContentsDebuggingEnabled: localDevelopmentUrl,
   },
   plugins: {
+    SystemBars: {
+      // Android uses one native inset owner, including on the offline page.
+      insetsHandling: "disable",
+    },
     SplashScreen: {
       // The web runtime hides this as soon as the first view is ready. The
       // bounded fallback prevents a failed remote load from covering the

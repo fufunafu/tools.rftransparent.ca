@@ -1,5 +1,10 @@
 import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
+  // Demo HTML stays on the app's trusted origin; its bundles load from its own deployment.
+  assetPrefix: process.env.RF_REVIEW_DEMO === "1" ? process.env.RF_REVIEW_ASSET_ORIGIN : undefined,
+  experimental: {
+    serverActions: { allowedOrigins: ["tools.rftransparent.ca"] },
+  },
   // Shopify app proxies append a slash when forwarding their root route. Let
   // src/proxy.ts rewrite that one signed webhook request without a redirect.
   skipTrailingSlashRedirect: true,

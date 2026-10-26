@@ -1,0 +1,74 @@
+{
+  "checkedAt": "2026-10-03T19:07:45.004010+00:00",
+  "releaseDirectory": "/private/tmp/rf-amazon-security-release-20261003",
+  "baselineDeployment": "dpl_7cPoKwxGEJxkmpNPW8pG9vvLBWW9",
+  "preservedSourceFiles": 842,
+  "salesPreservation": {
+    "passed": true,
+    "files": 28
+  },
+  "checks": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "tests": 149,
+    "testFiles": 22,
+    "productionBuild": "passed"
+  },
+  "liveControls": {
+    "macFirewall": "enabled",
+    "supabasePasswordPolicy": "12 characters, uppercase/lowercase/digit/symbol, leaked-password rejection",
+    "passwordRevisionMigration": "applied, grants and trigger verified"
+  },
+  "deployment": {
+    "id": "dpl_D6YqhFDhrrGGb4LX2kUxs8XrA4Ta",
+    "url": "https://tools.rftransparent.ca",
+    "state": "READY",
+    "sourceFilesVerified": 872,
+    "sourceMismatches": 0
+  },
+  "profileSubmitted": true,
+  "amazonListingsSubmitted": 0,
+  "pending": [
+    "User authenticator enrollment and password replacement",
+    "Full network security controls verification",
+    "Production Amazon authorization and credentials"
+  ],
+  "verifiedAt": "2026-10-03T19:14:53.869247+00:00",
+  "sourceCommit": "37312ce",
+  "liveChecks": {
+    "anonymousAmazonApi": 401,
+    "anonymousSecurityApi": 401,
+    "approvedUserSecurityApi": 200,
+    "approvedUserWithoutSetupAmazonApi": 403,
+    "setupPage": "rendered with enrollment and password controls",
+    "salesTable": "all five periods, five reps, paired sales/quotes and both total rows verified",
+    "salesOrderDialog": {
+      "rep": "Robert Glas",
+      "period": "7d",
+      "count": 18,
+      "tableCellTotal": 51519.43,
+      "dialogTotal": 51519.43,
+      "customerNames": true
+    },
+    "salesQuoteDialog": {
+      "rep": "Robert Glas",
+      "period": "7d",
+      "count": 8,
+      "tableCellTotal": 6498.7,
+      "dialogTotal": 6498.7,
+      "customerSearch": "Verified one matching row while preserving the full-period total"
+    }
+  },
+  "knownSalesWarning": "One existing sales record matches multiple reps and is excluded.",
+  "sourceArchive": "backups/amazon-security-20261003.bundle",
+  "incidentProcedure": {
+    "adoptedOn": "2026-10-03",
+    "owner": "Fu Gao",
+    "ownerAcceptance": "Explicit yes in conversation",
+    "nextReviewBy": "2027-04-03",
+    "notificationDeadlineHours": 24,
+    "rehearsed": false
+  },
+  "profileStatus": "Declined: network controls and password/MFA requirements",
+  "profileSubmissionReceipt": "docs/amazon-profile-submission.json"
+}

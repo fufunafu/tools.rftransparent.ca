@@ -1,19 +1,17 @@
 "use client";
 
-import type { Result, SalesByStore, CustomerServiceOps, TopPerformers, FollowupOverview } from "@/lib/ops-dashboard";
+import type { Result, SalesByStore, CustomerServiceOps, SalesTeamOverview, FollowupOverview } from "@/lib/ops-dashboard";
 import { Unavailable } from "@/components/admin/dashboard/widgets";
 import { DashboardPane } from "@/components/admin/dashboard/DashboardPane";
 import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
-import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
+import { SalesTeamTable } from "@/components/admin/dashboard/SalesTeamTable";
 import { QuotesCard } from "@/components/admin/dashboard/QuotesCard";
 import { FollowupCard } from "@/components/admin/dashboard/FollowupCard";
 
 // The sales manager's morning view: revenue vs target, quote flow, the
-// follow-up workload, and the sales leaderboard. Pure presentational —
+// follow-up workload, and the sales leaderboard. Pure presentational:
 // every number is server-fetched by the page.
-// TODO: drop CommissionsPanel back in here once the commissions feature
-// (panel + /api/kpi/commissions + its migration) has shipped.
 
 export default function SalesManagerDashboard({
   sales,
@@ -24,7 +22,7 @@ export default function SalesManagerDashboard({
 }: {
   sales: Result<SalesByStore>;
   customerService: Result<CustomerServiceOps>;
-  performers: Result<TopPerformers>;
+  performers: Result<SalesTeamOverview>;
   followup: Result<FollowupOverview>;
   today: string;
 }) {
@@ -58,9 +56,9 @@ export default function SalesManagerDashboard({
       </div>
 
       {performers.ok ? (
-        <PerformersSection p={performers.value} sections={["sales"]} />
+        <SalesTeamTable data={performers.value} />
       ) : (
-        <Unavailable label="Top performers" error={performers.error} />
+        <Unavailable label="Sales team" error={performers.error} />
       )}
     </DashboardPane>
   );

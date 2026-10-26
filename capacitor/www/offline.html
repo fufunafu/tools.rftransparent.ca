@@ -83,14 +83,9 @@
             await nativeSupport.retryRemoteLoad();
             return;
           }
-          if (document.referrer.startsWith("http://") || document.referrer.startsWith("https://")) {
-            window.location.replace(document.referrer);
-            return;
-          }
-          if (window.history.length > 1) {
-            window.history.back();
-            return;
-          }
+          // Android's error page has no native bridge. Old WebView history or
+          // referrers can point back to this error document after an update.
+          // Always retry the same trusted destination as the native handoff.
           window.location.replace(productionUrl);
         } catch {
           await refreshStatus();
