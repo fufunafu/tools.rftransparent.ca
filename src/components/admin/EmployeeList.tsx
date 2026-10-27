@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import EmployeeDrawer, { type EditDraft } from "@/components/admin/EmployeeDrawer";
 import EmployeeFilters, { type StatusFilter } from "@/components/admin/EmployeeFilters";
 import { normalizeOptionalInternationalPhone } from "@/lib/phone";
@@ -45,7 +46,6 @@ const DEPT_COLORS: Record<string, string> = {
   management: "border-slate-200 bg-slate-100 text-slate-700",
 };
 
-const NEW_ID = "__new__";
 
 type SortKey = "name" | "department" | "birthday";
 type SortDir = "asc" | "desc";
@@ -110,6 +110,7 @@ function employeeInitials(name: string): string {
 }
 
 export default function EmployeeList() {
+  const router = useRouter();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [locations, setLocations] = useState<Location[]>([]);
   const [loading, setLoading] = useState(true);
@@ -219,12 +220,10 @@ export default function EmployeeList() {
     setSaveError("");
   };
 
-  const startAdd = () => {
-    if (editingId) return;
-    setEditingId(NEW_ID);
-    setDraft(emptyDraft());
-    setSaveError("");
-  };
+  // Creating an employee lives on its own page now: it sends a welcome email
+  // and writes an access list, neither of which belongs in a drawer over the
+  // roster. This row only edits.
+  const startAdd = () => router.push("/employees/new");
 
   const cancelEdit = () => {
     if (saving || deleting) return;
@@ -250,7 +249,6 @@ export default function EmployeeList() {
     setSaving(true);
     setSaveError("");
     try {
-      const isNew = editingId === NEW_ID;
       const body = {
         name: draft.name.trim(),
         email: draft.email.trim().toLowerCase() || null,
@@ -272,9 +270,9 @@ export default function EmployeeList() {
         active: draft.active,
       };
       const res = await fetch(
-        isNew ? "/api/kpi/employees" : `/api/kpi/employees/${editingId}`,
+        `/api/kpi/employees/${editingId}`,
         {
-          method: isNew ? "POST" : "PUT",
+          method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         },
@@ -293,7 +291,7 @@ export default function EmployeeList() {
   };
 
   const handleDelete = async () => {
-    if (!editingId || editingId === NEW_ID) return;
+    if (!editingId) return;
     setDeleting(true);
     try {
       await fetch(`/api/kpi/employees/${editingId}`, { method: "DELETE" });
@@ -328,7 +326,6 @@ export default function EmployeeList() {
     statusFilter !== "active";
 
   const drawerOpen = editingId !== null;
-  const drawerMode: "create" | "edit" = editingId === NEW_ID ? "create" : "edit";
 
   return (
     <div className="space-y-5">
@@ -528,7 +525,6 @@ export default function EmployeeList() {
 
       <EmployeeDrawer
         open={drawerOpen}
-        mode={drawerMode}
         draft={draft}
         setField={setField}
         locations={locations}
@@ -536,10 +532,10 @@ export default function EmployeeList() {
         error={saveError}
         onSave={handleSave}
         onCancel={cancelEdit}
-        onDelete={drawerMode === "edit" ? handleDelete : undefined}
+        onDelete={handleDelete}
         deleting={deleting}
         isAdmin={isAdmin}
-        employeeId={editingId && editingId !== NEW_ID ? editingId : null}
+        employeeId={editingId}
       />
     </div>
   );
