@@ -39,7 +39,10 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
       const values = directoryQuery.filters[field];
       // Quote every literal, including blank values and punctuation, before
       // putting it inside PostgREST's filter expression grammar.
-      if (values.length) query = query.filter(`filter_${field}`, "in", `(${values.map(quotePostgrestValue).join(",")})`);
+      // PostgREST treats in.("") as an empty list, so a lone missing value
+      // must use equality. Mixed lists retain their empty-string member.
+      if (values.length === 1 && values[0] === "") query = query.eq(`filter_${field}`, "");
+      else if (values.length) query = query.filter(`filter_${field}`, "in", `(${values.map(quotePostgrestValue).join(",")})`);
     }
     if (directoryQuery.source) query = query.eq("source", directoryQuery.source);
   }

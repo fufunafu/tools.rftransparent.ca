@@ -42,3 +42,9 @@ it("applies directory filters before pagination and quotes reserved PostgREST ch
   expect(mock.range).toHaveBeenCalledWith(100, 149);
   await expect(listCrmRecords(new URLSearchParams("type=tasks&country=canada"), "viewer@example.com")).rejects.toThrow("Directory filters apply");
 });
+
+it("matches unassigned and missing values without PostgREST's empty-list interpretation", async () => {
+  await listCrmRecords(new URLSearchParams("type=contacts&owner=&stage=&country=&region=&city="), "viewer@example.com");
+  for (const field of ["owner", "stage", "country", "region", "city"]) expect(mock.eq).toHaveBeenCalledWith(`filter_${field}`, "");
+  expect(mock.filter).not.toHaveBeenCalled();
+});
