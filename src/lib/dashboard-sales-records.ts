@@ -1,59 +1,19 @@
 import { getSupabase } from "@/lib/supabase";
-import { fetchAllPages, getStores, calcNetRevenue, REVENUE_FIELDS, type RevenueFields, type ShopifyConnection } from "@/lib/shopify";
+import { fetchAllPages, getStores, calcNetRevenue, type RevenueFields, type ShopifyConnection } from "@/lib/shopify";
 import { dashboardSalesReps, resolveDashboardSalesAttribution, dashboardSalesSearchFilter, salesInPeriod, type DashboardSalesOrder, type DashboardSalesRecord } from "@/lib/dashboard-sales";
 import { BUSINESS_TIMEZONE, startOfDayInTimeZone } from "@/lib/dates";
 import { getSalesPeriod, type SalesPeriod } from "@/lib/sales-periods";
 import { salesRecordCustomerName, type SalesRecordCustomer, shopifyRecordUrl, type SalesRecordList, type SalesRecordDetail } from "@/lib/sales-record-details";
 
-export const PERFORMER_ORDERS_QUERY = `
-  query($after: String, $filter: String!) {
-    orders(first: 25, after: $after, query: $filter, sortKey: UPDATED_AT) {
-      edges {
-        node {
-          id name createdAt
-          customer { firstName lastName }
-          tags
-          shippingAddress { provinceCode province countryCodeV2 name company }
-          billingAddress { provinceCode province countryCodeV2 name company }
-          currentTotalPriceSet { shopMoney { amount } }
-          currentTotalTaxSet { shopMoney { amount } }
-          currentShippingPriceSet { shopMoney { amount } }
-          totalPriceSet { shopMoney { amount } }
-          totalTaxSet { shopMoney { amount } }
-          totalShippingPriceSet { shopMoney { amount } }
-          transactions(first: 50) {
-            kind status processedAt amountSet { shopMoney { amount } }
-          }
-        }
-        cursor
-      }
-      pageInfo { hasNextPage }
-    }
-  }
-`;
-
-export const PERFORMER_DRAFTS_QUERY = `
-  query($after: String, $filter: String!) {
-    draftOrders(first: 250, after: $after, query: $filter) {
-      edges {
-        node {
-          id name createdAt status tags ${REVENUE_FIELDS}
-          customer { firstName lastName }
-          shippingAddress { provinceCode province countryCodeV2 name company }
-          billingAddress { provinceCode province countryCodeV2 name company }
-        }
-        cursor
-      }
-      pageInfo { hasNextPage }
-    }
-  }
-`;
+import { PERFORMER_ORDERS_QUERY, PERFORMER_DRAFTS_QUERY } from "@/lib/sales-shopify-queries";
+import { loadSalesMirror } from "@/lib/sales-shopify-mirror";
+export { PERFORMER_ORDERS_QUERY, PERFORMER_DRAFTS_QUERY } from "@/lib/sales-shopify-queries";
 
 type OrderRecord = DashboardSalesOrder & SalesRecordCustomer & { id: string; name: string; createdAt: string };
 type QuoteRecord = DashboardSalesRecord & RevenueFields & SalesRecordCustomer & { id: string; name: string; createdAt: string; status: string };
 
 /** Uses the same territory, tag, date and money rules as the sales dashboard. */
-export async function getSalesRepRecords(repId: string, period: SalesPeriod, kind: "orders" | "quotes"): Promise<SalesRecordList> {
+export async function getSalesRepRecords(repId: string, period: SalesPeriod, kind: "orders" | "quotes", options?: { fromMirror?: boolean }): Promise<SalesRecordList> {
   const { data: employees, error } = await getSupabase().from("employees")
     .select("id, name, department, shopify_tags").eq("active", true).order("name");
   if (error) throw new Error(error.message);
@@ -70,7 +30,7 @@ export async function getSalesRepRecords(repId: string, period: SalesPeriod, kin
   const warnings: string[] = [];
 
   if (kind === "orders") {
-    const result = await fetchAllPages<OrderRecord, { orders: ShopifyConnection<OrderRecord> }>({
+    const result = options?.fromMirror ? await loadSalesMirror<OrderRecord>(store.id, "order", start) : await fetchAllPages<OrderRecord, { orders: ShopifyConnection<OrderRecord> }>({
       storeId: store.id, query: PERFORMER_ORDERS_QUERY,
       variables: { filter: dashboardSalesSearchFilter(store.id, reps, `updated_at:>='${start.toISOString()}'`) },
       getConnection: (data) => data.orders, maxPages: 2000,
@@ -91,7 +51,7 @@ export async function getSalesRepRecords(repId: string, period: SalesPeriod, kin
         amount, status: amount < 0 ? "Net refund" : "Net payment", url: shopifyRecordUrl(store.store, order.id, kind) });
     }
   } else {
-    const result = await fetchAllPages<QuoteRecord, { draftOrders: ShopifyConnection<QuoteRecord> }>({
+    const result = options?.fromMirror ? await loadSalesMirror<QuoteRecord>(store.id, "draft", start) : await fetchAllPages<QuoteRecord, { draftOrders: ShopifyConnection<QuoteRecord> }>({
       storeId: store.id, query: PERFORMER_DRAFTS_QUERY,
       variables: { filter: dashboardSalesSearchFilter(store.id, reps, `created_at:>='${start.toISOString()}'`) },
       getConnection: (data) => data.draftOrders, maxPages: 200,
