@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { evaluateNativeUpdate, type NativeVersionPolicy } from "@/lib/native-update";
+import { evaluateNativeUpdate, normalizeNativeUpdateUrl, type NativeVersionPolicy } from "@/lib/native-update";
 
 const policy: NativeVersionPolicy = {
   minimumBuild: 4,
@@ -9,6 +9,19 @@ const policy: NativeVersionPolicy = {
 };
 
 describe("native update policy", () => {
+  it("opens only this app's Google Play listing on Android", () => {
+    const updateUrl = "https://play.google.com/store/apps/details?id=ca.rftransparent.tools";
+    expect(evaluateNativeUpdate("3", { ...policy, updateUrl }, "android")).toEqual({ state: "required", updateUrl });
+    expect(normalizeNativeUpdateUrl(updateUrl, "ios")).toBeNull();
+    expect(normalizeNativeUpdateUrl(policy.updateUrl, "android")).toBeNull();
+    for (const unsafe of [
+      "https://play.google.com/store/apps/details?id=other.app",
+      "https://play.google.com.evil.example/store/apps/details?id=ca.rftransparent.tools",
+      "https://play.google.com:8443/store/apps/details?id=ca.rftransparent.tools",
+      "https://attacker@play.google.com/store/apps/details?id=ca.rftransparent.tools",
+      "https://play.google.com/redirect?id=ca.rftransparent.tools",
+    ]) expect(normalizeNativeUpdateUrl(unsafe, "android")).toBeNull();
+  });
   it("requires an update below the minimum build", () => {
     expect(evaluateNativeUpdate("3", policy)).toEqual({
       state: "required",

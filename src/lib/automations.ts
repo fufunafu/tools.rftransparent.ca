@@ -24,6 +24,17 @@ export interface AutomationJob {
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
   {
+    slug: "process-outreach",
+    label: "Outreach lead intake",
+    description: "Processes Instantly replies and interested lead handoffs.",
+    kind: "sync",
+    result: "Interested leads and staff follow-up tasks",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every five minutes",
+    scheduleDetail: "Processes authenticated campaign events without sending email",
+  },
+  {
     slug: "sync-calls",
     label: "Phone records import",
     description: "Copies CIK and Grasshopper call records into RF Tools.",

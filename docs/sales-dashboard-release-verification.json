@@ -1,0 +1,51 @@
+{
+  "verifiedAt": "2026-09-16T12:56:14.394445+00:00",
+  "deploymentId": "dpl_8CZxVH91yHANPSvngVmDWa3wWMST",
+  "productionBaseline": "dpl_Fs1ZaBthF6jAASrLvGzwS34haKPQ",
+  "url": "https://tools.rftransparent.ca/dashboards/sales",
+  "state": "READY",
+  "releaseSource": "/private/tmp/rf-sales-columns-50vm1j48",
+  "baselineFilesVerified": 811,
+  "salesFilesChanged": 6,
+  "sourceHashes": {
+    "src/app/dashboards/sales/page.tsx": "e9cea428b32265beed944a00acc4e07b3c6ea904b868f50578e9c593bdce1011",
+    "src/components/admin/SalesManagerDashboard.tsx": "d87f0e148cee8ea2726d411d46afc014906df532b41d2e624fa69dddaf9185e1",
+    "src/components/admin/dashboard/PerformersSection.tsx": "ebe9b7a88a3150362f03e378835b1adf6dad0f2e5058988ac7108339b4f161b9",
+    "src/components/admin/dashboard/PerformersSection.test.tsx": "81da6250de886ae19c81880dd798d8b663d684e0de18d4f80154fccbf4985ab7",
+    "src/lib/ops-dashboard.ts": "4a09bab2f1a55eef2301ef07adf56534e332d18af8e429f1d9b41d7bbbecffa2",
+    "src/lib/ops-dashboard-sales.test.ts": "35dc87aab94d7e54263d22bed82c516c59ea48497cc3f5555953f88663788723",
+    "src/lib/dashboard-sales.ts": "3bbb32073ee8c0eebe739f2c92025c394ac01347d728d1edc0ca5865a1a34e4e",
+    "src/lib/dashboard-sales.test.ts": "2181276588e7ca9e4fad81210f8ebd6c88bb5bfab92a35bceefc4eeb35082660",
+    "src/lib/sales-periods.ts": "18a304edf4b2cde63d3634580b9f1fa598fd5544f8924087d95ac3747596f3d3",
+    "src/lib/sales-periods.test.ts": "70972e2e4855c73e2ea5e6c998f25827edb71b37bbd4bd1bde83d7694a3db144",
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "e5b83c9c0ac2f73e55e6cccdb706c522d119b783c1a8c03d55e8f227bba7dd9a",
+    "src/components/admin/dashboard/SalesTeamTable.test.tsx": "6941a95d94808417d569cbf2bc5e10d9f7eece5235764aaf12f76d93e6347050"
+  },
+  "checks": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "salesTests": 42
+  },
+  "liveBrowserVerified": [
+    "All five date ranges visible as columns without a date selector",
+    "Four rep rows and All reps totals",
+    "Desktop table and page have no horizontal overflow",
+    "Marie is zero across every period",
+    "No incomplete-data warnings in live Shopify check"
+  ],
+  "dateRanges": [
+    "7d",
+    "30d",
+    "90d",
+    "180d",
+    "1y"
+  ],
+  "territoryPriority": "Daniel receives RF sales in QC, NS, NB and PE ahead of Rob or Craig tags",
+  "deploymentMethod": "Vercel CLI production deployment",
+  "gitPush": false,
+  "deletedFiles": [
+    "src/components/admin/dashboard/SalesPeriodSelector.tsx",
+    "src/components/admin/dashboard/SalesPeriodSelector.test.tsx"
+  ]
+}

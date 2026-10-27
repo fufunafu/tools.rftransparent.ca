@@ -5,7 +5,7 @@ import {
   getCustomerServiceOps,
   getFollowupOverview,
   getSalesByStore,
-  getTopPerformers,
+  getSalesTeamOverview,
 } from "@/lib/ops-dashboard";
 import { getStores } from "@/lib/shopify";
 import { BUSINESS_TIMEZONE } from "@/lib/dates";
@@ -26,7 +26,7 @@ export default async function SalesManagerPage() {
   const [sales, customerService, performers, followup] = await Promise.all([
     getSalesByStore(),
     getCustomerServiceOps(),
-    getTopPerformers(),
+    getSalesTeamOverview(),
     getFollowupOverview(getStores().map((s) => s.id)),
   ]);
 

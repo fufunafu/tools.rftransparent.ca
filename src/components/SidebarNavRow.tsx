@@ -2,7 +2,7 @@
 
 import { cloneElement } from "react";
 import Link from "next/link";
-import { matchesItem, type NavItem } from "@/components/nav-items";
+import { activeChildHref, matchesItem, type NavItem } from "@/components/nav-items";
 
 const ExternalArrow = ({ className }: { className: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
@@ -38,6 +38,7 @@ export default function SidebarNavRow({
 }) {
   const hasChildren = Boolean(item.children?.length);
   const sectionActive = matchesItem(item, pathname);
+  const activeChild = activeChildHref(pathname);
   const sectionId = `sidebar-section-${item.href.replace(/[^a-z0-9]+/gi, "-")}`;
 
   // Blue means "this exact page". A section that merely contains the current
@@ -159,8 +160,7 @@ export default function SidebarNavRow({
                 and the rule was the last thing dragging the eye down the rail. */}
             <div className="flex flex-col gap-px pl-[34px] py-0.5">
               {item.children!.map((child) => {
-                const childActive =
-                  !child.external && (pathname === child.href || pathname.startsWith(child.href + "/"));
+                const childActive = !child.external && child.href === activeChild;
                 const childBadge = child.href === "/customer-service/problems" && openProblems > 0;
                 const childClass = `flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors ${
                   childActive

@@ -1,8 +1,10 @@
 import type { Metadata, Viewport } from "next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
 import NativeAppRuntime from "@/components/NativeAppRuntime";
 import PushRegistrar from "@/components/PushRegistrar";
+import { isDemoWorkspace } from "@/lib/review-workspace";
 
 export const metadata: Metadata = {
   title: {
@@ -35,8 +37,17 @@ export default function RootLayout({
       <body className="min-h-screen">
         <NativeAppRuntime>
           <PushRegistrar />
-          <SidebarLayout>{children}</SidebarLayout>
+          <SidebarLayout>
+            {isDemoWorkspace() && (
+              <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-950" role="status">
+                Demo workspace. All records and actions use sample data.
+              </div>
+            )}
+            {children}
+          </SidebarLayout>
         </NativeAppRuntime>
+        {/* Real-visitor load times, reported once Speed Insights is on in Vercel. */}
+        <SpeedInsights />
       </body>
     </html>
   );

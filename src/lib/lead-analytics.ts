@@ -408,14 +408,24 @@ function torontoMonthNumber(date: Date): number {
   return year * 12 + month - 1;
 }
 
+// Intl.DateTimeFormat construction is expensive, and the trend and
+// performance charts convert every lead's timestamp for every bucket.
+const TORONTO_DATE_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TORONTO_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+const TORONTO_TIME_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TORONTO_TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
 function torontoTimeOfDayMs(date: Date): number {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TORONTO_TIME_ZONE,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(date);
+  const parts = TORONTO_TIME_FORMAT.formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((part) => part.type === type)?.value ?? 0);
   return ((value("hour") * 60 + value("minute")) * 60 + value("second")) * 1000
@@ -457,12 +467,7 @@ function parseDateKey(value: string): number | null {
 }
 
 function torontoParts(date: Date): { year: number; month: number; day: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TORONTO_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = TORONTO_DATE_FORMAT.formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((part) => part.type === type)?.value ?? 0);
   return { year: value("year"), month: value("month"), day: value("day") };

@@ -1,4 +1,4 @@
-// Native session locking for the RF Tools iOS app. Supabase owns the actual
+// Native session locking for RF Tools. Supabase owns the actual
 // authenticated session in WebView cookies. Biometrics only unlock the UI and
 // never release or store an account password.
 
@@ -9,7 +9,7 @@ const FRESH_SESSION_KEY = "rf-native-session-fresh";
 const UNLOCK_PREFERENCE_KEY = "rf-device-unlock-v1:";
 
 export type BiometricPreference = "enabled" | "disabled" | "unset";
-export type BiometricLabel = "Face ID" | "Touch ID";
+export type BiometricLabel = "Face ID" | "Touch ID" | "Fingerprint unlock" | "Face unlock" | "Iris unlock";
 
 // This is a device-local preference, never an account credential. Separate
 // accounts on a shared device must each make their own choice.
@@ -37,6 +37,9 @@ export async function getBiometricLabel(): Promise<BiometricLabel | null> {
         if (!result.isAvailable) return null;
         if (result.biometryType === BiometryType.faceId) return "Face ID" as const;
         if (result.biometryType === BiometryType.touchId) return "Touch ID" as const;
+        if (result.biometryType === BiometryType.fingerprintAuthentication) return "Fingerprint unlock" as const;
+        if (result.biometryType === BiometryType.faceAuthentication) return "Face unlock" as const;
+        if (result.biometryType === BiometryType.irisAuthentication) return "Iris unlock" as const;
         return null;
       })(),
       new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8_000); }),

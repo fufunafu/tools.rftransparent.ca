@@ -2,7 +2,7 @@ import type { NavTarget } from "@/components/CommandPalette";
 
 export type Status = "done" | "wip" | "todo";
 export type AccessLevel = "authenticated" | "admin" | "management";
-export type NavGroup = "overview" | "revenue" | "operations" | "finance";
+export type NavGroup = "overview" | "revenue" | "operations" | "finance" | "wip";
 
 // Rendered as labelled bands in the rail, in this order. NAV_ITEMS is kept in
 // the same order, so rendering is a filter per group with no sort.
@@ -11,6 +11,7 @@ export const NAV_GROUPS: { id: NavGroup; label: string }[] = [
   { id: "revenue", label: "Revenue" },
   { id: "operations", label: "Operations" },
   { id: "finance", label: "Finance" },
+  { id: "wip", label: "Work in progress" },
 ];
 
 export interface ViewerAccess {
@@ -182,7 +183,6 @@ export const NAV_ITEMS: NavSection[] = [
       { href: "/warehouse", label: "Dashboard", status: "done", access: "management" },
       { href: "/warehouse/report", label: "Daily Report", status: "done" },
       { href: "/warehouse/shipping", label: "Shipping Quotes", status: "done" },
-      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip", access: "management" },
       {
         href: "https://orderstream-checker.vercel.app/",
         label: "Order Stream",
@@ -212,9 +212,7 @@ export const NAV_ITEMS: NavSection[] = [
       { href: "/customer-service/phones", label: "Phones", status: "done" },
       { href: "/customer-service/emails", label: "Emails", status: "done" },
       { href: "/customer-service/follow-up", label: "Follow-up", status: "done" },
-      { href: "/customer-service/leads", label: "Leads", status: "wip" },
-      // TEMPORARY mockup of Leads + Follow-up combined; remove with src/app/customer-service/tmp.
-      { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
+      { href: "/customer-service/leads", label: "Leads", status: "done" },
       { href: "/customer-service/problems", label: "Problem Tickets", status: "done" },
     ],
   },
@@ -252,6 +250,37 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
   },
+  {
+    // Everything still being built, gathered in one place so the finished
+    // sections read as finished. `/wip` is not a route: a section with
+    // children toggles open rather than navigating, and collapsed it links to
+    // its first child. When a tool is done, move it back to its home section.
+    href: "/wip",
+    label: "Work in progress",
+    tint: "#B87519",
+    status: "wip",
+    group: "wip",
+    match: [
+      "/customer-service/outreach",
+      "/customer-service/tmp",
+      "/amazon",
+      "/ai-agent",
+      "/warehouse/purchasing",
+    ],
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M11.42 15.17 17.25 21A2.652 2.652 0 0 0 21 17.25l-5.877-5.877M11.42 15.17l2.496-3.03c.317-.384.74-.626 1.208-.766M11.42 15.17l-4.655 5.653a2.548 2.548 0 1 1-3.586-3.586l6.837-5.63m5.108-.233c.55-.164 1.163-.188 1.743-.14a4.5 4.5 0 0 0 4.486-6.336l-3.276 3.277a3.004 3.004 0 0 1-2.25-2.25l3.276-3.276a4.5 4.5 0 0 0-6.336 4.486c.091 1.076-.071 2.264-.904 2.95l-.102.085m-1.745 1.437L5.909 7.5H4.5L2.25 3.75l1.5-1.5L7.5 4.5v1.409l4.26 4.26m-1.745 1.437 1.745-1.437m6.615 8.206L15.75 15.75M4.867 19.125h.008v.008h-.008v-.008Z" />
+      </svg>
+    ),
+    children: [
+      { href: "/customer-service/outreach/leads", label: "Outreach leads", status: "wip" },
+      // TEMPORARY combined Leads + Follow-up; remove with src/app/customer-service/tmp.
+      { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
+      { href: "/amazon", label: "Amazon hardware", status: "wip", access: "admin" },
+      { href: "/ai-agent", label: "AI Agent", status: "wip", access: "admin" },
+      { href: "/warehouse/purchasing", label: "Purchasing", status: "wip", access: "management" },
+    ],
+  },
 ];
 
 // Pinned to the bottom of the sidebar, above Sign out. Employees and System
@@ -281,13 +310,51 @@ export const SETTINGS_ITEM: NavItem = {
   ],
 };
 
+function matchesPrefix(prefix: string, pathname: string): boolean {
+  return prefix === "/" ? pathname === "/" : pathname === prefix || pathname.startsWith(prefix + "/");
+}
+
+// The section that owns `pathname`: whichever lists the longest matching
+// prefix. Work in progress claims /customer-service/tmp and
+// /warehouse/purchasing, which also sit under Customer Service and Logistics
+// by prefix, and the longer match is the one that should light up.
+// Compared by label, not href: SidebarLayout rewrites the Dashboard row's href
+// to the viewer's own dashboard, so the href seen at render time can differ.
+function owningSectionLabel(pathname: string): string | null {
+  let best: { label: string; length: number } | null = null;
+  for (const section of [...NAV_ITEMS, SETTINGS_ITEM]) {
+    for (const prefix of section.match ?? [section.href]) {
+      if (matchesPrefix(prefix, pathname) && (!best || prefix.length > best.length)) {
+        best = { label: section.label, length: prefix.length };
+      }
+    }
+  }
+  return best?.label ?? null;
+}
+
+// The one child row that should light up for `pathname`: the longest matching
+// child href across every section. Without this, Logistics > Dashboard
+// ("/warehouse") would also light up on /warehouse/report and on
+// /warehouse/purchasing, which lives under Work in progress.
+export function activeChildHref(pathname: string): string | null {
+  let best: string | null = null;
+  for (const section of [...NAV_ITEMS, SETTINGS_ITEM]) {
+    for (const child of section.children ?? []) {
+      if (!child.external && matchesPrefix(child.href, pathname) && (!best || child.href.length > best.length)) {
+        best = child.href;
+      }
+    }
+  }
+  return best;
+}
+
 // True when `pathname` is the section itself or a page inside it. "/" is
 // matched exactly — as a prefix it would swallow every route and light up
 // Today on every page.
 export function matchesItem(item: NavItem, pathname: string): boolean {
-  return (item.match ?? [item.href]).some((prefix) =>
-    prefix === "/" ? pathname === "/" : pathname === prefix || pathname.startsWith(prefix + "/")
-  );
+  if (!(item.match ?? [item.href]).some((prefix) => matchesPrefix(prefix, pathname))) return false;
+  const owner = owningSectionLabel(pathname);
+  return owner === null || owner === item.label;
 }
 
 export function canAccess(required: AccessLevel | undefined, viewer: ViewerAccess): boolean {

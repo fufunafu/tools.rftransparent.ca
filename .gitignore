@@ -72,3 +72,11 @@ followup-revert-backup-*.xlsx
 # Supabase CLI cache
 supabase/.temp/
 !/scripts/freightcom-smoke.mjs
+
+!/scripts/export-outreach-campaigns.mjs
+
+!/scripts/verify-sales-preservation.mjs
+
+!/scripts/validate-android-release.mjs
+!/scripts/build-android-bundle.mjs
+!/scripts/verify-amazon-sandbox.mjs

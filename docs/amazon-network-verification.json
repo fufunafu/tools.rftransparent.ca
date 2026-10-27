@@ -1,0 +1,171 @@
+{
+  "verifiedAt": "2026-10-03T20:41:54.027051+00:00",
+  "scope": "Private Glass Railing Store integration, initial single operator Mac, en0 interface",
+  "suricata": {
+    "version": "8.0.7",
+    "enabledThreatRules": 53098,
+    "service": "ca.rftransparent.amazon-ids",
+    "configurationTest": "passed",
+    "liveTestSignature": 9900001,
+    "liveTest": "Harmless HTTP URI marker to owned site detected from wire/pcap on en0",
+    "mode": "Passive IDS; no TLS decryption or inline blocking",
+    "dailyRuleUpdates": "09:17 local via launchd; startup update and USR2 reload verified",
+    "health": {
+      "checkedAt": 1791060071.9268758,
+      "file": "/var/log/rf-amazon-security/eve-2026-10-03.json",
+      "offset": 510577,
+      "alerts": 0,
+      "testAlerts": 1,
+      "lastAlertAt": null,
+      "lastPacketCount": 209188,
+      "running": true,
+      "interface": "en0",
+      "monitoringExpectedInterface": true,
+      "lastEventAgeSeconds": 6.670110702514648,
+      "rulesAgeHours": 0.06455171194341447,
+      "healthy": true
+    },
+    "alerts": "Local notifications for priority 1/2 alerts and unhealthy monitoring; notification agent running on 60 second schedule",
+    "logRetentionDays": 14
+  },
+  "macFirewall": {
+    "enabled": true,
+    "stealthMode": true
+  },
+  "antiMalware": {
+    "xprotectVersion": "5363",
+    "gatekeeper": true,
+    "systemIntegrityProtection": true,
+    "criticalUpdateInstall": true
+  },
+  "vercel": {
+    "project": "tools-rftransparent-ca",
+    "config": {
+      "active": {
+        "ownerId": "team_SKBULV0wNkPEc5bIFBqCLP9k",
+        "projectKey": "prj_twZOObjT1WQMMy7dQJCWQW6sM1am#active",
+        "id": "waf_ZTXVhr9TmRyE",
+        "updatedAt": "2026-10-03T20:38:08.931Z",
+        "version": 4,
+        "firewallEnabled": true,
+        "crs": {
+          "sd": {
+            "active": false,
+            "action": "log"
+          },
+          "ma": {
+            "active": false,
+            "action": "log"
+          },
+          "lfi": {
+            "active": false,
+            "action": "log"
+          },
+          "rfi": {
+            "active": false,
+            "action": "log"
+          },
+          "rce": {
+            "active": false,
+            "action": "log"
+          },
+          "php": {
+            "active": false,
+            "action": "log"
+          },
+          "gen": {
+            "active": false,
+            "action": "log"
+          },
+          "xss": {
+            "active": false,
+            "action": "log"
+          },
+          "sqli": {
+            "active": false,
+            "action": "log"
+          },
+          "sf": {
+            "active": false,
+            "action": "log"
+          },
+          "java": {
+            "active": false,
+            "action": "log"
+          }
+        },
+        "ips": [],
+        "changes": [],
+        "rules": [
+          {
+            "id": "rule_rf_amazon_restricted_network_Cfy7JC",
+            "name": "RF Amazon restricted network",
+            "description": "Restrict Amazon UI and API to the initial operator network. Update after verification when the operator changes networks. MFA and approved-user checks remain mandatory.",
+            "active": true,
+            "conditionGroup": [
+              {
+                "conditions": [
+                  {
+                    "type": "path",
+                    "op": "re",
+                    "value": "^/(api/)?amazon(/|$)"
+                  },
+                  {
+                    "type": "ip_address",
+                    "op": "neq",
+                    "value": "66.205.13.56"
+                  }
+                ]
+              }
+            ],
+            "action": {
+              "mitigate": {
+                "action": "deny"
+              }
+            },
+            "valid": true,
+            "validationErrors": null
+          },
+          {
+            "id": "rule_rf_amazon_firewall_verification_l4ELVp",
+            "name": "RF Amazon firewall verification",
+            "description": "Deny the dedicated Amazon security verification path. Does not match application operations.",
+            "active": true,
+            "conditionGroup": [
+              {
+                "conditions": [
+                  {
+                    "type": "path",
+                    "op": "eq",
+                    "value": "/api/amazon/__firewall_probe_20261003__"
+                  }
+                ]
+              }
+            ],
+            "action": {
+              "mitigate": {
+                "action": "deny"
+              }
+            },
+            "valid": true,
+            "validationErrors": null
+          }
+        ]
+      }
+    },
+    "tests": {
+      "excludedNetworkAmazonApi": 403,
+      "excludedNetworkAmazonUi": 403,
+      "excludedNetworkSalesPage": 307,
+      "restoredOperatorNetworkAmazonApi": 401,
+      "dedicatedProbe": 403
+    },
+    "paidManagedRulesEnabled": false,
+    "segmentation": "Ingress IP-based separation of /amazon and /api/amazon paths, plus approved-user/MFA gates; not a dedicated VPC"
+  },
+  "limitations": [
+    "IP allowlist must be updated after verified network change; current address is shared NAT and is not device identity. Application identity and MFA remain required.",
+    "Suricata monitors en0 metadata and observable plaintext traffic, not decrypted HTTPS payloads. Other interfaces/devices require onboarding.",
+    "Owner must respond to notifications and review Vercel firewall logs."
+  ]
+}

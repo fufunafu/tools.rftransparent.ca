@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   policy: vi.fn(),
   hidePrivacy: vi.fn(),
   label: vi.fn(),
+  platform: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => {
@@ -22,6 +23,7 @@ vi.mock("next/navigation", () => {
   return { usePathname: () => "/clock", useRouter: () => router };
 });
 vi.mock("swr", () => ({ mutate: vi.fn() }));
+vi.mock("@/lib/native-platform", () => ({ getNativePlatform: mocks.platform }));
 vi.mock("@/lib/app-biometrics", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/app-biometrics")>(),
   isNativeApp: () => true,
@@ -110,6 +112,7 @@ beforeEach(() => {
   localStorage.clear();
   setBiometricPreference("review@example.com", "enabled");
   mocks.label.mockResolvedValue("Face ID");
+  mocks.platform.mockReturnValue("ios");
   mocks.authenticate.mockResolvedValue({ ok: true });
   mocks.cleanup.mockResolvedValue(undefined);
   mocks.fresh.mockReturnValue(false);
@@ -129,6 +132,30 @@ afterEach(async () => {
 });
 
 describe("native unlock recovery", () => {
+  it("does not invalidate an Android authentication result for the biometric overlay pause", async () => {
+    mocks.platform.mockReturnValue("android");
+    const authentication = deferred<{ ok: true }>();
+    mocks.authenticate.mockReturnValueOnce(authentication.promise);
+    await mount();
+    await emit("pause");
+    await emit("appStateChange", { isActive: true });
+    await act(async () => { authentication.resolve({ ok: true }); });
+    expect(container.querySelector("[inert]")).toBeNull();
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
+
+  it("relocks Android when onStop reports an actual background transition", async () => {
+    mocks.platform.mockReturnValue("android");
+    await mount();
+    expect(container.querySelector("[inert]")).toBeNull();
+    mocks.authenticate.mockReturnValue(new Promise(() => {}));
+    await emit("pause");
+    await emit("appStateChange", { isActive: false });
+    await emit("appStateChange", { isActive: true });
+    expectLocked();
+    expect(mocks.authenticate).toHaveBeenCalledTimes(2);
+  });
   it("unlocks after Face ID even if legacy credential cleanup never returns", async () => {
     mocks.cleanup.mockReturnValue(new Promise(() => {}));
     await mount();

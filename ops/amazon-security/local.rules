@@ -1,0 +1,1 @@
+alert http any any -> any any (msg:"RF Tools harmless IDS verification"; flow:established,to_server; http.uri; content:"/__rf_ids_test_20261003__"; sid:9900001; rev:1;)

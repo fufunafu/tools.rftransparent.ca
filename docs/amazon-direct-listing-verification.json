@@ -1,0 +1,20 @@
+{
+  "checkedAt": "2026-10-03T19:50:23.398079+00:00",
+  "source": "Glass Railing Store Shopify",
+  "products": 21,
+  "variants": 72,
+  "validGtinCandidates": 0,
+  "emptyBarcodeFields": 34,
+  "internalSkusInBarcodeFields": 38,
+  "brandField": "My Store for initial spigot; actual physical brand awaiting confirmation",
+  "directListingRoute": "Seller Central > Add products > Web URL",
+  "firstProductUrl": "https://glassrailingstore.com/products/glass-railing-spigot",
+  "status": "URL import accepted; one unsubmitted draft shown, zero live listings",
+  "openQuestions": [
+    "Do physical products have UPC/EAN codes?",
+    "Actual brand printed on product or packaging?"
+  ],
+  "apiAccess": "Declined; full network controls and password/MFA policy gaps",
+  "amazonMessage": "URL submitted. Importing may take up to 15 mins. Please refresh until draft appears.",
+  "draftsUrl": "https://sellercentral.amazon.com/myinventory/inventory/views/drafts?subview=unsubmitted-drafts"
+}

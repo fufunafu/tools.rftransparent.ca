@@ -8,7 +8,7 @@ const { checkBiometry, authenticate, remove } = vi.hoisted(() => ({
 
 vi.mock("@aparajita/capacitor-biometric-auth", () => ({
   BiometricAuth: { checkBiometry, authenticate },
-  BiometryType: { faceId: 2, touchId: 1 },
+  BiometryType: { faceId: 2, touchId: 1, fingerprintAuthentication: 3, faceAuthentication: 4, irisAuthentication: 5 },
 }));
 vi.mock("@aparajita/capacitor-secure-storage", () => ({
   SecureStorage: { remove },
@@ -52,6 +52,14 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe("native session authentication", () => {
+  it.each([[3, "Fingerprint unlock"], [4, "Face unlock"], [5, "Iris unlock"]])(
+    "offers the Android biometric name for type %s without authenticating before consent",
+    async (biometryType, label) => {
+      checkBiometry.mockResolvedValue({ isAvailable: true, biometryType });
+      await expect(getBiometricLabel()).resolves.toBe(label);
+      expect(authenticate).not.toHaveBeenCalled();
+    },
+  );
   it.each(["availability", "authentication"])("times out a stalled %s callback without accepting late success", async (stage) => {
     vi.useFakeTimers();
     let complete!: (value: unknown) => void;

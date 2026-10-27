@@ -3,19 +3,19 @@ import { passwordProblem, recoveryParams } from "./password-reset";
 
 describe("passwordProblem", () => {
   it("rejects short passwords", () => {
-    expect(passwordProblem("short", "short")).toMatch(/at least 8/);
+    expect(passwordProblem("short", "short")).toMatch(/at least 12/);
   });
 
   it("rejects mismatched confirmation", () => {
-    expect(passwordProblem("longenough", "different")).toMatch(/don't match/);
+    expect(passwordProblem("Strong Password 42!", "different")).toMatch(/don't match/);
   });
 
   it("accepts a matching pair of sufficient length", () => {
-    expect(passwordProblem("longenough", "longenough")).toBeNull();
+    expect(passwordProblem("Strong Password 42!", "Strong Password 42!")).toBeNull();
   });
 
   it("checks length before the mismatch, so the first fix comes first", () => {
-    expect(passwordProblem("short", "different")).toMatch(/at least 8/);
+    expect(passwordProblem("short", "different")).toMatch(/at least 12/);
   });
 });
 

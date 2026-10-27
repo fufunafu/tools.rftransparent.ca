@@ -2,14 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { isAuthenticated } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { shopifyGraphQL, getStores } from "@/lib/shopify";
+import { salesRecordCustomerName, type SalesRecordCustomer, shopifyRecordUrl, type SalesRecordDetail } from "@/lib/sales-record-details";
 
 
-interface OrderNode {
+interface OrderNode extends SalesRecordCustomer {
   id: string;
   name: string;
   createdAt: string;
   tags: string[];
   subtotalPriceSet: { shopMoney: { amount: string } };
+  cancelledAt: string | null;
 }
 
 interface FulfillmentOrderNode {
@@ -32,7 +34,7 @@ interface FulfillmentOrdersResponse {
   };
 }
 
-interface DraftOrderNode {
+interface DraftOrderNode extends SalesRecordCustomer {
   id: string;
   name: string;
   createdAt: string;
@@ -57,7 +59,11 @@ function makeOrdersQuery(dateFilter: string, cursor?: string) {
           node {
             id
             name
+            customer { firstName lastName }
+            shippingAddress { name company }
+            billingAddress { name company }
             createdAt
+            cancelledAt
             tags
             subtotalPriceSet { shopMoney { amount } }
           }
@@ -95,6 +101,9 @@ function makeDraftOrdersQuery(dateFilter: string, cursor?: string) {
           node {
             id
             name
+            customer { firstName lastName }
+            shippingAddress { name company }
+            billingAddress { name company }
             createdAt
             status
             tags
@@ -123,7 +132,7 @@ function makeUnfulfilledOrdersQuery(cursor?: string) {
   `;
 }
 
-type Period = "daily" | "weekly" | "monthly" | "yearly";
+type Period = "daily" | "weekly" | "monthly" | "quarterly" | "yearly";
 
 function getPeriodRange(
   period: Period,
@@ -153,6 +162,12 @@ function getPeriodRange(
     end = new Date(date.getFullYear(), date.getMonth() + 1, 1);
     prevStart = new Date(date.getFullYear(), date.getMonth() - 1, 1);
     prevEnd = new Date(start);
+  } else if (period === "quarterly") {
+    const quarterMonth = Math.floor(date.getMonth() / 3) * 3;
+    start = new Date(date.getFullYear(), quarterMonth, 1);
+    end = new Date(date.getFullYear(), quarterMonth + 3, 1);
+    prevStart = new Date(date.getFullYear(), quarterMonth - 3, 1);
+    prevEnd = new Date(start);
   } else {
     // yearly — rolling 12-month window ending on (and including) the selected date
     end = new Date(date);
@@ -177,6 +192,7 @@ interface EmployeeMetrics {
   department: string;
   locationName: string;
   shopifyTags?: string[];
+  records?: { orders: SalesRecordDetail[]; quotes: SalesRecordDetail[] };
   metrics: {
     current: Record<string, number>;
     previous: Record<string, number>;
@@ -194,10 +210,14 @@ export async function GET(req: NextRequest) {
   const department = req.nextUrl.searchParams.get("department");
   const locationId = req.nextUrl.searchParams.get("locationId");
   const employeeId = req.nextUrl.searchParams.get("employeeId");
+  const includeRecords = !!employeeId && req.nextUrl.searchParams.get("includeRecords") === "true";
 
-  if (!["daily", "weekly", "monthly", "yearly"].includes(period))
+  if (!["daily", "weekly", "monthly", "quarterly", "yearly"].includes(period))
     return NextResponse.json({ error: "Invalid period" }, { status: 400 });
 
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || Number.isNaN(Date.parse(dateStr))) {
+    return NextResponse.json({ error: "Invalid date" }, { status: 400 });
+  }
   const { start, end, prevStart, prevEnd } = getPeriodRange(period, dateStr);
 
   // Fetch employees
@@ -238,7 +258,7 @@ export async function GET(req: NextRequest) {
    */
   function getMatchTags(emp: { name: string; shopify_tags?: string[] | null }): string[] {
     const configured = (emp.shopify_tags ?? [])
-      .map((t: string) => t.toLowerCase())
+      .map((t: string) => t.trim().toLowerCase())
       .filter(Boolean);
     if (configured.length > 0) return configured;
     // Name-based fallback: "Robert Glas" → ["robert glas", "robert", "glas"]
@@ -254,7 +274,8 @@ export async function GET(req: NextRequest) {
     const stores = getStores();
     // Sales always uses RF Transparent store only
     const rfStore = stores.find((s) => s.label === "RF Transparent");
-    const salesStoreIds = rfStore ? [rfStore.id] : stores.map((s) => s.id);
+    const salesStoreIds = rfStore ? [rfStore.id] : stores.filter((store) => store.id === "store1").map((store) => store.id);
+    if (!salesStoreIds.length) return NextResponse.json({ error: "RF Shopify connection is unavailable" }, { status: 503 });
 
     const fetchDate = toDateStr(prevStart);
 
@@ -277,8 +298,10 @@ export async function GET(req: NextRequest) {
           cursor = edges[edges.length - 1]?.cursor;
           pages++;
         }
+        if (hasNext) throw new Error("Order pagination limit reached");
       } catch (err) {
         console.error(`[KPI Metrics] Orders fetch failed for ${store.id}:`, err);
+        return NextResponse.json({ error: "Sales orders could not be loaded completely. Please try again." }, { status: 502 });
       }
     }
 
@@ -298,8 +321,7 @@ export async function GET(req: NextRequest) {
             makeDraftOrdersQuery(fetchDate, cursor)
           );
           if (!data?.draftOrders) {
-            draftDebug[store.label].error = "draftOrders field missing (scope?)";
-            break;
+            throw new Error("Draft orders are unavailable");
           }
           const edges = data.draftOrders.edges;
           allDrafts.push(...edges.map((e) => e.node));
@@ -308,10 +330,10 @@ export async function GET(req: NextRequest) {
           cursor = edges[edges.length - 1]?.cursor;
           pages++;
         }
+        if (hasNext) throw new Error("Quote pagination limit reached");
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
         console.error(`[KPI Metrics] Drafts fetch failed for ${store.id}:`, err);
-        draftDebug[store.label].error = msg;
+        return NextResponse.json({ error: "Sales quotes could not be loaded completely. Please try again." }, { status: 502 });
       }
     }
     draftsDiagnostic = draftDebug;
@@ -340,21 +362,28 @@ export async function GET(req: NextRequest) {
       for (const t of getMatchTags(emp)) allKnownTags.add(t);
     }
 
+    const shopDomain = stores.find((store) => salesStoreIds.includes(store.id))!.store;
+
     // Attribute to employees via tags (configured shopify_tags or name fallback)
     for (const emp of salesEmployees) {
       const empTags = getMatchTags(emp);
+      const records: { orders: SalesRecordDetail[]; quotes: SalesRecordDetail[] } = { orders: [], quotes: [] };
 
       let curRevenue = 0, curOrders = 0, prevRevenue = 0, prevOrders = 0;
       let curQuoted = 0, curQuotes = 0, prevQuoted = 0, prevQuotes = 0;
+      let curCompleted = 0, prevCompleted = 0;
 
       for (const order of allOrders) {
+        if (order.cancelledAt) continue;
         const orderDate = new Date(order.createdAt);
-        const orderTags = order.tags.map((t) => t.toLowerCase());
+        const orderTags = order.tags.map((t) => t.trim().toLowerCase());
         if (!empTags.some((et) => orderTags.includes(et))) continue;
         const amount = parseFloat(order.subtotalPriceSet.shopMoney.amount);
         if (orderDate >= start && orderDate < end) {
           curRevenue += amount;
           curOrders++;
+          if (includeRecords) records.orders.push({ id: order.id, name: order.name, customerName: salesRecordCustomerName(order), date: order.createdAt, amount,
+            status: "Order", url: shopifyRecordUrl(shopDomain, order.id, "orders") });
         } else if (orderDate >= prevStart && orderDate < prevEnd) {
           prevRevenue += amount;
           prevOrders++;
@@ -366,22 +395,26 @@ export async function GET(req: NextRequest) {
         // customer. Count only INVOICE_SENT (true quotes) and COMPLETED (closed).
         if (draft.status === "OPEN") continue;
         const draftDate = new Date(draft.createdAt);
-        const draftTags = draft.tags.map((t) => t.toLowerCase());
+        const draftTags = draft.tags.map((t) => t.trim().toLowerCase());
         if (!empTags.some((et) => draftTags.includes(et))) continue;
         const amount = parseFloat(draft.subtotalPriceSet?.shopMoney?.amount ?? "0");
         if (draftDate >= start && draftDate < end) {
           curQuoted += amount;
           curQuotes++;
+          if (includeRecords) records.quotes.push({ id: draft.id, name: draft.name, customerName: salesRecordCustomerName(draft), date: draft.createdAt, amount,
+            status: draft.status === "COMPLETED" ? "Completed" : "Invoice sent", url: shopifyRecordUrl(shopDomain, draft.id, "quotes") });
+          if (draft.status === "COMPLETED") curCompleted++;
         } else if (draftDate >= prevStart && draftDate < prevEnd) {
           prevQuoted += amount;
           prevQuotes++;
+          if (draft.status === "COMPLETED") prevCompleted++;
         }
       }
 
       const curAOV = curOrders > 0 ? curRevenue / curOrders : 0;
       const prevAOV = prevOrders > 0 ? prevRevenue / prevOrders : 0;
-      const curConv = curQuoted > 0 ? (curRevenue / curQuoted) * 100 : 0;
-      const prevConv = prevQuoted > 0 ? (prevRevenue / prevQuoted) * 100 : 0;
+      const curConv = curQuotes > 0 ? (curCompleted / curQuotes) * 100 : 0;
+      const prevConv = prevQuotes > 0 ? (prevCompleted / prevQuotes) * 100 : 0;
 
       const pctChange = (cur: number, prev: number) =>
         prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
@@ -392,6 +425,7 @@ export async function GET(req: NextRequest) {
         department: emp.department,
         locationName: emp.locations?.name ?? "—",
         shopifyTags: empTags,
+        ...(includeRecords ? { records } : {}),
         metrics: {
           current: {
             quoted: Math.round(curQuoted * 100) / 100,
@@ -425,13 +459,15 @@ export async function GET(req: NextRequest) {
     {
       let curRevenue = 0, curOrders = 0, prevRevenue = 0, prevOrders = 0;
       let curQuoted = 0, curQuotes = 0, prevQuoted = 0, prevQuotes = 0;
+      let curCompleted = 0, prevCompleted = 0;
 
       const pctChange = (cur: number, prev: number) =>
         prev > 0 ? Math.round(((cur - prev) / prev) * 100) : null;
 
       for (const order of allOrders) {
+        if (order.cancelledAt) continue;
         const orderDate = new Date(order.createdAt);
-        const orderTags = order.tags.map((t) => t.toLowerCase());
+        const orderTags = order.tags.map((t) => t.trim().toLowerCase());
         if (orderTags.some((t) => allKnownTags.has(t))) continue; // attributed
         const amount = parseFloat(order.subtotalPriceSet.shopMoney.amount);
         if (orderDate >= start && orderDate < end) {
@@ -448,24 +484,26 @@ export async function GET(req: NextRequest) {
         // Same OPEN-exclusion as attributed quotes above
         if (draft.status === "OPEN") continue;
         const draftDate = new Date(draft.createdAt);
-        const draftTags = draft.tags.map((t) => t.toLowerCase());
+        const draftTags = draft.tags.map((t) => t.trim().toLowerCase());
         if (draftTags.some((t) => allKnownTags.has(t))) continue; // attributed
         const amount = parseFloat(draft.subtotalPriceSet?.shopMoney?.amount ?? "0");
         if (draftDate >= start && draftDate < end) {
           curQuoted += amount;
           curQuotes++;
+          if (draft.status === "COMPLETED") curCompleted++;
           unassignedOrderDetails.push({ id: draft.id, name: draft.name, createdAt: draft.createdAt, amount, tags: draft.tags, type: "draft" });
         } else if (draftDate >= prevStart && draftDate < prevEnd) {
           prevQuoted += amount;
           prevQuotes++;
+          if (draft.status === "COMPLETED") prevCompleted++;
         }
       }
 
       if (curOrders + prevOrders + curQuotes + prevQuotes > 0) {
         const curAOV = curOrders > 0 ? curRevenue / curOrders : 0;
         const prevAOV = prevOrders > 0 ? prevRevenue / prevOrders : 0;
-        const curConv = curQuoted > 0 ? (curRevenue / curQuoted) * 100 : 0;
-        const prevConv = prevQuoted > 0 ? (prevRevenue / prevQuoted) * 100 : 0;
+        const curConv = curQuotes > 0 ? (curCompleted / curQuotes) * 100 : 0;
+        const prevConv = prevQuotes > 0 ? (prevCompleted / prevQuotes) * 100 : 0;
         results.push({
           employeeId: "__unassigned__",
           employeeName: "Unassigned",

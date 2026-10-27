@@ -1,0 +1,16 @@
+{
+  "checkedAt": "2026-10-03T18:31:00.373Z",
+  "appName": "RF Tools Hardware Sandbox",
+  "appId": "amzn1.sp.solution.ff2c89b5-bdf4-46e9-93fa-23241d6269bf",
+  "environment": "sandbox",
+  "endpoint": "https://sandbox.sellingpartnerapi-na.amazon.com",
+  "authorization": "passed",
+  "getListingsItem": "passed",
+  "httpStatus": 200,
+  "fixtureMatched": true,
+  "productionRequests": 0,
+  "listingsSubmitted": 0,
+  "deployed": false,
+  "productionProfileSubmitted": false,
+  "limitations": "Static test data only. Does not verify real hardware category requirements or production listing eligibility."
+}

@@ -4,6 +4,8 @@ import {
   SETTINGS_ITEM,
   filterNavItem,
   getSearchTargets,
+  activeChildHref,
+  matchesItem,
   type NavItem,
   type ViewerAccess,
 } from "@/components/nav-items";
@@ -51,5 +53,35 @@ describe("role-aware navigation", () => {
 
     expect(hrefs).toContain("/settings/access");
     expect(hrefs).not.toContain("/warehouse/purchasing");
+  });
+});
+
+describe("section highlighting", () => {
+  const section = (label: string) => NAV_ITEMS.find((item) => item.label === label)!;
+
+  it("lights up Work in progress, not the prefix section, for unfinished tools", () => {
+    for (const path of ["/customer-service/tmp", "/warehouse/purchasing", "/customer-service/outreach/leads"]) {
+      expect(matchesItem(section("Work in progress"), path)).toBe(true);
+    }
+    expect(matchesItem(section("Customer Service"), "/customer-service/tmp")).toBe(false);
+    expect(matchesItem(section("Logistics"), "/warehouse/purchasing")).toBe(false);
+  });
+
+  it("keeps finished pages in their home section", () => {
+    expect(matchesItem(section("Customer Service"), "/customer-service/leads/rf")).toBe(true);
+    expect(matchesItem(section("Logistics"), "/warehouse/report")).toBe(true);
+    expect(matchesItem(section("Work in progress"), "/customer-service/leads")).toBe(false);
+  });
+
+  it("still highlights Dashboard after its href is swapped for the viewer's own", () => {
+    const dashboard = { ...section("Dashboard"), href: "/dashboards/sales" };
+    expect(matchesItem(dashboard, "/dashboards/sales")).toBe(true);
+  });
+
+  it("lights up only the most specific child row", () => {
+    expect(activeChildHref("/warehouse/purchasing/inventory")).toBe("/warehouse/purchasing");
+    expect(activeChildHref("/warehouse/report")).toBe("/warehouse/report");
+    expect(activeChildHref("/warehouse")).toBe("/warehouse");
+    expect(activeChildHref("/customer-service/leads/rf")).toBe("/customer-service/leads");
   });
 });

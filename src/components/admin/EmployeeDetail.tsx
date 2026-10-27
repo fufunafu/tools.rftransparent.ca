@@ -1,9 +1,11 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { formatCADWhole } from "@/lib/format";
+import { SalesRecordsTable } from "./SalesRecordsTable";
+import type { SalesRecordDetail } from "@/lib/sales-record-details";
 
 // Charts are split out so recharts loads on demand instead of in the
 // route's initial bundle (same pattern as ShopifyCharts).
@@ -96,11 +98,11 @@ function resolveTargetValue(metric: string, current: MetricsCurrent): number {
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({ label, value, onClick }: { label: string; value: string; onClick?: () => void }) {
   return (
     <div className="bg-white rounded-xl border border-sand-200/60 p-4">
       <p className="text-xs text-sand-400 uppercase tracking-wider">{label}</p>
-      <p className="text-xl font-semibold text-sand-900 mt-1 tabular-nums">{value}</p>
+      {onClick ? <button type="button" onClick={onClick} aria-label={`View ${label === "Sold" || label === "Orders" ? "orders" : "quotes"}`} className="text-xl font-semibold text-blue-700 mt-1 tabular-nums hover:underline">{value}</button> : <p className="text-xl font-semibold text-sand-900 mt-1 tabular-nums">{value}</p>}
     </div>
   );
 }
@@ -152,66 +154,73 @@ export default function EmployeeDetail({ id }: { id: string }) {
   const [date, setDate] = useState(() => new Date().toISOString().split("T")[0]);
 
   const [employee, setEmployee] = useState<EmployeeRecord | null>(null);
+  const [records, setRecords] = useState<{ orders: SalesRecordDetail[]; quotes: SalesRecordDetail[] }>({ orders: [], quotes: [] });
+  const [recordKind, setRecordKind] = useState<"orders" | "quotes">("orders");
+  const recordsRef = useRef<HTMLElement>(null);
   const [current, setCurrent] = useState<MetricsCurrent>({});
   const [history, setHistory] = useState<MonthlySnapshot[]>([]);
   const [targets, setTargets] = useState<Target[]>([]);
 
   const [loadingMetrics, setLoadingMetrics] = useState(true);
   const [loadingHistory, setLoadingHistory] = useState(true);
-  const [error, setError] = useState("");
+  const [metricsError, setMetricsError] = useState("");
+  const [historyError, setHistoryError] = useState("");
+  const [targetsError, setTargetsError] = useState("");
 
-  // Fetch current-period metrics (re-runs when period/date changes)
-  const fetchMetrics = useCallback(async () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    // Reset the request state when the selected reporting period changes.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingMetrics(true);
-    try {
-      const res = await fetch(
-        `/api/kpi/metrics?employeeId=${id}&department=sales&period=${period}&date=${date}`
-      );
-      const json = await res.json();
-      if (json.employees?.length) {
-        setCurrent(json.employees[0].metrics.current ?? {});
-      } else {
-        setCurrent({});
-      }
-    } catch {
-      setError("Failed to load metrics.");
-    } finally {
-      setLoadingMetrics(false);
-    }
+    setMetricsError("");
+    fetch(`/api/kpi/metrics?employeeId=${id}&department=sales&period=${period}&date=${date}&includeRecords=true`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load metrics.");
+        const result = json.employees?.find((entry: { employeeId: string }) => entry.employeeId === id);
+        if (!result) throw new Error("No active employee metrics are available.");
+        if (!controller.signal.aborted) { setCurrent(result.metrics.current ?? {}); setRecords(result.records ?? { orders: [], quotes: [] }); }
+      })
+      .catch((error: Error) => {
+        if (!controller.signal.aborted) { setCurrent({}); setMetricsError(error.message); }
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoadingMetrics(false); });
+    return () => controller.abort();
   }, [id, period, date]);
 
-  // Fetch history + targets (once on mount)
-  const fetchHistoryAndTargets = useCallback(async () => {
+  useEffect(() => {
+    const controller = new AbortController();
+    // The employee ID selects a new external history request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingHistory(true);
-    try {
-      const [histRes, targRes] = await Promise.all([
-        fetch(`/api/kpi/employees/${id}/history`),
-        fetch(`/api/kpi/targets?employeeId=${id}`),
-      ]);
-      const [histJson, targJson] = await Promise.all([histRes.json(), targRes.json()]);
-
-      if (histJson.employee) setEmployee(histJson.employee);
-      setHistory(histJson.history ?? []);
-
-      // Keep only the most recent target per metric
-      const seen = new Set<string>();
-      const deduped: Target[] = [];
-      for (const t of (targJson.targets ?? [])) {
-        if (!seen.has(t.metric)) {
-          seen.add(t.metric);
-          deduped.push(t);
+    setHistoryError("");
+    setTargetsError("");
+    fetch(`/api/kpi/employees/${id}/history`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error(json.error || "Failed to load history.");
+        if (!controller.signal.aborted) {
+          setEmployee(json.employee ?? null);
+          setHistory(json.history ?? []);
         }
-      }
-      setTargets(deduped);
-    } catch {
-      setError("Failed to load history or targets.");
-    } finally {
-      setLoadingHistory(false);
-    }
+      })
+      .catch((error: Error) => { if (!controller.signal.aborted) { setHistory([]); setHistoryError(error.message); } })
+      .finally(() => { if (!controller.signal.aborted) setLoadingHistory(false); });
+    fetch(`/api/kpi/targets?employeeId=${id}`, { signal: controller.signal })
+      .then(async (res) => {
+        const json = await res.json();
+        if (!res.ok) throw new Error("Failed to load targets.");
+        const seen = new Set<string>();
+        const deduped = (json.targets ?? []).filter((target: Target) => {
+          if (seen.has(target.metric)) return false;
+          seen.add(target.metric);
+          return true;
+        });
+        if (!controller.signal.aborted) setTargets(deduped);
+      })
+      .catch((error: Error) => { if (!controller.signal.aborted) setTargetsError(error.message); });
+    return () => controller.abort();
   }, [id]);
-
-  useEffect(() => { fetchMetrics(); }, [fetchMetrics]);
-  useEffect(() => { fetchHistoryAndTargets(); }, [fetchHistoryAndTargets]);
 
   const chartData = history.map((s) => ({
     ...s,
@@ -268,6 +277,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
               <button
                 key={p}
                 onClick={() => setPeriod(p)}
+                aria-pressed={period === p}
                 className={`px-3 py-1.5 text-sm font-medium transition-colors capitalize ${
                   period === p
                     ? "bg-sand-900 text-sand-50"
@@ -280,16 +290,17 @@ export default function EmployeeDetail({ id }: { id: string }) {
           </div>
           <input
             type="date"
+            aria-label="Reporting date"
             value={date}
-            onChange={(e) => setDate(e.target.value)}
+            onChange={(e) => { if (e.target.value) setDate(e.target.value); }}
             className="text-sm border border-sand-200 rounded-lg px-3 py-1.5 text-sand-700 bg-white"
           />
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
-          {error}
+      {(metricsError || historyError || targetsError) && (
+        <div role="alert" className="rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700">
+          {[metricsError, historyError, targetsError].filter(Boolean).join(" ")}
         </div>
       )}
 
@@ -299,19 +310,37 @@ export default function EmployeeDetail({ id }: { id: string }) {
           <StatCard
             key={key}
             label={label}
+            onClick={["sold", "orders", "quoted", "quote_count"].includes(key) ? () => {
+              setRecordKind(key === "sold" || key === "orders" ? "orders" : "quotes");
+              recordsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+            } : undefined}
             value={
               loadingMetrics
-                ? "—"
-                : formatMetricValue(key, current[key] ?? 0)
+                ? "Loading"
+                : metricsError ? "Unavailable" : formatMetricValue(key, current[key] ?? 0)
             }
           />
         ))}
       </div>
 
+      <p className="text-xs text-sand-500">Sold shows RF Shopify order subtotals by order date. Quotes exclude unsent drafts. Conversion is the percentage of those quotes marked completed. History shows the latest 12 months.</p>
+
+      <section ref={recordsRef} aria-label="Employee orders and quotes" className="rounded-xl border border-slate-200 bg-white p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-slate-900">Orders and quotes · {period}</h2>
+          <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+            {(["orders", "quotes"] as const).map((kind) => <button key={kind} type="button" aria-pressed={recordKind === kind} onClick={() => setRecordKind(kind)}
+              className={`rounded-md px-3 py-1.5 text-sm capitalize ${recordKind === kind ? "bg-white shadow-sm text-slate-900" : "text-slate-500"}`}>{kind}</button>)}
+          </div>
+        </div>
+        {loadingMetrics ? <p role="status" className="text-sm text-slate-500">Loading {recordKind}…</p> : metricsError ? <p className="text-sm text-red-700">{recordKind === "orders" ? "Orders" : "Quotes"} are unavailable.</p> :
+          <SalesRecordsTable key={`${id}:${date}:${period}:${recordKind}`} records={records[recordKind]} total={current[recordKind === "orders" ? "sold" : "quoted"] ?? 0} kind={recordKind} amountLabel="Subtotal" />}
+      </section>
+
       {/* Charts */}
       {loadingHistory ? (
         <div className="h-64 bg-sand-50 rounded-xl border border-sand-200/60 animate-pulse" />
-      ) : history.length === 0 ? (
+      ) : historyError ? null : history.length === 0 ? (
         <div className="rounded-xl border border-sand-200/60 px-6 py-12 text-center text-sand-400 text-sm bg-white">
           No history data available.
         </div>
@@ -321,7 +350,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
           {/* Quoted vs Sold */}
           <div className="bg-white rounded-xl border border-sand-200/60 p-6">
             <h2 className="text-sm font-semibold text-sand-700 uppercase tracking-wider mb-4">
-              Quoted vs Sold — last 12 months
+              Quoted vs Sold · last 12 months
             </h2>
             <QuotedSoldChart chartData={chartData} />
           </div>
@@ -329,7 +358,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
           {/* Conversion Rate */}
           <div className="bg-white rounded-xl border border-sand-200/60 p-6">
             <h2 className="text-sm font-semibold text-sand-700 uppercase tracking-wider mb-4">
-              Conversion Rate — last 12 months
+              Conversion Rate · last 12 months
             </h2>
             <ConversionRateChart chartData={chartData} />
           </div>
@@ -338,7 +367,7 @@ export default function EmployeeDetail({ id }: { id: string }) {
       )}
 
       {/* Targets */}
-      {targets.length > 0 && (
+      {targets.length > 0 && !metricsError && !loadingMetrics && (
         <div className="bg-white rounded-xl border border-sand-200/60 p-6">
           <h2 className="text-sm font-semibold text-sand-700 uppercase tracking-wider mb-5">
             Targets

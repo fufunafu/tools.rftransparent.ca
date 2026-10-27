@@ -1,15 +1,15 @@
 // Pure logic for the password-reset pages, kept out of the components so it
 // can be unit-tested.
 
-export const MIN_PASSWORD_LENGTH = 8;
+import { passwordStrengthProblem } from "./password-policy";
+export { MIN_PASSWORD_LENGTH } from "./password-policy";
 
 // Returns a human-readable problem with the chosen password, or null when
 // it's acceptable. Supabase enforces its own policy server-side too; this
 // only catches the mistakes people actually make before a round-trip.
 export function passwordProblem(password: string, confirm: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
-  }
+  const problem = passwordStrengthProblem(password);
+  if (problem) return problem;
   if (password !== confirm) {
     return "The two passwords don't match.";
   }
