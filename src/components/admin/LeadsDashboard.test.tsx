@@ -175,12 +175,13 @@ it('defaults to newest despite a saved priority preference and supports the My l
   await chooseFilters("owner", ["mine"]);
   expect(leadRows()).toHaveLength(1);
 });
-it('explains excluded spam and keeps phone numbers readable and callable', async () => {
+it('keeps spam out of the queue without a persistent banner and keeps phone numbers callable', async () => {
   const leads = makeLeads(2);
   leads[0].phone = '+1 416 555 0123';
   leads[1].outcome = 'not_applicable'; leads[1].not_applicable_reason = 'Spam: marketing solicitation';
   await render(leads);
-  expect(container.textContent).toContain('1 spam excluded');
+  expect(container.textContent).not.toContain('spam excluded');
+  expect(leadRows()).toHaveLength(1);
   expect(container.querySelector('a[href="tel:+14165550123"]')).not.toBeNull();
 });
 

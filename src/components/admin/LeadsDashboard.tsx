@@ -1159,7 +1159,6 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const scoped = sourceLeads.filter((lead) => owners.some(owner => owner === "others"
     ? !!lead.assigned_to?.trim() && !leadMatchesOwner(lead, "mine", currentUserEmail)
     : leadMatchesOwner(lead, owner, currentUserEmail)));
-  const spamCount = scoped.filter((lead) => isLeadSpamReason(lead.not_applicable_reason)).length;
   const visible = scoped.filter((lead) => {
     const spam = isLeadSpamReason(lead.not_applicable_reason);
     if (spam && !statuses.includes("spam")) return false;
@@ -1203,7 +1202,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     </section>
     <div className="min-w-0 space-y-4">
     <section className="rounded-lg border border-sand-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div>{!statuses.includes("spam") && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div></div>
       <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
         <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
         <LeadFilterDropdown label="Filter leads by status" allLabel="All except spam" value={filters.status} onChange={value => change("status", value)} options={FILTER_TABS.filter(item => item.value !== "all")} allValues={FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value)} />

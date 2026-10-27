@@ -59,6 +59,13 @@ function usesStandaloneLayout(pathname: string) {
   );
 }
 
+const BugIcon = ({ className }: { className: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 8.5a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M8 10.5H4.5M19.5 10.5H16M8.5 5.5 6 3.5M15.5 5.5 18 3.5M8 15l-2.5 2.5M16 15l2.5 2.5M12 16.5v4" />
+  </svg>
+);
+
 const SignOutIcon = ({ className }: { className: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} className={className}>
     <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15m3 0 3-3m0 0-3-3m3 3H9" />
@@ -90,7 +97,7 @@ function ViewerAvatar({
     <span
       role="img"
       aria-label={`${label} profile`}
-      className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10px] font-bold text-slate-600"
+      className="flex h-7 w-7 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-200 text-[10.5px] font-bold text-slate-600"
     >
       {avatarUrl && !failed ? (
         <img src={avatarUrl} alt="" onError={() => setFailed(true)} className="h-full w-full object-cover" />
@@ -299,34 +306,44 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
       <aside
         ref={sidebarRef}
         style={{ width }}
-        className="min-h-0 bg-white border-r border-slate-200 flex-col z-40 relative hidden xl:flex
+        className="min-h-0 bg-white border-r border-slate-300 flex-col z-40 relative hidden xl:flex
           md:shrink-0 md:transition-[width] md:duration-200"
       >
         {/* Logo and collapse controls */}
-        <div className="px-3 pt-3 pb-2.5 flex items-center gap-2.5">
+        {/* Shut, the two sit one above the other. Side by side they needed
+            more width than the rail has, and the button was being pushed off
+            its own edge. */}
+        <div className={`px-3 pt-3 pb-2.5 flex ${collapsed ? "flex-col items-center gap-2" : "items-center gap-2.5"}`}>
           <Link
             href={homePath}
             title={collapsed ? "Go to your home page" : undefined}
             className={`flex min-w-0 items-center gap-2.5 ${collapsed ? "" : "flex-1"}`}
           >
-            <span className="w-[26px] h-[26px] rounded-[7px] bg-blue-600 flex items-center justify-center shrink-0">
-              <span className="text-white text-[10.5px] font-bold tracking-[0.02em]">RF</span>
+            <span className="w-[28px] h-[28px] rounded-[8px] bg-blue-600 flex items-center justify-center shrink-0">
+              <span className="text-white text-[11px] font-bold tracking-[0.02em]">RF</span>
             </span>
             {!collapsed && (
-              <span className="flex-1 min-w-0 truncate text-[13px] font-semibold text-slate-900">
+              <span className="flex-1 min-w-0 truncate text-[13.5px] font-semibold text-slate-900">
                 RF Transparent
               </span>
             )}
           </Link>
-          {/* Desktop: collapse/expand toggle */}
+          {/* Desktop: collapse/expand toggle. It was a 22px chevron in
+              slate-300, which is 1.1 to 1 against white: the one control that
+              changes the shape of the whole screen, and you had to know it was
+              there. A bordered button at 28px, with a 2px stroke, is findable
+              without being loud. */}
           <button
             onClick={toggleCollapsed}
-            className="max-md:hidden w-[22px] h-[22px] rounded-md flex items-center justify-center text-slate-300 hover:text-slate-600 transition-colors shrink-0"
+            className="max-md:hidden w-7 h-7 rounded-lg border border-slate-200 bg-white flex items-center justify-center
+              text-slate-500 hover:text-slate-900 hover:border-slate-400 hover:bg-slate-50 transition-colors shrink-0"
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-expanded={!collapsed}
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-4 h-4 transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={`w-[15px] h-[15px] transition-transform duration-200 ${collapsed ? "rotate-180" : ""}`}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 19.5 7 12l7.5-7.5" />
+              <path strokeLinecap="round" d="M18.5 4.75v14.5" />
             </svg>
           </button>
         </div>
@@ -337,16 +354,18 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             type="button"
             onClick={() => setSearchOpen(true)}
             title={collapsed ? "Search pages" : undefined}
-            className={`w-full h-[30px] flex items-center gap-2 rounded-lg bg-slate-50 border border-slate-100 text-slate-400 hover:border-slate-200 hover:text-slate-600 transition-colors ${
-              collapsed ? "justify-center" : "px-[9px]"
+            className={`h-[34px] flex items-center gap-2 rounded-lg bg-white border border-slate-200 text-slate-500 hover:border-slate-400 hover:text-slate-700 transition-colors ${
+              collapsed ? "w-10 mx-auto justify-center" : "w-full px-[10px]"
             }`}
           >
-            <SearchIcon className="w-3.5 h-3.5 shrink-0" />
+            <SearchIcon className="w-4 h-4 shrink-0" />
             {!collapsed && (
               <>
                 <span className="flex-1 text-left text-[12.5px]">Search</span>
                 {modKey ? (
-                  <kbd className="font-sans text-[10px] text-slate-300">{modKey}K</kbd>
+                  <kbd className="font-sans text-[10px] font-medium text-slate-500 bg-slate-50 border border-slate-200 rounded px-[5px] py-px">
+                    {modKey}K
+                  </kbd>
                 ) : null}
               </>
             )}
@@ -363,12 +382,20 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             return (
               <Fragment key={group.id}>
                 {collapsed
-                  ? // No room for a label — a hairline keeps the grouping
-                    // legible in the rail.
-                    groupIndex > 0 && <span className="my-1.5 h-px w-6 mx-auto bg-slate-100" />
+                  ? // No room for a label, so a rule carries the grouping. Full
+                    // width rather than a 24px stub: a short line floating in
+                    // the middle of the rail reads as a stray mark.
+                    groupIndex > 0 && <span className="my-2 h-px bg-slate-200" />
                   : (
+                    // The label was slate-300, which is 1.6 to 1 against white.
+                    // Five headings nobody could read is the same as no
+                    // headings at all, so the rail was one list of thirteen.
+                    // slate-500 reads, and a rule above each band says where
+                    // one ends without the label having to shout.
                     <p
-                      className={`${groupIndex === 0 ? "mt-2" : "mt-3"} mb-[3px] px-[9px] text-[9.5px] font-semibold uppercase tracking-[0.13em] text-slate-300`}
+                      className={`${
+                        groupIndex === 0 ? "mt-1.5" : "mt-3 pt-3 border-t border-slate-200"
+                      } mb-1 px-[10px] text-[10px] font-bold uppercase tracking-[0.1em] text-slate-500`}
                     >
                       {group.label}
                     </p>
@@ -389,10 +416,10 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
           })}
         </nav>
 
-        {/* One footer block: Settings, then who you're signed in as. Reporting
-            a bug and signing out hang off the identity row rather than taking
-            a full-width strip each. */}
-        <div className="px-3 pt-2 pb-2.5 border-t border-slate-100 flex flex-col gap-0.5">
+        {/* One footer block: Settings, then the way to report a bug, then who
+            you're signed in as. Signing out still hangs off the identity row,
+            which is where somebody looks for it. */}
+        <div className="px-3 pt-2 pb-2.5 border-t border-slate-200 flex flex-col gap-1">
           {visibleSettings && (
             <SidebarNavRow
               item={visibleSettings}
@@ -404,11 +431,32 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
             />
           )}
 
+          {/* Reporting a bug was four words of slate-300 tucked under the
+              name, at 10px: the one thing in here somebody reaches for when
+              the app is misbehaving, drawn as the quietest thing on the
+              screen. It is a button now, on its own line, where it can be
+              found by somebody who is already annoyed. */}
+          <Link
+            href="/bugs"
+            title={collapsed ? "Report a bug" : undefined}
+            aria-label={collapsed ? "Report a bug" : undefined}
+            className={`h-[32px] flex items-center gap-2 rounded-lg border text-[12.5px] font-medium transition-colors ${
+              collapsed ? "w-10 mx-auto justify-center" : "w-full px-[10px]"
+            } ${
+              pathname === "/bugs"
+                ? "border-blue-200 bg-blue-50 text-blue-700"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-400 hover:text-slate-900 hover:bg-slate-50"
+            }`}
+          >
+            <BugIcon className="w-4 h-4 shrink-0" />
+            {!collapsed && <span>Report a bug</span>}
+          </Link>
+
           {collapsed ? (
             // Stacked rather than avatar-only: there's no avatar menu to hide
             // sign-out behind, and needing to expand the rail to sign out is a
-            // worse trade than one more 26px row.
-            <div className="mt-1.5 flex flex-col items-center gap-1">
+            // worse trade than one more row.
+            <div className="mt-0.5 flex flex-col items-center gap-1">
               <ViewerAvatar
                 name={viewer.name}
                 email={viewer.email}
@@ -418,40 +466,36 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
                 href="/api/logout"
                 title="Sign out"
                 aria-label="Sign out"
-                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                className="w-10 h-9 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors"
               >
-                <SignOutIcon className="w-[15px] h-[15px]" />
+                <SignOutIcon className="w-[16px] h-[16px]" />
               </a>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 h-[38px] pl-[9px] pr-[5px]">
+            <div className="mt-0.5 flex items-center gap-2.5 h-[38px] pl-[10px] pr-[5px]">
               <ViewerAvatar
                 name={viewer.name}
                 email={viewer.email}
                 avatarUrl={viewer.avatarUrl}
               />
-              <span className="flex-1 min-w-0 flex flex-col leading-[1.25]">
-                <span className="truncate text-xs font-semibold text-slate-900">
+              {/* The line under the name is the account you are signed in as,
+                  which is the question somebody actually has when they look
+                  down here on a shared machine. */}
+              <span className="flex-1 min-w-0 flex flex-col leading-[1.3]">
+                <span className="truncate text-[12.5px] font-semibold text-slate-900">
                   {viewer.name ?? viewer.email ?? ""}
                 </span>
-                <Link
-                  href="/bugs"
-                  className={`text-[10px] w-fit transition-colors ${
-                    pathname === "/bugs"
-                      ? "text-slate-600 font-medium"
-                      : "text-slate-300 hover:text-slate-500"
-                  }`}
-                >
-                  Report a bug
-                </Link>
+                {viewer.name && viewer.email ? (
+                  <span className="truncate text-[10.5px] text-slate-500">{viewer.email}</span>
+                ) : null}
               </span>
               <a
                 href="/api/logout"
                 title="Sign out"
                 aria-label="Sign out"
-                className="w-[26px] h-[26px] rounded-[7px] flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors shrink-0"
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-slate-900 hover:bg-slate-100 transition-colors shrink-0"
               >
-                <SignOutIcon className="w-[15px] h-[15px]" />
+                <SignOutIcon className="w-[16px] h-[16px]" />
               </a>
             </div>
           )}
