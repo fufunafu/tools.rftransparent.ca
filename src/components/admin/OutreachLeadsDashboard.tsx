@@ -25,7 +25,7 @@ function localDate(value:string|null) {
   return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
 }
 function money(amount:number|string|null, currency:string|null) {
-  return amount === null || amount === undefined ? 'Amount not recorded' : new Intl.NumberFormat(undefined,{style:'currency',currency:currency||'USD'}).format(Number(amount));
+  return amount === null || amount === undefined ? 'Amount not recorded' : currency ? new Intl.NumberFormat(undefined,{style:'currency',currency}).format(Number(amount)) : new Intl.NumberFormat(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}).format(Number(amount))+' (currency unavailable)';
 }
 function Stage({value}:{value:StaffLead['stage']}) {
   const color = value==='won' ? 'bg-emerald-50 text-emerald-800' : value==='suppressed' ? 'bg-red-50 text-red-800' : value==='quote_sent' ? 'bg-violet-50 text-violet-800' : 'bg-slate-100 text-slate-700';
@@ -43,6 +43,7 @@ export default function OutreachLeadsDashboard() {
   const [searchDraft,setSearchDraft]=useState(''),[search,setSearch]=useState('');
   const [dueOnly,setDueOnly]=useState(false),[loading,setLoading]=useState(true);
   const [summary,setSummary]=useState<LeadSummary|null>(null),[sync,setSync]=useState<LeadSync|null>(null);
+  const [activityError,setActivityError]=useState(false);
   const [currentUser,setCurrentUser]=useState(''),[error,setError]=useState(''),[notice,setNotice]=useState('');
   const [selected,setSelected]=useState<StaffLead|null>(null),[asOf,setAsOf]=useState(0);
   useEffect(()=>{if(searchDraft===search)return;const timer=setTimeout(()=>{setLoading(true);setSearch(searchDraft);setPage(0);},250);return()=>clearTimeout(timer);},[searchDraft,search]);
@@ -53,7 +54,7 @@ export default function OutreachLeadsDashboard() {
     fetch(`/api/outreach/leads?${q}`,{cache:'no-store',signal:controller.signal}).then(async r=>{
       const result=await r.json();
       if(!r.ok)throw Error(result.error||'Unable to load leads');
-      if(!controller.signal.aborted){setLeads(result.leads);setTotal(result.total);setSummary(result.summary??null);setSync(result.sync??null);setCurrentUser(result.currentUser??'');setAsOf(Date.now());setError('');}
+      if(!controller.signal.aborted){setActivityError(Boolean(result.activityError));setLeads(result.leads);setTotal(result.total);setSummary(result.summary??null);setSync(result.sync??null);setCurrentUser(result.currentUser??'');setAsOf(Date.now());setError('');}
     }).catch(e=>{if(!controller.signal.aborted)setError(e.message);}).finally(()=>{if(!controller.signal.aborted)setLoading(false);});
     return()=>controller.abort();
   },[page,filter,campaign,owner,search,dueOnly,refresh]);
@@ -63,14 +64,14 @@ export default function OutreachLeadsDashboard() {
   function saved(message:string){setSelected(null);setNotice(message);reload();}
   return <main className="mx-auto max-w-[1500px] space-y-6 text-slate-800">
     <header className="flex flex-wrap items-start justify-between gap-4">
-      <div><p className="text-sm font-medium text-blue-700">Customer service / Outreach</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Outreach leads</h1><p className="mt-2 max-w-2xl text-sm text-slate-600">Interested prospects, calls, quotes and next steps. Every logged call and quote records who handled it.</p></div>
+      <div><p className="text-sm font-medium text-blue-700">Customer service / Outreach</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">Outreach leads</h1><p className="mt-2 max-w-2xl text-sm text-slate-600">Interested prospects, calls, quotes and next steps. Calls and sent Shopify quotes update automatically.</p></div>
       <button className={button} disabled={loading} onClick={reload}>{loading?'Refreshing...':'Refresh'}</button>
     </header>
     {notice&&<p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{notice}</p>}
     {error&&<p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800">{error}</p>}
     <OutreachProviderStatus campaign={campaign} refresh={refresh}/>
     <section className="grid grid-cols-2 gap-3 xl:grid-cols-4" aria-label="All outreach lead totals">
-      {([['Open leads',summary?.open],['Need first call',summary?.needsCall],['Quotes recorded',summary?.quoted],['Follow-ups due',summary?.due]] as const).map(([label,value])=><div key={label} className="rounded-xl border border-slate-200 bg-white px-5 py-4"><p className="text-sm text-slate-500">{label}</p><p className={`mt-2 text-3xl font-semibold tabular-nums ${label==='Follow-ups due'&&value?'text-amber-700':''}`}>{error?'Unavailable':value??'...'}</p></div>)}
+      {([['Open leads',summary?.open],['Need first call',summary?.needsCall],['Quotes recorded',summary?.quoted],['Follow-ups due',summary?.due]] as const).map(([label,value])=><div key={label} className="rounded-xl border border-slate-200 bg-white px-5 py-4"><p className="text-sm text-slate-500">{label}</p><p className={`mt-2 text-3xl font-semibold tabular-nums ${label==='Follow-ups due'&&value?'text-amber-700':''}`}>{error||(activityError&&(label==='Need first call'||label==='Quotes recorded'))?'Unavailable':value??'...'}</p></div>)}
     </section>
     <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="flex flex-wrap items-end gap-3 border-b border-slate-200 p-4">
@@ -86,8 +87,8 @@ export default function OutreachLeadsDashboard() {
         <tbody className="divide-y divide-slate-100">{leads.map(lead=><tr key={lead.id} className="align-top hover:bg-slate-50/70">
           <td className="max-w-[260px] px-4 py-4"><button onClick={()=>setSelected(lead)} className="text-left font-semibold text-slate-900 hover:text-blue-700">{lead.contact.company_name||lead.contact_name||lead.contact.email}</button><p className="mt-1 break-all text-xs text-slate-500">{lead.contact.email}</p>{lead.phone&&<p className="mt-1 text-xs text-slate-600">{lead.phone}</p>}<p className="mt-2 text-xs text-slate-400">{campaignNames[lead.campaign.campaign_key]}</p></td>
           <td className="max-w-[190px] px-4 py-4"><Stage value={lead.stage}/><p className="mt-2 break-all text-xs text-slate-500">{lead.owner_email||'Unassigned'}</p></td>
-          <td className="max-w-[200px] px-4 py-4">{lead.last_call_at?<><p className="font-medium">{lead.last_call_result?callResultLabels[lead.last_call_result]:'Call recorded'}</p><p className="mt-1 break-all text-xs text-slate-600" title={lead.last_called_by||''}>{lead.last_called_by_name||lead.last_called_by}</p><p className="mt-1 text-xs text-slate-400">{date(lead.last_call_at)}</p><p className="mt-1 text-xs text-slate-400">{lead.call_count} {lead.call_count===1?'attempt':'attempts'}</p></>:<span className="text-slate-400">Not called</span>}</td>
-          <td className="max-w-[200px] px-4 py-4">{lead.quote_sent_at?<><QuoteLink url={lead.quote_url}>{lead.quote_number}</QuoteLink><p className="mt-1 text-xs">{money(lead.quote_amount,lead.quote_currency)} {lead.quote_amount!==null&&lead.quote_currency}</p><p className="mt-1 break-all text-xs text-slate-600" title={lead.quoted_by||''}>{lead.quoted_by_name||lead.quoted_by}</p><p className="mt-1 text-xs text-slate-400">{date(lead.quote_sent_at)}</p></>:<span className="text-slate-400">No quote recorded</span>}</td>
+          <td className="max-w-[200px] px-4 py-4">{lead.last_call_at?<><p className="font-medium">{lead.call_source&&lead.last_call_result==='connected'?'Call answered':lead.last_call_result?callResultLabels[lead.last_call_result]:'Call recorded'}</p><p className="mt-1 break-all text-xs text-slate-600" title={lead.last_called_by||''}>{lead.last_called_by_name||lead.last_called_by}</p><p className="mt-1 text-xs text-slate-400">{date(lead.last_call_at)}</p>{lead.call_source&&<p className="text-xs text-slate-400">Phone system</p>}{lead.activity_error&&<p className="text-xs text-amber-700">Automatic activity unavailable</p>}<p className="mt-1 text-xs text-slate-400">{lead.call_count} {lead.call_count===1?'attempt':'attempts'}</p></>:<span className="text-slate-400">{lead.activity_error?'Activity unavailable':!lead.phone?'Phone needed to match calls':'Not called'}</span>}</td>
+          <td className="max-w-[200px] px-4 py-4">{lead.quote_sent_at?<><QuoteLink url={lead.quote_url}>{lead.quote_number}</QuoteLink><p className="mt-1 text-xs">{money(lead.quote_amount,lead.quote_currency)} {lead.quote_amount!==null&&lead.quote_currency}</p><p className="mt-1 break-all text-xs text-slate-600" title={lead.quoted_by||''}>{lead.quoted_by_name||lead.quoted_by}</p><p className="mt-1 text-xs text-slate-400">{date(lead.quote_sent_at)}</p>{lead.quote_source&&<p className="text-xs text-slate-400">Shopify · {lead.quote_date_kind==='sent'?'invoice sent':'draft created'}</p>}{lead.activity_error&&<p className="text-xs text-amber-700">Automatic activity unavailable</p>}</>:<span className="text-slate-400">{lead.activity_error?'Activity unavailable':'No quote recorded'}</span>}</td>
           <td className="max-w-[230px] px-4 py-4">{leadIsClosed(lead.stage)?<span className="text-slate-400">{lead.stage==='suppressed'?'Do not contact':'Closed'}</span>:<><p className="text-sm">{lead.next_action||'Set the next action'}</p><p className={`mt-2 text-xs ${lead.next_follow_up_at&&Date.parse(lead.next_follow_up_at)<=asOf?'font-medium text-amber-800':'text-slate-500'}`}>{lead.next_follow_up_at?date(lead.next_follow_up_at):'Not scheduled'}</p></>}</td>
           <td className="px-4 py-4"><button className={button} aria-label={`Open ${lead.contact.company_name||lead.contact.email}`} onClick={()=>setSelected(lead)}>Open</button></td>
         </tr>)}</tbody>
@@ -95,7 +96,7 @@ export default function OutreachLeadsDashboard() {
       {!loading&&!error&&!leads.length&&<div className="px-6 py-14 text-center"><h2 className="font-semibold">{filtered?'No leads match these filters':'No interested leads yet'}</h2><p className="mt-2 text-sm text-slate-500">{filtered?'Try another search or stage.':'Prospects appear here after Instantly marks their reply as interested. Raw campaign prospects stay in Instantly.'}</p></div>}
       <nav aria-label="Lead pages" className="flex items-center justify-between border-t border-slate-200 px-4 py-3"><p className="text-xs text-slate-500">Page {page+1} of {Math.max(1,Math.ceil(total/50))}</p><div className="flex gap-2"><button className={button} disabled={loading||page===0} onClick={()=>{setLoading(true);setPage(p=>p-1);}}>Previous</button><button className={button} disabled={loading||(page+1)*50>=total} onClick={()=>{setLoading(true);setPage(p=>p+1);}}>Next</button></div></nav>
     </section>
-    <p className="text-xs text-slate-500">Reply to prospects in {GENERAL_INBOX}. Calls and quotes are logged here by the person who handled them.</p>
+    <p className="text-xs text-slate-500">Reply to prospects in {GENERAL_INBOX}. Phone-system calls and sent Shopify quotes sync automatically. Use manual logging for other activity.</p>
     {selected&&<LeadWorkspace key={selected.id} initial={selected} currentUser={currentUser} onClose={()=>setSelected(null)} onSaved={saved}/>}
   </main>;
 }
@@ -127,7 +128,8 @@ function LeadWorkspace({initial,currentUser,onClose,onSaved}:{initial:StaffLead;
             {!history.mail?.length&&history.events.filter(e=>e.event_type!=='email_sent').map(e=><article key={e.id} className="mt-3 rounded-lg bg-slate-50 p-3"><p className="text-xs text-slate-500">{title(e.event_type)} · {date(e.occurred_at)}</p>{e.event.subject&&<p className="mt-1 text-sm font-medium">{e.event.subject}</p>}<p className="mt-2 whitespace-pre-wrap break-words text-sm">{e.event.body||'Open the original conversation in the general inbox.'}</p>{e.event.body&&!e.event.bodyComplete&&<p className="mt-2 text-xs text-amber-800">Preview only. Review the full email in the inbox.</p>}</article>)}
           </details>
         </section>
-        <section className="min-w-0 border-t border-slate-200 pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0"><h3 className="font-semibold">Activity history</h3><p className="mt-1 text-xs text-slate-500">Who called, who quoted, and what happened.</p>
+        <section className="min-w-0 border-t border-slate-200 pt-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0"><h3 className="font-semibold">Activity history</h3><p className="mt-1 text-xs text-slate-500">Calls and sent Shopify quotes appear automatically. Manual entries remain available for other activity.</p>
+          {lead.activity_error&&<p role="status" className="mt-3 text-sm text-amber-800">Automatic activity is temporarily unavailable. Showing manual records.</p>}
           {!history.activity?.length&&<p className="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-500">No calls, quotes or notes recorded yet.</p>}
           {history.activity?.map(a=><Activity key={a.id} value={a}/>)}
           <details className="mt-6 border-t border-slate-200 pt-4"><summary className="cursor-pointer text-sm font-medium text-slate-600">Lead updates</summary>{history.audit.filter(a=>a.action!=='lead_activity_logged').map(a=><article key={a.id} className="mt-3 rounded-lg bg-slate-50 p-3 text-sm"><p className="font-medium">{title(a.action)}</p><p className="mt-1 break-all text-xs text-slate-500">{a.actor_email} · {date(a.created_at)}</p>{a.detail.stage&&<p className="mt-2">Stage: {title(a.detail.stage)}</p>}<p className="mt-1 whitespace-pre-wrap">{a.detail.nextAction}</p><p className="mt-1 whitespace-pre-wrap">{a.detail.note}</p></article>)}</details>
@@ -153,7 +155,7 @@ function LeadDetails({lead,onSaved}:{lead:StaffLead;onSaved:()=>void}) {
     <label className="block text-sm font-medium">Follow-up date and time<input type="datetime-local" required={!closed} className={field} value={due} onChange={e=>setDue(e.target.value)}/></label>
     <label className="block text-sm font-medium">Client notes<textarea rows={3} maxLength={4000} className={field} value={note} onChange={e=>setNote(e.target.value)}/></label>
     <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={claim} onChange={e=>setClaim(e.target.checked)}/>Assign this lead to me</label>
-    {stage==='quote_sent'&&!lead.quote_sent_at&&<p className="text-xs text-amber-800">Use Log quote to record the quote reference and who sent it. A stage change alone does not create a quote record.</p>}
+    {stage==='quote_sent'&&!lead.quote_sent_at&&<p className="text-xs text-amber-800">Sent Shopify quotes appear automatically after syncing. Use Log quote only for a quote outside Shopify.</p>}
     {error&&<p role="alert" className="text-sm text-red-700">{error}</p>}<button className={`${primary} w-full`} disabled={busy}>{busy?'Saving...':'Save lead'}</button>
   </form>;
 }
@@ -187,7 +189,7 @@ function ActivityForm({lead,kind,currentUser,onSaved}:{lead:StaffLead;kind:'call
 }
 function Activity({value:a}:{value:LeadActivity}) {
   return <article className="mt-4 rounded-xl border border-slate-200 p-4"><div className="flex items-center justify-between gap-2"><h4 className="text-sm font-semibold">{a.kind==='call'?'Call':a.kind==='quote'?'Quote sent':'Note'}</h4><span className="text-xs text-slate-400">{date(a.occurred_at)}</span></div><p className="mt-1 break-all text-xs text-slate-500" title={a.actor_email}>{a.actor_name||a.actor_email}{a.actor_name!==a.actor_email&&<span className="block">{a.actor_email}</span>}</p>
-    {a.kind==='call'&&a.call_result&&<p className="mt-3 text-sm font-medium">{callResultLabels[a.call_result]}</p>}
+    {a.kind==='call'&&a.call_result&&<p className="mt-3 text-sm font-medium">{a.id.startsWith('phone:')&&a.call_result==='connected'?'Call answered':callResultLabels[a.call_result]}</p>}
     {a.kind==='quote'&&<div className="mt-3 text-sm"><QuoteLink url={a.quote_url}>{a.quote_number}</QuoteLink><p className="mt-1">{money(a.quote_amount,a.quote_currency)} {a.quote_amount!==null&&a.quote_currency}</p></div>}
     {a.note&&<p className="mt-3 whitespace-pre-wrap break-words text-sm text-slate-700">{a.note}</p>}
   </article>;

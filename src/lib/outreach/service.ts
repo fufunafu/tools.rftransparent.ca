@@ -11,14 +11,10 @@ export async function ingestOutreachEvent(event: OutreachEvent) {
 
 interface ClaimedEvent { id: string; lease_token: string; event: OutreachEvent }
 
-export async function processOutreachEvents() {
+type ProcessingSummary = { claimed: number; processed: number; held: number; errors: number };
+async function processClaimed(rows: ClaimedEvent[], summary: ProcessingSummary) {
   const db = getSupabase();
-  // Five events, at most three email pages each, stays below Instantly's
-  // documented email-list limit for a single worker run.
-  const { data, error } = await db.rpc("outreach_claim", { p_limit: 5 });
-  if (error) throw new Error("outreach_claim_failed");
-  const summary = { claimed: 0, processed: 0, held: 0, errors: 0 };
-  for (const row of (data ?? []) as ClaimedEvent[]) {
+  for (const row of rows) {
     summary.claimed++;
     try {
       const event = await hydrateReply(row.event, process.env.INSTANTLY_API_KEY);
@@ -37,6 +33,32 @@ export async function processOutreachEvents() {
       if (failError) throw new Error("outreach_retry_record_failed");
     }
   }
+}
+async function claimLane(lane: 'fast' | 'reply', limit: number, id: string | null = null) {
+  const {data,error}=await getSupabase().rpc('outreach_claim_lane',{p_limit:limit,p_lane:lane,p_event_id:id});
+  if(error)throw new Error('outreach_claim_failed');
+  return (data??[]) as ClaimedEvent[];
+}
+// Called after a committed classification webhook. Uses the same leases and
+// idempotent apply path as cron; concurrent deliveries cannot create duplicates.
+export async function processImmediateOutreachEvent(id: string) {
+  const summary:ProcessingSummary={claimed:0,processed:0,held:0,errors:0};
+  await processClaimed(await claimLane('fast',1,id),summary);
+  return summary;
+}
+export async function processOutreachEvents() {
+  const summary:ProcessingSummary={claimed:0,processed:0,held:0,errors:0};
+  const started=Date.now();
+  // Drain inexpensive events in bounded batches, with classifications ahead of
+  // sent-email telemetry. Leave time for reply hydration and mailbox syncing.
+  for(let batch=0;batch<4 && Date.now()-started<20000;batch++) {
+    const rows=await claimLane('fast',25);
+    await processClaimed(rows,summary);
+    if(rows.length<25)break;
+  }
+  // Keep the existing provider request budget: at most five replies, each with
+  // at most three email-list pages. Fast events never call that external API.
+  await processClaimed(await claimLane('reply',5),summary);
   return summary;
 }
 

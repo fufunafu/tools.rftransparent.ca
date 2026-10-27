@@ -1,7 +1,7 @@
 import type { NavTarget } from "@/components/CommandPalette";
 
 export type Status = "done" | "wip" | "todo";
-export type AccessLevel = "authenticated" | "admin" | "management";
+export type AccessLevel = "authenticated" | "admin" | "management" | "crm";
 export type NavGroup = "overview" | "revenue" | "operations" | "finance" | "wip";
 
 // Rendered as labelled bands in the rail, in this order. NAV_ITEMS is kept in
@@ -17,6 +17,7 @@ export const NAV_GROUPS: { id: NavGroup; label: string }[] = [
 export interface ViewerAccess {
   isAdmin: boolean;
   isManagement: boolean;
+  canAccessCrm?: boolean;
 }
 
 export interface NavChild {
@@ -292,6 +293,7 @@ export const NAV_ITEMS: NavSection[] = [
     status: "wip",
     group: "wip",
     match: [
+      "/hubspot-dupe",
       "/customer-service/outreach",
       "/customer-service/tmp",
       "/amazon",
@@ -304,6 +306,7 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
     children: [
+      { href: "/hubspot-dupe", label: "HubSpot Dupe", status: "wip", access: "crm" },
       { href: "/customer-service/outreach/leads", label: "Outreach leads", status: "wip" },
       // TEMPORARY combined Leads + Follow-up; remove with src/app/customer-service/tmp.
       { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
@@ -391,6 +394,7 @@ export function matchesItem(item: NavItem, pathname: string): boolean {
 export function canAccess(required: AccessLevel | undefined, viewer: ViewerAccess): boolean {
   if (!required || required === "authenticated") return true;
   if (required === "admin") return viewer.isAdmin;
+  if (required === "crm") return viewer.canAccessCrm === true || viewer.isManagement;
   return viewer.isManagement;
 }
 

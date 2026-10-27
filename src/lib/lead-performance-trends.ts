@@ -38,6 +38,7 @@ export interface LeadPerformanceTrendPoint {
   rangeEnd: string;
   website: LeadPerformanceTrendSourceMetrics;
   meta: LeadPerformanceTrendSourceMetrics;
+  outreach: LeadPerformanceTrendSourceMetrics;
 }
 
 export interface LeadPerformanceRateTrendPoint {
@@ -46,6 +47,7 @@ export interface LeadPerformanceRateTrendPoint {
   rangeEnd: string;
   website: { value: number | null; count: number; denominator: number };
   meta: { value: number | null; count: number; denominator: number };
+  outreach: { value: number | null; count: number; denominator: number };
 }
 
 type PerformanceLead = Pick<
@@ -108,6 +110,7 @@ export function buildLeadPerformanceTrend(
       rangeEnd: bucket.rangeEnd,
       website: summarizeSource(bucketLeads, "website"),
       meta: summarizeSource(bucketLeads, "meta"),
+      outreach: summarizeSource(bucketLeads, "outreach"),
     };
   });
 }
@@ -158,6 +161,7 @@ export function buildRollingLeadPerformanceRateTrend(
       rangeEnd: point.rangeEnd,
       website: summarize("website"),
       meta: summarize("meta"),
+      outreach: summarize("outreach"),
     };
   });
 }

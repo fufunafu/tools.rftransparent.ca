@@ -18,6 +18,12 @@ function visibleItems(viewer: ViewerAccess): NavItem[] {
 }
 
 describe("role-aware navigation", () => {
+  it("offers CRM only to the approved departments or management", () => {
+    const allowed = getSearchTargets(visibleItems({ isAdmin: false, isManagement: false, canAccessCrm: true }));
+    const other = getSearchTargets(visibleItems({ isAdmin: true, isManagement: false, canAccessCrm: false }));
+    expect(allowed.map(item => item.href)).toContain("/hubspot-dupe");
+    expect(other.map(item => item.href)).not.toContain("/hubspot-dupe");
+  });
   it("hides management and admin destinations from regular employees", () => {
     const targets = getSearchTargets(visibleItems({ isAdmin: false, isManagement: false }));
     const hrefs = targets.map((target) => target.href);

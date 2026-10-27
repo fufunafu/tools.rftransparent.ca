@@ -19,6 +19,6 @@ it("returns the selected rep and period's records", async () => {
   vi.mocked(getSalesRepRecords).mockResolvedValue({ records: [], total: 0, warnings: [] });
   const response = await GET(new NextRequest("https://example.test/api/dashboards/sales/records?repId=rob&period=7d&kind=quotes"));
   expect(response.status).toBe(200);
-  expect(getSalesRepRecords).toHaveBeenCalledWith("rob", "7d", "quotes");
+  expect(getSalesRepRecords).toHaveBeenCalledWith("rob", "7d", "quotes", { fromMirror: true });
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
 });

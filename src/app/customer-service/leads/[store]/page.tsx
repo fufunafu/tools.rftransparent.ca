@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAuthenticated, getAuthenticatedUser } from "@/lib/admin-auth";
 import LeadsDashboard from "@/components/admin/LeadsDashboard";
 import { getCachedLeads } from "@/lib/customer-service/lead-queries";
 import { leadTrendQueryBounds } from "@/lib/lead-analytics";
@@ -32,15 +32,18 @@ export default async function LeadsPage({ params }: { params: Params }) {
     initialBounds?.from,
     initialBounds?.to,
     store,
+    false,
   ).catch(() => null);
 
   return (
     <div className="mx-auto max-w-[1900px] space-y-6">
       <LeadsDashboard
+        key={store}
         initialLeads={initialLeads}
         initialNow={renderedAt}
         initialBounds={initialBounds}
         store={store}
+        currentUserEmail={(await getAuthenticatedUser())?.email ?? ""}
       />
     </div>
   );

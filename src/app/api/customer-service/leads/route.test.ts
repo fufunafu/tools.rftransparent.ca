@@ -8,6 +8,7 @@ const {
   attachmentRangeMock,
   attemptRangeMock,
   attemptInMock,
+  orMock,
   gteMock,
   ltMock,
 } = vi.hoisted(() => ({
@@ -17,6 +18,7 @@ const {
   attachmentRangeMock: vi.fn(),
   attemptRangeMock: vi.fn(),
   attemptInMock: vi.fn(),
+  orMock: vi.fn(),
   gteMock: vi.fn(),
   ltMock: vi.fn(),
 }));
@@ -41,6 +43,7 @@ function queryBuilder(range: ReturnType<typeof vi.fn>) {
   const builder = {
     select: vi.fn(() => builder),
     order: vi.fn(() => builder),
+    or: vi.fn((value) => { orMock(value); return builder; }),
     range,
     eq: vi.fn(() => builder),
     in: attemptInMock,
@@ -325,4 +328,12 @@ describe("POST /api/customer-service/leads", () => {
     await expect(response.json()).resolves.toEqual({ error: "unknown action" });
     expect(getSupabaseMock).not.toHaveBeenCalled();
   });
+});
+
+
+it("includes open leads outside reporting dates without truncating their call history", async () => {
+  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?store=rf_transparent&from=2026-08-01&to=2026-08-03&include_open=true"));
+  expect(response.status).toBe(200);
+  expect(orMock).toHaveBeenCalledWith(expect.stringContaining("outcome.in.(new,contacted,quoted),and(submitted_at.gte."));
+  expect(gteMock).not.toHaveBeenCalledWith("called_at", expect.anything());
 });

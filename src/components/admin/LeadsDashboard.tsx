@@ -1,8 +1,8 @@
 "use client";
 
-import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type {
   CallStatus,
@@ -17,24 +17,9 @@ import {
   CALL_STATUS_LABELS,
   extractSubmissionDetails,
 } from "@/lib/customer-service/leads";
-import {
-  buildCustomLeadTrend,
-  buildLeadTrend,
-  calculateLeadFunnel,
-  calculateLeadFunnelBySource,
-  isLeadInCustomDateRange,
-  isLeadIncludedInPerformance,
-  leadTrendQueryBounds,
-  type LeadFunnelMetricsBySource,
-  type LeadTrendQueryBounds,
-  type LeadTrendRange,
-} from "@/lib/lead-analytics";
-import {
-  buildLeadPerformanceTrend,
-  type LeadPerformanceMetricKey,
-  type LeadPerformanceTrendPoint,
-} from "@/lib/lead-performance-trends";
-import { formatCADShort, formatCADWhole } from "@/lib/format";
+import { isLeadInCustomDateRange, leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
+import { compareLeadPriority, hasUnansweredReply, isFollowUpDue, isOpenLead, leadMatchesOwner } from "@/lib/customer-service/lead-queue";
+import { formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
 import { getAutomationDetailFailure } from "@/lib/automation-status";
 import {
@@ -45,7 +30,6 @@ import {
 import {
   formatLeadResponseTime,
   leadResponseTimeMs,
-  medianLeadResponseTimeMs,
 } from "@/lib/lead-response-times";
 import { redirectOnUnauthorized } from "@/lib/client-auth";
 import { useRouter } from "next/navigation";
@@ -57,24 +41,16 @@ import {
   type LeadStoreId,
 } from "@/lib/customer-service/lead-store";
 
-const LeadTrendChart = dynamic(() => import("@/components/admin/LeadTrendChart"), {
-  ssr: false,
-  loading: () => <div className="h-full animate-pulse bg-sand-50 rounded-md" />,
+const LeadAnalysisDashboard = dynamic(() => import("./LeadAnalysisDashboard"), {
+  loading: () => <p className="p-4 text-sm text-sand-500">Loading analytics...</p>,
 });
-
-const LeadPerformanceTrendChart = dynamic(
-  () => import("@/components/admin/LeadPerformanceTrendChart"),
-  {
-    ssr: false,
-    loading: () => <div className="h-full animate-pulse rounded-md bg-sand-50" />,
-  },
-);
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     timeZone: "America/Toronto",
+    year: "numeric",
     month: "short",
     day: "numeric",
   });
@@ -83,6 +59,7 @@ function formatDate(iso: string): string {
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString("en-US", {
     timeZone: "America/Toronto",
+    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -95,74 +72,13 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-function timeAgo(iso: string, now: number): string {
-  const diffMs = now - new Date(iso).getTime();
-  const minutes = Math.floor(diffMs / (1000 * 60));
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days === 1) return "1 day ago";
-  return `${days} days ago`;
-}
-
 const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
   website: { label: "Website", className: "bg-blue-100 text-blue-700" },
   meta: { label: "Meta", className: "bg-rose-100 text-rose-700" },
+  outreach: { label: "Outreach", className: "bg-violet-100 text-violet-700" },
 };
 
-type TrendSelection = LeadTrendRange | "custom";
-
-const TREND_RANGES: { value: TrendSelection; label: string; metricLabel: string }[] = [
-  { value: "7d", label: "7 days", metricLabel: "7 days" },
-  { value: "30d", label: "30 days", metricLabel: "30 days" },
-  { value: "90d", label: "90 days", metricLabel: "90 days" },
-  { value: "12m", label: "12 months", metricLabel: "12 months" },
-  { value: "all", label: "All time", metricLabel: "all time" },
-  { value: "custom", label: "Custom", metricLabel: "custom" },
-];
-
-// The table draws this many leads at first and adds the same number each
-// time the reader scrolls near the end, so a long range doesn't render
-// hundreds of rows up front.
 export const LEAD_ROWS_PER_PAGE = 50;
-
-const subscribeToHydration = () => () => {};
-const hydratedSnapshot = () => true;
-const serverSnapshot = () => false;
-
-function defaultCustomDates(): { from: string; to: string } {
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Toronto",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  });
-  const key = (date: Date) => {
-    const parts = formatter.formatToParts(date);
-    const value = (type: Intl.DateTimeFormatPartTypes) =>
-      parts.find((part) => part.type === type)?.value ?? "";
-    return `${value("year")}-${value("month")}-${value("day")}`;
-  };
-  const now = new Date();
-  return { from: key(new Date(now.getTime() - 29 * 86_400_000)), to: key(now) };
-}
-
-function formatCustomDateRange(from: string, to: string): string | null {
-  if (!from || !to) return null;
-  const [start, end] = from <= to ? [from, to] : [to, from];
-  const format = (value: string) => {
-    const [year, month, day] = value.split("-").map(Number);
-    return new Date(Date.UTC(year, month - 1, day)).toLocaleDateString("en-US", {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  };
-  return start === end ? format(start) : `${format(start)} to ${format(end)}`;
-}
 
 const OUTCOME_BADGE: Record<Outcome, string> = {
   new: "bg-blue-100 text-blue-700",
@@ -225,7 +141,10 @@ function LeadResponseSummary({ lead }: { lead: Lead }) {
 }
 
 const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }[] = [
-  { value: "all", label: "All", match: (l) => !isLeadSpamReason(l.not_applicable_reason) },
+  { value: "open", label: "Open leads", match: isOpenLead },
+  { value: "overdue", label: "Follow-ups due", match: () => true },
+  { value: "replies", label: "Unanswered replies", match: () => true },
+  { value: "all", label: "All except spam", match: (l) => !isLeadSpamReason(l.not_applicable_reason) },
   { value: "installation", label: "Installation", match: (l) => l.installation_requested === true },
   { value: "uncalled", label: "Uncalled", match: (l) => l.call_status === "not_called" && !isClosedOutcome(l.outcome) && isCallablePhone(l.phone) },
   { value: "no_phone", label: "No Phone", match: needsPhone },
@@ -237,42 +156,12 @@ const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }
   { value: "not_applicable", label: "Not Applicable", match: (l) => l.outcome === "not_applicable" },
 ];
 
-interface MetaStatus {
-  configured: boolean;
-  connected: boolean;
-  page_name: string | null;
-  subscribed: boolean;
-  error: string | null;
-  can_sync: boolean;
+type SyncAutomationJob = "sync-calls" | "sync-lead-quotes" | "process-outreach" | "sync-followup";
+const SYNC_LABELS: Record<SyncAutomationJob, string> = { "sync-calls": "Calls", "sync-lead-quotes": "Quotes", "process-outreach": "Outreach", "sync-followup": "Shopify import" };
+interface LeadSyncHealth {
+  canSync: boolean;
+  sources: { job: string; label: string; lastSuccessAt: string | null; needsAttention: boolean; error: string | null }[];
 }
-
-interface MetaSyncSummary {
-  forms: number;
-  fetched: number;
-  inserted: number;
-  deduped: number;
-  skipped: number;
-  failed: number;
-  errors: string[];
-}
-
-interface SyncAllResult {
-  completed: string[];
-  errors: string[];
-}
-
-type SyncAutomationJob = "sync-calls" | "sync-followup" | "sync-lead-quotes";
-
-interface SourceResponseMetrics {
-  medianCallMs: number | null;
-  callCount: number;
-  medianQuoteMs: number | null;
-  quoteCount: number;
-  applicableCount: number;
-  callEligibleCount: number;
-}
-
-type SourceResponseMetricsBySource = Record<LeadSource, SourceResponseMetrics>;
 
 async function fetcher<T>(url: string): Promise<T> {
   const response = redirectOnUnauthorized(await fetch(url));
@@ -283,16 +172,9 @@ async function fetcher<T>(url: string): Promise<T> {
   return body as T;
 }
 
-function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
+function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId, includeOlderOpen = false): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ store, to: bounds.to });
-  if (bounds.from) params.set("from", bounds.from);
-  return `/api/customer-service/leads?${params.toString()}`;
-}
-
-function leadResponsePerformanceUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
-  if (!bounds) return null;
-  const params = new URLSearchParams({ view: "response_performance", store, to: bounds.to });
+  const params = new URLSearchParams({ store, to: bounds.to, include_open: String(includeOlderOpen) });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
 }
@@ -491,9 +373,11 @@ function LeadDetailPanel({
   store,
   onClose,
   onChanged,
+  currentUserEmail,
 }: {
   lead: Lead;
   store: LeadStoreId;
+  currentUserEmail: string;
   onClose: () => void;
   onChanged: () => void | Promise<unknown>;
 }) {
@@ -514,9 +398,23 @@ function LeadDetailPanel({
   );
   const attempts = attemptsData?.attempts ?? [];
 
+  const [owner, setOwner] = useState(lead.assigned_to ?? "");
+  const [nextAction, setNextAction] = useState(lead.next_action ?? "");
+  const [followUp, setFollowUp] = useState(() => {
+    if (!lead.next_follow_up_at) return "";
+    const date = new Date(lead.next_follow_up_at);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planSaved, setPlanSaved] = useState(false);
   const [editingQuote, setEditingQuote] = useState(false);
   const [quoteNumber, setQuoteNumber] = useState(lead.quote_number ?? "");
   const [quoteAmount, setQuoteAmount] = useState(lead.quote_amount?.toString() ?? "");
+  const [quoteDate, setQuoteDate] = useState(() => {
+    if (!lead.quote_sent_at) return "";
+    const date = new Date(lead.quote_sent_at);
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
   const [editingPhone, setEditingPhone] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
   const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
@@ -664,9 +562,7 @@ function LeadDetailPanel({
     const saved = await patchLead({
       quote_number: savedQuoteNumber || null,
       quote_amount: savedQuoteAmount,
-      quote_sent_at: savedQuoteNumber
-        ? lead.first_quote_at ?? lead.quote_sent_at ?? new Date().toISOString()
-        : null,
+      quote_sent_at: savedQuoteNumber && quoteDate ? new Date(quoteDate).toISOString() : null,
       outcome: savedQuoteNumber && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
     }, true);
     if (saved) setEditingQuote(false);
@@ -856,6 +752,23 @@ function LeadDetailPanel({
           </div>
         </section>
 
+        <section className="space-y-3 border-b border-sand-200 px-5 py-5 sm:px-6">
+          <h3 className="text-sm font-semibold text-sand-900">Owner and next step</h3>
+          <form className="space-y-3" onSubmit={async (event) => {
+            event.preventDefault(); setSavingPlan(true); setPlanSaved(false);
+            if (followUp && !nextAction.trim()) { setSaveError("Add a next action for the scheduled follow-up."); setSavingPlan(false); return; }
+            const saved = await patchLead({ assigned_to: owner.trim() || null, next_action: nextAction.trim() || null,
+              next_follow_up_at: followUp ? new Date(followUp).toISOString() : null }, true);
+            setSavingPlan(false); setPlanSaved(saved);
+          }}>
+            <label className="block text-xs text-sand-600">Owner email or name<input value={owner} onChange={(event) => setOwner(event.target.value)} maxLength={200} className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
+            {currentUserEmail && <button type="button" onClick={() => setOwner(currentUserEmail)} className="text-xs text-blue-700">Assign to me</button>}
+            <label className="block text-xs text-sand-600">Next action<input value={nextAction} onChange={(event) => setNextAction(event.target.value)} maxLength={1000} placeholder="Call to confirm measurements" className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
+            <label className="block text-xs text-sand-600">Follow-up date and time (your local time)<input type="datetime-local" value={followUp} onChange={(event) => setFollowUp(event.target.value)} className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
+            <div className="flex items-center gap-3"><button disabled={savingPlan || groupPending} className="rounded bg-indigo-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50">{savingPlan ? "Saving..." : "Save next step"}</button>{planSaved && <span role="status" className="text-xs text-green-700">Saved</span>}</div>
+          </form>
+        </section>
+
         {/* Submissions */}
         <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-4">
           <div className="flex items-center justify-between gap-3">
@@ -1018,6 +931,7 @@ function LeadDetailPanel({
                 placeholder="Amount (CAD)"
                 className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
+              <label className="block text-xs text-sand-500">Actual send date (optional, local time)<input type="datetime-local" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditingQuote(false)} className="px-3 py-1.5 text-xs text-sand-600">Cancel</button>
                 <button onClick={handleSaveQuote} disabled={groupPending} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded disabled:cursor-wait disabled:opacity-60">Save</button>
@@ -1043,7 +957,7 @@ function LeadDetailPanel({
               )}
               {lead.assigned_to && (
                 <div className="flex justify-between gap-3">
-                  <span className="text-sand-500">Staff</span>
+                  <span className="text-sand-500">Lead owner</span>
                   <span className="text-sand-700 text-right">{lead.assigned_to}</span>
                 </div>
               )}
@@ -1204,1328 +1118,150 @@ function LoadMoreRows({
 
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
-export default function LeadsDashboard({
-  initialLeads,
-  initialNow,
-  initialBounds,
-  store,
-}: {
+export default function LeadsDashboard({ initialLeads, initialNow, initialBounds, store, currentUserEmail = "" }: {
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
   store: LeadStoreId;
+  currentUserEmail?: string;
 }) {
   const setStore = useStoreNavigation();
-  // Only RF runs Meta lead ads; BC is website-only.
-  const hasMeta = store === "rf_transparent";
-  const [filter, setFilter] = useState<string>("all");
-  const [sourceFilter, setSourceFilter] = useState<"all" | LeadSource>("all");
-  const [search, setSearch] = useState("");
-  const [sortOrder, setSortOrder] = useState<"newest" | "oldest">("newest");
-  const [trendRange, setTrendRange] = useState<TrendSelection>("30d");
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
-  const [chartSources, setChartSources] = useState({ website: true, meta: true });
-  const [selectedPerformanceMetric, setSelectedPerformanceMetric] = useState<LeadPerformanceMetricKey | null>(null);
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [syncingAll, setSyncingAll] = useState(false);
-  const [syncAllResult, setSyncAllResult] = useState<SyncAllResult | null>(null);
-  const [now, setNow] = useState(initialNow);
-  const hydrated = useSyncExternalStore(
-    subscribeToHydration,
-    hydratedSnapshot,
-    serverSnapshot,
-  );
-
+  const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" });
+  const [classicView, setClassicView] = useState(false);
+  const [viewRestored, setViewRestored] = useState(false);
   useEffect(() => {
-    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
-    return () => window.clearInterval(interval);
+    try { setClassicView(localStorage.getItem("lead-layout") === "classic"); } catch { /* Optional preference. */ }
+    setViewRestored(true);
   }, []);
-
-  // Background refresh: SWR pauses polling while the tab is hidden
-  // (refreshWhenHidden defaults to false) and revalidateOnFocus catches up
-  // when it becomes visible again — overriding the provider-wide opt-out.
-  const autoRefreshOpts = {
-    refreshInterval: 60_000,
-    revalidateOnFocus: true,
-    focusThrottleInterval: 30_000,
-  };
-  const requestedBounds = useMemo(
-    () => leadTrendQueryBounds(trendRange, new Date(now), customFrom, customTo),
-    [trendRange, now, customFrom, customTo],
-  );
-  const leadsUrl = leadListUrl(requestedBounds, store);
-  const initialLeadsUrl = leadListUrl(initialBounds, store);
-  const { data, error: leadsError, isLoading } = useSWR<{ leads: Lead[] }>(
-    leadsUrl,
-    fetcher,
-    {
-      ...autoRefreshOpts,
-      fallbackData: initialLeads && leadsUrl === initialLeadsUrl
-        ? { leads: initialLeads }
-        : undefined,
-      // The server just rendered this list, so don't download it again on
-      // load. Polling and focus still refresh it, and other ranges fetch.
-      revalidateOnMount: initialLeads && leadsUrl === initialLeadsUrl ? false : undefined,
-    },
-  );
-  const {
-    data: metaStatus,
-    error: metaStatusError,
-    mutate: refreshMetaStatus,
-  } = useSWR<MetaStatus>(hasMeta ? "/api/customer-service/leads?view=meta_status" : null, fetcher, autoRefreshOpts);
-  const leads = useMemo(
-    () => (hydrated ? data?.leads : leadsUrl === initialLeadsUrl ? initialLeads : null) ?? [],
-    [data?.leads, hydrated, initialLeads, initialLeadsUrl, leadsUrl],
-  );
-  const rawCallPerformanceSelected = selectedPerformanceMetric === "medianCallMs";
-  const {
-    data: responsePerformanceData,
-    error: responsePerformanceError,
-    isLoading: responsePerformanceLoading,
-  } = useSWR<{
-    leads: Lead[];
-    tracking_started_at: string | null;
-  }>(
-    rawCallPerformanceSelected ? leadResponsePerformanceUrl(requestedBounds, store) : null,
-    fetcher,
-    autoRefreshOpts,
-  );
-  const { mutate } = useSWRConfig();
-
-  const refresh = () => (
-    mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"))
-  );
-
-  const syncAll = async () => {
-    setSyncingAll(true);
-    setSyncAllResult(null);
-    const completed: string[] = [];
-    const errors: string[] = [];
-
-    try {
-      if (!hasMeta) {
-        // Nothing to pull for BC; phone/Shopify syncs below still apply.
-      } else if (metaStatus?.connected) {
-        try {
-          const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads?action=sync_meta", {
-            method: "POST",
-          }));
-          const body = await response.json().catch(() => ({})) as {
-            error?: string;
-            summary?: MetaSyncSummary;
-          };
-          if (!response.ok || !body.summary) {
-            throw new Error(body.error ?? `Meta sync failed with status ${response.status}`);
-          }
-          completed.push(`Meta (${body.summary.inserted} imported)`);
-          if (body.summary.failed > 0) {
-            errors.push(`Meta: ${body.summary.failed} lead${body.summary.failed === 1 ? "" : "s"} failed`);
-          }
-        } catch (error) {
-          errors.push(`Meta: ${error instanceof Error ? error.message : "sync failed"}`);
-        }
-      } else {
-        errors.push("Meta: not connected");
-      }
-
-      const automationResults = await Promise.allSettled([
-        triggerSyncAutomation("sync-calls", "Phone"),
-        // Quote matching runs on its own so a slow Shopify import cannot
-        // stop leads from being linked to their quotes.
-        triggerSyncAutomation("sync-followup", "Shopify")
-          .finally(() => triggerSyncAutomation("sync-lead-quotes", "Quotes")),
-      ]);
-      for (const [index, result] of automationResults.entries()) {
-        const label = index === 0 ? "Phone" : "Shopify";
-        if (result.status === "fulfilled") {
-          completed.push(label);
-        } else {
-          const message = result.reason instanceof Error ? result.reason.message : "sync failed";
-          errors.push(`${label}: ${message}`);
-        }
-      }
-
-      const refreshResults = await Promise.allSettled([refresh(), refreshMetaStatus()]);
-      if (refreshResults.some((result) => result.status === "rejected")) {
-        errors.push("Lead data could not be refreshed after syncing");
-      }
-    } catch (error) {
-      errors.push(error instanceof Error ? error.message : "Sync failed");
-    } finally {
-      setSyncAllResult({ completed, errors });
-      setSyncingAll(false);
-    }
-  };
-
-  const trend = useMemo(
-    () => trendRange === "custom"
-      ? buildCustomLeadTrend(leads, customFrom, customTo, new Date(now))
-      : buildLeadTrend(leads, trendRange, new Date(now)),
-    [leads, trendRange, customFrom, customTo, now],
-  );
-  const analysisLeads = useMemo(() => {
-    const firstPoint = trend.points[0];
-    const lastPoint = trend.points.at(-1);
-    return firstPoint && lastPoint
-      ? leads.filter((lead) => isLeadInCustomDateRange(
-          lead,
-          firstPoint.rangeStart,
-          lastPoint.rangeEnd,
-        ))
-      : [];
-  }, [leads, trend]);
-  const queueLeads = analysisLeads;
-
-  const sourceLeads = useMemo(
-    () => sourceFilter === "all"
-      ? queueLeads
-      : queueLeads.filter((lead) => lead.source === sourceFilter),
-    [queueLeads, sourceFilter],
-  );
-
-  const filtered = useMemo(() => {
-    const tab = FILTER_TABS.find((t) => t.value === filter) ?? FILTER_TABS[0];
-    return sourceLeads.filter((l) => {
-      if (!tab.match(l)) return false;
-      if (search.trim()) {
-        const q = search.toLowerCase();
-        const submissionValues = l.submissions?.flatMap((submission) => [
-          submission.name,
-          submission.email,
-          submission.phone,
-        ]) ?? [];
-        if (
-          !(l.name ?? "").toLowerCase().includes(q) &&
-          !(l.email ?? "").toLowerCase().includes(q) &&
-          !(l.phone ?? "").includes(q) &&
-          !(l.assigned_to ?? "").toLowerCase().includes(q) &&
-          !submissionValues.some((value) => (value ?? "").toLowerCase().includes(q))
-        ) return false;
-      }
-      return true;
-    }).sort((a, b) => {
-      const difference = new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime();
-      return sortOrder === "newest" ? difference : -difference;
-    });
-  }, [sourceLeads, filter, search, sortOrder]);
-
-  // Changing what the list shows starts it again from the first page.
-  const listKey = [leadsUrl, filter, sourceFilter, search, sortOrder].join("|");
-  const [rowPaging, setRowPaging] = useState({ key: listKey, count: LEAD_ROWS_PER_PAGE });
-  const visibleRowCount = rowPaging.key === listKey ? rowPaging.count : LEAD_ROWS_PER_PAGE;
-  const visibleLeads = filtered.slice(0, visibleRowCount);
-  const showMoreRows = useCallback(() => {
-    setRowPaging((current) => ({
-      key: listKey,
-      count: (current.key === listKey ? current.count : LEAD_ROWS_PER_PAGE) + LEAD_ROWS_PER_PAGE,
-    }));
-  }, [listKey]);
-
-  const queueResponseMetrics = useMemo(() => {
-    const visibleLeads = filtered.filter(isLeadIncludedInPerformance);
-    const callTimes = visibleLeads
-      .map((lead) => leadResponseTimeMs(lead.submitted_at, lead.first_call_at))
-      .filter((duration): duration is number => duration != null);
-    const quoteTimes = visibleLeads
-      .map((lead) => leadResponseTimeMs(
-        lead.submitted_at,
-        lead.first_quote_at ?? lead.quote_sent_at,
-      ))
-      .filter((duration): duration is number => duration != null);
-    return {
-      medianCallMs: medianLeadResponseTimeMs(callTimes),
-      medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
-    };
-  }, [filtered]);
-
-  const filterCounts: Record<string, number> = useMemo(() => {
-    const result: Record<string, number> = {};
-    for (const tab of FILTER_TABS) {
-      result[tab.value] = sourceLeads.filter((l) => tab.match(l)).length;
-    }
-    return result;
-  }, [sourceLeads]);
-
-  const metrics = useMemo(() => {
-    const funnel = calculateLeadFunnel(analysisLeads);
-    const openLeads = analysisLeads.filter((l) => !isClosedOutcome(l.outcome));
-    const uncalledLeads = openLeads.filter((l) => (
-      l.call_status === "not_called" && isCallablePhone(l.phone)
-    ));
-    const overdueUncalled = uncalledLeads.filter(
-      (l) => now - new Date(l.submitted_at).getTime() >= 24 * 60 * 60 * 1000,
-    );
-    const pipelineLeads = analysisLeads.filter((l) => l.outcome === "quoted");
-    const pipelineValue = pipelineLeads
-      .reduce((sum, l) => sum + Number(l.quote_amount ?? 0), 0);
-    const uncalledBySource = {
-      website: uncalledLeads.filter((lead) => lead.source === "website").length,
-      meta: uncalledLeads.filter((lead) => lead.source === "meta").length,
-    };
-    const overdueUncalledBySource = {
-      website: overdueUncalled.filter((lead) => lead.source === "website").length,
-      meta: overdueUncalled.filter((lead) => lead.source === "meta").length,
-    };
-    const pipelineBySource = {
-      website: pipelineLeads
-        .filter((lead) => lead.source === "website")
-        .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
-      meta: pipelineLeads
-        .filter((lead) => lead.source === "meta")
-        .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
-    };
-    const openQuoteCountBySource = {
-      website: pipelineLeads.filter((lead) => lead.source === "website").length,
-      meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
-    };
-    return {
-      ...funnel,
-      uncalled: uncalledLeads.length,
-      uncalledBySource,
-      overdueUncalled: overdueUncalled.length,
-      overdueUncalledBySource,
-      pipelineValue,
-      pipelineBySource,
-      openQuoteCount: pipelineLeads.length,
-      openQuoteCountBySource,
-    };
-  }, [analysisLeads, now]);
-  const metricsBySource = useMemo(
-    () => calculateLeadFunnelBySource(analysisLeads),
-    [analysisLeads],
-  );
-  const responseMetricsBySource = useMemo<SourceResponseMetricsBySource>(() => {
-    const summarize = (source: LeadSource): SourceResponseMetrics => {
-      const applicableLeads = analysisLeads.filter((lead) => (
-        lead.source === source && isLeadIncludedInPerformance(lead)
-      ));
-      const callTimes = applicableLeads.map((lead) => (
-        leadResponseTimeMs(lead.submitted_at, lead.first_call_at)
-      ));
-      const quoteTimes = applicableLeads.map((lead) => leadResponseTimeMs(
-        lead.submitted_at,
-        lead.first_quote_at ?? lead.quote_sent_at,
-      ));
-      return {
-        medianCallMs: medianLeadResponseTimeMs(callTimes),
-        callCount: callTimes.filter((duration) => duration != null).length,
-        medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
-        quoteCount: quoteTimes.filter((duration) => duration != null).length,
-        applicableCount: applicableLeads.length,
-        callEligibleCount: applicableLeads.filter((lead) => (
-          lead.call_status !== "not_called" || isCallablePhone(lead.phone)
-        )).length,
-      };
-    };
-    return { website: summarize("website"), meta: summarize("meta") };
-  }, [analysisLeads]);
-  const performanceTrend = useMemo(
-    () => buildLeadPerformanceTrend(
-      rawCallPerformanceSelected ? responsePerformanceData?.leads ?? [] : leads,
-      trend.points,
-    ),
-    [leads, rawCallPerformanceSelected, responsePerformanceData?.leads, trend.points],
-  );
-
-  const trendLabel = TREND_RANGES.find((range) => range.value === trendRange)?.metricLabel ?? "period";
-  const comparisonLabel = trendRange === "custom" ? "selected period" : trendLabel;
-  const trendComparison = trendRange === "all"
-    ? "All recorded leads"
-    : trend.previous.total === 0
-    ? trend.current.total > 0 ? "No leads in the previous period" : "No leads in this period"
-    : `${Math.abs(trend.changePct ?? 0)}% ${Number(trend.changePct) >= 0 ? "increase" : "decrease"} vs previous ${comparisonLabel}`;
-  const sourceCounts = useMemo(() => ({
-    all: queueLeads.length,
-    website: queueLeads.filter((lead) => lead.source === "website").length,
-    meta: queueLeads.filter((lead) => lead.source === "meta").length,
-  }), [queueLeads]);
-  const selectedDateRange = trend.points[0] && trend.points.at(-1)
-    ? formatCustomDateRange(trend.points[0].rangeStart, trend.points.at(-1)!.rangeEnd)
-    : null;
-
-  const selectedLead = leads.find((l) => l.id === selectedLeadId) ?? null;
-
-  const selectTrendRange = (range: TrendSelection) => {
-    if (range === "custom" && (!customFrom || !customTo)) {
-      const defaults = defaultCustomDates();
-      setCustomFrom(defaults.from);
-      setCustomTo(defaults.to);
-    }
-    setTrendRange(range);
-  };
-
-  const toggleChartSource = (source: LeadSource) => {
-    setChartSources((current) => {
-      const other = source === "website" ? "meta" : "website";
-      if (current[source] && !current[other]) return current;
-      return { ...current, [source]: !current[source] };
-    });
-  };
-
-  const selectChartRange = (from: string, to: string) => {
-    setCustomFrom(from);
-    setCustomTo(to);
-    setTrendRange("custom");
-  };
-
-  return (
-    <>
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-sand-900">Leads</h1>
-          <p className="text-sm text-sand-500 mt-1">
-            {hasMeta
-              ? "Track, contact, and convert website and Meta leads."
-              : "Track, contact, and convert BC Transparent website leads."}
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <StoreSelect value={store} onChange={setStore} />
-          {hasMeta && metaStatus?.connected && metaStatus.subscribed && (
-            <div className="flex items-center gap-2 text-xs text-sand-600">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>{metaStatus.page_name ? `Meta: ${metaStatus.page_name}` : "Meta connected"}</span>
-            </div>
-          )}
-          <Link
-            href={leadsPath(store, "analysis")}
-            className="inline-flex items-center gap-2 rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-medium text-indigo-700 hover:bg-indigo-100"
-          >
-            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth={1.6} className="h-4 w-4" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3 15.5V11m4.5 4.5V7.5m4.5 8V4m4.5 11.5V9" />
-            </svg>
-            Analysis
-          </Link>
-          {(hasMeta ? metaStatus?.can_sync : true) && (
-            <button
-              type="button"
-              onClick={syncAll}
-              disabled={syncingAll}
-              className="min-w-[88px] px-3 py-2 rounded-md border border-sand-300 bg-white text-sm font-medium text-sand-700 hover:bg-sand-50 disabled:cursor-wait disabled:opacity-60"
-            >
-              {syncingAll ? "Syncing..." : "Sync All"}
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="grid items-start gap-4 xl:grid-cols-[minmax(420px,440px)_minmax(0,1fr)]">
-        <div className="flex min-w-0 flex-col gap-5">
-          <section className="order-2 overflow-hidden rounded-lg border border-sand-200/60 bg-white">
-            <div className="grid divide-y divide-sand-200/60 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
-            <SummaryMetric
-              label={`New Leads (${trendLabel})`}
-              value={trend.current.total}
-              color="bg-blue-500"
-              subtitle={trendComparison}
-              sourceDetails={{
-                website: {
-                  value: trend.current.website,
-                },
-                meta: {
-                  value: trend.current.meta,
-                },
-              }}
-            />
-            <SummaryMetric
-              label="Need a Call"
-              value={metrics.uncalled}
-              color={metrics.uncalled > 0 ? "bg-amber-400" : "bg-emerald-500"}
-              subtitle={metrics.overdueUncalled > 0 ? `${metrics.overdueUncalled} waiting over 24 hours` : "No overdue calls"}
-              sourceDetails={{
-                website: {
-                  value: metrics.uncalledBySource.website,
-                },
-                meta: {
-                  value: metrics.uncalledBySource.meta,
-                },
-              }}
-            />
-            <SummaryMetric
-              label="Quoted Pipeline"
-              value={formatCADWhole(metrics.pipelineValue)}
-              color="bg-emerald-500"
-              subtitle={`${metrics.openQuoteCount} open quotes`}
-              sourceDetails={{
-                website: {
-                  value: formatCADShort(metrics.pipelineBySource.website),
-                },
-                meta: {
-                  value: formatCADShort(metrics.pipelineBySource.meta),
-                },
-              }}
-            />
-            </div>
-            <FunnelComparison
-              metrics={metricsBySource}
-              responseMetrics={responseMetricsBySource}
-              periodLabel={selectedDateRange ?? trendLabel}
-              onSelectMetric={setSelectedPerformanceMetric}
-            />
-          </section>
-
-          <section className="order-1 overflow-hidden rounded-lg border border-sand-200 bg-white">
-        <div className="flex flex-col justify-between gap-2.5 border-b border-sand-200 px-4 py-2.5 lg:flex-row lg:items-center xl:items-stretch xl:flex-col">
-          <div>
-            <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
-            <p className="text-xs text-sand-500 mt-0.5">{hasMeta ? "Website and Meta leads" : "Website leads"}; matching submissions within 7 days count once</p>
-          </div>
-          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center xl:items-start xl:flex-col">
-            <div className="flex items-center gap-3 text-xs">
-              <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={chartSources.website}
-                  disabled={chartSources.website && !chartSources.meta}
-                  onChange={() => toggleChartSource("website")}
-                  className="w-4 h-4 accent-blue-600"
-                />
-                <span className="w-2.5 h-2.5 rounded-sm bg-blue-600" />
-                Website
-              </label>
-              <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={chartSources.meta}
-                  disabled={chartSources.meta && !chartSources.website}
-                  onChange={() => toggleChartSource("meta")}
-                  className="w-4 h-4 accent-pink-600"
-                />
-                <span className="w-2.5 h-2.5 rounded-sm bg-pink-600" />
-                Meta
-              </label>
-            </div>
-            <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-md border border-sand-200 bg-sand-50 p-0.5 text-[11px] font-medium">
-              {TREND_RANGES.map((range) => (
-                <button
-                  key={range.value}
-                  type="button"
-                  aria-pressed={trendRange === range.value}
-                  onClick={() => selectTrendRange(range.value)}
-                    className={`shrink-0 px-2.5 py-1 rounded transition-colors ${
-                    trendRange === range.value
-                      ? "bg-white text-sand-900 shadow-sm"
-                      : "text-sand-500 hover:text-sand-800"
-                  }`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-        {trendRange === "custom" && (
-          <div className="px-5 py-3 border-b border-sand-200 bg-sand-50 flex flex-wrap items-end gap-3">
-            <label className="text-xs font-medium text-sand-600">
-              From
-              <input
-                type="date"
-                value={customFrom}
-                max={customTo || undefined}
-                onChange={(event) => setCustomFrom(event.target.value)}
-                className="block mt-1 px-3 py-2 rounded-md border border-sand-200 bg-white text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </label>
-            <label className="text-xs font-medium text-sand-600">
-              To
-              <input
-                type="date"
-                value={customTo}
-                min={customFrom || undefined}
-                onChange={(event) => setCustomTo(event.target.value)}
-                className="block mt-1 px-3 py-2 rounded-md border border-sand-200 bg-white text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
-              />
-            </label>
-          </div>
-        )}
-            <div className="h-[150px] px-3 pb-1 pt-2.5 sm:px-4">
-              <LeadTrendChart
-                data={trend.points}
-                showWebsite={chartSources.website}
-                showMeta={chartSources.meta}
-                onSelectRange={selectChartRange}
-              />
-            </div>
-            <div className="grid gap-3 border-t border-sand-200 px-3 py-2.5 sm:grid-cols-3">
-              <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
-              <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
-              <div className="border-t border-sand-200 pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-                <p className="text-xs text-sand-500">All sources</p>
-                <p className="mt-0.5 text-xl font-semibold text-sand-900">{trend.current.total}</p>
-                <p className="mt-0.5 text-[11px] text-sand-500">{trendComparison}</p>
-              </div>
-            </div>
-          </section>
-
-      {hasMeta && (metaStatusError || metaStatus?.error) && (
-        <div className="order-3 border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
-          <span className="font-medium">Meta connection needs attention. </span>
-          {metaStatusError?.message ?? metaStatus?.error}
-        </div>
-      )}
-      {syncAllResult && (
-        <div
-          role={syncAllResult.errors.length > 0 ? "alert" : "status"}
-          aria-live="polite"
-          className={`order-3 border px-4 py-3 rounded-lg text-sm ${
-          syncAllResult.errors.length > 0
-            ? "border-amber-200 bg-amber-50 text-amber-900"
-            : "border-emerald-200 bg-emerald-50 text-emerald-800"
-          }`}
-        >
-          {syncAllResult.errors.length > 0 ? (
-            <>
-              <span className="font-medium">Sync finished with issues. </span>
-              {syncAllResult.errors.join(". ")}.
-              {syncAllResult.completed.length > 0 && ` Refreshed: ${syncAllResult.completed.join(", ")}.`}
-            </>
-          ) : (
-            <>Sync finished: {syncAllResult.completed.join(", ")}.</>
-          )}
-        </div>
-      )}
-
-      {leadsError && (
-        <div className="order-3 border border-red-200 bg-red-50 px-4 py-3 rounded-lg text-sm text-red-800">
-          Could not load leads: {leadsError.message}
-        </div>
-      )}
-        </div>
-
-        <section className="min-w-0 overflow-hidden rounded-lg border border-sand-200 bg-white xl:sticky xl:top-6">
-        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-sand-200">
-          <div>
-            <h2 className="text-base font-semibold text-sand-900">Lead queue</h2>
-            <p className="text-xs text-sand-500 mt-0.5">
-              {filtered.length === queueLeads.length
-                ? `${queueLeads.length} leads`
-                : `${filtered.length} of ${queueLeads.length} leads`}
-              {selectedDateRange ? ` | ${selectedDateRange}` : ""}
-            </p>
-          </div>
-          <div className="hidden sm:flex items-center gap-3 text-xs text-sand-500">
-            <span>
-              Median call <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.medianCallMs)}</strong>
-            </span>
-            <span className="h-4 w-px bg-sand-200" aria-hidden="true" />
-            <span>
-              Median quote <strong className="font-semibold text-sand-700">{formatLeadResponseTime(queueResponseMetrics.medianQuoteMs)}</strong>
-            </span>
-          </div>
-        </div>
-        <div className="border-b border-sand-200 bg-sand-50 px-3 py-3">
-          <div className="flex flex-wrap gap-2">
-            <input
-              type="search"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search name, email, phone, or staff"
-              aria-label="Search leads"
-              className="h-9 min-w-[220px] flex-[1_1_260px] rounded-md border border-sand-200 bg-white px-3 text-xs text-sand-700 placeholder-sand-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-            <select
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              aria-label="Filter leads by status"
-              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[180px]"
-            >
-              {FILTER_TABS.map((tab) => (
-                <option key={tab.value} value={tab.value}>
-                  {tab.label} ({filterCounts[tab.value] ?? 0})
-                </option>
-              ))}
-            </select>
-            <select
-              value={sourceFilter}
-              onChange={(event) => setSourceFilter(event.target.value as "all" | LeadSource)}
-              aria-label="Filter leads by source"
-              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[150px]"
-            >
-              <option value="all">All sources ({sourceCounts.all})</option>
-              <option value="website">Website ({sourceCounts.website})</option>
-              {hasMeta && <option value="meta">Meta ({sourceCounts.meta})</option>}
-            </select>
-            <select
-              value={sortOrder}
-              onChange={(event) => setSortOrder(event.target.value as "newest" | "oldest")}
-              aria-label="Sort leads"
-              className="h-9 w-full rounded-md border border-sand-200 bg-white px-2.5 text-xs text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 sm:w-[130px]"
-            >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
-            {(filter !== "all" || sourceFilter !== "all" || search.trim()) && (
-              <button
-                type="button"
-                onClick={() => {
-                  setFilter("all");
-                  setSourceFilter("all");
-                  setSearch("");
-                }}
-                className="h-9 whitespace-nowrap px-2 text-[11px] font-medium text-blue-600 hover:text-blue-800"
-              >
-                Reset
-              </button>
-            )}
-          </div>
-        </div>
-
-        {isLoading && data == null ? (
-          <div className="py-12 text-center text-sand-400 text-sm">Loading leads…</div>
-        ) : leadsError ? (
-          <div className="py-12 text-center text-red-500 text-sm">Lead data is unavailable.</div>
-        ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-sand-400 text-sm">
-            {leads.length === 0
-              ? "No leads have been received yet."
-              : queueLeads.length === 0
-                ? "No leads were received in this date range."
-                : sourceLeads.length === 0
-                  ? `No ${sourceFilter === "meta" ? "Meta" : "website"} leads were received in this date range.`
-                  : "No leads match this filter."}
-          </div>
-        ) : (
-          <div className="overflow-auto max-h-[calc(100vh-220px)]">
-            <table className="w-full min-w-[880px] table-fixed text-sm">
-              <thead className="sticky top-0 z-20 bg-white">
-                <tr className="border-b border-sand-200/60">
-                  <th className="w-[23%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Lead</th>
-                  <th className="w-[9%] px-3 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Received</th>
-                  <th className="w-[16%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Response</th>
-                  <th className="w-[14%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Contact</th>
-                  <th className="w-[18%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Quote / Staff</th>
-                  <th className="w-[12%] px-4 py-3 text-left text-[11px] font-medium uppercase tracking-wider text-sand-400">Stage</th>
-                  <th className="w-[8%] px-4 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleLeads.map((lead) => (
-                  <tr
-                    key={lead.id}
-                    onClick={() => setSelectedLeadId(lead.id)}
-                    className={`border-b border-sand-100 hover:bg-sand-50 cursor-pointer transition-colors ${
-                      lead.call_status === "not_called" && !isClosedOutcome(lead.outcome) && isCallablePhone(lead.phone)
-                        ? "border-l-2 border-l-amber-400"
-                        : "border-l-2 border-l-transparent"
-                    }`}
-                  >
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 font-medium text-sand-900">
-                        <span className="truncate">{lead.name || "Unnamed"}</span>
-                        <span
-                          role="img"
-                          aria-label={`${SOURCE_BADGE[lead.source].label} lead`}
-                          title={`${SOURCE_BADGE[lead.source].label}${lead.source_detail ? `: ${lead.source_detail}` : ""}`}
-                          className={`h-2.5 w-2.5 shrink-0 rounded-sm ${lead.source === "website" ? "bg-blue-600" : "bg-pink-600"}`}
-                        />
-                      </div>
-                      <div className="text-[11px] text-sand-400 truncate max-w-[220px]">
-                        {[lead.email, lead.phone].filter(Boolean).join(" · ")}
-                      </div>
-                      {(lead.duplicate_count ?? 1) > 1 && (
-                        <div className="text-[11px] text-violet-600 mt-0.5">
-                          {lead.duplicate_count} submissions combined
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-3 text-sand-600">
-                      <div>{formatDate(lead.submitted_at)}</div>
-                      <div className="text-[11px] text-sand-400">{timeAgo(lead.submitted_at, now)}</div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <LeadResponseSummary lead={lead} />
-                    </td>
-                    <td className="px-4 py-3">
-                      {lead.outcome === "not_applicable" && !isHistoricalImport(lead) ? (
-                        <span className="inline-block rounded-full border border-stone-200 bg-stone-50 px-2 py-0.5 text-xs font-medium text-stone-600">
-                          Not required
-                        </span>
-                      ) : needsPhone(lead) ? (
-                        <span className="inline-block rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
-                          No phone
-                        </span>
-                      ) : (
-                        <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
-                          {CALL_STATUS_LABELS[lead.call_status]}
-                        </span>
-                      )}
-                      {lead.last_called_by && lead.last_call_at && (
-                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[200px]">
-                          {lead.last_called_by} · {timeAgo(lead.last_call_at, now)}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      {lead.quote_number ? (
-                        <>
-                          <div className="font-medium text-sand-900">{lead.quote_number}</div>
-                          {lead.quote_amount != null && (
-                            <div className="text-[11px] text-sand-400">{formatCADWhole(Number(lead.quote_amount))}</div>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-sand-300">-</span>
-                      )}
-                      <div className="mt-1 truncate text-[11px] text-sand-400" title={lead.assigned_to || "Unassigned"}>
-                        Staff: <span className="text-sand-600">{lead.assigned_to || "Unassigned"}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${OUTCOME_BADGE[lead.outcome]}`}>
-                        {OUTCOME_LABELS[lead.outcome]}
-                      </span>
-                      {lead.outcome === "lost" && lead.lost_reason && (
-                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[160px]">{lead.lost_reason}</div>
-                      )}
-                      {lead.outcome === "not_applicable" && lead.not_applicable_reason && (
-                        <div className="text-[11px] text-sand-400 mt-0.5 truncate max-w-[160px]">{lead.not_applicable_reason}</div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setSelectedLeadId(lead.id); }}
-                        className="text-xs font-medium text-blue-600 hover:text-blue-800 whitespace-nowrap"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {visibleLeads.length < filtered.length && (
-              <LoadMoreRows
-                shown={visibleLeads.length}
-                total={filtered.length}
-                onLoadMore={showMoreRows}
-              />
-            )}
-          </div>
-        )}
-        </section>
-      </div>
-
-      {selectedLead && (
-        <LeadDetailPanel
-          store={store}
-          lead={selectedLead}
-          onClose={() => setSelectedLeadId(null)}
-          onChanged={refresh}
-        />
-      )}
-      {selectedPerformanceMetric && (
-        <PerformanceTrendDialog
-          metric={selectedPerformanceMetric}
-          data={performanceTrend}
-          periodLabel={selectedDateRange ?? trendLabel}
-          trendRange={trendRange}
-          onSelectRange={selectTrendRange}
-          customFrom={customFrom}
-          customTo={customTo}
-          onCustomFromChange={setCustomFrom}
-          onCustomToChange={setCustomTo}
-          chartSources={chartSources}
-          onToggleSource={toggleChartSource}
-          responseTrackingStartedAt={responsePerformanceData?.tracking_started_at ?? null}
-          responseDataLoading={responsePerformanceLoading}
-          responseDataError={responsePerformanceError?.message ?? null}
-          onClose={() => setSelectedPerformanceMetric(null)}
-        />
-      )}
-    </>
-  );
-}
-
-// ─── Subcomponents ───────────────────────────────────────────────────────────
-
-interface SourceMetricDetail {
-  value: string | number;
-}
-
-function SummaryMetric({
-  label,
-  value,
-  color,
-  subtitle,
-  sourceDetails,
-}: {
-  label: string;
-  value: string | number;
-  color: string;
-  subtitle?: string;
-  sourceDetails: Record<LeadSource, SourceMetricDetail>;
-}) {
-  return (
-    <div className="flex min-w-0 flex-col p-2.5">
-      <div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-          <p className="truncate text-[10px] uppercase tracking-wider text-sand-400" title={label}>{label}</p>
-        </div>
-        <p className="text-lg font-semibold leading-5 text-sand-900">{value}</p>
-        {subtitle && <p className="mt-0.5 truncate text-[10px] leading-4 text-sand-400" title={subtitle}>{subtitle}</p>}
-      </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 border-t border-sand-100 pt-1.5">
-        {(["website", "meta"] as const).map((source) => (
-          <div key={source} className="min-w-0">
-            <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
-              <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
-              <span className="truncate capitalize">{source}</span>
-            </div>
-            <p className="truncate text-xs font-semibold leading-4 text-sand-800" title={String(sourceDetails[source].value)}>
-              {sourceDetails[source].value}
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const FUNNEL_COMPARISON_ROWS = [
-  { label: "Call attempt (callable)", rate: "callRate", count: "attempted", denominator: "callEligible" },
-  { label: "Quote rate (included)", rate: "quoteRate", count: "quoted", denominator: "total" },
-  { label: "Lead-to-order (included)", rate: "conversionRate", count: "won", denominator: "total" },
-] as const;
-
-const RESPONSE_COMPARISON_ROWS = [
-  { label: "Median elapsed to call", value: "medianCallMs", count: "callCount", denominator: "callEligibleCount" },
-  { label: "Median elapsed to quote", value: "medianQuoteMs", count: "quoteCount", denominator: "applicableCount" },
-] as const;
-
-const PERFORMANCE_METRIC_DETAILS: Record<LeadPerformanceMetricKey, {
-  title: string;
-  description: string;
-}> = {
-  callRate: {
-    title: "Call attempt rate",
-    description: "Share of callable leads with at least one call attempt. Higher is better.",
-  },
-  quoteRate: {
-    title: "Quote rate",
-    description: "Share of included leads that received a quote. Higher is better.",
-  },
-  conversionRate: {
-    title: "Lead-to-order rate",
-    description: "Share of included leads that became an order. Higher is better.",
-  },
-  medianCallMs: {
-    title: "Median elapsed to call",
-    description: "Median elapsed time among leads with a completed first call. Lower is better.",
-  },
-  medianQuoteMs: {
-    title: "Median elapsed to quote",
-    description: "Median elapsed time among leads with a completed first quote. Lower is better.",
-  },
-};
-
-function performanceRateWindow(
-  trendRange: TrendSelection,
-  customFrom: string,
-  customTo: string,
-): { size: number; label: string } {
-  if (trendRange === "7d") return { size: 3, label: "3-day rolling rate" };
-  if (trendRange === "30d") return { size: 7, label: "7-day rolling rate" };
-  if (trendRange === "90d") return { size: 4, label: "4-week rolling rate" };
-  if (trendRange === "12m" || trendRange === "all") {
-    return { size: 3, label: "3-month rolling rate" };
-  }
-
-  const start = Date.parse(`${customFrom}T00:00:00.000Z`);
-  const end = Date.parse(`${customTo}T00:00:00.000Z`);
-  const spanDays = Number.isFinite(start) && Number.isFinite(end)
-    ? Math.floor(Math.abs(end - start) / 86_400_000) + 1
-    : 30;
-  if (spanDays > 180) return { size: 3, label: "3-month rolling rate" };
-  if (spanDays > 45) return { size: 4, label: "4-week rolling rate" };
-  if (spanDays >= 14) return { size: 7, label: "7-day rolling rate" };
-  if (spanDays >= 5) return { size: 3, label: "3-day rolling rate" };
-  return { size: 1, label: "Daily cohort rate" };
-}
-
-function formatTrendStart(value: string): string {
-  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString("en-US", {
-    timeZone: "UTC",
-    month: "short",
-    year: "numeric",
-  });
-}
-
-function FunnelComparison({
-  metrics,
-  responseMetrics,
-  periodLabel,
-  onSelectMetric,
-}: {
-  metrics: LeadFunnelMetricsBySource;
-  responseMetrics: SourceResponseMetricsBySource;
-  periodLabel: string;
-  onSelectMetric: (metric: LeadPerformanceMetricKey) => void;
-}) {
-  return (
-    <div className="border-t border-sand-200/60">
-      <div className="flex items-center justify-between gap-3 border-b border-sand-200/60 px-4 py-2.5">
-        <div className="flex items-center gap-2">
-          <span className="w-2 h-2 rounded-full bg-indigo-500" />
-          <p className="text-[11px] text-sand-500 uppercase tracking-wider">Performance by source</p>
-        </div>
-        <span className="text-[10px] text-sand-400 uppercase tracking-wider">{periodLabel}</span>
-      </div>
-      <table className="w-full table-fixed text-left">
-        <thead>
-          <tr className="border-b border-sand-100">
-            <th className="w-[42%] px-4 py-2 text-[10px] font-medium text-sand-400 uppercase tracking-wider">Metric</th>
-            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-sm bg-blue-600" />
-                Website
-              </span>
-            </th>
-            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-sm bg-pink-600" />
-                Meta
-              </span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {FUNNEL_COMPARISON_ROWS.map((row) => (
-            <tr
-              key={row.rate}
-              onClick={() => onSelectMetric(row.rate)}
-              className="group cursor-pointer border-b border-sand-100 transition-colors last:border-b-0 hover:bg-indigo-50/50 focus-within:bg-indigo-50/50"
-            >
-              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">
-                <MetricTrendButton
-                  label={row.label}
-                  onClick={() => onSelectMetric(row.rate)}
-                />
-              </th>
-              {(["website", "meta"] as const).map((source) => (
-                <td key={source} className="px-3 py-1.5">
-                  <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
-                  <span className="ml-2 whitespace-nowrap text-[10px] text-sand-400">
-                    {metrics[source][row.count]} / {metrics[source][row.denominator]}
-                  </span>
-                </td>
-              ))}
-            </tr>
-          ))}
-          {RESPONSE_COMPARISON_ROWS.map((row) => (
-            <tr
-              key={row.value}
-              onClick={() => onSelectMetric(row.value)}
-              className="group cursor-pointer border-b border-sand-100 transition-colors last:border-b-0 hover:bg-indigo-50/50 focus-within:bg-indigo-50/50"
-            >
-              <th className="px-4 py-1.5 text-xs font-medium text-sand-600">
-                <MetricTrendButton
-                  label={row.label}
-                  onClick={() => onSelectMetric(row.value)}
-                />
-              </th>
-              {(["website", "meta"] as const).map((source) => (
-                <td key={source} className="px-3 py-1.5">
-                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                    <span className="whitespace-nowrap text-sm font-semibold text-sand-900">
-                      {formatLeadResponseTime(responseMetrics[source][row.value])}
-                    </span>
-                    <span className="whitespace-nowrap text-[10px] text-sand-400">
-                      {responseMetrics[source][row.count]} / {responseMetrics[source][row.denominator]} completed
-                    </span>
-                  </div>
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <p className="border-t border-sand-100 px-4 py-2 text-[10px] leading-4 text-sand-400">
-        Historical imports are included in performance rates. Spam, forwarded, and unquotable leads remain excluded.
-        Rates use the current stage of leads first submitted in this period, so recent cohorts are still maturing.
-        Response medians include completed responses only and measure elapsed time, including nights and weekends.
-      </p>
-    </div>
-  );
-}
-
-function MetricTrendButton({
-  label,
-  onClick,
-}: {
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-label={`View ${label} trend`}
-      title={`View ${label} trend`}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-      className="flex w-full items-center justify-between gap-2 rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
-    >
-      <span>{label}</span>
-      <svg
-        viewBox="0 0 20 20"
-        aria-hidden="true"
-        className="h-3.5 w-3.5 shrink-0 text-sand-300 transition-colors group-hover:text-indigo-500 group-focus-within:text-indigo-500"
-      >
-        <path
-          d="M3 14.5 7.25 10l3 2.5L17 5.75M13 5.75h4v4"
-          fill="none"
-          stroke="currentColor"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          strokeWidth="1.6"
-        />
-      </svg>
-    </button>
-  );
-}
-
-function PerformanceTrendDialog({
-  metric,
-  data,
-  periodLabel,
-  trendRange,
-  customFrom,
-  customTo,
-  onSelectRange,
-  onCustomFromChange,
-  onCustomToChange,
-  chartSources,
-  onToggleSource,
-  responseTrackingStartedAt,
-  responseDataLoading,
-  responseDataError,
-  onClose,
-}: {
-  metric: LeadPerformanceMetricKey;
-  data: LeadPerformanceTrendPoint[];
-  periodLabel: string;
-  trendRange: TrendSelection;
-  customFrom: string;
-  customTo: string;
-  onSelectRange: (range: TrendSelection) => void;
-  onCustomFromChange: (value: string) => void;
-  onCustomToChange: (value: string) => void;
-  chartSources: Record<LeadSource, boolean>;
-  onToggleSource: (source: LeadSource) => void;
-  responseTrackingStartedAt: string | null;
-  responseDataLoading: boolean;
-  responseDataError: string | null;
-  onClose: () => void;
-}) {
-  const details = PERFORMANCE_METRIC_DETAILS[metric];
-  const rateMetric = metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
-  const rollingWindow = performanceRateWindow(trendRange, customFrom, customTo);
-  const responseStarts = !rateMetric
-    ? (["website", "meta"] as const).flatMap((source) => {
-        const first = data.find((point) => point[source][metric] != null);
-        return first ? [`${source === "website" ? "Website" : "Meta"} ${formatTrendStart(first.rangeStart)}`] : [];
-      })
-    : [];
-
   useEffect(() => {
-    const previousOverflow = document.body.style.overflow;
-    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/35 p-3 backdrop-blur-[1px] sm:p-6"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
-      <section
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="performance-trend-title"
-        aria-describedby="performance-trend-description"
-        className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-sand-200 bg-white shadow-2xl"
-      >
-        <header className="flex items-start justify-between gap-5 border-b border-sand-200 px-5 py-4 sm:px-6">
-          <div>
-            <div className="mb-1 flex items-center gap-2">
-              <span className="h-2.5 w-2.5 rounded-full bg-indigo-500" />
-              <p className="text-[10px] font-medium uppercase tracking-wider text-sand-400">
-                Performance trend
-              </p>
-            </div>
-            <h2 id="performance-trend-title" className="text-xl font-semibold text-sand-900">
-              {details.title}
-            </h2>
-            <p id="performance-trend-description" className="mt-1 text-sm text-sand-500">
-              {details.description}
-            </p>
-          </div>
-          <button
-            type="button"
-            autoFocus
-            onClick={onClose}
-            aria-label="Close performance trend"
-            className="rounded-md p-2 text-sand-400 transition-colors hover:bg-sand-100 hover:text-sand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true" className="h-5 w-5">
-              <path d="m5 5 10 10M15 5 5 15" fill="none" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
-            </svg>
-          </button>
-        </header>
-
-        <div className="overflow-y-auto">
-          <div className="flex flex-col gap-3 border-b border-sand-100 bg-sand-50/60 px-5 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-md border border-sand-200 bg-white p-0.5 text-[11px] font-medium">
-              {TREND_RANGES.map((range) => (
-                <button
-                  key={range.value}
-                  type="button"
-                  aria-pressed={trendRange === range.value}
-                  onClick={() => onSelectRange(range.value)}
-                  className={`shrink-0 rounded px-2.5 py-1 transition-colors ${
-                    trendRange === range.value
-                      ? "bg-indigo-50 text-indigo-700 shadow-sm"
-                      : "text-sand-500 hover:text-sand-800"
-                  }`}
-                >
-                  {range.label}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] uppercase tracking-wider text-sand-400">{periodLabel}</p>
-          </div>
-
-          {trendRange === "custom" && (
-            <div className="flex flex-wrap items-end gap-3 border-b border-sand-100 px-5 py-3 sm:px-6">
-              <label className="text-xs font-medium text-sand-600">
-                From
-                <input
-                  type="date"
-                  value={customFrom}
-                  max={customTo || undefined}
-                  onChange={(event) => onCustomFromChange(event.target.value)}
-                  className="mt-1 block rounded-md border border-sand-200 bg-white px-3 py-2 text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-              </label>
-              <label className="text-xs font-medium text-sand-600">
-                To
-                <input
-                  type="date"
-                  value={customTo}
-                  min={customFrom || undefined}
-                  onChange={(event) => onCustomToChange(event.target.value)}
-                  className="mt-1 block rounded-md border border-sand-200 bg-white px-3 py-2 text-sm text-sand-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-              </label>
-            </div>
-          )}
-
-          <div className="px-3 pb-3 pt-5 sm:px-6 sm:pb-5">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 px-2 text-xs text-sand-600">
-              <div className="flex items-center gap-5">
-                <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={chartSources.website}
-                  disabled={chartSources.website && !chartSources.meta}
-                  onChange={() => onToggleSource("website")}
-                  className="h-3.5 w-3.5 accent-blue-600"
-                />
-                <span className="h-0.5 w-5 bg-blue-600" />
-                Website
-                </label>
-                <label className="inline-flex cursor-pointer items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={chartSources.meta}
-                  disabled={chartSources.meta && !chartSources.website}
-                  onChange={() => onToggleSource("meta")}
-                  className="h-3.5 w-3.5 accent-pink-600"
-                />
-                <span className="h-0.5 w-5 bg-pink-600" />
-                Meta
-                </label>
-              </div>
-              <span className="rounded-full bg-sand-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
-                {rateMetric
-                  ? rollingWindow.label
-                  : responseDataLoading
-                    ? "Loading recorded responses"
-                  : responseStarts.length > 0
-                    ? `Recorded data: ${responseStarts.join(" · ")}`
-                    : "No recorded response data"}
-              </span>
-            </div>
-            <div className="h-[330px] w-full">
-              {responseDataLoading && !rateMetric ? (
-                <div className="h-full animate-pulse rounded-lg bg-sand-50" />
-              ) : responseDataError && !rateMetric ? (
-                <div className="flex h-full items-center justify-center rounded-lg bg-red-50 px-5 text-center text-sm text-red-700">
-                  Recorded response data could not be loaded: {responseDataError}
-                </div>
-              ) : (
-                <LeadPerformanceTrendChart
-                  data={data}
-                  metric={metric}
-                  showWebsite={chartSources.website}
-                  showMeta={chartSources.meta}
-                  rollingWindowSize={rollingWindow.size}
-                />
-              )}
-            </div>
-          </div>
-
-          <p className="border-t border-sand-100 px-5 py-3 text-[11px] leading-5 text-sand-400 sm:px-6">
-            {rateMetric
-              ? `Each point recomputes the rate from all leads in the preceding ${rollingWindow.label.replace(" rolling rate", "")} window. The first points use the days available so far, so the chart starts immediately. This reduces misleading daily jumps caused by small samples.`
-              : responseTrackingStartedAt
-                ? `Phone response tracking begins ${formatDateTime(responseTrackingStartedAt)}. Earlier lead cohorts are omitted because phone history before that point is unavailable. Each point is the median for leads first submitted in that period.`
-                : "Each point is the median for leads first submitted in that period."}
-            {" "}Recent groups may improve as calls, quotes, and orders are completed. Hover or tap a point to see the exact value and sample size.
-          </p>
-        </div>
-      </section>
+    if (viewRestored) try { localStorage.setItem("lead-layout", classicView ? "classic" : "compact"); } catch { /* Optional preference. */ }
+  }, [classicView, viewRestored]);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const [now, setNow] = useState(initialNow);
+  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [copyMessage, setCopyMessage] = useState<string | null>(null);
+  const { mutate } = useSWRConfig();
+  const storageKey = `rf-lead-queue:v2:${store}`;
+  useEffect(() => {
+    // Restore only after hydration so the server and first client render agree.
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
+      if (saved && typeof saved === "object") {
+        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned"], sort: ["priority", "newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
+        setFilters((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key,
+          key === "search" ? typeof saved[key] === "string" ? saved[key].slice(0, 200) : value
+          : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
+      }
+    } catch { /* Storage can be unavailable in private browsing. */ }
+    setRestored(true);
+  }, [storageKey]);
+  useEffect(() => { if (restored) try { sessionStorage.setItem(storageKey, JSON.stringify(filters)); } catch { /* Optional persistence. */ } }, [filters, restored, storageKey]);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
+  const change = (key: keyof typeof filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
+  const bounds = useMemo(() => leadTrendQueryBounds(filters.history as "30d" | "90d" | "all", new Date(now)), [filters.history, now]);
+  const url = leadListUrl(bounds, store, filters.olderOpen === "true");
+  const initialUrl = leadListUrl(initialBounds, store);
+  const { data, error, isLoading, mutate: reload, isValidating } = useSWR<{ leads: Lead[] }>(url, fetcher, {
+    refreshInterval: 60_000, revalidateOnFocus: true,
+    fallbackData: initialLeads && url === initialUrl ? { leads: initialLeads } : undefined,
+    revalidateOnMount: initialLeads && url === initialUrl ? false : undefined,
+  });
+  const { data: health, error: healthError, mutate: refreshHealth } = useSWR<LeadSyncHealth>("/api/customer-service/leads/sync-status", fetcher, { refreshInterval: 60_000 });
+  const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
+  const queue = useMemo(() => leads.filter((lead) =>
+    !bounds?.from || isLeadInCustomDateRange(lead, bounds.from, bounds.to)
+      || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, filters.olderOpen]);
+  const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
+  const sourceLeads = queue.filter((lead) => filters.source === "all" || lead.source === filters.source);
+  const tab = FILTER_TABS.find((item) => item.value === filters.status) ?? FILTER_TABS[0];
+  const scoped = sourceLeads.filter((lead) => leadMatchesOwner(lead, filters.owner, currentUserEmail));
+  const spamCount = scoped.filter((lead) => isLeadSpamReason(lead.not_applicable_reason)).length;
+  const visible = scoped.filter((lead) => {
+    if (filters.status !== "spam" && isLeadSpamReason(lead.not_applicable_reason)) return false;
+    if (filters.status === "overdue" ? !isFollowUpDue(lead, now) : filters.status === "replies" ? !isOpenLead(lead) || !hasUnansweredReply(lead) : !tab.match(lead)) return false;
+    const q = filters.search.trim().toLowerCase();
+    if (!q) return true;
+    const text = [lead.name, lead.email, lead.phone, lead.assigned_to, lead.next_action, lead.quote_number].filter(Boolean).join(" ").toLowerCase();
+    const phoneQuery = q.replace(/\D/g, "");
+    return text.includes(q) || (phoneQuery.length >= 4 && (lead.phone ?? "").replace(/\D/g, "").includes(phoneQuery));
+  }).sort((a, b) => filters.sort === "priority" ? compareLeadPriority(a, b, now) :
+    (Date.parse(b.submitted_at) - Date.parse(a.submitted_at)) * (filters.sort === "oldest" ? -1 : 1));
+  const pagingKey = JSON.stringify(filters);
+  const [paging, setPaging] = useState({ key: pagingKey, count: LEAD_ROWS_PER_PAGE });
+  const count = paging.key === pagingKey ? paging.count : LEAD_ROWS_PER_PAGE;
+  const showMore = useCallback(() => setPaging((old) => ({ key: pagingKey, count: (old.key === pagingKey ? old.count : LEAD_ROWS_PER_PAGE) + LEAD_ROWS_PER_PAGE })), [pagingKey]);
+  const selected = leads.find((lead) => lead.id === selectedLeadId);
+  const refresh = () => mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"));
+  const runSync = async (job: SyncAutomationJob) => {
+    if (syncing) return;
+    setSyncing(job); setSyncMessage(null);
+    try { await triggerSyncAutomation(job, SYNC_LABELS[job]); await Promise.all([refresh(), refreshHealth()]); setSyncMessage(`${SYNC_LABELS[job]} updated.`); }
+    catch (err) { setSyncMessage(err instanceof Error ? err.message : "Sync failed. Try again."); }
+    finally { setSyncing(null); }
+  };
+  const copy = async (value: string, label: string) => {
+    try { await navigator.clipboard.writeText(value); setCopyMessage(`${label} copied.`); }
+    catch { setCopyMessage("Copy was unavailable. Select the contact text to copy it."); }
+  };
+  const setQuickView = (status: string, owner = "all") => setFilters((current) => ({ ...current, status, owner, source: "all", search: "" }));
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-start justify-between gap-3">
+      <div><h1 className="text-2xl font-bold text-sand-900">Leads</h1><p className="mt-1 text-sm text-sand-500">Call, reply, and follow up. Choose a received date range for your work queue.</p></div>
+      <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><button type="button" aria-pressed={classicView} onClick={() => setClassicView((value) => !value)} className="rounded-md border border-sand-300 bg-white px-3 py-2 text-sm text-sand-700">{classicView ? "Switch to compact view" : "Switch to old view"}</button><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); void refreshHealth(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
     </div>
-  );
-}
-
-function SourceTotal({
-  label,
-  value,
-  total,
-  color,
-}: {
-  label: string;
-  value: number;
-  total: number;
-  color: string;
-}) {
-  const share = total > 0 ? Math.round((value / total) * 100) : 0;
-  return (
-    <div>
-      <div className="flex items-center justify-between gap-3 text-sm">
-        <span className="flex items-center gap-2 font-medium text-sand-700">
-          <span className={`w-2.5 h-2.5 rounded-sm ${color}`} />
-          {label}
-        </span>
-        <span className="font-semibold text-sand-900">{value}</span>
-      </div>
-      <div className="mt-1.5 h-1.5 bg-sand-100 rounded-full overflow-hidden">
-        <div className={`h-full ${color}`} style={{ width: `${share}%` }} />
-      </div>
-      <p className="text-[10px] text-sand-400 mt-0.5">{share}% of leads</p>
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {[{ label: "Open leads", value: open.length, status: "open" }, { label: "Follow-ups due", value: open.filter((lead) => isFollowUpDue(lead, now)).length, status: "overdue" }, { label: "Need a call", value: open.filter((lead) => lead.call_status === "not_called" && isCallablePhone(lead.phone)).length, status: "uncalled" }, { label: "Unassigned", value: open.filter((lead) => !lead.assigned_to?.trim()).length, status: "open", owner: "unassigned" }].map((card) => <button key={card.label} onClick={() => setQuickView(card.status, card.owner)} className="rounded-lg border border-sand-200 bg-white p-3 text-left hover:border-indigo-300"><span className="text-xs text-sand-500">{card.label}</span><span className="mt-1 block text-2xl font-semibold tabular-nums text-sand-900">{card.value}</span></button>)}
     </div>
-  );
+    <div data-lead-layout={classicView ? "classic" : "compact"} className={classicView ? "grid items-start gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]" : "space-y-4"}>
+    <section className={classicView ? "min-w-0 rounded-lg border border-sand-200 bg-white xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto" : "rounded-lg border border-sand-200 bg-white"}>
+      {classicView ? <div className="border-b border-sand-100 px-4 py-3"><h2 className="text-sm font-semibold text-sand-900">Analytics</h2><p className="text-xs text-sand-500">Date filters apply to analytics only.</p></div> : <>
+      <button type="button" aria-expanded={showAnalytics} aria-controls="lead-analytics" onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+        <span><span className="block text-sm font-semibold text-sand-900">Analytics</span><span className="text-xs text-sand-500">Lead volume, source performance, conversion, and response times</span></span>
+        <span className="shrink-0 text-xs font-medium text-blue-700">{showAnalytics ? "Hide analytics" : "Show analytics"}</span>
+      </button>
+      </>}
+      {(classicView || showAnalytics) && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded sidePanel={classicView} initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
+    </section>
+    <div className="min-w-0 space-y-4">
+    <details className="rounded-lg border border-sand-200 bg-white px-3 py-2 text-xs">
+      <summary className="cursor-pointer text-sand-600">Sync status {healthError ? "· unavailable" : health?.sources?.some((source) => source.needsAttention) ? "· needs attention" : "· automatic updates"}</summary>
+      {healthError && <p className="mt-2 text-amber-700">Sync history is unavailable. Lead records remain available.</p>}
+      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{health?.sources?.filter((source) => store === "rf_transparent" || source.job !== "process-outreach").map((source) => <div key={source.job} className="rounded border border-sand-100 p-2"><div className="font-medium">{source.label}</div><div className="mt-1 text-sand-500">Last success: {source.lastSuccessAt ? formatDateTime(source.lastSuccessAt) : "Not recorded"}</div>{source.needsAttention && <div className="mt-1 text-amber-700">{source.error || "No recent successful update"}</div>}{health.canSync && <button disabled={syncing !== null} onClick={() => void runSync(source.job as SyncAutomationJob)} className="mt-2 text-blue-700 disabled:opacity-50">{syncing === source.job ? "Updating..." : `Update ${source.label.toLowerCase()}`}</button>}</div>)}</div>
+      {syncMessage && <p role="status" className="mt-2">{syncMessage}</p>}
+    </details>
+    <section className="overflow-hidden rounded-lg border border-sand-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div>{filters.status !== "spam" && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
+      <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
+        <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
+        <select aria-label="Filter leads by status" value={filters.status} onChange={(event) => change("status", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs">{FILTER_TABS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+        <select aria-label="Filter leads by source" value={filters.source} onChange={(event) => change("source", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">All sources</option>{(["website", "meta", "outreach"] as const).filter((source) => store === "rf_transparent" || source === "website").map((source) => <option key={source} value={source}>{SOURCE_BADGE[source].label} ({queue.filter((lead) => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length})</option>)}</select>
+        <select aria-label="Filter leads by owner" value={filters.owner} onChange={(event) => change("owner", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">Everyone</option><option value="mine" disabled={!currentUserEmail}>My leads</option><option value="unassigned">Unassigned</option></select>
+        <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="priority">Priority first</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+        <label className="text-xs text-sand-500">Received <select aria-label="Lead received date range" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
+        {filters.history !== "all" && <label className="flex items-center gap-2 text-xs text-sand-600"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={(event) => change("olderOpen", String(event.target.checked))} />Include older open leads</label>}
+        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" })}>Reset</button>
+      </div>
+      {error && <div role="alert" className="flex items-center justify-between gap-3 bg-amber-50 px-4 py-3 text-sm text-amber-800"><span>{data ? "The latest refresh failed. Showing the last loaded records." : "Lead data could not be loaded."}</span><button className="shrink-0 underline" onClick={() => void reload()}>Try again</button></div>}
+      {isLoading && !data ? <p className="p-8 text-center text-sm text-sand-500">Loading leads...</p> : visible.length === 0 ? <p className="p-8 text-center text-sm text-sand-500">No leads match these filters.</p> : <div className="overflow-x-auto">
+        <table className="w-full min-w-[1050px] table-fixed text-sm"><thead className="bg-sand-50 text-left text-[11px] uppercase tracking-wider text-sand-500"><tr><th className="w-[26%] px-4 py-3">Lead / contact</th><th className="w-[23%] px-3 py-3">Next action / owner</th><th className="w-[17%] px-3 py-3">Last call</th><th className="w-[17%] px-3 py-3">Latest quote</th><th className="w-[11%] px-3 py-3">Stage</th><th className="w-[6%]"><span className="sr-only">Open lead</span></th></tr></thead>
+          <tbody>{visible.slice(0, count).map((lead) => <tr key={lead.id} className="border-t border-sand-100 align-top hover:bg-sand-50/50">
+            <td className="px-4 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-left font-semibold text-sand-900 hover:text-blue-700"><span className="line-clamp-2 break-words">{lead.name || "Unnamed"}</span></button><div className="my-1 flex flex-wrap items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE[lead.source].className}`}>{SOURCE_BADGE[lead.source].label}</span><span className="text-[10px] text-sand-400" title={formatDateTime(lead.submitted_at)}>Received {formatDate(lead.submitted_at)}</span></div>
+              {lead.email && <div className="flex items-start gap-2 text-xs"><a href={`mailto:${lead.email}`} className="break-all text-blue-700">{lead.email}</a><button aria-label={`Copy email for ${lead.name || lead.email}`} onClick={() => void copy(lead.email!, "Email")} className="shrink-0 text-[10px] text-sand-500">Copy</button></div>}
+              {lead.phone && <div className="mt-1 flex items-center gap-2 text-xs"><a href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`} className="text-blue-700">{lead.phone}</a><button aria-label={`Copy phone for ${lead.name || lead.phone}`} onClick={() => void copy(lead.phone!, "Phone")} className="text-[10px] text-sand-500">Copy</button></div>}
+            </td>
+            <td className="px-3 py-3"><div className="break-words text-xs text-sand-700">{isOpenLead(lead) ? lead.next_action || (hasUnansweredReply(lead) ? "Reply to prospect" : lead.call_status === "not_called" ? "Make first contact" : "Set the next action") : "Closed"}</div><div className={`mt-1 text-xs ${isFollowUpDue(lead, now) ? "font-medium text-amber-700" : "text-sand-500"}`}>{isOpenLead(lead) ? lead.next_follow_up_at ? `${isFollowUpDue(lead, now) ? "Due: " : "Follow up: "}${formatDateTime(lead.next_follow_up_at)}` : "No follow-up scheduled" : ""}</div><div className="mt-1 break-words text-xs text-sand-500">{lead.assigned_to || "Unassigned"}</div><button onClick={() => setSelectedLeadId(lead.id)} className="mt-1 text-xs text-blue-700">Assign / schedule</button></td>
+            <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : CALL_STATUS_LABELS[lead.call_status]}</span>{lead.last_call_at && <div className="mt-1 text-xs text-sand-600">{formatDateTime(lead.last_call_at)}<div className="break-words text-sand-400">{lead.last_called_by || "Staff not recorded"}</div></div>}<details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
+            <td className="px-3 py-3">{lead.quote_number ? <><span className="font-medium">{lead.quote_number}</span>{lead.quote_amount != null && <div className="text-xs text-sand-600">{formatCADWhole(Number(lead.quote_amount))}</div>}<div className="mt-1 text-[11px] text-sand-500">{lead.quote_sent_at ? `Sent ${formatDateTime(lead.quote_sent_at)}` : "Send date not recorded"}</div></> : <span className="text-xs text-sand-400">No quote recorded</span>}</td>
+            <td className="px-3 py-3"><span className={`inline-block rounded-full px-2 py-0.5 text-xs ${OUTCOME_BADGE[lead.outcome]}`}>{OUTCOME_LABELS[lead.outcome] || "New"}</span></td><td className="px-2 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-xs text-blue-700">View</button></td>
+          </tr>)}</tbody></table>{count < visible.length && <LoadMoreRows shown={count} total={visible.length} onLoadMore={showMore} />}
+      </div>}
+    </section>
+    </div>
+    </div>
+    {copyMessage && <p role="status" className="text-xs text-sand-600">{copyMessage}</p>}
+    {selected && <LeadDetailPanel key={selected.id} lead={selected} store={store} currentUserEmail={currentUserEmail} onClose={() => setSelectedLeadId(null)} onChanged={refresh} />}
+  </div>;
 }

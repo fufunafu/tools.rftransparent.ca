@@ -1,3 +1,4 @@
+import { getAutomaticActivity, applyAutomaticActivity, automaticSummary } from '@/lib/outreach/automatic-activity';
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { getAuthenticatedUser } from '@/lib/admin-auth';
@@ -33,7 +34,10 @@ export async function GET(request: Request) {
       db.from('outreach_lead_activity').select('*').eq('lead_id',id).order('occurred_at',{ascending:false}).order('id').limit(100),
     ]);
     if (events.error || audit.error || mail.error || activity.error) return NextResponse.json({ error: 'History unavailable' }, { status: 503, headers });
-    return NextResponse.json({ lead: lead.data, events: events.data, audit: audit.data, mail: mail.data, activity: activity.data }, { headers });
+    const automatic=await getAutomaticActivity().catch(()=>null);
+    const automaticHistory=automatic?.history.get(id)||[];
+    const enriched=automatic?applyAutomaticActivity(lead.data,automaticHistory):{...lead.data,activity_error:true};
+    return NextResponse.json({ lead: enriched, events: events.data, audit: audit.data, mail: mail.data, activity: [...(activity.data||[]),...automaticHistory].sort((a,b)=>Date.parse(b.occurred_at)-Date.parse(a.occurred_at)) }, { headers });
   }
   const filter = z.object({
     page: z.coerce.number().int().min(0).max(100000),
@@ -57,17 +61,17 @@ export async function GET(request: Request) {
     query=query.or(`email.ilike.${term},company_name.ilike.${term}`,{referencedTable:'contact'});
   }
   const count = () => db.from('outreach_leads').select('id',{count:'exact',head:true});
-  const [result,open,needsCall,quoted,due,sync] = await Promise.all([
+  const [result,open,due,sync] = await Promise.all([
     query.order('next_follow_up_at',{ascending:true,nullsFirst:false}).order('id').range(f.page*50,f.page*50+49),
     count().not('stage','in','(won,lost,suppressed)'),
-    count().not('stage','in','(won,lost,suppressed)').is('last_call_at',null),
-    count().not('quote_sent_at','is',null).neq('stage','suppressed'),
     count().not('stage','in','(won,lost,suppressed)').lte('next_follow_up_at',now),
     db.from('cron_runs').select('status,started_at').eq('job','process-outreach').order('started_at',{ascending:false}).limit(1).maybeSingle(),
   ]);
-  if ([result,open,needsCall,quoted,due].some(r=>r.error)) return NextResponse.json({ error: 'Leads unavailable. Check connection and database setup.' }, { status: 503, headers });
-  return NextResponse.json({ leads: result.data, total: result.count, page: f.page,
-    summary:{open:open.count,needsCall:needsCall.count,quoted:quoted.count,due:due.count},
+  if ([result,open,due].some(r=>r.error)) return NextResponse.json({ error: 'Leads unavailable. Check connection and database setup.' }, { status: 503, headers });
+  const automatic=await getAutomaticActivity().catch(()=>null);
+  const enriched=(result.data||[]).map(lead=>automatic?applyAutomaticActivity(lead,automatic.history.get(lead.id)||[]):{...lead,activity_error:true});
+  return NextResponse.json({ leads: enriched, activityError:!automatic, total: result.count, page: f.page,
+    summary:{open:open.count,needsCall:automatic?automaticSummary(automatic.leads).needsCall:null,quoted:automatic?automaticSummary(automatic.leads).quoted:null,due:due.count},
     sync:sync.error || !sync.data ? null : {status:sync.data.status,lastRunAt:sync.data.started_at},
     currentUser:user.email.toLowerCase(),
   }, { headers });

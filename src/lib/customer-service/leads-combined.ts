@@ -96,6 +96,7 @@ export interface CombinedRow {
 export interface SourceSplit {
   website: number;
   meta: number;
+  outreach: number;
   quote: number;
 }
 
@@ -481,7 +482,7 @@ export function sortByUrgency(rows: CombinedRow[]): CombinedRow[] {
 }
 
 function emptySplit(): SourceSplit {
-  return { website: 0, meta: 0, quote: 0 };
+  return { website: 0, meta: 0, outreach: 0, quote: 0 };
 }
 
 export function summarize(rows: CombinedRow[], opts: BuildOptions): CombinedSummary {

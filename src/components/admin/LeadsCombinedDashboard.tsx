@@ -91,10 +91,11 @@ const TABS: { id: CombinedTab; label: string; hint: string }[] = [
   { id: "dupes", label: "Duplicates", hint: "One person with more than one open quote." },
 ];
 
-const SOURCE_LABELS: Record<CombinedSource, string> = { website: "Website", meta: "Meta", quote: "Quote only" };
+const SOURCE_LABELS: Record<CombinedSource, string> = { website: "Website", meta: "Meta", outreach: "Outreach", quote: "Quote only" };
 const SOURCE_DOT: Record<CombinedSource, string> = {
   website: "bg-blue-500",
   meta: "bg-pink-700",
+  outreach: "bg-violet-600",
   quote: "border border-slate-400",
 };
 
@@ -240,6 +241,7 @@ function Kpi({
   alert,
   website,
   meta,
+  outreach,
   dot,
 }: {
   label: string;
@@ -248,6 +250,7 @@ function Kpi({
   alert?: boolean;
   website?: string;
   meta?: string;
+  outreach?: string;
   dot: string;
 }) {
   return (
@@ -267,6 +270,10 @@ function Kpi({
           <div className="flex items-baseline justify-between gap-2 whitespace-nowrap">
             <span><span className="mr-1 inline-block h-1.5 w-1.5 rounded-sm bg-pink-700 align-middle" />Meta</span>
             <b className="text-[12.5px] text-slate-900">{meta}</b>
+          </div>
+<div className="flex items-baseline justify-between gap-2 whitespace-nowrap">
+            <span><span className="mr-1 inline-block h-1.5 w-1.5 rounded-sm bg-violet-600 align-middle" />Outreach</span>
+            <b className="text-[12.5px] text-slate-900">{outreach}</b>
           </div>
         </div>
       )}
@@ -364,7 +371,7 @@ function RowDrawer({ row, storeId, shops, nowMs, onClose, onMutated, onLogFollow
 
   const otherStore = storeId === "bc_transparent" ? "rf_transparent" : "bc_transparent";
   const otherStoreLabel = LEAD_STORE_OPTIONS.find((option) => option.id === otherStore)?.label ?? otherStore;
-  const kind = row.source === "website" ? "Website lead" : row.source === "meta" ? "Meta lead" : "Quote only";
+  const kind = row.source === "website" ? "Website lead" : row.source === "meta" ? "Meta lead" : row.source === "outreach" ? "Outreach lead" : "Quote only";
   const submissions = detailsData?.details ?? [];
   const attempts = attemptsData?.attempts ?? [];
   const logs = logsData?.logs ?? [];
@@ -849,6 +856,7 @@ export default function LeadsCombinedDashboard({ initialStore }: { initialStore:
           sub={summary ? (summary.needCall.over24h ? `${summary.needCall.over24h} waiting over 24 hours` : "No overdue calls") : ""}
           website={summary ? String(summary.needCall.split.website) : undefined}
           meta={summary ? String(summary.needCall.split.meta) : undefined}
+          outreach={summary ? String(summary.needCall.split.outreach) : undefined}
         />
         <Kpi
           label="Follow-ups due"
@@ -858,6 +866,7 @@ export default function LeadsCombinedDashboard({ initialStore }: { initialStore:
           sub={summary ? (summary.followupsDue.overdue ? `${summary.followupsDue.overdue} overdue` : "Nothing overdue") : ""}
           website={summary ? String(summary.followupsDue.split.website) : undefined}
           meta={summary ? String(summary.followupsDue.split.meta) : undefined}
+          outreach={summary ? String(summary.followupsDue.split.outreach) : undefined}
         />
         <Kpi
           label="New leads · 30 days"
@@ -866,6 +875,7 @@ export default function LeadsCombinedDashboard({ initialStore }: { initialStore:
           sub={summary ? `Median call ${formatLeadResponseTime(summary.medianCallMs)} · quote ${formatLeadResponseTime(summary.medianQuoteMs)}` : ""}
           website={summary ? String(summary.newLeads30d.split.website) : undefined}
           meta={summary ? String(summary.newLeads30d.split.meta) : undefined}
+          outreach={summary ? String(summary.newLeads30d.split.outreach) : undefined}
         />
         <Kpi
           label="Quoted pipeline"
@@ -874,6 +884,7 @@ export default function LeadsCombinedDashboard({ initialStore }: { initialStore:
           sub={summary ? `${summary.openQuotes.count} open quotes · 12 months` : ""}
           website={summary ? compactMoney(summary.openQuotes.split.website) : undefined}
           meta={summary ? compactMoney(summary.openQuotes.split.meta) : undefined}
+          outreach={summary ? compactMoney(summary.openQuotes.split.outreach) : undefined}
         />
         <Kpi
           label="Conversion"
@@ -933,6 +944,7 @@ export default function LeadsCombinedDashboard({ initialStore }: { initialStore:
             <option value="all">All sources</option>
             <option value="website">Website</option>
             <option value="meta">Meta</option>
+            <option value="outreach">Outreach</option>
             <option value="quote">Quote only</option>
           </select>
           <select value={sort} onChange={(event) => setSort(event.target.value as SortKey)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-sm" aria-label="Sort">
