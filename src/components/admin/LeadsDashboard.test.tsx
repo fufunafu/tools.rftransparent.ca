@@ -148,11 +148,20 @@ it('allows historical website leads through the explicit All time received filte
   await act(async () => { dates.value = 'all'; dates.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(leadRows()).toHaveLength(1);
 });
-it('puts overdue work first and supports the My leads view', async () => {
+it('defaults to newest despite a saved priority preference and supports the My leads view', async () => {
   const leads = makeLeads(3);
+  sessionStorage.setItem('rf-lead-queue:v2:bc_transparent', JSON.stringify({ sort: 'priority' }));
+  leads[0].submitted_at = '2026-10-26T14:00:00Z';
+  leads[1].submitted_at = '2026-10-25T14:00:00Z';
+  leads[2].submitted_at = '2026-10-24T14:00:00Z';
   leads[2].next_follow_up_at = '2026-10-25T10:00:00Z';
   leads[2].assigned_to = 'employee@example.com';
   await render(leads);
+  expect(leadRows()[0].textContent).toContain('Customer 0');
+  const sort = container.querySelector<HTMLSelectElement>('select[aria-label="Sort leads"]')!;
+  expect(sort.value).toBe('newest');
+  expect([...sort.options].map(option => option.value)).toEqual(['newest', 'oldest']);
+  await act(async () => { sort.value = 'oldest'; sort.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(leadRows()[0].textContent).toContain('Customer 2');
   const owner = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by owner"]')!;
   await act(async () => { owner.value = 'mine'; owner.dispatchEvent(new Event('change', { bubbles: true })); });
