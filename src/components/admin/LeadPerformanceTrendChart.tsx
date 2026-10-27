@@ -103,7 +103,7 @@ function MetricTooltip({
                 {formatMetricValue(metric, point[source])}
               </span>
               <span className="text-[10px] text-sand-400">
-                {count} of {denominator} {isRateMetric(metric) ? "leads" : "completed"}
+                {isRateMetric(metric) ? `${count} of ${denominator} leads` : `${count} leads with a recorded ${metric === "medianQuoteMs" ? "quote" : "call"}`}
               </span>
             </span>
           </div>
