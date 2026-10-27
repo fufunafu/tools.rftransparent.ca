@@ -1,6 +1,5 @@
 import type { Lead } from "@/lib/customer-service/leads";
 import { isCallablePhone } from "@/lib/call-metrics";
-import { isLeadIncludedInPerformance } from "@/lib/lead-analytics";
 
 export const LEAD_BUSINESS_TIME_ZONE = "America/Toronto";
 const localTime = new Intl.DateTimeFormat("en-CA", {
@@ -42,7 +41,7 @@ export interface BusinessDayCallMetrics {
 }
 
 export function callDeadlineStatus(lead: CallLead, now: number): CallDeadlineStatus {
-  if (!isLeadIncludedInPerformance(lead)) return "excluded";
+  if (lead.outcome === "not_applicable") return "excluded";
   if (!isCallablePhone(lead.phone) && !lead.first_call_at && lead.call_status === "not_called") return "excluded";
   const deadline = leadCallDeadline(lead.submitted_at);
   const submitted = Date.parse(lead.submitted_at);
