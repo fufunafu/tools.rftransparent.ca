@@ -74,6 +74,10 @@
     {
       "path": "/api/cron/refresh-sales-dashboard",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/sync-purchasing-sales",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

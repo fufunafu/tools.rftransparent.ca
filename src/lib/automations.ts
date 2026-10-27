@@ -24,6 +24,17 @@ export interface AutomationJob {
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
   {
+    slug: "sync-purchasing-sales",
+    label: "Purchasing sales history",
+    description: "Updates RF and GRS product quantities, including refunds and renamed listings.",
+    kind: "sync",
+    result: "Monthly SKU history and purchasing demand baselines",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes",
+    scheduleDetail: "Resumes incomplete imports and retains the previous complete baseline if a store fails",
+  },
+  {
     slug: "crm-workflows",
     label: "CRM reminders and activity",
     description: "Sends enabled task reminders, matches business calls and email previews, and indexes CRM records.",

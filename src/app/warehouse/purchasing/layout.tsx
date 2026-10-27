@@ -5,6 +5,8 @@ import { getPurchasingSummary } from "@/lib/purchasing/queries";
 import PurchasingTabs from "@/components/admin/purchasing/PurchasingTabs";
 import PurchasingSummaryStrip from "@/components/admin/purchasing/PurchasingSummaryStrip";
 
+import SalesSyncStatus from "@/components/admin/purchasing/SalesSyncStatus";
+
 export const dynamic = "force-dynamic";
 
 export default async function PurchasingLayout({
@@ -24,13 +26,14 @@ export default async function PurchasingLayout({
 
   return (
     <SWRProvider>
-      <div className="max-w-[1400px] mx-auto space-y-6">
+      <div className="max-w-[1600px] mx-auto space-y-4">
         <div className="space-y-4">
           <div className="flex items-baseline justify-between">
             <h1 className="text-2xl font-semibold text-sand-900">Purchasing</h1>
           </div>
           <PurchasingSummaryStrip summary={summary} />
           <PurchasingTabs />
+          <SalesSyncStatus />
         </div>
         {children}
       </div>

@@ -1,17 +1,26 @@
 {
   "scope": "Compact CRM Home layout and simplify navigation",
-  "mainSections": ["Home", "Contacts", "Companies", "Tasks"],
+  "mainSections": [
+    "Home",
+    "Contacts",
+    "Companies",
+    "Tasks"
+  ],
   "activity": "Home activity feed",
   "reminders": "Expandable delivery history within Tasks",
   "maintenance": "Collapsed HubSpot connection settings",
   "databaseChanges": false,
   "checks": {
-    "testFiles": 207,
-    "tests": 1536,
+    "testFiles": 212,
+    "tests": 1561,
     "lint": "passed",
     "typecheck": "passed",
     "productionBuild": "passed",
     "protectedSalesFiles": 36,
     "visual": "Not completed because scoped browser access was unavailable."
-  }
+  },
+  "preservedConcurrentReleases": [
+    "Purchasing sales history",
+    "Leads quote-response rolling median"
+  ]
 }

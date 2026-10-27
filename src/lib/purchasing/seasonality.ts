@@ -59,3 +59,14 @@ export function consumptionBetween(
   }
   return total;
 }
+
+// The displayed monthly demand is annual units / 12 multiplied by seasonality.
+// Growth remains a separate planning assumption in the stock forecast.
+export function currentSeasonMultiplier(settings: Pick<PurchasingSettings, "season_multipliers">, date = new Date()): number {
+  const month = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", month: "numeric" }).format(date)) - 1;
+  const value = Number(settings.season_multipliers[month]);
+  return Number.isFinite(value) && value > 0 ? value : 1;
+}
+export function seasonalMonthlySales(baseMonthly: number, settings: Pick<PurchasingSettings, "season_multipliers">, date = new Date()): number {
+  return baseMonthly * currentSeasonMultiplier(settings, date);
+}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCustomLeadTrend } from "@/lib/lead-analytics";
 import {
   buildLeadPerformanceTrend,
+  buildThreeDayQuoteTrend,
   buildRollingLeadPerformanceRateTrend,
 } from "@/lib/lead-performance-trends";
 
@@ -145,4 +146,26 @@ it("weights same-business-day rates by passed deadlines, not pending leads or mi
   const rolling = buildRollingLeadPerformanceRateTrend(points, "sameDayCallRate", 2);
   expect(rolling[1].website).toEqual({ value: 33.3, count: 1, denominator: 3 });
   expect(rolling[1].outreach.value).toBeNull();
+});
+
+it("pools quote durations across three calendar days rather than averaging daily medians", () => {
+  const buckets = buildCustomLeadTrend([], "2026-10-01", "2026-10-05").points;
+  const rows = [
+    lead({ source: "website", submitted_at: "2026-10-01T12:00:00Z", first_quote_at: "2026-10-01T13:00:00Z" }),
+    ...[2, 3, 4].map(hours => lead({ source: "website", submitted_at: "2026-10-02T12:00:00Z", first_quote_at: `2026-10-02T${12 + hours}:00:00Z` })),
+    lead({ source: "meta", submitted_at: "2026-10-02T12:00:00Z", first_quote_at: "2026-10-03T12:00:00Z" }),
+  ];
+  const result = buildThreeDayQuoteTrend(rows, buckets);
+  expect(result[2].website.medianQuoteMs).toBe(2.5 * 3600000);
+  expect(result[2].website.quoteResponseCount).toBe(4);
+  expect(result[2].meta.medianQuoteMs).toBe(24 * 3600000);
+  expect(result[3].website.medianQuoteMs).toBe(3 * 3600000);
+  expect(result[4].website.medianQuoteMs).toBeNull();
+  expect(result[2]).toMatchObject({ rangeStart: "2026-10-01", rangeEnd: "2026-10-03" });
+});
+it("uses calendar-day windows even when the other charts have weekly buckets", () => {
+  const buckets = buildCustomLeadTrend([], "2026-07-01", "2026-09-28").points;
+  const result = buildThreeDayQuoteTrend([], buckets);
+  expect(result).toHaveLength(90);
+  expect(result[30]).toMatchObject({ rangeStart: "2026-07-29", rangeEnd: "2026-07-31" });
 });
