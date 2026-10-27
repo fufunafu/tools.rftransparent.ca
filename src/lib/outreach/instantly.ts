@@ -19,6 +19,26 @@ export class InstantlyError extends Error {
   constructor(public code: string) { super(code); }
 }
 
+export interface LeadProfile { company: string; name: string; phone: string }
+export async function getLeadProfile(event: OutreachEvent, key: string, fetcher: typeof fetch = fetch): Promise<LeadProfile> {
+  if (!event.campaignId) throw new InstantlyError('instantly_lead_mismatch');
+  let response: Response;
+  try {
+    response = await fetcher('https://api.instantly.ai/api/v2/leads/list', {
+      method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'User-Agent': 'RF-Tools-Outreach/1.0' },
+      body: JSON.stringify({campaign:event.campaignId,contacts:[event.email],limit:2}),
+      cache:'no-store',redirect:'error',signal:AbortSignal.timeout(10000),
+    });
+  } catch { throw new InstantlyError('instantly_unavailable'); }
+  if (!response.ok) throw new InstantlyError(`instantly_http_${response.status}`);
+  const value = await response.json() as {items?: Array<{email?:string;organization?:string;campaign?:string;company_name?:string;first_name?:string;last_name?:string;phone?:string}>};
+  if (!Array.isArray(value.items) || value.items.length!==1) throw new InstantlyError('instantly_lead_mismatch');
+  const lead=value.items[0];
+  if (lead.email?.toLowerCase()!==event.email || lead.organization!==event.workspaceId || lead.campaign!==event.campaignId) throw new InstantlyError('instantly_lead_mismatch');
+  const text=(v:unknown,max:number)=>typeof v==='string'?v.trim().slice(0,max):'';
+  return {company:text(lead.company_name,500),name:[text(lead.first_name,100),text(lead.last_name,100)].filter(Boolean).join(' ').slice(0,200),phone:text(lead.phone,60)};
+}
+
 export async function getJson(path: string, key: string, fetcher: typeof fetch): Promise<unknown> {
   let response: Response;
   try {

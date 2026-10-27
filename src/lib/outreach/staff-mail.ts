@@ -1,7 +1,7 @@
 import 'server-only';
 import { getSupabase } from '@/lib/supabase';
 import { INBOXES, readGmailConversation, extractEmail, type GmailConversationMessage } from '@/lib/gmail';
-import { getJson, type EmailRecord } from './instantly';
+import { getJson, getLeadProfile, type EmailRecord } from './instantly';
 import { explicitOptOut, authoredText, type OutreachEvent } from './domain';
 import { GENERAL_INBOX } from './staff-leads';
 export function staffMailDirection(message:GmailConversationMessage, prospect:string):'inbound'|'outbound'|null {
@@ -16,7 +16,7 @@ export async function syncOutreachStaffMail() {
   const db=getSupabase(), key=process.env.INSTANTLY_API_KEY;
   const inbox=INBOXES.find(i=>i.email===GENERAL_INBOX);
   if (!key || !inbox) throw new Error('General inbox sync is not configured');
-  const {data:leads,error}=await db.from('outreach_leads').select('id,contact_id,case_id,interest_event_id')
+  const {data:leads,error}=await db.from('outreach_leads').select('id,contact_id,case_id,interest_event_id,profile_synced_at')
     .not('stage','in','(won,lost,suppressed)').order('mail_synced_at',{ascending:true,nullsFirst:true}).limit(3);
   if(error)throw new Error('Lead mail queue unavailable');
   const summary={checked:0,synced:0,errors:0};
@@ -26,6 +26,16 @@ export async function syncOutreachStaffMail() {
       const anchor=await db.from('outreach_events').select('event').eq('id',lead.interest_event_id).single();
       if(anchor.error || !anchor.data) throw new Error('Interest event unavailable');
       let event=anchor.data.event as OutreachEvent;
+      // Import only a single exact campaign/workspace/email match. Blank-only
+      // database updates preserve phone and contact details entered by staff.
+      // A failed profile lookup must not prevent conversation/opt-out syncing.
+      if (!lead.profile_synced_at) {
+        try {
+          const profile=await getLeadProfile(event,key);
+          await db.rpc('outreach_lead_sync_profile',{p_id:lead.id,p_email:event.email,p_campaign:event.campaignId,
+            p_company:profile.company,p_name:profile.name,p_phone:profile.phone});
+        } catch { /* Retry on a later sync; staff can also enter details manually. */ }
+      }
       if(!event.emailId){
         const reply=await db.from('outreach_events').select('event').eq('contact_id',lead.contact_id).eq('campaign_key',event.campaignKey)
           .eq('event_type','reply_received').lte('occurred_at',event.occurredAt).order('occurred_at',{ascending:false}).limit(1).maybeSingle();
