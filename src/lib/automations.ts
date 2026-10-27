@@ -24,6 +24,28 @@ export interface AutomationJob {
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
   {
+    slug: "sync-hubspot",
+    label: "HubSpot CRM import",
+    description: "Copies HubSpot CRM records and history into Tools while keeping Tools changes independent.",
+    kind: "sync",
+    result: "Resumable CRM import with source IDs, properties, history, and associations",
+    staleAfterHours: 26,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes while importing; starts a new pass after 24 hours",
+    scheduleDetail: "Enabled by HUBSPOT_SYNC_ENABLED; new Tools records stay in Tools",
+  },
+  {
+    slug: "refresh-sales-dashboard",
+    label: "Sales dashboard refresh",
+    description: "Prepares all five sales periods so opening the dashboard does not download Shopify history.",
+    kind: "sync",
+    result: "Complete sales dashboard with a visible update time",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes",
+    scheduleDetail: "Keeps the previous complete update if a source is unavailable",
+  },
+  {
     slug: "process-outreach",
     label: "Outreach lead intake",
     description: "Processes Instantly replies and interested lead handoffs.",

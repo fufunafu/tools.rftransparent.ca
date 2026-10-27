@@ -27,7 +27,7 @@ export default async function MorePage() {
     <div className="mx-auto max-w-md">
       <h1 className="mb-4 text-2xl font-bold tracking-tight text-slate-900">More</h1>
       <MoreScreen
-        viewerAccess={{ isAdmin, isManagement }}
+        viewerAccess={{ isAdmin, isManagement, canAccessCrm: isManagement || employee?.department === "sales" || employee?.department === "customer_service" }}
         viewerName={employee?.name ?? metadataName}
         viewerEmail={user.email ?? ""}
         viewerDepartment={employee?.department ?? null}

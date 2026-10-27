@@ -1,0 +1,22 @@
+{
+  "status": "candidate-ready",
+  "sourceProduction": "dpl_Hd74UqXAEtPJ7NwqorHAtkE9ymky",
+  "deploymentId": "dpl_7JAuxFMdDoL64gThanVf7WmqppCm",
+  "checks": {
+    "fullSuitePassed": 1308,
+    "additionalStrictGraphqlRegressionPassed": 1,
+    "lint": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "preservationFiles": 36
+  },
+  "dataBenchmark": {
+    "comparedCells": 50,
+    "allDialogTotalsMatched": true,
+    "customerNameSearchVerified": true
+  },
+  "migration": "20261027024500_sales_shopify_mirror",
+  "migrationApplied": true,
+  "migrationRlsVerified": true,
+  "customerRecordsIncluded": false
+}

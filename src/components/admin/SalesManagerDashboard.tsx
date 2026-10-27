@@ -19,19 +19,30 @@ export default function SalesManagerDashboard({
   performers,
   followup,
   today,
+  asOf,
+  delayed = false,
 }: {
   sales: Result<SalesByStore>;
   customerService: Result<CustomerServiceOps>;
   performers: Result<SalesTeamOverview>;
   followup: Result<FollowupOverview>;
   today: string;
+  asOf?: string;
+  delayed?: boolean;
 }) {
+  const updated = asOf ? new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  }).format(new Date(asOf)) : null;
   return (
     <DashboardPane>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Sales Manager</h2>
           <p className="text-[12.5px] text-slate-500 mt-0.5">{today} · all stores</p>
+          {updated && <p className={`text-xs mt-1 ${delayed ? "text-amber-700" : "text-slate-500"}`}>
+            Sales data as of {updated} Toronto time. Updates every 5 minutes.
+            {delayed && " The latest refresh is delayed. Showing the last complete update."}
+          </p>}
         </div>
         <DashboardSwitcher current="/dashboards/sales" />
       </div>

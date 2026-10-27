@@ -1,3 +1,4 @@
+import { loadSalesMirror } from "@/lib/sales-shopify-mirror";
 import { getSupabase } from "@/lib/supabase";
 import { PERFORMER_ORDERS_QUERY, PERFORMER_DRAFTS_QUERY } from "@/lib/dashboard-sales-records";
 import {
@@ -263,7 +264,7 @@ async function computeSalesByStore(): Promise<SalesByStore> {
   return { stores, failedStores, warnings, cachedAt: null };
 }
 
-export async function getSalesByStore(): Promise<Result<SalesByStore>> {
+export async function getSalesByStore(options?: { forceRefresh?: boolean }): Promise<Result<SalesByStore>> {
   try {
     if (getStores().length === 0) {
       return { ok: false, error: "No Shopify stores are configured." };
@@ -272,7 +273,7 @@ export async function getSalesByStore(): Promise<Result<SalesByStore>> {
     // totals as today's.
     const dayKey = businessDayKey(new Date().toISOString());
     const [{ data, cachedAt }, targets] = await Promise.all([
-      cached(`ops:sales:v2:${dayKey}`, SALES_TTL_MS, computeSalesByStore),
+      cached(`ops:sales:v2:${dayKey}`, SALES_TTL_MS, computeSalesByStore, options),
       // Read OUTSIDE the cache and merged in here. Targets are one cheap
       // settings row, and burying them in the 5-minute Shopify cache meant
       // editing a target appeared to do nothing until the cache expired.
@@ -717,7 +718,7 @@ async function fetchAllRows<T>(
   return all;
 }
 
-export async function getCustomerServiceOps(scope?: StoreScope): Promise<Result<CustomerServiceOps>> {
+export async function getCustomerServiceOps(scope?: StoreScope, options?: { forceRefresh?: boolean }): Promise<Result<CustomerServiceOps>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     // Scope lands in the cache key so Toronto's numbers can never be served
@@ -725,7 +726,8 @@ export async function getCustomerServiceOps(scope?: StoreScope): Promise<Result<
     const { data, cachedAt } = await cached(
       `ops:cs:v2:${dayKey}:${scope?.slug ?? "all"}`,
       OPS_TTL_MS,
-      () => computeCustomerServiceOps(scope)
+      () => computeCustomerServiceOps(scope),
+      options,
     );
     return ok({ ...data, cachedAt });
   } catch (err) {
@@ -869,16 +871,17 @@ export interface SalesTeamOverview {
 }
 
 /** Download the longest history once, then calculate every visible column in memory. */
-export async function getSalesTeamOverview(): Promise<Result<SalesTeamOverview>> {
+export async function getSalesTeamOverview(options?: { forceRefresh?: boolean; fromMirror?: boolean }): Promise<Result<SalesTeamOverview>> {
   try {
     const dayKey = businessDayKey(new Date().toISOString());
     const { data, cachedAt } = await cached(
       `ops:sales-team:v8:${dayKey}`,
       OPS_TTL_MS,
       async () => {
-        const result = await computeTopPerformers("1y", true);
+        const result = await computeTopPerformers("1y", true, options?.fromMirror);
         return { periods: result.salesByPeriod, warnings: result.warnings };
       },
+      options,
     );
     return ok({ ...data, cachedAt });
   } catch (err) {
@@ -886,7 +889,7 @@ export async function getSalesTeamOverview(): Promise<Result<SalesTeamOverview>>
   }
 }
 
-async function computeTopPerformers(salesPeriod: SalesPeriod, allSalesPeriods = false): Promise<TopPerformers & { salesByPeriod: Record<SalesPeriod, Performer[]> }> {
+async function computeTopPerformers(salesPeriod: SalesPeriod, allSalesPeriods = false, fromMirror = false): Promise<TopPerformers & { salesByPeriod: Record<SalesPeriod, Performer[]> }> {
   {
     const now = new Date();
     const start30 = startOfDayInTimeZone(now, BUSINESS_TIMEZONE, -29);
@@ -921,14 +924,14 @@ async function computeTopPerformers(salesPeriod: SalesPeriod, allSalesPeriods = 
     const [orderResults, draftResults, warehouseRows, followupLogs] = await Promise.all([
       Promise.allSettled(
         stores.map((s) =>
-          fetchAllPages<DashboardSalesOrder, { orders: { edges: { node: DashboardSalesOrder; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+          fromMirror ? loadSalesMirror<DashboardSalesOrder>(s.id, "order", previousSalesStart) : fetchAllPages<DashboardSalesOrder, { orders: { edges: { node: DashboardSalesOrder; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
             { storeId: s.id, query: PERFORMER_ORDERS_QUERY, variables: { filter: dashboardSalesSearchFilter(s.id, reps, orderFilter) }, getConnection: (d) => d.orders, maxPages: 2000 }
           )
         )
       ),
       Promise.allSettled(
         stores.map((s) =>
-          fetchAllPages<TaggedDraft, { draftOrders: { edges: { node: TaggedDraft; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
+          fromMirror ? loadSalesMirror<TaggedDraft>(s.id, "draft", salesStart) : fetchAllPages<TaggedDraft, { draftOrders: { edges: { node: TaggedDraft; cursor: string }[]; pageInfo: { hasNextPage: boolean } } }>(
             { storeId: s.id, query: PERFORMER_DRAFTS_QUERY, variables: { filter: dashboardSalesSearchFilter(s.id, reps, filter) }, getConnection: (d) => d.draftOrders, maxPages: 200 }
           )
         )

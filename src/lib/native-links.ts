@@ -12,6 +12,7 @@ const EXACT_DESTINATIONS = new Set([
   "/customer-service/problems",
   "/sales",
   "/field-sales",
+  "/hubspot-dupe",
   "/dashboards/marketing",
   "/employees",
   "/warehouse",
