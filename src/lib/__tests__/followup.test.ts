@@ -109,6 +109,7 @@ import {
   getFollowupDaysForStore,
   FOLLOWUP_CATEGORIES,
   DEFAULT_FOLLOWUP_DAYS,
+  followupRowUnchanged,
 } from "@/lib/followup";
 import { shopifyGraphQL } from "@/lib/shopify";
 
@@ -558,5 +559,90 @@ describe("syncDraftOrdersForStore (incremental)", () => {
     for (const call of mockShopifyGraphQL.mock.calls) {
       expect(String(call[1])).toContain("updated_at:>=");
     }
+  });
+});
+
+// A stored row as Postgres returns it for makeDraft()'s defaults: numeric as a
+// string and timestamptz with an explicit offset.
+function storedCopyOf(draft: Draft, over: Partial<Row> = {}): Row {
+  return existingLead({
+    shopify_draft_id: draft.id,
+    id: "L1",
+    draft_name: draft.name,
+    customer_name: "Jane Customer",
+    customer_email: "jane@example.com",
+    customer_phone: null,
+    quote_amount: "100.00",
+    shopify_created_at: "2026-07-01T12:00:00+00:00",
+    created_by_staff: null,
+    customer_orders_count: 1,
+    last_invoice_sender: null,
+    contributors: [],
+    ...over,
+  });
+}
+
+describe("syncDraftOrdersForStore (incremental, unchanged rows)", () => {
+  it("skips rewriting a lead whose fields already match Shopify", async () => {
+    const draft = makeDraft();
+    db.leadRows = [storedCopyOf(draft)];
+    setShopifyDrafts([draft], []);
+
+    const result = await syncDraftOrdersForStore("store1", { incremental: true });
+
+    expect(db.updates).toHaveLength(0);
+    expect(result.updated_leads).toBe(0);
+  });
+
+  it("still writes a lead when a field changed", async () => {
+    const draft = makeDraft({ amount: "250.00" });
+    db.leadRows = [storedCopyOf(draft)];
+    setShopifyDrafts([draft], []);
+
+    const result = await syncDraftOrdersForStore("store1", { incremental: true });
+
+    expect(result.updated_leads).toBe(1);
+    expect(db.updates.find((u) => u.id === "L1")!.values).toMatchObject({ quote_amount: 250 });
+  });
+
+  it("skips the backfill for an already-won completed draft with no changes", async () => {
+    const draft = makeDraft({ status: "COMPLETED" });
+    db.leadRows = [storedCopyOf(draft, { lead_status: "won", shopify_status: "COMPLETED" })];
+    setShopifyDrafts([], [draft]);
+
+    await syncDraftOrdersForStore("store1", { incremental: true });
+
+    expect(db.updates).toHaveLength(0);
+  });
+
+  it("keeps rewriting every row on a full sync", async () => {
+    const draft = makeDraft();
+    db.leadRows = [storedCopyOf(draft)];
+    setShopifyDrafts([draft], []);
+
+    const result = await syncDraftOrdersForStore("store1");
+
+    expect(result.updated_leads).toBe(1);
+  });
+});
+
+describe("followupRowUnchanged", () => {
+  it("treats Postgres and Shopify spellings of the same value as equal", () => {
+    expect(followupRowUnchanged(
+      { quote_amount: "100.00", shopify_created_at: "2026-07-01T12:00:00+00:00", customer_phone: null, contributors: ["A", "B"] },
+      { quote_amount: 100, shopify_created_at: "2026-07-01T12:00:00Z", customer_phone: undefined, contributors: ["A", "B"] },
+    )).toBe(true);
+  });
+
+  it("notices real differences", () => {
+    expect(followupRowUnchanged({ contributors: ["A"] }, { contributors: ["A", "B"] })).toBe(false);
+    expect(followupRowUnchanged({ customer_email: null }, { customer_email: "x@example.com" })).toBe(false);
+    expect(followupRowUnchanged({ draft_name: "#D1" }, { draft_name: "#D2" })).toBe(false);
+    expect(followupRowUnchanged({ quote_amount: "100.00" }, { quote_amount: 100.5 })).toBe(false);
+    expect(followupRowUnchanged({ shopify_created_at: "2026-07-01T12:00:00+00:00" }, { shopify_created_at: "2026-07-02T12:00:00Z" })).toBe(false);
+  });
+
+  it("treats a column the row never loaded as changed", () => {
+    expect(followupRowUnchanged({}, { created_by_staff: "Carol Jones" })).toBe(false);
   });
 });

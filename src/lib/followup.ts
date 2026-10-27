@@ -235,6 +235,32 @@ function extractContributors(draft: ShopifyDraftNode): {
 
 const MAX_PAGES = 80;
 
+// Columns the live sync compares before rewriting a row. Every 30s tick sees
+// each draft edited in the last 10 minutes, and rewriting identical rows made
+// followup_leads updates the busiest write in the database.
+const LIVE_COMPARE_COLUMNS =
+  "draft_name, customer_name, customer_email, customer_phone, quote_amount, shopify_created_at, created_by_staff, customer_orders_count, last_invoice_sender, contributors";
+
+function sameStoredValue(stored: unknown, next: unknown): boolean {
+  if (stored == null || next == null) return stored == null && next == null;
+  if (typeof next === "number") return Number(stored) === next;
+  if (Array.isArray(next)) return JSON.stringify(stored) === JSON.stringify(next);
+  if (typeof stored === "string" && typeof next === "string" && stored !== next) {
+    // Postgres returns timestamptz as "…+00:00"; Shopify sends "…Z".
+    const a = Date.parse(stored);
+    return /^\d{4}-\d{2}-\d{2}T/.test(next) && !Number.isNaN(a) && a === Date.parse(next);
+  }
+  return stored === next;
+}
+
+/** True when every field in `next` already matches the stored row. */
+export function followupRowUnchanged(
+  stored: Record<string, unknown>,
+  next: Record<string, unknown>,
+): boolean {
+  return Object.entries(next).every(([key, value]) => sameStoredValue(stored[key], value));
+}
+
 async function fetchDraftsForSync(
   storeId: string,
   fromDate: string,
@@ -361,7 +387,8 @@ export async function syncDraftOrdersForStore(
   // 2. Get existing leads. Full sync loads every row for the store (needed for
   //    stale detection); incremental loads only the rows matching the drafts we
   //    just fetched, which is far cheaper.
-  const existingLeads: { id: string; shopify_draft_id: string; lead_status: string; shopify_status: string }[] = [];
+  type ExistingLead = { id: string; shopify_draft_id: string; lead_status: string; shopify_status: string } & Record<string, unknown>;
+  const existingLeads: ExistingLead[] = [];
   if (incremental) {
     // The completed-drafts pass (step 4) needs the matching rows too, so load
     // for both the invoice_sent and completed draft IDs.
@@ -371,10 +398,10 @@ export async function syncDraftOrdersForStore(
     for (let i = 0; i < wantedIds.length; i += PAGE) {
       const { data } = await supabase
         .from("followup_leads")
-        .select("id, shopify_draft_id, lead_status, shopify_status")
+        .select(`id, shopify_draft_id, lead_status, shopify_status, ${LIVE_COMPARE_COLUMNS}`)
         .eq("store_id", storeId)
         .in("shopify_draft_id", wantedIds.slice(i, i + PAGE));
-      if (data) existingLeads.push(...data);
+      if (data) existingLeads.push(...(data as ExistingLead[]));
     }
   } else {
     // Paginate in 1000-row pages to bypass PostgREST's server-side db-max-rows
@@ -395,7 +422,7 @@ export async function syncDraftOrdersForStore(
   }
 
   const existingByDraftId = new Map(
-    (existingLeads ?? []).map((l: { shopify_draft_id: string; id: string; lead_status: string; shopify_status: string }) => [l.shopify_draft_id, l])
+    existingLeads.map((l) => [l.shopify_draft_id, l])
   );
 
   // 3. Separate new leads from updates, then batch/parallelize
@@ -494,21 +521,25 @@ export async function syncDraftOrdersForStore(
         })
       );
     } else if (existing) {
+      const fields = {
+        draft_name: draft.name,
+        customer_name: draft.customer?.displayName || null,
+        customer_email: draft.customer?.email || null,
+        customer_phone: draft.customer?.phone || null,
+        quote_amount: amount,
+        shopify_created_at: draft.createdAt,
+        shopify_status: draft.status,
+        created_by_staff: createdBy,
+        customer_orders_count: ordersCount,
+        last_invoice_sender: contrib.lastInvoiceSender,
+        contributors: contrib.contributors,
+      };
+      if (incremental && followupRowUnchanged(existing, fields)) continue;
       updateFns.push(() =>
         supabase.from("followup_leads").update({
-          draft_name: draft.name,
-          customer_name: draft.customer?.displayName || null,
-          customer_email: draft.customer?.email || null,
-          customer_phone: draft.customer?.phone || null,
-          quote_amount: amount,
-          shopify_created_at: draft.createdAt,
-          shopify_status: draft.status,
+          ...fields,
           last_synced_at: now,
           updated_at: now,
-          created_by_staff: createdBy,
-          customer_orders_count: ordersCount,
-          last_invoice_sender: contrib.lastInvoiceSender,
-          contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `update lead ${existing.id}`, error);
           else result.updated_leads++;
@@ -612,13 +643,17 @@ export async function syncDraftOrdersForStore(
       });
     } else {
       // Already won/lost — backfill creator/contributors + last_synced_at without touching status.
+      const fields = {
+        created_by_staff: createdBy,
+        customer_orders_count: ordersCount,
+        last_invoice_sender: contrib.lastInvoiceSender,
+        contributors: contrib.contributors,
+      };
+      if (incremental && followupRowUnchanged(existing, fields)) continue;
       completedUpdateFns.push(() =>
         supabase.from("followup_leads").update({
-          created_by_staff: createdBy,
-          customer_orders_count: ordersCount,
+          ...fields,
           last_synced_at: now,
-          last_invoice_sender: contrib.lastInvoiceSender,
-          contributors: contrib.contributors,
         }).eq("id", existing.id).then(({ error }) => {
           if (error) recordError(result, `backfill lead ${existing.id}`, error);
           else result.updated_leads++;
