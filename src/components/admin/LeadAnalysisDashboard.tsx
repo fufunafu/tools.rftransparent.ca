@@ -26,7 +26,7 @@ import {
 } from "@/lib/lead-analytics";
 import {
   buildLeadPerformanceTrend,
-  buildThreeDayQuoteTrend,
+  buildRollingQuoteTrend,
   type LeadPerformanceMetricKey,
   type LeadPerformanceTrendPoint,
 } from "@/lib/lead-performance-trends";
@@ -82,9 +82,14 @@ const PERFORMANCE_CHARTS: Array<{
     description: "Share of included leads that became an order. Higher is better.",
   },
   {
+    metric: "quoteConversionRate",
+    title: "Quote-to-order conversion",
+    description: "Quoted leads that became orders, grouped by when the lead arrived. Each lead counts once, including revised quotes. Recent cohorts can still convert.",
+  },
+  {
     metric: "medianQuoteMs",
-    title: "Time to quote · 3-day rolling median",
-    description: "Typical elapsed time to first quote, combining leads received across three calendar days. Lower is better.",
+    title: "Time to quote · 7-day rolling median",
+    description: "Typical elapsed time to first quote, combining leads received across seven calendar days. Lower is better.",
   },
 ];
 
@@ -325,6 +330,7 @@ function metricDisplay(
   if (metric === "sameDayCallRate") return source.sameDayCallRate == null ? "No data" : `${source.sameDayCallRate}%`;
   if (metric === "callRate") return source.callEligible ? `${source.callRate}%` : "No data";
   if (metric === "quoteRate") return source.total ? `${source.quoteRate}%` : "No data";
+  if (metric === "quoteConversionRate") return source.quoteConversionRate == null ? "No data" : `${source.quoteConversionRate}%`;
   if (metric === "conversionRate") return source.total ? `${source.conversionRate}%` : "No data";
   return formatLeadResponseTime(source[metric]);
 }
@@ -354,7 +360,7 @@ function MetricChartCard({
   loading?: boolean;
   error?: string | null;
 }) {
-  const rateMetric = metric === "sameDayCallRate" || metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
+  const rateMetric = metric === "sameDayCallRate" || metric === "callRate" || metric === "quoteRate" || metric === "conversionRate" || metric === "quoteConversionRate";
   return (
     <article className="overflow-hidden rounded-xl border border-sand-200 bg-white shadow-sm shadow-slate-200/30">
       <header className="flex flex-col gap-3 border-b border-sand-100 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
@@ -367,10 +373,10 @@ function MetricChartCard({
           {summary && <div className="flex flex-wrap gap-x-3 gap-y-1">
             {(["website", "meta", "outreach"] as const).filter(source => ({ website: showWebsite, meta: showMeta, outreach: showOutreach })[source]).map(source => <div key={source} className={source === "website" ? "text-blue-700" : source === "meta" ? "text-pink-700" : "text-violet-700"}>
               <span>{source === "website" ? "Website" : source === "meta" ? "Meta" : "Outreach"}: </span><strong>{metricDisplay(metric, summary[source])}</strong>
-              {rateMetric && <span className="ml-1 text-[10px] text-sand-500">({metric === "sameDayCallRate" ? `${summary[source].businessDayCalls.dueOnTime}/${summary[source].businessDayCalls.due} due` : metric === "conversionRate" ? `${summary[source].won}/${summary[source].total} won` : `${summary[source].quoted}/${summary[source].total} quoted`})</span>}
+              {rateMetric && <span className="ml-1 text-[10px] text-sand-500">({metric === "sameDayCallRate" ? `${summary[source].businessDayCalls.dueOnTime}/${summary[source].businessDayCalls.due} due` : metric === "quoteConversionRate" ? `${summary[source].quotedWon}/${summary[source].quoted} quoted leads became orders` : metric === "conversionRate" ? `${summary[source].won}/${summary[source].total} won` : `${summary[source].quoted}/${summary[source].total} quoted`})</span>}
             </div>)}
           </div>}
-          <p className="mt-2 text-[10px] text-sand-500">{rateMetric ? `Lines: ${rollingWindow.label} rates` : "Lines: 3-day rolling median"}</p>
+          <p className="mt-2 text-[10px] text-sand-500">{rateMetric ? `Lines: ${rollingWindow.label} rates` : "Lines: 7-day rolling median"}</p>
         </div>
       </header>
       <div className="h-64 px-2 pb-3 pt-4 sm:h-72 sm:px-4">
@@ -501,7 +507,7 @@ export default function LeadAnalysisDashboard({
     [leads, trend.points, currentTime],
   );
   const quotePerformanceTrend = useMemo(
-    () => buildThreeDayQuoteTrend(leads, trend.points, currentTime),
+    () => buildRollingQuoteTrend(leads, trend.points, currentTime),
     [leads, trend.points, currentTime],
   );
   const callPerformanceTrend = useMemo(
@@ -794,7 +800,7 @@ export default function LeadAnalysisDashboard({
             <p className="font-semibold text-sand-700">How to read these charts</p>
             <p className="mt-1">
               Rate charts use rolling windows to reduce noise from small daily samples. At the start of a chart,
-              each rate uses the days available so far, then settles into the full rolling window. Header totals cover the whole selected period. Same-business-day call rates exclude leads whose deadlines have not passed and calls with unknown timing. Quote response times use a 3-day rolling median of individual response times, including nights and weekends. The first two points use the available selected days.
+              each rate uses the days available so far, then settles into the full rolling window. Header totals cover the whole selected period. Same-business-day call rates exclude leads whose deadlines have not passed and calls with unknown timing. Quote response times use a 7-day rolling median of individual response times, including nights and weekends. The first six points use the available selected days.
               Recent lead cohorts can improve as calls, quotes, and orders are completed.
             </p>
           </section>
