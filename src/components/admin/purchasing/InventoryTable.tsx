@@ -24,6 +24,8 @@ import RecentActivityPanel from "./RecentActivityPanel";
 import BulkUploadPreviewDialog, { type BulkChange } from "./BulkUploadPreviewDialog";
 import ColumnHint from "./ColumnHint";
 import { formatCADWhole } from "@/lib/format";
+import PurchasingPageHeader from "./PurchasingPageHeader";
+import ProductFilters from "./ProductFilters";
 
 type BulkResult = {
   applied: number;
@@ -71,7 +73,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   );
   const products = data?.products ?? initialProducts;
 
-  const [category, setCategory] = useState<Category>("glass");
+  const [category, setCategory] = useState<Category | "all">("all");
   const [height, setHeight] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sort_order");
@@ -88,6 +90,8 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showSalesDetail, setShowSalesDetail] = useState(false);
   const [showPricingDetail, setShowPricingDetail] = useState(false);
+  const [showPlanningDetail, setShowPlanningDetail] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const heightBuckets = useMemo(() => {
@@ -99,7 +103,9 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = products.filter((p) => {
-      if (p.category !== category) return false;
+      if (category !== "all" && p.category !== category) return false;
+      if (statusFilter === "attention" && !["reorder", "montreal_transfer", "reorder_plus_montreal"].includes(p.sop_label)) return false;
+      if (statusFilter !== "all" && statusFilter !== "attention" && p.sop_label !== statusFilter) return false;
       if (height !== "all" && heightBucket(p.height) !== height) return false;
       if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
       return true;
@@ -114,7 +120,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
       return sortDir === "asc" ? aNum - bNum : bNum - aNum;
     });
     return rows;
-  }, [products, category, height, search, sortKey, sortDir]);
+  }, [products, category, height, search, sortKey, sortDir, statusFilter]);
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -208,8 +214,11 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   }
 
   async function saveField(id: string, field: keyof ProductWithMetrics, rawValue: string) {
-    const numeric = parseFloat(rawValue);
-    const value = Number.isFinite(numeric) ? numeric : 0;
+    const value = Number(rawValue);
+    if (rawValue.trim() === "" || !Number.isFinite(value) || value < 0) {
+      setError("Enter a valid quantity of zero or more. The previous stock count has been kept.");
+      return;
+    }
     setSavingId(id); setError(null);
     try {
       const res = await fetch("/api/purchasing/products", {
@@ -228,39 +237,43 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["glass", "hardware"] as const).map((c) => (
-            <button key={c} onClick={() => setCategory(c)}
-              className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>{c}</button>
-          ))}
-        </div>
-        <select value={height} onChange={(e) => setHeight(e.target.value)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 bg-white">
-          <option value="all">All heights</option>
-          {heightBuckets.map((h) => <option key={h} value={h}>{h}</option>)}
-        </select>
-        <input type="text" placeholder="Search SKU or name" value={search} onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 flex-1 min-w-[200px]" />
-        <div className="flex items-center gap-2 ml-auto">
-          {sortKey !== "sort_order" && (
-            <button type="button" onClick={resetSort} className="text-xs text-accent hover:underline">Reset sort</button>
-          )}
+      <PurchasingPageHeader title="Stock overview" description="See what is available, what is arriving, and which products need attention. Select a product to inspect its forecast." actions={<>
           <button type="button" onClick={() => setShowAddDialog(true)}
-            className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:bg-accent/90">+ New product</button>
+            className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm font-medium hover:bg-sand-50">Add product</button>
+          <Link href="/warehouse/purchasing/reorder" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90">Plan an order</Link>
+        </>} />
+      <div className="space-y-3 rounded-xl border border-sand-200 bg-white p-3 sm:p-4">
+        <ProductFilters category={category} onCategory={value => { setCategory(value); setHeight("all"); }} search={search} onSearch={setSearch}>
+          {category !== "hardware" && <select aria-label="Glass height" value={height} onChange={(e) => setHeight(e.target.value)} className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm">
+            <option value="all">All heights</option>
+            {heightBuckets.filter(h => h !== "-").map((h) => <option key={h} value={h}>{h}</option>)}
+          </select>}
+          <select aria-label="Stock status" value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm">
+            <option value="all">All stock statuses</option><option value="attention">Needs attention</option><option value="ok">Stock OK</option><option value="no_sales_data">No sales data</option>
+          </select>
+        </ProductFilters>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 border-t border-sand-100 pt-3">
+          <div className="flex flex-wrap items-center gap-4 text-xs text-sand-600">
+            <span className="font-medium text-sand-900">{visible.length} of {products.length} products</span>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={showPlanningDetail} onChange={e => setShowPlanningDetail(e.target.checked)} /> Planning details</label>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={showSalesDetail} onChange={e => setShowSalesDetail(e.target.checked)} /> Sales by store</label>
+            <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={showPricingDetail} onChange={e => setShowPricingDetail(e.target.checked)} /> Costs</label>
+            {sortKey !== "sort_order" && <button type="button" onClick={resetSort} className="text-accent hover:underline">Reset sort</button>}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
           <button type="button" onClick={downloadTemplate}
-            className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 bg-white hover:bg-sand-50">Download CSV</button>
+            className="text-xs font-medium text-sand-600 hover:text-accent">Download stock CSV</button>
           <button type="button" onClick={() => fileInputRef.current?.click()} disabled={bulkBusy}
-            className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 bg-white hover:bg-sand-50 disabled:opacity-50">
-            {bulkBusy ? "Uploading…" : "Upload CSV"}
+            className="text-xs font-medium text-accent hover:underline disabled:opacity-50">
+            {bulkBusy ? "Reading CSV…" : "Import stock counts"}
           </button>
           <input ref={fileInputRef} type="file" accept=".csv,text/csv" className="hidden"
             onChange={(e) => { const f = e.target.files?.[0]; if (f) handleUpload(f); }} />
-          <div className="text-xs text-sand-500 pl-2 border-l border-sand-200">{visible.length} of {products.length}</div>
+          </div>
         </div>
       </div>
 
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
+      {error && <div role="alert" className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
 
       {bulkResult && (
         <div className="bg-blue-50 border border-blue-200 text-blue-900 text-sm rounded-lg px-3 py-2 flex items-start gap-3">
@@ -286,8 +299,9 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
-        <table className="w-full text-sm tabular-nums">
+      <div className="max-h-[65vh] overflow-auto rounded-xl border border-sand-200 bg-white">
+        <table className="w-full min-w-[320px] text-sm tabular-nums md:min-w-[700px]">
+          <caption className="sr-only">Stock overview with seasonal monthly demand. Product names open stock forecasts.</caption>
           <thead className="sticky top-0 z-20 bg-sand-50 text-sand-500 text-[11px] uppercase tracking-wider">
             <tr>
               <Th sortable sortKey="sku" current={sortKey} dir={sortDir} onToggle={toggleSort}>
@@ -300,9 +314,9 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
               <Th sortable sortKey="inbound" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Inbound<ColumnHint>Units already ordered but not yet received. Computed live as <span className="font-mono">SUM(qty_ordered − qty_received)</span> across every PO whose status is <em>Ordered</em> or <em>In transit</em>.</ColumnHint></span>
               </Th>
-              <Th sortable sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
+              {showPlanningDetail && (<Th sortable sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: auto-derived target = <span className="font-mono">max(50, 3 × monthly × growth)</span> - three months of cover at the current month&apos;s sales rate, with a 50-unit floor for SKUs with no sales data. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
-              </Th>
+              </Th>)}
               {showSalesDetail && (
                 <>
                   <th className="text-right px-3 py-2 font-medium">
@@ -317,23 +331,19 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center gap-1">
                   Monthly
                   <ColumnHint>Annual net units from RF + GRS ÷ 12 × this month&apos;s seasonality multiplier. Click a value to inspect the annual baseline and actual monthly history. Growth settings apply separately to stock projections.</ColumnHint>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); setShowSalesDetail((v) => !v); }}
-                    title={showSalesDetail ? "Hide GRS/RF" : "Show GRS/RF"}
-                    className="text-sand-400 hover:text-accent text-[10px]">
-                    {showSalesDetail ? "◀" : "▶"}
-                  </button>
+
                 </span>
               </Th>
               <Th sortable sortKey="days_of_stock_left" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Days (on hand)<ColumnHint>How many days you can keep selling using only what&apos;s in the warehouse: <span className="font-mono">on_hand / (monthly / 30)</span>. Doesn&apos;t account for inbound.</ColumnHint></span>
+                <span className="inline-flex items-center">Days of stock<ColumnHint>How many days you can keep selling using only what&apos;s in the warehouse: <span className="font-mono">on_hand / (monthly / 30)</span>. Doesn&apos;t account for inbound.</ColumnHint></span>
               </Th>
-              <Th sortable sortKey="days_of_stock_with_inbound" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
+              {showPlanningDetail && (<Th sortable sortKey="days_of_stock_with_inbound" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Days (w/ inbound)<ColumnHint>Days of coverage if every inbound PO landed today: <span className="font-mono">(on_hand + inbound) / (monthly / 30)</span>. Click 📈 for real per-ETA projection.</ColumnHint></span>
-              </Th>
-              <Th sortable sortKey="reorder_point" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
+              </Th>)}
+              {showPlanningDetail && (<Th sortable sortKey="reorder_point" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Reorder pt<ColumnHint>The total-stock level (on hand + inbound) at which a new order should be placed: <span className="font-mono">target_at_arrival + lead_time_sales</span>. The target is the higher of the Expected-fill floor or the Target-at-arrival cover (% of a lead time of sales, see Settings), capped at capacity. Drops below this → status flips to Reorder.</ColumnHint></span>
-              </Th>
-              <th className="text-left px-3 py-2 font-medium">
+              </Th>)}
+              <th className="hidden text-left px-3 py-2 font-medium md:table-cell">
                 <span className="inline-flex items-center gap-1">Status<ColumnHint>
                   <span className="block"><strong>Reorder + Montreal transfer</strong> - on hand runs out before the next PO arrives AND total stock (on hand + inbound) is below the reorder point. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
                   <span className="block mt-1"><strong>Montreal transfer</strong> - on hand runs out before the next PO arrives, but total stock is still above the reorder point. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
@@ -341,11 +351,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                   <span className="block mt-1"><strong>OK</strong> - sufficient cover and inbound timing is safe.</span>
                   <span className="block mt-1"><strong>No sales data</strong> - monthly sales is 0.</span>
                 </ColumnHint>
-                <button type="button" onClick={(e) => { e.stopPropagation(); setShowPricingDetail((v) => !v); }}
-                  title={showPricingDetail ? "Hide Value / Unit cost" : "Show Value / Unit cost"}
-                  className="text-sand-400 hover:text-accent text-[10px]">
-                  {showPricingDetail ? "◀" : "▶"}
-                </button>
+
                 </span>
               </th>
               {showPricingDetail && (
@@ -358,17 +364,17 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                   </th>
                 </>
               )}
-              <th className="px-2 py-2"></th>
+
             </tr>
           </thead>
           <tbody className="divide-y divide-sand-100">
             {visible.map((p) => (
-              <tr key={p.id} className={savingId === p.id ? "bg-amber-50/40" : ""}>
-                <td className="sticky left-0 z-10 min-w-48 bg-white px-3 py-2"><span className="block font-mono text-xs font-medium">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-500">{p.name.replaceAll("\u2014", "-")}</span></td>
-                <EditableCell value={p.current_inventory}
+              <tr key={p.id} className={savingId === p.id ? "bg-amber-50/40" : "hover:bg-sand-50/60"}>
+                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3"><button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View forecast for ${p.sku}`} className="text-left hover:text-accent"><span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span></button><span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span></td>
+                <EditableCell sku={p.sku} value={p.current_inventory}
                   onSave={(v) => saveField(p.id, "current_inventory", v)} saving={savingId === p.id} />
-                <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "-"}</td>
-                <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.storage_capacity, 0)}</td>
+                <td className="hidden px-3 py-2 text-right text-sand-500 md:table-cell">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "-"}</td>
+                {showPlanningDetail && <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.storage_capacity, 0)}</td>}
                 {showSalesDetail && (
                   <>
                     <td className="px-3 py-2 text-right text-sand-700">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs, settings), 2)}</td>
@@ -376,12 +382,12 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                   </>
                 )}
                 <td className="px-3 py-2 text-right text-sand-500"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="text-accent hover:underline">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</Link></td>
-                <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.days_of_stock_left, 0)}</td>
-                <td className={"px-3 py-2 text-right " + (p.inbound > 0 ? "text-sand-900 font-medium" : "text-sand-500")}>
+                <td className="hidden px-3 py-2 text-right text-sand-700 md:table-cell">{fmtNum(p.days_of_stock_left, 0)}</td>
+                {showPlanningDetail && (<td className={"px-3 py-2 text-right " + (p.inbound > 0 ? "text-sand-900 font-medium" : "text-sand-500")}>
                   {fmtNum(p.days_of_stock_with_inbound, 0)}
-                </td>
-                <td className="px-3 py-2 text-right text-sand-500">{fmtNum(p.reorder_point, 0)}</td>
-                <td className="px-3 py-2">
+                </td>)}
+                {showPlanningDetail && <td className="px-3 py-2 text-right text-sand-500">{fmtNum(p.reorder_point, 0)}</td>}
+                <td className="hidden px-3 py-2 md:table-cell">
                   <span className={"inline-block px-2 py-0.5 rounded-md border text-[11px] " + (SOP_BADGE[p.sop_label] ?? "bg-sand-100 text-sand-600 border-sand-200")}>
                     {SOP_LABEL_DISPLAY[p.sop_label] ?? p.sop_label}
                   </span>
@@ -392,15 +398,12 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                     <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.unit_cost_landed, 2)}</td>
                   </>
                 )}
-                <td className="px-2 py-2 text-right">
-                  <button type="button" onClick={() => setForecastSku(p.id)} title="Forecast"
-                    className="text-sand-400 hover:text-accent text-sm">📈</button>
-                </td>
+
               </tr>
             ))}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={10 + (showSalesDetail ? 2 : 0) + (showPricingDetail ? 2 : 0)} className="px-3 py-10 text-center text-sand-500">
+                <td colSpan={6 + (showPlanningDetail ? 3 : 0) + (showSalesDetail ? 2 : 0) + (showPricingDetail ? 2 : 0)} className="px-3 py-10 text-center text-sand-500">
                   No products match these filters.
                 </td>
               </tr>
@@ -410,8 +413,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
       </div>
 
       <p className="text-xs text-sand-500">
-        Click the blue &ldquo;On hand&rdquo; number to edit. Inbound is computed live from open POs. Click 📈 for a per-SKU
-        stockout forecast. For bulk edits, use Download CSV → edit in Excel → Upload CSV.
+        Click an on-hand count to edit it, or a product to view its forecast. Monthly demand is annual sales ÷ 12 × seasonality. Stock coverage also includes your growth assumption.
       </p>
 
       {forecastSku && (() => {
@@ -435,7 +437,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
           applying={bulkBusy} onCancel={cancelPendingUpload} onConfirm={applyPendingUpload} />
       )}
 
-      <RecentActivityPanel />
+      <details className="rounded-xl border border-sand-200 bg-white p-4"><summary className="cursor-pointer text-sm font-medium text-sand-700">Recent inventory activity</summary><div className="mt-3"><RecentActivityPanel /></div></details>
     </div>
   );
 }
@@ -450,7 +452,7 @@ function Th({ children, sortable, sortKey, current, dir, onToggle, align = "left
   }
   const active = current === sortKey;
   return (
-    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-2 font-medium" + (sortKey === "sku" ? " sticky left-0 z-30 min-w-48 bg-sand-50" : "")}>
+    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-2 font-medium" + (sortKey === "sku" ? " sticky left-0 z-30 min-w-36 bg-sand-50 md:min-w-48" : "") + (["inbound", "days_of_stock_left"].includes(sortKey) ? " hidden md:table-cell" : "")}>
       <button type="button" onClick={() => onToggle(sortKey)}
         className={"inline-flex items-center gap-1 hover:text-sand-700 " + (active ? "text-sand-700" : "")}>
         {children}
@@ -460,8 +462,8 @@ function Th({ children, sortable, sortKey, current, dir, onToggle, align = "left
   );
 }
 
-function EditableCell({ value, digits = 0, saving, onSave }: {
-  value: number; digits?: number; saving: boolean; onSave: (v: string) => void;
+function EditableCell({ sku, value, digits = 0, saving, onSave }: {
+  sku: string; value: number; digits?: number; saving: boolean; onSave: (v: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -472,7 +474,7 @@ function EditableCell({ value, digits = 0, saving, onSave }: {
   if (editing) {
     return (
       <td className="px-3 py-1 text-right">
-        <input autoFocus type="number" step="any" value={draft}
+        <input aria-label={`On-hand count for ${sku}`} autoFocus type="number" min="0" step="any" value={draft}
           onChange={(e) => setDraft(e.target.value)} onBlur={commit}
           onKeyDown={(e) => {
             if (e.key === "Enter") (e.target as HTMLInputElement).blur();
@@ -484,7 +486,7 @@ function EditableCell({ value, digits = 0, saving, onSave }: {
   }
   return (
     <td className="px-3 py-2 text-right">
-      <button type="button" disabled={saving} onClick={startEdit}
+      <button type="button" aria-label={`Edit on-hand count for ${sku}: ${value}`} disabled={saving} onClick={startEdit}
         className="text-accent hover:underline disabled:opacity-50 tabular-nums">{fmtNum(value, digits)}</button>
     </td>
   );

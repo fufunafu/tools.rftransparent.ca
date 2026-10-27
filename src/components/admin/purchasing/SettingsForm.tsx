@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PurchasingSettings } from "@/lib/purchasing/types";
+import PurchasingPageHeader from "./PurchasingPageHeader";
 
 interface Props {
   initialSettings: PurchasingSettings;
@@ -156,6 +157,7 @@ export default function SettingsForm({ initialSettings }: Props) {
 
   return (
     <form onSubmit={save} className="space-y-5">
+      <PurchasingPageHeader title="Planning settings" description="Set the lead time, stock targets, and seasonal assumptions used across purchasing." />
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">
           {error}
@@ -167,10 +169,10 @@ export default function SettingsForm({ initialSettings }: Props) {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-sand-200/60 p-6 space-y-5">
+      <div className="bg-white rounded-xl border border-sand-200 p-4 sm:p-5 space-y-5">
         <div>
           <h2 className="text-lg font-semibold text-sand-900">
-            Reorder algorithm
+            Replenishment targets
           </h2>
           <p className="text-sm text-sand-500 mt-1">
             These values drive the Reorder page&apos;s suggestions and the
@@ -180,13 +182,14 @@ export default function SettingsForm({ initialSettings }: Props) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           <Field
             label="Lead time days"
-            help="How long a PO usually takes to arrive — also doubles as the safety buffer. 90 is the safe default for shipments from China. Drop to 60 if your supplier is reliable; raise to 120 if shipments tend to slip."
+            help="Expected days between placing a China order and receiving it. This sets the planning horizon for replenishment."
           >
             <div className="flex items-center gap-2">
               <input
                 type="number"
                 min="0"
                 step="1"
+                aria-label="Lead time days"
                 value={leadDays}
                 onChange={(e) => setLeadDays(e.target.value)}
                 className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
@@ -196,13 +199,14 @@ export default function SettingsForm({ initialSettings }: Props) {
           </Field>
           <Field
             label="Crate size"
-            help="Units per crate from the supplier. Suggested order quantities round to whole crates (or a half-crate for small needs) so we never end up with awkward fractions like 2.5 crates."
+            help="Glass units per crate. Suggested quantities round to crates, with half-crates for smaller needs."
           >
             <div className="flex items-center gap-2">
               <input
                 type="number"
                 min="1"
                 step="1"
+                aria-label="Crate size"
                 value={crateSize}
                 onChange={(e) => setCrateSize(e.target.value)}
                 className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
@@ -212,7 +216,7 @@ export default function SettingsForm({ initialSettings }: Props) {
           </Field>
           <Field
             label="Target at arrival"
-            help="How much stock to still have on the shelf when a new PO lands, as a percent of one lead time of sales. 100 = a full lead time (~90 days of cover), 75 = three-quarters, 150 = one and a half. Higher = order earlier and more."
+            help="Stock cover to retain when an order arrives, as a percentage of lead-time demand. A higher target means ordering earlier or ordering more."
           >
             <div className="flex items-center gap-2">
               <input
@@ -220,6 +224,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                 min="0"
                 max="500"
                 step="1"
+                aria-label="Target at arrival percent"
                 value={coverPct}
                 onChange={(e) => setCoverPct(e.target.value)}
                 className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
@@ -229,7 +234,7 @@ export default function SettingsForm({ initialSettings }: Props) {
           </Field>
           <Field
             label="Expected fill"
-            help="Floor on the restock target, as a percent of capacity — keeps slow movers from going bare. The stock to have left when a PO arrives is the higher of this floor or lead-time sales + buffer, capped at capacity."
+            help="Minimum stock target as a percentage of capacity. Helps keep slower-selling products available."
           >
             <div className="flex items-center gap-2">
               <input
@@ -237,6 +242,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                 min="0"
                 max="200"
                 step="1"
+                aria-label="Expected fill percent"
                 value={expectedFillPct}
                 onChange={(e) => setExpectedFillPct(e.target.value)}
                 className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
@@ -247,7 +253,7 @@ export default function SettingsForm({ initialSettings }: Props) {
         </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-sand-200/60 p-6 space-y-5">
+      <div className="bg-white rounded-xl border border-sand-200 p-4 sm:p-5 space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
             <h2 className="text-lg font-semibold text-sand-900">Seasonality</h2>
@@ -260,10 +266,7 @@ export default function SettingsForm({ initialSettings }: Props) {
               future month&apos;s own value.
             </p>
             <p className="text-xs text-sand-500 mt-2">
-              <em>Recompute from Shopify</em> pulls the last 12 completed
-              months from RF Transparent and Glass Railing Store (BC is
-              excluded). The 12 multipliers come out averaging to ~1.0 by
-              construction — you can still hand-edit individual months after.
+              Recalculating uses RF and GRS revenue history and immediately saves the new seasonality multipliers. Manual edits below are applied with Save changes.
             </p>
           </div>
           <button
@@ -272,7 +275,7 @@ export default function SettingsForm({ initialSettings }: Props) {
             disabled={recomputing}
             className="shrink-0 px-3 py-1.5 text-sm font-medium rounded-lg border border-accent text-accent hover:bg-accent hover:text-white disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {recomputing ? "Pulling…" : "Recompute from Shopify"}
+            {recomputing ? "Recalculating…" : "Recalculate from Shopify revenue"}
           </button>
         </div>
 
@@ -287,7 +290,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                 <li key={s.storeId}>
                   · {s.label}: {s.orders.toLocaleString("en-CA")} orders,
                   ${Math.round(s.revenue).toLocaleString("en-CA")}
-                  {s.error && <span className="text-red-600"> — {s.error}</span>}
+                  {s.error && <span className="text-red-600"> - {s.error}</span>}
                 </li>
               ))}
             </ul>
@@ -296,8 +299,8 @@ export default function SettingsForm({ initialSettings }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-[200px,1fr] gap-5 items-start">
           <Field
-            label="Annual growth"
-            help="Year-over-year sales lift on top of seasonality. 20 = expect 20% more than last year across every month. 0 = no lift. Negative is allowed for a planned downturn."
+            label="Forecast growth"
+            help="Additional demand used in stock projections. This does not change the monthly sales figure. Enter 0 for no growth."
           >
             <div className="flex items-center gap-2">
               <input
@@ -305,6 +308,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                 min="-100"
                 max="1000"
                 step="1"
+                aria-label="Forecast growth percent"
                 value={annualGrowth}
                 onChange={(e) => setAnnualGrowth(e.target.value)}
                 className="w-24 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
@@ -316,10 +320,10 @@ export default function SettingsForm({ initialSettings }: Props) {
             <div className="text-xs uppercase tracking-wider text-sand-400 font-medium mb-2">
               Monthly multipliers
               <span className="ml-2 text-[10px] normal-case tracking-normal text-sand-400">
-                (top = shape only; bottom = effective with growth applied)
+                (annual sales ÷ 12 × month multiplier)
               </span>
             </div>
-            <div className="grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-6 2xl:grid-cols-12 gap-2">
               {MONTH_NAMES.map((name, i) => {
                 const val = parseFloat(multipliers[i] ?? "1");
                 const safe = Number.isFinite(val) ? val : 1;
@@ -340,6 +344,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                       type="number"
                       min="0"
                       step="0.01"
+                      aria-label={`${name} seasonality multiplier`}
                       value={multipliers[i] ?? ""}
                       onChange={(e) => setMonth(i, e.target.value)}
                       className="w-full px-1 py-1 text-center text-sm tabular-nums rounded border border-sand-300 bg-white focus:outline-none focus:ring-1 focus:ring-accent"
@@ -349,7 +354,7 @@ export default function SettingsForm({ initialSettings }: Props) {
                         className="mt-1 text-[10px] tabular-nums text-sand-600"
                         title={`${safe.toFixed(2)} × ${growthFactor.toFixed(2)}`}
                       >
-                        = {effective.toFixed(2)}
+                        Forecast: {effective.toFixed(2)}×
                       </div>
                     )}
                   </div>
