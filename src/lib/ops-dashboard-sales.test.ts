@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getTopPerformers, getSalesTeamOverview } from "./ops-dashboard";
+import { getSalesRepRecords } from "./dashboard-sales-records";
+import { loadSalesMirror } from "./sales-shopify-mirror";
 import { fetchAllPages } from "./shopify";
+
+vi.mock("./sales-shopify-mirror", () => ({ loadSalesMirror: vi.fn() }));
 
 vi.mock("./api-cache", () => ({ cached: async (_key: string, _ttl: number, compute: () => Promise<unknown>) => ({ data: await compute(), cachedAt: null }) }));
 vi.mock("./purchasing/queries", () => ({ getPurchasingSummary: vi.fn(), listProductsWithMetrics: vi.fn() }));
@@ -127,4 +131,33 @@ describe("sales dashboard data integration", () => {
     const orderCall = vi.mocked(fetchAllPages).mock.calls.find(([options]) => !options.query.includes("draftOrders("));
     expect(orderCall?.[0].variables?.filter).toBe(`updated_at:>='${from}'`);
   });
+});
+
+
+it("keeps every sales/quote cell equal to its database-backed record dialog without downloading Shopify history", async () => {
+  const original = vi.mocked(fetchAllPages).getMockImplementation()!;
+  const fixture = async (storeId: string, kind: "order" | "draft") => {
+    const result = await original({ storeId, query: kind === "draft" ? "draftOrders(" : "orders(", getConnection: () => { throw new Error("unused"); } });
+    return { ...result, nodes: result.nodes.map((node, index) => ({ ...node as object,
+      id: `gid://shopify/${kind === "draft" ? "DraftOrder" : "Order"}/${index + 1}`, name: `#${index + 1}`,
+      customer: { firstName: "Avery", lastName: "Chen" },
+    })) };
+  };
+  vi.mocked(fetchAllPages).mockImplementation(async ({ storeId, query }) => fixture(storeId, query.includes("draftOrders(") ? "draft" : "order") as never);
+  const live = await getSalesTeamOverview();
+  vi.mocked(fetchAllPages).mockClear();
+  vi.mocked(loadSalesMirror).mockImplementation(async (storeId, kind) => fixture(storeId, kind) as never);
+  const saved = await getSalesTeamOverview({ fromMirror: true });
+  expect(saved).toEqual(live);
+  if (!saved.ok) throw new Error(saved.error);
+  for (const [period, reps] of Object.entries(saved.value.periods)) {
+    for (const rep of reps) {
+      for (const [kind, metric] of [["orders", "sold"], ["quotes", "quoted"]] as const) {
+        const records = await getSalesRepRecords(rep.id, period as "7d", kind, { fromMirror: true });
+        expect(records.total).toBeCloseTo(rep.metrics[metric] ?? 0, 2);
+        if (records.records.length) expect(records.records[0].customerName).toBe("Avery Chen");
+      }
+    }
+  }
+  expect(fetchAllPages).not.toHaveBeenCalled();
 });

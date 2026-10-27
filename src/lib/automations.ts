@@ -24,6 +24,17 @@ export interface AutomationJob {
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
   {
+    slug: "refresh-sales-dashboard",
+    label: "Sales dashboard refresh",
+    description: "Prepares all five sales periods so opening the dashboard does not download Shopify history.",
+    kind: "sync",
+    result: "Complete sales dashboard with a visible update time",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes",
+    scheduleDetail: "Keeps the previous complete update if a source is unavailable",
+  },
+  {
     slug: "process-outreach",
     label: "Outreach lead intake",
     description: "Processes Instantly replies and interested lead handoffs.",

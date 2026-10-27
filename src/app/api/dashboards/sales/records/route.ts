@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Select a sales representative, period and record type." }, { status: 400 });
   }
   try {
-    return NextResponse.json(await getSalesRepRecords(repId, period.id, kind), { headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json(await getSalesRepRecords(repId, period.id, kind, { fromMirror: true }), { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     console.error("[sales records]", error);
     return NextResponse.json({ error: "Could not load the complete list. Please try again." }, { status: 502 });
