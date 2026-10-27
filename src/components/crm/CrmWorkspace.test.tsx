@@ -46,3 +46,11 @@ it("hydrates preloaded dates consistently before formatting them in the viewer's
   expect(container.textContent).not.toContain("UTC");
   expect(fetcher).not.toHaveBeenCalled();
 });
+
+it("keeps reminder delivery history within Tasks instead of a separate navigation section", async () => {
+  vi.stubGlobal("fetch", vi.fn(async () => Response.json({ records: [], total: 0, page: 0 })));
+  await act(async () => root.render(<CrmWorkspace initialTab="tasks" email="rep@example.com" canManage={false} initialPage={{ records: [], total: 0, page: 0 }} initialStatus={initialStatus} />));
+  expect(container.querySelector('nav [aria-current="page"]')?.textContent).toBe("Tasks");
+  expect(container.querySelector("nav")?.textContent).not.toContain("reminders");
+  expect(container.textContent).toContain("Task reminders and delivery history");
+});
