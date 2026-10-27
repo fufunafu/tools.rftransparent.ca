@@ -23,6 +23,7 @@ const RATE_METRICS = new Set<LeadPerformanceMetricKey>([
   "sameDayCallRate",
   "quoteRate",
   "conversionRate",
+  "quoteConversionRate",
 ]);
 
 function metricValue(
@@ -103,7 +104,7 @@ function MetricTooltip({
                 {formatMetricValue(metric, point[source])}
               </span>
               <span className="text-[10px] text-sand-400">
-                {isRateMetric(metric) ? `${count} of ${denominator} leads` : `${count} leads with a recorded ${metric === "medianQuoteMs" ? "quote" : "call"}`}
+                {isRateMetric(metric) ? `${count} of ${denominator} ${metric === "quoteConversionRate" ? "quoted leads became orders" : "leads"}` : `${count} leads with a recorded ${metric === "medianQuoteMs" ? "quote" : "call"}`}
               </span>
             </span>
           </div>
