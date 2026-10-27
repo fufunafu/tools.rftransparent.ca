@@ -131,3 +131,18 @@ describe("buildRollingLeadPerformanceRateTrend", () => {
     });
   });
 });
+
+it("weights same-business-day rates by passed deadlines, not pending leads or missing timing", () => {
+  const buckets = buildCustomLeadTrend([], "2026-10-22", "2026-10-23").points;
+  const rows = [
+    lead({ source: "website", submitted_at: "2026-10-22T14:00:00Z", first_call_at: "2026-10-22T15:00:00Z" }),
+    lead({ source: "website", submitted_at: "2026-10-22T14:00:00Z" }),
+    lead({ source: "website", submitted_at: "2026-10-23T14:00:00Z" }),
+    lead({ source: "website", submitted_at: "2026-10-23T22:00:00Z" }),
+    lead({ source: "website", submitted_at: "2026-10-22T14:00:00Z", call_status: "called" }),
+  ];
+  const points = buildLeadPerformanceTrend(rows, buckets, Date.parse("2026-10-24T15:00:00Z"));
+  const rolling = buildRollingLeadPerformanceRateTrend(points, "sameDayCallRate", 2);
+  expect(rolling[1].website).toEqual({ value: 33.3, count: 1, denominator: 3 });
+  expect(rolling[1].outreach.value).toBeNull();
+});

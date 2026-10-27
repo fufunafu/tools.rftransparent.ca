@@ -20,6 +20,7 @@ import { formatLeadResponseTime } from "@/lib/lead-response-times";
 
 const RATE_METRICS = new Set<LeadPerformanceMetricKey>([
   "callRate",
+  "sameDayCallRate",
   "quoteRate",
   "conversionRate",
 ]);
