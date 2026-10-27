@@ -1581,7 +1581,7 @@ export default function LeadsDashboard({
           <h1 className="text-2xl font-bold text-sand-900">Leads</h1>
           <p className="text-sm text-sand-500 mt-1">
             {hasMeta
-              ? "Track, contact, and convert website and Meta leads."
+              ? "Track, contact, and convert website, Meta, and outreach leads."
               : "Track, contact, and convert BC Transparent website leads."}
           </p>
         </div>
@@ -2086,22 +2086,22 @@ function SummaryMetric({
 }) {
   return (
     <div className="flex min-w-0 flex-col p-2.5">
-      <div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-          <p className="truncate text-[10px] uppercase tracking-wider text-sand-400" title={label}>{label}</p>
+      <div className="pb-2">
+        <div className="flex min-w-0 items-start gap-1.5">
+          <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${color}`} />
+          <p className="text-[10px] leading-4 uppercase tracking-wider text-sand-400" title={label}>{label}</p>
         </div>
         <p className="text-lg font-semibold leading-5 text-sand-900">{value}</p>
-        {subtitle && <p className="mt-0.5 truncate text-[10px] leading-4 text-sand-400" title={subtitle}>{subtitle}</p>}
+        {subtitle && <p className="mt-0.5 text-[10px] leading-4 text-sand-400" title={subtitle}>{subtitle}</p>}
       </div>
-      <div className="mt-2 grid grid-cols-3 gap-2 border-t border-sand-100 pt-1.5">
+      <div className="mt-auto space-y-1 border-t border-sand-100 pt-2">
         {(["website", "meta", "outreach"] as const).map((source) => (
-          <div key={source} className="min-w-0">
+          <div key={source} className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
               <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : source === "outreach" ? "bg-violet-600" : "bg-pink-600"}`} />
-              <span className="truncate capitalize">{source}</span>
+              <span className="capitalize">{source}</span>
             </div>
-            <p className="truncate text-xs font-semibold leading-4 text-sand-800" title={String(sourceDetails[source].value)}>
+            <p className="shrink-0 text-xs font-semibold leading-4 tabular-nums text-sand-800" title={String(sourceDetails[source].value)}>
               {sourceDetails[source].value}
             </p>
           </div>
