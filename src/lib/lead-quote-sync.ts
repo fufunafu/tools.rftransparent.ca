@@ -229,6 +229,32 @@ async function fetchAllRows<T>(
   }
 }
 
+// The Follow-up page's live refresh runs an incremental draft sync every 30s
+// per open tab. Re-matching every lead against every sent quote on each tick
+// was the database's heaviest query, so the live path re-matches only when the
+// sync touched drafts, at most once per LIVE_REMATCH_INTERVAL_MS per store on
+// this instance. A changed draft keeps showing up for the sync's 10-minute
+// lookback, so a throttled tick is picked up by a later one, and the hourly
+// sync-lead-quotes cron still runs the full match.
+const LIVE_REMATCH_INTERVAL_MS = 2 * 60 * 1000;
+const lastLiveRematch = new Map<string, number>();
+
+export function shouldRematchAfterLiveSync(
+  storeId: string,
+  sync: { new_leads: number; updated_leads: number; auto_won: number },
+  now = Date.now(),
+): boolean {
+  if (sync.new_leads + sync.updated_leads + sync.auto_won === 0) return false;
+  const last = lastLiveRematch.get(storeId);
+  if (last !== undefined && now - last < LIVE_REMATCH_INTERVAL_MS) return false;
+  lastLiveRematch.set(storeId, now);
+  return true;
+}
+
+export function resetLiveRematchThrottle(): void {
+  lastLiveRematch.clear();
+}
+
 export async function syncLeadQuotesFromFollowups(
   storeIds?: string[],
 ): Promise<LeadQuoteSyncSummary> {
