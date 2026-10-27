@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { getCrmRecord, getCrmStatus, listCrmRecords } from "@/lib/crm/data";
-import { CrmInputError, createCrmRecord, readCrmJson, updateCrmTask } from "@/lib/crm/input";
+import { CrmInputError, createCrmRecord, readCrmJson, updateCrmTask, editCrmContact } from "@/lib/crm/input";
 import { canAccessCrm } from "@/lib/crm/access";
 import { CRM_RECORD_VIEWS, type CrmRecordView } from "@/lib/crm/types";
 
@@ -53,7 +53,7 @@ export async function POST(request: Request) {
     if (v.relatedId) await getCrmRecord(v.relatedId, "summary");
     const result = await getSupabase().rpc("crm_create_record", {
       p_id: v.requestId, p_type: v.type, p_title: v.title, p_body: v.body,
-      p_properties: { email: v.email, phone: v.phone, company: v.company },
+      p_properties: { email: v.email, phone: v.phone, company: v.company, ...(v.type === "tasks" ? { reminder_enabled: v.reminderEnabled, reminder_minutes: v.reminderMinutes } : {}) },
       p_occurred_at: v.occurredAt, p_due_at: v.type === "tasks" ? v.dueAt : null,
       p_related_id: v.relatedId, p_actor: user.email.toLowerCase(),
     });
@@ -67,13 +67,22 @@ export async function PATCH(request: Request) {
   if (!user?.email) return json({ error: "Unauthorized" }, 401);
   if (!(await canAccessCrm())) return json({ error: "CRM is available to management, sales, and customer service." }, 403);
   try {
-    const parsed = updateCrmTask.safeParse(await readCrmJson(request));
+    const input = await readCrmJson(request);
+    if (typeof input === "object" && input && "action" in input && input.action === "editContact") {
+      const edit = editCrmContact.safeParse(input);
+      if (!edit.success) return json({ error: "Enter a name and valid contact details." }, 400);
+      const result = await getSupabase().rpc("crm_edit_contact", { p_id: edit.data.id, p_version: edit.data.version, p_fields: edit.data.fields, p_actor: user.email.toLowerCase() });
+      if (result.error) return json({ error: "Contact changed or is unavailable. Refresh before saving." }, 409);
+      return json({ saved: true, version: result.data });
+    }
+    const parsed = updateCrmTask.safeParse(input);
     if (!parsed.success) return json({ error: "Choose a status and valid due date." }, 400);
     const v = parsed.data;
     const record = await getCrmRecord(v.id, "summary");
     const canManage = await isManagementUser();
     if (record.owner_email !== user.email.toLowerCase() && !canManage) return json({ error: "Only the task owner or management may update this task." }, 403);
-    const result = await getSupabase().rpc("crm_update_task", { p_id: v.id, p_version: v.version, p_status: v.status, p_due_at: v.dueAt, p_actor: user.email.toLowerCase(), p_can_manage: canManage });
+    const result = await getSupabase().rpc(v.reminderEnabled === undefined ? "crm_update_task" : "crm_update_task_settings", { p_id: v.id, p_version: v.version, p_status: v.status, p_due_at: v.dueAt, p_actor: user.email.toLowerCase(), p_can_manage: canManage,
+      ...(v.reminderEnabled === undefined ? {} : { p_reminder_enabled: v.reminderEnabled, p_reminder_minutes: v.reminderMinutes }) });
     if (result.error) return json({ error: "Task changed or is unavailable. Refresh before saving." }, 409);
     return json({ saved: true, version: result.data });
   } catch (error) { return fail(error); }

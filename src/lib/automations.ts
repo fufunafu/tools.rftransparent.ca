@@ -24,6 +24,29 @@ export interface AutomationJob {
 
 export const AUTOMATION_JOBS: AutomationJob[] = [
   {
+    slug: "crm-workflows",
+    label: "CRM reminders and activity",
+    description: "Sends enabled task reminders, matches business calls and email previews, and indexes CRM records.",
+    kind: "email",
+    result: "Task reminder receipts and customer activity",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes",
+    scheduleDetail: "Imported tasks stay quiet until reminders are enabled. Unclear customer matches await staff review.",
+    sendsEmail: "Sends due reminders to the owners of tasks with email reminders enabled.",
+  },
+  {
+    slug: "crm-files",
+    label: "CRM attachment migration",
+    description: "Copies HubSpot attachments and call recordings into private Tools storage and verifies the retained bytes.",
+    kind: "sync",
+    result: "Verified private file copies and visible blocked-source details",
+    staleAfterHours: 1,
+    cron: "*/5 * * * *",
+    schedule: "Every 5 minutes",
+    scheduleDetail: "One leased server worker continues the migration without requiring a computer to stay open.",
+  },
+  {
     slug: "sync-hubspot",
     label: "HubSpot CRM import",
     description: "Copies HubSpot CRM records and history into Tools while keeping Tools changes independent.",

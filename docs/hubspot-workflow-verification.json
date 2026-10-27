@@ -1,0 +1,37 @@
+{
+  "verifiedAt": "2026-10-27",
+  "baseCommit": "585460dc792098f5b65a0e12e0560937131657e4",
+  "scope": [
+    "Contact table and named views",
+    "Contact workspace with editable local fields and activity timeline",
+    "Upcoming, local-day, overdue and completed task views",
+    "Opt-in task reminder delivery",
+    "Non-destructive duplicate review",
+    "Private attachment and recording migration",
+    "Future business call and email activity capture"
+  ],
+  "migrations": [
+    "20261027183000_crm_workflows.sql",
+    "20261027183500_crm_activity_capture.sql",
+    "20261027192500_crm_workflow_query_paths.sql"
+  ],
+  "validation": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "salesPreservationFiles": 36,
+    "tests": 1479,
+    "testNote": "The full run passed 1478 tests. One unrelated existing PGlite test hit its five-second limit during migration work; its complete three-test suite passed when rerun alone.",
+    "databaseRehearsal": "Original fields and history preserved; imported reminders remain off; historical source activity is not re-enqueued.",
+    "appliedMigrationSource": "All three database migration source hashes match the release files.",
+    "api": "CRM access gates, task date boundaries, contact search, compact related-record reads, review lists and source field/history preservation passed.",
+    "files": "Private bucket verified; an authenticated recording download matched the saved byte count and SHA-256.",
+    "browser": "Contact table, contact workspace, prefilled edit dialog, linked task form, upcoming tasks and newest-first overdue tasks verified without creating production test records."
+  },
+  "operations": {
+    "source": "HubSpot remains read-only.",
+    "fileWorker": "A leased server worker resumes private copies independently of reminders and activity capture.",
+    "migrationCompletion": "Use the Files & recordings workspace for current counts and blocked sources. Feature release does not imply every file copy is complete.",
+    "reminderDelivery": "Delivery logic was verified with isolated tests. No production test reminders were sent."
+  }
+}

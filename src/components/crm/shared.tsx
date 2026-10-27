@@ -46,3 +46,18 @@ export function Pager({ page, total, onPage, busy = false }: { page: number; tot
     <div className="flex gap-2"><button className={BUTTON} disabled={busy || page === 0} onClick={() => onPage(page - 1)}>Previous</button><button className={BUTTON} disabled={busy || (page + 1) * 50 >= total} onClick={() => onPage(page + 1)}>Next</button></div>
   </div>;
 }
+
+export function cleanSummary(value: string | undefined) {
+  return (value ?? "").split(" · ").filter(part => !/^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(part.trim())).join(" · ");
+}
+export function stageLabel(value: string | undefined) {
+  const labels: Record<string, string> = { subscriber: "Subscriber", lead: "Lead", marketingqualifiedlead: "Marketing qualified", salesqualifiedlead: "Sales qualified", opportunity: "Opportunity", customer: "Customer", evangelist: "Advocate", other: "Other" };
+  if (!value || /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/i.test(value) || /^\d+$/.test(value)) return "Not set";
+  return labels[value] || value.replaceAll("_", " ").replace(/\b\w/g, char => char.toUpperCase());
+}
+export function ownerLabel(value: string | null | undefined) { return value ? value.split("@")[0].replace(/[._]/g, " ") : "Unassigned"; }
+
+export function recordTitle(record: CrmRecord) {
+  if (record.source === "hubspot" && new RegExp(`^${record.object_type} \\d+$`).test(record.title)) return `Untitled ${SINGLE[record.object_type].toLowerCase()}`;
+  return record.title;
+}

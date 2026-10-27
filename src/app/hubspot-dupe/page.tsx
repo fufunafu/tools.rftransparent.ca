@@ -5,18 +5,21 @@ import CrmWorkspace from "@/components/crm/CrmWorkspace";
 import { canAccessCrm } from "@/lib/crm/access";
 import { getCrmStatus, listCrmRecords } from "@/lib/crm/data";
 import { CRM_INITIAL_LIST_URL } from "@/lib/crm/types";
+import { crmId } from "@/lib/crm/input";
 
 export const metadata: Metadata = { title: "HubSpot Dupe", description: "Customer records, conversations, notes and follow-up tasks in RF Tools." };
 export const dynamic = "force-dynamic";
-export default async function HubspotDupePage() {
+export default async function HubspotDupePage({ searchParams }: { searchParams?: Promise<{ record?: string | string[] }> } = {}) {
   const user = await getAuthenticatedUser();
   if (!user?.email) redirect("/login");
   if (!(await canAccessCrm())) redirect("/access-denied");
   const email = user.email.toLowerCase();
+  const params = await searchParams;
+  const linkedRecord = crmId.safeParse(params?.record);
   const [initialPage, initialStatus, canManage] = await Promise.all([
     listCrmRecords(new URLSearchParams(CRM_INITIAL_LIST_URL.split("?")[1]), email).catch(() => undefined),
     getCrmStatus().catch(() => undefined),
     isManagementUser(),
   ]);
-  return <CrmWorkspace email={email} canManage={canManage} initialPage={initialPage} initialStatus={initialStatus} />;
+  return <CrmWorkspace email={email} canManage={canManage} initialPage={initialPage} initialStatus={initialStatus} initialRecordId={linkedRecord.success ? linkedRecord.data : undefined} />;
 }

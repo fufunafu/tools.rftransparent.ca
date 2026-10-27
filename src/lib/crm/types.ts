@@ -15,12 +15,16 @@ export interface CrmRecord {
   title: string;
   summary: string;
   body?: string;
+  view_fields?: Record<string, string>;
+  local_fields?: Record<string, string>;
   owner_email: string | null;
   occurred_at: string | null;
   effective_due_at: string | null;
   effective_task_status: "open" | "completed" | null;
   archived: boolean;
   version: number;
+  reminder_enabled?: boolean;
+  reminder_minutes?: number;
   properties?: Record<string, unknown>;
   property_history?: Record<string, unknown>;
   created_by_email: string | null;

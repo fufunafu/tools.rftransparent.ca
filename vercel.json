@@ -4,6 +4,14 @@
   ],
   "crons": [
     {
+      "path": "/api/cron/crm-files",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/crm-workflows",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/sync-hubspot",
       "schedule": "*/5 * * * *"
     },

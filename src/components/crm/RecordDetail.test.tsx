@@ -24,12 +24,13 @@ it("fetches and renders source fields and history only when their disclosures ar
   await act(async () => root.render(<SWRConfig value={{ provider: () => new Map() }}><RecordDetail id={record.id} email="rep@example.com" canManage={false} onSelect={() => {}} onAdd={() => {}} onClose={() => {}} onChanged={() => {}} /></SWRConfig>));
   expect(container.textContent).toContain("Latest conversation");
   expect(fetcher.mock.calls.some(([url]) => /view=(fields|history)/.test(url))).toBe(false);
-  const panels = container.querySelectorAll("details");
-  await act(async () => { panels[0].open = true; panels[0].dispatchEvent(new Event("toggle")); });
+  const fields = [...container.querySelectorAll("details")].find(panel => panel.querySelector("summary")?.textContent === "All saved fields")!;
+  const history = [...container.querySelectorAll("details")].find(panel => panel.querySelector("summary")?.textContent === "Original property history")!;
+  await act(async () => { fields.open = true; fields.dispatchEvent(new Event("toggle")); });
   expect(container.textContent).toContain("416-555-0199");
   expect(fetcher.mock.calls.some(([url]) => url.includes("view=history"))).toBe(false);
-  await act(async () => { panels[1].open = true; panels[1].dispatchEvent(new Event("toggle")); });
+  await act(async () => { history.open = true; history.dispatchEvent(new Event("toggle")); });
   expect(container.textContent).toContain("Previous railing plan");
-  await act(async () => { panels[1].open = false; panels[1].dispatchEvent(new Event("toggle")); });
+  await act(async () => { history.open = false; history.dispatchEvent(new Event("toggle")); });
   expect(container.querySelector("pre")).toBeNull();
 });

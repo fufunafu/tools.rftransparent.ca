@@ -5,37 +5,47 @@ import { CRM_TYPES, CRM_RECORD_VIEWS, type CrmPage, type CrmRecord, type CrmReco
 import { CrmInputError, crmId } from "./input";
 import { unpackProperties } from "./storage.mjs";
 
-const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email";
+const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email,reminder_enabled,reminder_minutes,view_fields,local_fields";
 
 export async function listCrmRecords(params: URLSearchParams, email: string): Promise<CrmPage> {
   const page = Number(params.get("page") ?? 0);
   const type = params.get("type") ?? "contacts";
   const search = params.get("q")?.trim() ?? "";
   const related = params.get("related");
-  if (!Number.isSafeInteger(page) || page < 0 || page > 100000 || search.length > 200 || (type !== "activities" && type !== "all" && !CRM_TYPES.includes(type as never))) throw new CrmInputError("Invalid search");
+  const view = params.get("filter") ?? "all";
+  if (!["all", "recent", "upcoming", "overdue", "today"].includes(view)) throw new CrmInputError("Invalid view");
+  if (!Number.isSafeInteger(page) || page < 0 || page > 100000 || search.length > 200 || (type !== "relationships" && type !== "activities" && type !== "all" && !CRM_TYPES.includes(type as never))) throw new CrmInputError("Invalid search");
   if (related && !crmId.safeParse(related).success) throw new CrmInputError("Invalid record");
   const db = getSupabase();
   let query = related
-    ? db.rpc("crm_related_records", { p_id: related }, { count: "exact" }).select(SUMMARY_COLUMNS)
+    ? db.rpc("crm_related_summaries", { p_id: related, p_search: search }, { count: "exact" }).select(SUMMARY_COLUMNS)
     : db.from("crm_records").select(SUMMARY_COLUMNS, { count: "exact" });
-  if (type === "activities") query = query.in("object_type", ["calls", "meetings", "emails", "notes", "tasks"]);
+  if (type === "relationships") query = query.in("object_type", ["contacts", "companies", "deals", "tickets"]);
+  else if (type === "activities") query = query.in("object_type", ["calls", "meetings", "emails", "notes", "tasks"]);
   else if (type !== "all") query = query.eq("object_type", type);
   query = query.eq("archived", params.get("archived") === "true");
-  if (search) {
+  if (search && !related) {
     const value = quotePostgrestValue(`%${search.replace(/[%_\\]/g, "\\$&")}%`);
-    query = query.or(`title.ilike.${value},summary.ilike.${value},search_document.wfts(simple).${quotePostgrestValue(search)}`);
+    query = query.or(`title.ilike.${value},summary.ilike.${value},local_fields->>title.ilike.${value},local_fields->>email.ilike.${value},local_fields->>phone.ilike.${value},local_fields->>company.ilike.${value},search_document.wfts(simple).${quotePostgrestValue(search)}`);
   }
   if (params.get("mine") === "true") query = query.eq("owner_email", email);
+  if (view === "recent") query = query.gte("occurred_at", new Date(Date.now() - 30 * 86400000).toISOString());
   if (type === "tasks") {
     const status = params.get("status") ?? "open";
     if (!["open", "completed", "all"].includes(status)) throw new CrmInputError("Invalid task status");
     if (status !== "all") query = query.eq("effective_task_status", status);
-    if (params.get("overdue") === "true") query = query.lt("effective_due_at", new Date().toISOString()).eq("effective_task_status", "open");
-    query = query.order("effective_due_at", { ascending: true, nullsFirst: false });
+    if (params.get("overdue") === "true" || view === "overdue") query = query.lt("effective_due_at", new Date().toISOString()).eq("effective_task_status", "open");
+    if (view === "upcoming") query = query.gte("effective_due_at", new Date().toISOString()).lt("effective_due_at", new Date(Date.now() + 7 * 86400000).toISOString());
+    if (view === "today") {
+      const start = params.get("dayStart"), end = params.get("dayEnd");
+      if (!start || !end || !Number.isFinite(Date.parse(start)) || !Number.isFinite(Date.parse(end)) || Date.parse(end) - Date.parse(start) > 26 * 3600000 || Date.parse(end) <= Date.parse(start)) throw new CrmInputError("Invalid day");
+      query = query.gte("effective_due_at", start).lt("effective_due_at", end);
+    }
+    query = query.order("effective_due_at", { ascending: view === "upcoming" || view === "today", nullsFirst: false });
   } else query = query.order("occurred_at", { ascending: false, nullsFirst: false });
   const result = await query.order("id").range(page * 50, page * 50 + 49);
   if (result.error) throw new Error("CRM search unavailable");
-  return { records: result.data as unknown as CrmRecord[], total: result.count ?? 0, page };
+  return { records: (result.data as unknown as CrmRecord[]).map(effectiveRecord), total: result.count ?? 0, page };
 }
 
 export async function getCrmRecord(id: string, view: CrmRecordView = "full"): Promise<CrmRecord> {
@@ -51,7 +61,7 @@ export async function getCrmRecord(id: string, view: CrmRecordView = "full"): Pr
   const record = { ...(result.data as unknown as CrmRecord) };
   if (record.properties) record.properties = unpackProperties(record.properties);
   if (record.property_history) record.property_history = unpackProperties(record.property_history);
-  return record;
+  return effectiveRecord(record);
 }
 
 export async function getCrmStatus(): Promise<CrmStatus> {
@@ -62,4 +72,9 @@ export async function getCrmStatus(): Promise<CrmStatus> {
   ]);
   if (counts.error || sync.error) throw new Error("CRM database is not ready");
   return { configured: Boolean(process.env.HUBSPOT_ACCESS_TOKEN && process.env.HUBSPOT_PORTAL_ID), counts: counts.data ?? [], sync: sync.data };
+}
+
+function effectiveRecord(record: CrmRecord): CrmRecord {
+  if (!record.local_fields || !Object.keys(record.local_fields).length) return record;
+  return { ...record, title: record.local_fields.title || record.title, view_fields: { ...record.view_fields, ...record.local_fields } };
 }
