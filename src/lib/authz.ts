@@ -23,13 +23,42 @@ function normalize(raw: string | undefined | null): string | null {
   return e || null;
 }
 
+// Proxy and the page both authorize every request, and each check is a
+// database round trip. Remember positive answers briefly per server instance
+// so navigation doesn't repeat them. Only grants are cached: a denial or a
+// failed lookup is re-checked every time, and a revoked user loses access
+// within GRANT_TTL_MS.
+const GRANT_TTL_MS = 60_000;
+const grants = new Map<string, number>();
+
+async function rememberGrant(
+  kind: string,
+  email: string,
+  check: (email: string) => Promise<boolean>,
+): Promise<boolean> {
+  const key = `${kind}:${email}`;
+  const expires = grants.get(key);
+  if (expires !== undefined && expires > Date.now()) return true;
+  grants.delete(key);
+  const granted = await check(email);
+  if (granted) grants.set(key, Date.now() + GRANT_TTL_MS);
+  return granted;
+}
+
+export function clearAuthorizationCache(): void {
+  grants.clear();
+}
+
 // Anyone allowed to access the site at all: owner, allowlisted company
 // domains, active employees (either primary or alt email), or manual
 // overrides in admin_users.
 export async function isAuthorizedEmail(raw: string | undefined | null): Promise<boolean> {
   const email = normalize(raw);
   if (!email) return false;
+  return rememberGrant("authorized", email, checkAuthorized);
+}
 
+async function checkAuthorized(email: string): Promise<boolean> {
   if (email === OWNER_EMAIL) return true;
 
   const domains = allowedDomains();
@@ -54,13 +83,16 @@ export async function isAuthorizedEmail(raw: string | undefined | null): Promise
   return false;
 }
 
-// Admin = owner / allowed domain / admin_users override. Excludes the
-// employee-table path so we can distinguish "got in because they're an
-// active employee" from "got in because they're an admin."
+// Admin = owner / allowed domain / admin_users override / management
+// employee. Regular (non-management) employees are deliberately excluded so
+// "got in because they're an active employee" never implies admin.
 export async function isAdminEmail(raw: string | undefined | null): Promise<boolean> {
   const email = normalize(raw);
   if (!email) return false;
+  return rememberGrant("admin", email, checkAdmin);
+}
 
+async function checkAdmin(email: string): Promise<boolean> {
   if (email === OWNER_EMAIL) return true;
 
   const domains = allowedDomains();
@@ -80,7 +112,9 @@ export async function isAdminEmail(raw: string | undefined | null): Promise<bool
     // admin_users table may not exist yet
   }
 
-  return false;
+  // Management is the top operational role: everyone in that department gets
+  // full access, whether or not they sign in with a company-domain address.
+  return employeeMatches(email, { managementOnly: true });
 }
 
 // Sign-off authority for the reimbursement workflow. Only people in the
@@ -91,7 +125,9 @@ export async function isManagementEmail(raw: string | undefined | null): Promise
   if (!email) return false;
   if (email === OWNER_EMAIL) return true;
 
-  return employeeMatches(email, { managementOnly: true });
+  return rememberGrant("management", email, (e) =>
+    employeeMatches(e, { managementOnly: true }),
+  );
 }
 
 // Shared employees-table lookup. Tries the new email_alt path first; if

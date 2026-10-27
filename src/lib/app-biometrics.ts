@@ -1,22 +1,71 @@
-// Face ID / Touch ID sign-in, available only when the site runs inside the
-// RF Tools iOS app (Capacitor injects `window.Capacitor` into the page).
-// In a normal browser every function quietly reports "not available" — the
-// plugin code is dynamically imported so it never lands in the web bundle.
-//
-// The model: after a successful email+password sign-in inside the app, the
-// credentials go into the device Keychain (hardware-encrypted, per-device).
-// Next time, the login page offers Face ID; passing the check releases the
-// stored credentials and signs in with them.
+// Native session locking for RF Tools. Supabase owns the actual
+// authenticated session in WebView cookies. Biometrics only unlock the UI and
+// never release or store an account password.
 
-const CREDENTIALS_KEY = "rf-login-credentials";
+import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
 
-export interface SavedCredentials {
-  email: string;
-  password: string;
+const LEGACY_CREDENTIALS_KEY = "rf-login-credentials";
+const FRESH_SESSION_KEY = "rf-native-session-fresh";
+const UNLOCK_PREFERENCE_KEY = "rf-device-unlock-v1:";
+
+export type BiometricPreference = "enabled" | "disabled" | "unset";
+export type BiometricLabel = "Face ID" | "Touch ID" | "Fingerprint unlock" | "Face unlock" | "Iris unlock";
+
+// This is a device-local preference, never an account credential. Separate
+// accounts on a shared device must each make their own choice.
+export function getBiometricPreference(account: string): BiometricPreference {
+  try {
+    const value = localStorage.getItem(UNLOCK_PREFERENCE_KEY + account.trim().toLowerCase());
+    return value === "enabled" || value === "disabled" ? value : "unset";
+  } catch {
+    return "unset";
+  }
+}
+
+export function setBiometricPreference(account: string, value: "enabled" | "disabled"): void {
+  localStorage.setItem(UNLOCK_PREFERENCE_KEY + account.trim().toLowerCase(), value);
+}
+
+export async function getBiometricLabel(): Promise<BiometricLabel | null> {
+  if (!isNativeApp()) return null;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      (async () => {
+        const { BiometricAuth, BiometryType } = await import("@aparajita/capacitor-biometric-auth");
+        const result = await BiometricAuth.checkBiometry();
+        if (!result.isAvailable) return null;
+        if (result.biometryType === BiometryType.faceId) return "Face ID" as const;
+        if (result.biometryType === BiometryType.touchId) return "Touch ID" as const;
+        if (result.biometryType === BiometryType.fingerprintAuthentication) return "Fingerprint unlock" as const;
+        if (result.biometryType === BiometryType.faceAuthentication) return "Face unlock" as const;
+        if (result.biometryType === BiometryType.irisAuthentication) return "Iris unlock" as const;
+        return null;
+      })(),
+      new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8_000); }),
+    ]);
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 interface CapacitorGlobal {
   Capacitor?: { isNativePlatform?: () => boolean };
+}
+
+export type DeviceUnlockResult =
+  | { ok: true }
+  | { ok: false; reason: "cancelled" | "unavailable" | "locked" | "failed" | "timed_out" };
+
+export type NativeSessionGateDecision = "authenticated" | "expired" | "unavailable";
+
+export function classifyNativeSessionResponse(
+  response: Pick<Response, "ok" | "status">,
+): NativeSessionGateDecision {
+  if (response.status === 401 || response.status === 403) return "expired";
+  return response.ok ? "authenticated" : "unavailable";
 }
 
 export function isNativeApp(): boolean {
@@ -26,63 +75,92 @@ export function isNativeApp(): boolean {
   );
 }
 
-export async function biometryAvailable(): Promise<boolean> {
+export function markNativeSessionFresh(): void {
+  if (!isNativeApp()) return;
+  sessionStorage.setItem(FRESH_SESSION_KEY, "1");
+}
+
+export function consumeFreshNativeSession(): boolean {
+  if (!isNativeApp()) return false;
+  const fresh = sessionStorage.getItem(FRESH_SESSION_KEY) === "1";
+  sessionStorage.removeItem(FRESH_SESSION_KEY);
+  return fresh;
+}
+
+export async function deviceUnlockAvailable(): Promise<boolean> {
   if (!isNativeApp()) return false;
   try {
     const { BiometricAuth } = await import("@aparajita/capacitor-biometric-auth");
-    return (await BiometricAuth.checkBiometry()).isAvailable;
+    const result = await BiometricAuth.checkBiometry();
+    return result.isAvailable || result.deviceIsSecure;
   } catch {
+    recordNativeDiagnosticEvent("plugin_failed");
     return false;
   }
 }
 
-export async function savedCredentialsExist(): Promise<boolean> {
-  if (!isNativeApp()) return false;
+export async function authenticateAppSession(): Promise<DeviceUnlockResult> {
+  // A missing native callback must leave a way to retry or sign out. A late
+  // success only settles the abandoned promise and cannot unlock the UI.
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
   try {
-    const { SecureStorage } = await import("@aparajita/capacitor-secure-storage");
-    return (await SecureStorage.get(CREDENTIALS_KEY)) !== null;
-  } catch {
-    return false;
+    return await Promise.race([
+      authenticateDevice(controller.signal),
+      new Promise<DeviceUnlockResult>((resolve) => {
+        timeout = setTimeout(() => {
+          controller.abort();
+          resolve({ ok: false, reason: "timed_out" });
+        }, 60_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-export async function saveCredentials(email: string, password: string): Promise<void> {
-  if (!isNativeApp()) return;
-  try {
-    const { SecureStorage } = await import("@aparajita/capacitor-secure-storage");
-    await SecureStorage.set(CREDENTIALS_KEY, { email, password });
-  } catch {
-    // Failing to save is not fatal — the user just signs in manually next time.
-  }
-}
-
-export async function clearSavedCredentials(): Promise<void> {
-  if (!isNativeApp()) return;
-  try {
-    const { SecureStorage } = await import("@aparajita/capacitor-secure-storage");
-    await SecureStorage.remove(CREDENTIALS_KEY);
-  } catch {
-    // Nothing sensible to do; the key may simply not exist.
-  }
-}
-
-// Prompts Face ID / Touch ID and, if it passes, returns the stored
-// credentials. Returns null when the user cancels, the check fails, or
-// nothing is stored.
-export async function unlockWithBiometrics(): Promise<SavedCredentials | null> {
-  if (!isNativeApp()) return null;
+async function authenticateDevice(signal: AbortSignal): Promise<DeviceUnlockResult> {
+  if (!isNativeApp()) return { ok: false, reason: "unavailable" };
   try {
     const { BiometricAuth } = await import("@aparajita/capacitor-biometric-auth");
+    const available = await BiometricAuth.checkBiometry();
+    if (signal.aborted) return { ok: false, reason: "timed_out" };
+    if (!available.isAvailable && !available.deviceIsSecure) {
+      return { ok: false, reason: "unavailable" };
+    }
     await BiometricAuth.authenticate({
-      reason: "Sign in to RF Tools",
-      cancelTitle: "Use password instead",
+      reason: "Unlock RF Tools",
+      cancelTitle: "Cancel",
+      allowDeviceCredential: true,
+      iosFallbackTitle: "Use Passcode",
     });
+    return { ok: true };
+  } catch (error) {
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String(error.code)
+        : "";
+    if (["appCancel", "systemCancel", "userCancel", "userFallback"].includes(code)) {
+      return { ok: false, reason: "cancelled" };
+    }
+    if (code === "biometryLockout") return { ok: false, reason: "locked" };
+    if (["biometryNotAvailable", "biometryNotEnrolled", "passcodeNotSet"].includes(code)) {
+      return { ok: false, reason: "unavailable" };
+    }
+    recordNativeDiagnosticEvent("plugin_failed");
+    return { ok: false, reason: "failed" };
+  }
+}
+
+// Remove credentials written by older app builds. Keep this migration for at
+// least one widely deployed release, then the secure-storage dependency can be
+// removed entirely.
+export async function clearLegacySavedCredentials(): Promise<void> {
+  if (!isNativeApp()) return;
+  try {
     const { SecureStorage } = await import("@aparajita/capacitor-secure-storage");
-    const data = (await SecureStorage.get(CREDENTIALS_KEY)) as SavedCredentials | null;
-    return data && typeof data.email === "string" && typeof data.password === "string"
-      ? data
-      : null;
+    await SecureStorage.remove(LEGACY_CREDENTIALS_KEY);
   } catch {
-    return null;
+    // The key usually does not exist on new installations.
   }
 }

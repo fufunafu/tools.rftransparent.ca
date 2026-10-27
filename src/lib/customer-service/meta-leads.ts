@@ -186,6 +186,8 @@ export async function ingestMetaLead(
       : null;
 
   return findOrInsertLead({
+    // Only RF runs Meta lead ads; BC has website leads only.
+    store_id: "rf_transparent",
     source: "meta",
     source_detail: form.name?.trim() || `Meta form ${form.id}`,
     form_id: lead.form_id ?? form.id,
@@ -234,11 +236,16 @@ export async function syncRecentMetaLeads(): Promise<MetaSyncSummary> {
 
       for (const lead of leads) {
         try {
+          // Backfills stay quiet, but a lead that Meta created in the last
+          // two days is new business: notify exactly as the webhook would.
+          const createdAt = typeof lead.created_time === "string" ? Date.parse(lead.created_time) : NaN;
+          const isFresh = !Number.isNaN(createdAt)
+            && Date.now() - createdAt < 48 * 60 * 60 * 1000;
           const result = await ingestMetaLead(
             lead,
             form,
             { import: "manual_sync" },
-            { sendNotification: false },
+            { sendNotification: isFresh },
           );
           if (!result.ok) {
             summary.failed += 1;

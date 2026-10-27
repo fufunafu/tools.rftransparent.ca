@@ -33,7 +33,6 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
-          "var(--font-inter)",
           "system-ui",
           "-apple-system",
           "BlinkMacSystemFont",

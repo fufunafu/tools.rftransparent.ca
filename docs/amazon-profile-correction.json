@@ -1,0 +1,18 @@
+{
+  "checkedAt": "2026-10-03T20:02:26.165556+00:00",
+  "priorCase": "22404325731",
+  "resubmitted": false,
+  "passwordMfaAssessment": "Corrected to Yes for this private Amazon integration. Server enforcement denies all Amazon app access without verified AAL2, a live verified TOTP factor, and password certification younger than 365 days; the certification flow validates 12 characters and mixed character classes. An unenrolled account being denied is evidence of enforcement, not evidence that enforcement is absent.",
+  "ownerEnrollment": {
+    "mfaVerified": false,
+    "passwordCurrent": false,
+    "ready": false
+  },
+  "networkAssessment": "Full IDS/IPS and network segmentation not verified. Mac application firewall, XProtect, and Vercel default mitigation do not by themselves establish the complete bundle.",
+  "profileAction": "Saved draft confirmed by Amazon: Your form is saved. Password/MFA Yes; Product Listing restored after Amazon cleared it; network No. No new submission.",
+  "remainingRequirements": [
+    "Implement and verify network IDS/IPS and segmentation for scoped Amazon systems",
+    "Owner completes enrollment and password certification before using app"
+  ],
+  "newCaseCreated": false
+}

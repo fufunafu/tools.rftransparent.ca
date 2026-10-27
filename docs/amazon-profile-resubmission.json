@@ -1,0 +1,32 @@
+{
+  "submittedAt": "2026-10-03T20:43:10.628992+00:00",
+  "organization": "15041074 Canada Inc.",
+  "solutionType": "private",
+  "roles": [
+    "Product Listing"
+  ],
+  "securityAnswers": {
+    "usesNetworkControls": "Yes",
+    "usesDataRestrictions": "Yes",
+    "usesDataEncryption": "Yes",
+    "hasIncidentManagementPolicy": "Yes",
+    "reportsIncidentsToAmazon": "Yes",
+    "requireMinPassword": "Yes",
+    "credentialStoredSecurely": "Yes"
+  },
+  "caseId": "22404482901",
+  "caseUrl": "https://solutionproviderportal.amazon.com/cu/case-dashboard/view-case?caseID=22404482901",
+  "priorDeclinedCaseId": "22404325731",
+  "result": "APPROVED for SP-API access",
+  "productionAppCreation": "Permitted; production application registration and authorization still pending",
+  "amazonListingsSubmitted": 0,
+  "evidence": [
+    "amazon-network-verification.json",
+    "amazon-security-release-verification.json",
+    "amazon-incident-response.md"
+  ],
+  "scope": "Private integration, initial owner Mac and restricted ingress network. Further devices, administration account hardening, and incident rehearsal remain operational follow-up.",
+  "decisionCheckedAt": "2026-10-03T20:45:10.760442+00:00",
+  "caseStatus": "Answered",
+  "amazonDecision": "Your request for access to SP-API has been APPROVED. Global Marketplace access based on the roles requested."
+}

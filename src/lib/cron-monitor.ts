@@ -100,15 +100,25 @@ export async function recordCronRun(
 }
 
 const RETENTION_DAYS = 90;
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+let lastPruneAt = 0;
 
 /**
- * Drop runs older than the retention window. Called on each insert — at five
- * jobs a day that's a handful of cheap deletes, and it means retention can't
- * silently stop working the way a separate scheduled cleanup could.
+ * Drop runs older than the retention window. Called on each insert, so
+ * retention can't silently stop working the way a separate scheduled cleanup
+ * could. The delete filters on started_at alone, which the (job, started_at)
+ * index can't serve, and some jobs now run every five minutes, so it runs at
+ * most once per PRUNE_INTERVAL_MS per instance.
  */
 async function pruneOldRuns(): Promise<void> {
+  if (Date.now() - lastPruneAt < PRUNE_INTERVAL_MS) return;
+  lastPruneAt = Date.now();
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
   await getSupabase().from("cron_runs").delete().lt("started_at", cutoff);
+}
+
+export function resetCronPruneThrottle(): void {
+  lastPruneAt = 0;
 }
 
 /**

@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import { quotePostgrestValue } from "@/lib/postgrest";
+import type { ClockErrorCode } from "@/lib/mobile-types";
 import {
   checkGeofence,
   formatDistance,
+  isValidLatitude,
+  isValidLongitude,
   isStaleShift,
   startOfWeekInTimeZone,
   totalMinutes,
+  validateClockPosition,
   validateSelfReportedClockOut,
   weekDays,
   type ClockEntry,
@@ -32,14 +36,54 @@ interface EmployeeRow {
   locations: LocationRow | null;
 }
 
-// A location only enforces the geofence once someone has set its pin.
-function geofencePin(location: LocationRow | null) {
-  if (location?.latitude == null || location?.longitude == null) return null;
+type GeofenceConfiguration =
+  | { status: "none" }
+  | { status: "invalid" }
+  | {
+      status: "ready";
+      pin: { latitude: number; longitude: number; radiusM: number | null };
+    };
+
+function geofenceConfiguration(location: LocationRow | null): GeofenceConfiguration {
+  if (!location) {
+    return { status: "none" };
+  }
+  if (location.latitude == null && location.longitude == null) {
+    return location.clock_in_radius_m == null ? { status: "none" } : { status: "invalid" };
+  }
+  const validRadius =
+    location.clock_in_radius_m == null ||
+    (Number.isInteger(location.clock_in_radius_m) &&
+      location.clock_in_radius_m >= 25 &&
+      location.clock_in_radius_m <= 5000);
+  if (
+    !isValidLatitude(location.latitude) ||
+    !isValidLongitude(location.longitude) ||
+    !validRadius
+  ) {
+    return { status: "invalid" };
+  }
   return {
-    latitude: location.latitude,
-    longitude: location.longitude,
-    radiusM: location.clock_in_radius_m,
+    status: "ready",
+    pin: {
+      latitude: location.latitude,
+      longitude: location.longitude,
+      radiusM: location.clock_in_radius_m,
+    },
   };
+}
+
+function clockError(error: string, code: ClockErrorCode, status: number) {
+  return NextResponse.json(
+    { error, code },
+    { status, headers: { "Cache-Control": "private, no-store" } },
+  );
+}
+
+function clockStatusResponse(status: unknown) {
+  return NextResponse.json(status, {
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }
 
 async function findEmployee(email: string): Promise<EmployeeRow | null> {
@@ -96,13 +140,14 @@ async function buildStatus(employee: EmployeeRow, now: Date) {
   // Friday, say) — include it so its state is visible.
   if (open && !weekEntries.some((e) => e.id === open.id)) weekEntries.push(open);
 
+  const geofence = geofenceConfiguration(employee.locations);
   return {
     linked: true,
     employeeName: employee.name,
     department: employee.department,
     locationName: employee.locations?.name ?? null,
-    // True when clock-in requires the phone's location (store has a pin).
-    geofenced: geofencePin(employee.locations) !== null,
+    geofenced: geofence.status !== "none",
+    geofenceReady: geofence.status !== "invalid",
     open: open
       ? { id: open.id, clockInAt: open.clock_in_at, stale: isStaleShift(open.clock_in_at, now) }
       : null,
@@ -116,39 +161,47 @@ async function buildStatus(employee: EmployeeRow, now: Date) {
 
 export async function GET() {
   const user = await getAuthenticatedUser();
-  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  try {
-    const employee = await findEmployee(user.email);
-    if (!employee) return NextResponse.json({ linked: false });
-    return NextResponse.json(await buildStatus(employee, new Date()));
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Failed to load clock status";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
-}
-
-export async function POST(req: NextRequest) {
-  const user = await getAuthenticatedUser();
-  if (!user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  let body: {
-    action?: string;
-    clockOutAt?: string;
-    position?: { latitude?: number; longitude?: number; accuracy?: number };
-  };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
-  }
+  if (!user?.email) return clockError("Unauthorized", "unauthorized", 401);
 
   try {
     const employee = await findEmployee(user.email);
     if (!employee) {
       return NextResponse.json(
-        { error: "Your login isn't linked to an employee profile. Ask your manager to add your email on the Employees page." },
-        { status: 403 },
+        { linked: false },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
+    return NextResponse.json(await buildStatus(employee, new Date()), {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    console.error("Failed to load clock status", error);
+    return clockError("Clock status is temporarily unavailable.", "server_unavailable", 503);
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const user = await getAuthenticatedUser();
+  if (!user?.email) return clockError("Unauthorized", "unauthorized", 401);
+
+  let body: {
+    action?: string;
+    clockOutAt?: string;
+    position?: unknown;
+  };
+  try {
+    body = await req.json();
+  } catch {
+    return clockError("Invalid request body", "invalid_request", 400);
+  }
+
+  try {
+    const employee = await findEmployee(user.email);
+    if (!employee) {
+      return clockError(
+        "Your login isn't linked to an employee profile. Ask your manager to add your email on the Employees page.",
+        "profile_not_linked",
+        403,
       );
     }
 
@@ -158,36 +211,62 @@ export async function POST(req: NextRequest) {
 
     if (body.action === "in") {
       if (open) {
-        return NextResponse.json(
-          { error: "You already have a running shift.", code: open && isStaleShift(open.clock_in_at, now) ? "stale" : "already_open" },
-          { status: 409 },
+        return clockError(
+          isStaleShift(open.clock_in_at, now)
+            ? "Your previous shift needs an end time before you can clock in again."
+            : "You already have a running shift.",
+          isStaleShift(open.clock_in_at, now) ? "stale_shift" : "duplicate_shift",
+          409,
         );
       }
-      // Geofence: only enforced when the employee's store has a pin set.
-      const pin = geofencePin(employee.locations);
+      const geofence = geofenceConfiguration(employee.locations);
+      if (geofence.status === "invalid") {
+        return clockError(
+          "Your store's clock-in location is not configured correctly. Ask a manager for help.",
+          "geofence_unavailable",
+          503,
+        );
+      }
       let clockInDistanceM: number | null = null;
-      if (pin) {
-        const { latitude, longitude, accuracy } = body.position ?? {};
-        if (typeof latitude !== "number" || typeof longitude !== "number") {
-          return NextResponse.json(
-            {
-              error: `Clocking in at ${employee.locations?.name ?? "your store"} needs your location. Allow location access and try again.`,
-              code: "location_required",
-            },
-            { status: 400 },
+      let clockInAccuracyM: number | null = null;
+      let clockInCapturedAt: string | null = null;
+      if (geofence.status === "ready") {
+        if (body.position == null) {
+          return clockError(
+            `Clocking in at ${employee.locations?.name ?? "your store"} needs your location. Allow location access and try again.`,
+            "permission_required",
+            400,
           );
         }
-        const check = checkGeofence({ latitude, longitude, accuracy }, pin);
+        const position = validateClockPosition(body.position, now);
+        if (!position.ok) {
+          if (position.code === "inaccurate_location") {
+            return clockError(
+              "Your location is not accurate enough to clock in. Move near a window or outdoors and try again.",
+              "inaccurate_location",
+              422,
+            );
+          }
+          if (position.code === "stale_location") {
+            return clockError(
+              "That location reading is out of date. Get a fresh location and try again.",
+              "stale_location",
+              422,
+            );
+          }
+          return clockError("The location reading was invalid. Try again.", "invalid_location", 400);
+        }
+        const check = checkGeofence(position.position, geofence.pin);
         if (!check.ok) {
-          return NextResponse.json(
-            {
-              error: `You look ${formatDistance(check.distanceM)} from ${employee.locations?.name ?? "your store"} — clock in when you arrive.`,
-              code: "too_far",
-            },
-            { status: 403 },
+          return clockError(
+            `You look ${formatDistance(check.distanceM)} from ${employee.locations?.name ?? "your store"}. Clock in when you arrive.`,
+            "outside_geofence",
+            403,
           );
         }
         clockInDistanceM = check.distanceM;
+        clockInAccuracyM = Math.round(position.position.accuracy);
+        clockInCapturedAt = position.capturedAt.toISOString();
       }
 
       const { error } = await sb.from("time_entries").insert({
@@ -195,39 +274,47 @@ export async function POST(req: NextRequest) {
         location_name: employee.locations?.name ?? null,
         clock_in_at: now.toISOString(),
         clock_in_distance_m: clockInDistanceM,
+        clock_in_accuracy_m: clockInAccuracyM,
+        clock_in_position_captured_at: clockInCapturedAt,
       });
-      // 23505 = unique violation on the one-open-shift index (double-tap race).
-      if (error && error.code !== "23505") throw new Error(error.message);
-      return NextResponse.json(await buildStatus(employee, now));
+      if (error?.code === "23505") {
+        return clockError("You already have a running shift.", "duplicate_shift", 409);
+      }
+      if (error) throw new Error(error.message);
+      return clockStatusResponse(await buildStatus(employee, now));
     }
 
     if (body.action === "out") {
       if (!open) {
-        return NextResponse.json({ error: "You're not clocked in.", code: "not_open" }, { status: 409 });
+        return clockError("You're not clocked in.", "no_open_shift", 409);
       }
       if (isStaleShift(open.clock_in_at, now)) {
-        return NextResponse.json(
-          { error: "This shift ran too long — confirm when it really ended.", code: "stale" },
-          { status: 409 },
+        return clockError(
+          "This shift ran too long. Confirm when it really ended.",
+          "stale_shift",
+          409,
         );
       }
-      const { error } = await sb
+      const result = await sb
         .from("time_entries")
         .update({ clock_out_at: now.toISOString() })
         .eq("id", open.id)
-        .is("clock_out_at", null);
-      if (error) throw new Error(error.message);
-      return NextResponse.json(await buildStatus(employee, now));
+        .is("clock_out_at", null)
+        .select("id")
+        .maybeSingle();
+      if (result.error) throw new Error(result.error.message);
+      if (!result.data) return clockError("You're not clocked in.", "no_open_shift", 409);
+      return clockStatusResponse(await buildStatus(employee, now));
     }
 
     if (body.action === "resolve") {
       if (!open) {
-        return NextResponse.json({ error: "There's no shift to fix.", code: "not_open" }, { status: 409 });
+        return clockError("There's no shift to fix.", "no_open_shift", 409);
       }
       const clockOutAt = body.clockOutAt ?? "";
       const invalid = validateSelfReportedClockOut(open.clock_in_at, clockOutAt, now);
-      if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
-      const { error } = await sb
+      if (invalid) return clockError(invalid, "invalid_end_time", 400);
+      const result = await sb
         .from("time_entries")
         .update({
           clock_out_at: new Date(clockOutAt).toISOString(),
@@ -235,14 +322,17 @@ export async function POST(req: NextRequest) {
           flag_reason: "Self-reported end time after a forgotten clock-out",
         })
         .eq("id", open.id)
-        .is("clock_out_at", null);
-      if (error) throw new Error(error.message);
-      return NextResponse.json(await buildStatus(employee, now));
+        .is("clock_out_at", null)
+        .select("id")
+        .maybeSingle();
+      if (result.error) throw new Error(result.error.message);
+      if (!result.data) return clockError("There's no shift to fix.", "no_open_shift", 409);
+      return clockStatusResponse(await buildStatus(employee, now));
     }
 
-    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Clock action failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return clockError("Unknown action", "invalid_request", 400);
+  } catch (error) {
+    console.error("Clock action failed", error);
+    return clockError("Clocking is temporarily unavailable. Try again.", "server_unavailable", 503);
   }
 }

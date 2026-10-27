@@ -10,6 +10,7 @@ interface TestForm {
 }
 
 type SubmitListener = (event: { target: TestForm }) => void;
+type ClickListener = (event: { target: { closest: (selector: string) => unknown } }) => void;
 
 const captureScript = readFileSync(
   new URL("../../../docs/shopify-lead-capture.js", import.meta.url),
@@ -18,6 +19,7 @@ const captureScript = readFileSync(
 
 function captureRuntime() {
   const submitListeners: SubmitListener[] = [];
+  const clickListeners: ClickListener[] = [];
   const entries: Array<[string, string]> = [
     ["text-5", "Ada"],
     ["text-6", "Lovelace"],
@@ -43,11 +45,14 @@ function captureRuntime() {
 
   const context = vm.createContext({
     window: { location: { href: "https://glassrailingstore.com/pages/contact" } },
+    Date,
+    JSON,
     document: {
       title: "Quotation Request",
       querySelectorAll: () => [],
       addEventListener: (type: string, listener: SubmitListener) => {
         if (type === "submit") submitListeners.push(listener);
+        if (type === "click") clickListeners.push(listener as unknown as ClickListener);
       },
     },
     console: { log: vi.fn(), error: vi.fn() },
@@ -57,7 +62,7 @@ function captureRuntime() {
     fetch: fetchMock,
   });
 
-  return { context, fetchMock, submitListeners };
+  return { context, fetchMock, submitListeners, clickListeners };
 }
 
 describe("Shopify lead capture storefront script", () => {
@@ -96,6 +101,45 @@ describe("Shopify lead capture storefront script", () => {
       message: "Frameless deck railing",
     });
     expect(payload.form_id).toBe("46323");
+  });
+
+  it("captures a wizard submission from the submit button click, exactly once", async () => {
+    const runtime = captureRuntime();
+    vm.runInContext(captureScript, runtime.context);
+
+    const form = {
+      tagName: "FORM",
+      id: "",
+      closest: () => ({}),
+      getAttribute: (name: string) => (name === "data-id" ? "91165" : null),
+    };
+    const button = {
+      closest: (selector: string) => {
+        if (selector.includes("button")) return button;
+        if (selector === ".globo-form-app") return {};
+        if (selector === "form") return form;
+        return null;
+      },
+    };
+
+    // The wizard fires a click on its submit button, then Powerful Form
+    // Builder submits over AJAX — sometimes with a late submit event too.
+    runtime.clickListeners[0]({ target: button });
+    runtime.submitListeners[0]({ target: form });
+
+    await vi.waitFor(() => expect(runtime.fetchMock).toHaveBeenCalledOnce());
+    const payload = JSON.parse(runtime.fetchMock.mock.calls[0][1].body);
+    expect(payload.form_id).toBe("91165");
+    expect(payload.mapped.email).toBe("ada@example.com");
+  });
+
+  it("ignores clicks outside Powerful Form Builder", async () => {
+    const runtime = captureRuntime();
+    vm.runInContext(captureScript, runtime.context);
+
+    runtime.clickListeners[0]({ target: { closest: () => null } });
+    await Promise.resolve();
+    expect(runtime.fetchMock).not.toHaveBeenCalled();
   });
 
   it("ignores forms outside Powerful Form Builder", async () => {

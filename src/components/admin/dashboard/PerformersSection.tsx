@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import { formatCADShort } from "@/lib/format";
 import type { Performer, TopPerformers } from "@/lib/ops-dashboard";
 import { delta, num } from "@/components/admin/dashboard/widgets";
+import { getSalesPeriod, type SalesPeriod } from "@/lib/sales-periods";
 
 // Moved verbatim from OpsDashboard.tsx. `sections` renders a subset of the
 // three leaderboards; `locationSlug` keeps only one location's staff.
@@ -12,7 +13,7 @@ import { delta, num } from "@/components/admin/dashboard/widgets";
 
 export const RANKINGS = {
   sales: [
-    { key: "sold", label: "Sold $", format: formatCADShort },
+    { key: "sold", label: "Net sales $", format: formatCADShort },
     { key: "quoted", label: "Quoted $", format: formatCADShort },
     { key: "conversion", label: "Conversion", format: (n) => `${n.toFixed(1)}%` },
   ],
@@ -24,6 +25,20 @@ export const RANKINGS = {
   ],
   customerService: [{ key: "followups", label: "Follow-ups", format: num }],
 } satisfies Record<string, { key: string; label: string; format: (n: number) => string }[]>;
+
+export function PerformerLink({ person, children, ...props }: {
+  person: Performer;
+  children: ReactNode;
+  className?: string;
+  "aria-describedby"?: string;
+  "data-label"?: string;
+  "data-calc"?: string;
+  "data-src"?: string;
+}) {
+  return person.hasEmployeeProfile === false
+    ? <div {...props}>{children}</div>
+    : <Link href={`/employees/${person.id}`} {...props}>{children}</Link>;
+}
 
 export function PerformerList({
   title,
@@ -42,10 +57,10 @@ export function PerformerList({
   const [metric, setMetric] = useState(options[0].key);
   const chosen = options.find((o) => o.key === metric) ?? options[0];
 
-  // Client-side re-sort of an already-fetched list — no refetch.
+  // Show the full sales team, including new reps with no activity yet.
   const ranked = [...people]
     .sort((a, b) => (b.metrics[chosen.key] ?? 0) - (a.metrics[chosen.key] ?? 0))
-    .slice(0, 3);
+    .slice(0, section === "sales" ? people.length : 3);
 
   return (
     <section className="bg-white border border-slate-200 rounded-xl shadow-soft overflow-hidden">
@@ -69,20 +84,18 @@ export function PerformerList({
         )}
       </div>
       {ranked.length === 0 ? (
-        <p className="px-4 py-3 text-[12px] text-slate-400">No activity in the last 30 days.</p>
+        <p className="px-4 py-3 text-[12px] text-slate-400">No activity in this period.</p>
       ) : (
         ranked.map((p, i) => {
-          // `previous` is the prior-30-day value of the DEFAULT metric only,
-          // so a delta is honest only when that's what's being ranked —
-          // comparing quoted-$ against last month's sold-$ isn't a trend.
+          // `previous` covers the preceding equal-length period for the default metric.
           const d =
             chosen.key === options[0].key ? delta(p.metrics[chosen.key] ?? 0, p.previous) : null;
           return (
-            <Link
+            <PerformerLink
+              person={p}
               key={p.id}
-              href={`/employees/${p.id}`}
               className="flex items-center gap-3 px-4 py-1.5 hover:bg-slate-50 transition-colors"
-              data-label={`${title} — ${chosen.label}`}
+              data-label={`${title}: ${chosen.label}`}
               data-calc={dataCalc}
               data-src={dataSrc}
             >
@@ -99,7 +112,7 @@ export function PerformerList({
                 </span>
                 {d && <span className={`block text-[10.5px] ${d.tone}`}>{d.text}</span>}
               </span>
-            </Link>
+            </PerformerLink>
           );
         })
       )}
@@ -111,7 +124,7 @@ const LIST_META: Record<keyof typeof RANKINGS, { title: string; dataCalc: string
   sales: {
     title: "Sales",
     dataCalc:
-      "Orders and non-open draft orders in the last 30 days, attributed by Shopify tag (configured shopify_tags, else name-derived). Delta compares the previous 30 days.",
+      "Net sales use successful payments less refunds, excluding tax and shipping proportionally, by payment date. Rob and Craig: RF name tags. Daniel: RF records tagged Daniel, plus Quebec, Nova Scotia, New Brunswick and PEI territory records. Territory rules take priority over tags; territory uses shipping with billing fallback when absent. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac. Quotes use the same ownership rules and quote creation date. Delta compares the preceding period of the same length.",
     dataSrc: "Shopify Admin API · orders + draftOrders",
   },
   warehouse: {
@@ -122,7 +135,7 @@ const LIST_META: Record<keyof typeof RANKINGS, { title: string; dataCalc: string
   customerService: {
     title: "Customer service",
     dataCalc:
-      "Follow-ups logged in the last 30 days. Calls are deliberately absent — the phone data has no per-agent attribution.",
+      "Follow-ups logged in the last 30 days. Phone data has no per-agent attribution.",
     dataSrc: "Supabase · followup_logs",
   },
 };
@@ -131,11 +144,16 @@ export function PerformersSection({
   p,
   sections = ["sales", "warehouse", "customerService"],
   locationSlug,
+  salesPeriod = "30d",
+  periodControl,
 }: {
   p: TopPerformers;
   sections?: (keyof typeof RANKINGS)[];
   locationSlug?: string;
+  salesPeriod?: SalesPeriod;
+  periodControl?: ReactNode;
 }) {
+  const period = getSalesPeriod(salesPeriod);
   const byLocation = (people: Performer[]) =>
     locationSlug ? people.filter((person) => person.locationSlug === locationSlug) : people;
   const gridCols =
@@ -143,11 +161,12 @@ export function PerformersSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 shrink-0">
-          Top performers · last 30 days
+          {sections.length === 1 && sections[0] === "sales" ? "Sales team" : "Top performers"} · {period.label.toLowerCase()}
         </span>
         <span className="flex-1 h-px bg-slate-200" />
+        {periodControl}
       </div>
       <div className={`grid grid-cols-1 ${gridCols} gap-3`}>
         {sections.map((section) => (
@@ -156,11 +175,25 @@ export function PerformersSection({
             title={LIST_META[section].title}
             people={byLocation(p[section])}
             section={section}
-            dataCalc={LIST_META[section].dataCalc}
+            dataCalc={`${LIST_META[section].dataCalc} Period: ${period.label.toLowerCase()}.`}
             dataSrc={LIST_META[section].dataSrc}
           />
         ))}
       </div>
+      {sections.includes("sales") && (
+        <div className="text-[11px] leading-relaxed text-slate-500 space-y-1">
+          <p>Net sales are payments received less refunds, excluding tax and shipping, by payment date. Compared with the previous {period.days} days.</p>
+          <p>Rob and Craig: tagged RF orders. Daniel: RF orders and quotes tagged Daniel, plus Quebec, Nova Scotia, New Brunswick and PEI territory records. Territory rules take priority over tags. Aaron: RF orders and quotes tagged Aaron or Aron, plus British Columbia records created July 16, 2026 onward. Daniel territory and Rob tags take priority. Marie: BC Transparent orders and quotes tagged Marijac.</p>
+        </div>
+      )}
+      {p.warnings.length > 0 && (
+        <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+          <p className="font-semibold">Some totals may be incomplete.</p>
+          <ul className="list-disc pl-4">
+            {[...new Set(p.warnings)].map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -47,6 +47,7 @@ next-env.d.ts
 /playwright-report/
 /test-results/
 /playwright/.auth/
+/.artifacts/
 
 # Local design handoff/reference artifacts
 /Multi-store sales and operations dashboard.zip
@@ -56,9 +57,26 @@ next-env.d.ts
 # Local PII backups & one-off scripts — never commit (customer data)
 followup-revert-backup-*.pdf
 followup-revert-backup-*.xlsx
-/scripts/
+/scripts/*
+!/scripts/validate-ios-release.mjs
+!/scripts/validate-ios-export.mjs
+!/scripts/validate-mobile-e2e-env.mjs
+!/scripts/validate-native-shell.mjs
+!/scripts/capture-app-store-screenshots.mjs
+!/scripts/run-ios-tests.mjs
+!/scripts/archive-ios.mjs
+!/scripts/verify-ios-deployment.mjs
 /tmp/
 /output/
 
 # Supabase CLI cache
 supabase/.temp/
+!/scripts/freightcom-smoke.mjs
+
+!/scripts/export-outreach-campaigns.mjs
+
+!/scripts/verify-sales-preservation.mjs
+
+!/scripts/validate-android-release.mjs
+!/scripts/build-android-bundle.mjs
+!/scripts/verify-amazon-sandbox.mjs

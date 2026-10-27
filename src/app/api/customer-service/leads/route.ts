@@ -2,7 +2,7 @@
 // attempts for a lead, and update a lead's outcome / quote / notes.
 
 import { NextRequest, NextResponse } from "next/server";
-import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
+import { isAuthenticated, isAdminUser, getAuthenticatedUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
 import {
   type CallStatus,
@@ -16,6 +16,7 @@ import {
   markLeadsCacheStale,
 } from "@/lib/customer-service/lead-queries";
 import { isCallablePhone } from "@/lib/call-metrics";
+import { isLeadStoreId } from "@/lib/customer-service/lead-store";
 import {
   getMetaConnectionStatus,
   metaErrorMessage,
@@ -149,9 +150,15 @@ export async function GET(req: NextRequest) {
   ) {
     return NextResponse.json({ error: "Invalid lead date range" }, { status: 400 });
   }
+  const storeParam = req.nextUrl.searchParams.get("store");
+  if (storeParam && !isLeadStoreId(storeParam)) {
+    return NextResponse.json({ error: "Invalid store" }, { status: 400 });
+  }
+  const store = storeParam && isLeadStoreId(storeParam) ? storeParam : undefined;
   if (view === "response_performance") {
     try {
       const performance = await loadLeadResponsePerformance({
+        store,
         from: fromParam,
         to: toParam,
       });
@@ -168,13 +175,15 @@ export async function GET(req: NextRequest) {
   }
 
   const sourceParam = req.nextUrl.searchParams.get("source");
-  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
+  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta" || sourceParam === "outreach"
     ? sourceParam
     : undefined;
   try {
     return NextResponse.json({
       leads: await loadLeads({
+        store,
         source,
+        includeOpen: req.nextUrl.searchParams.get("include_open") === "true",
         from: fromParam,
         to: toParam,
       }),
@@ -253,7 +262,12 @@ export async function PATCH(req: NextRequest) {
     }
     update.quote_amount = rest.quote_amount;
   }
-  if (rest.quote_sent_at === null || typeof rest.quote_sent_at === "string") update.quote_sent_at = rest.quote_sent_at;
+  if (rest.quote_sent_at !== undefined) {
+    if (rest.quote_sent_at !== null && (typeof rest.quote_sent_at !== "string" || !Number.isFinite(Date.parse(rest.quote_sent_at)))) {
+      return NextResponse.json({ error: "Enter a valid quote send date" }, { status: 400 });
+    }
+    update.quote_sent_at = rest.quote_sent_at;
+  }
   if (rest.phone === null) {
     update.phone = null;
   } else if (typeof rest.phone === "string") {
@@ -268,9 +282,36 @@ export async function PATCH(req: NextRequest) {
     update.not_applicable_reason = rest.not_applicable_reason;
   }
   if (rest.notes === null || typeof rest.notes === "string") update.notes = rest.notes;
-  if (rest.assigned_to === null || typeof rest.assigned_to === "string") update.assigned_to = rest.assigned_to;
+  if (rest.assigned_to !== undefined) {
+    if (rest.assigned_to !== null && (typeof rest.assigned_to !== "string" || rest.assigned_to.length > 200)) return NextResponse.json({ error: "Owner must be at most 200 characters" }, { status: 400 });
+    update.assigned_to = rest.assigned_to?.trim() || null;
+  }
   if (rest.installation_requested === null || typeof rest.installation_requested === "boolean") {
     update.installation_requested = rest.installation_requested;
+  }
+  if (rest.next_follow_up_at !== undefined) {
+    if (rest.next_follow_up_at !== null && (typeof rest.next_follow_up_at !== "string" || !Number.isFinite(Date.parse(rest.next_follow_up_at)))) {
+      return NextResponse.json({ error: "Enter a valid follow-up date" }, { status: 400 });
+    }
+    update.next_follow_up_at = rest.next_follow_up_at;
+  }
+  if (rest.next_action !== undefined) {
+    if (rest.next_action !== null && (typeof rest.next_action !== "string" || rest.next_action.length > 1000)) {
+      return NextResponse.json({ error: "Next action must be at most 1000 characters" }, { status: 400 });
+    }
+    update.next_action = rest.next_action?.trim() || null;
+  }
+  if (rest.claim === true) update.assigned_to = (await getAuthenticatedUser())?.email;
+  if (['next_action', 'next_follow_up_at', 'assigned_to', 'outcome'].some((key) => key in update)) {
+    update.workflow_updated_at = new Date().toISOString();
+  }
+  if (['won', 'lost', 'not_applicable'].includes(String(update.outcome))) update.next_follow_up_at = null;
+  // "Send to BC" / "Send to RF": move the lead to the other store's queue.
+  if (rest.store_id !== undefined) {
+    if (!isLeadStoreId(rest.store_id)) {
+      return NextResponse.json({ error: "Invalid store" }, { status: 400 });
+    }
+    update.store_id = rest.store_id;
   }
 
   if (Object.keys(update).length === 0) {

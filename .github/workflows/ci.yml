@@ -19,10 +19,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies
@@ -40,11 +40,16 @@ jobs:
       - name: Production build
         run: npm run build
 
-      - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+      - name: Install Chromium and WebKit
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Browser smoke tests
-        run: npm run test:e2e
+        # Keep the broad browser smoke suite on Chromium. The dedicated mobile
+        # step below exercises WebKit across every supported viewport.
+        run: npm run test:e2e -- --project=chromium
+
+      - name: Public mobile accessibility and layout tests
+        run: npm run test:e2e:mobile:public
 
       - name: Upload browser report
         if: failure()
@@ -53,3 +58,73 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  native-ios-tests:
+    # Release validation requires the iOS 26 SDK. Keep this pinned to the
+    # matching hosted image instead of relying on macos-latest drift.
+    runs-on: macos-26
+    timeout-minutes: 40
+    # Isolate device families so the iPad starts on a fresh runner and does
+    # not inherit the iPhone simulator's resource use or elapsed job budget.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - family: iphone
+            scope: all
+          - family: ipad
+            scope: ui
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Sync production native configuration
+        run: npm run cap:sync:prod
+
+      - name: Generate Xcode project
+        run: npm run ios:project
+
+      - name: Build Release iOS Simulator app
+        run: npm run ios:build:sim:release
+
+      - name: Validate native runtime
+        run: npm run ios:native-smoke
+
+      - name: Run native tests (${{ matrix.family }})
+        env:
+          IOS_TEST_FAMILY: ${{ matrix.family }}
+          IOS_TEST_SCOPE: ${{ matrix.scope }}
+        run: node scripts/run-ios-tests.mjs
+
+      - name: Upload native test results
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results-${{ matrix.family }}
+          path: ${{ runner.temp }}/rf-tools-ios-tests-*/Logs/Test/
+          retention-days: 7
+
+  native-ios:
+    # Preserve the required status name, and fail if either device family
+    # failed, was cancelled, or did not run.
+    needs: native-ios-tests
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require all native test jobs to pass
+        env:
+          NATIVE_RESULT: ${{ needs.native-ios-tests.result }}
+        run: test "$NATIVE_RESULT" = success

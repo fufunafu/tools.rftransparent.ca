@@ -1,17 +1,21 @@
+import "server-only";
+
 import { createSupabaseServerClient } from "@/lib/supabase-server";
 import { isAuthorizedEmail, isAdminEmail, isManagementEmail } from "@/lib/authz";
 import type { User } from "@supabase/supabase-js";
+import { cache } from "react";
 
-export async function getAuthenticatedUser(): Promise<User | null> {
-  // getSession() reads the JWT from the cookie — no network call.
-  // The proxy.ts already ran getUser() (authoritative check) before this.
+export const getAuthenticatedUser = cache(async (): Promise<User | null> => {
+  // Revalidate the cookie-backed token at the point where protected pages and
+  // APIs make authorization decisions. Proxy remains the fast routing guard,
+  // while this cached DAL check keeps direct entry points authoritative.
   const supabase = await createSupabaseServerClient();
-  const { data: { session } } = await supabase.auth.getSession();
-  const user = session?.user ?? null;
+  const { data: { user }, error } = await supabase.auth.getUser();
+  if (error) return null;
   if (!user || !user.email) return null;
 
   return (await isAuthorizedEmail(user.email)) ? user : null;
-}
+});
 
 export async function isAuthenticated(): Promise<boolean> {
   return (await getAuthenticatedUser()) !== null;

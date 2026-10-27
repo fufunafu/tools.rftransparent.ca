@@ -1,0 +1,15 @@
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {NextRequest} from 'next/server';
+const {getUser,authorized}=vi.hoisted(()=>({getUser:vi.fn(),authorized:vi.fn()}));
+vi.mock('@supabase/ssr',()=>({createServerClient:()=>({auth:{getUser,signOut:vi.fn()}})}));
+vi.mock('@/lib/authz',()=>({isAuthorizedEmail:authorized}));
+vi.mock('@/lib/default-dashboard',()=>({resolveLandingPage:()=>'/'}));
+import {proxy} from './proxy';
+beforeEach(()=>{vi.clearAllMocks();vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL','https://live.supabase.co');vi.stubEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY','live-anon');vi.stubEnv('NEXT_PUBLIC_RF_REVIEW_AUTH_URL','https://demo.supabase.co');vi.stubEnv('NEXT_PUBLIC_RF_REVIEW_AUTH_KEY','demo-anon');vi.stubEnv('RF_REVIEW_USER_ID','reviewer');vi.stubEnv('RF_REVIEW_PROXY_SECRET','secret'.repeat(8));vi.stubEnv('RF_REVIEW_ORIGIN','https://demo.vercel.app');getUser.mockResolvedValue({data:{user:{id:'reviewer'}}});authorized.mockResolvedValue(true);});
+afterEach(()=>vi.unstubAllEnvs());
+it('routes a validated isolated identity before live authorization',async()=>{const r=await proxy(new NextRequest('https://tools.rftransparent.ca/api/todos?q=1',{headers:{cookie:'sb-demo-auth-token=demo'}}));expect(r.headers.get('x-middleware-rewrite')).toBe('https://demo.vercel.app/api/todos?q=1');expect(r.headers.get('cache-control')).toBe('private, no-store');expect(authorized).not.toHaveBeenCalled();});
+it('fails closed when the demo destination is missing',async()=>{vi.stubEnv('RF_REVIEW_ORIGIN','');const r=await proxy(new NextRequest('https://tools.rftransparent.ca/api/todos',{headers:{cookie:'sb-demo-auth-token.0=demo'}}));expect(r.status).toBe(503);expect(authorized).not.toHaveBeenCalled();});
+it('does not grant access on an unverified demo cookie',async()=>{getUser.mockResolvedValue({data:{user:null}});const r=await proxy(new NextRequest('https://tools.rftransparent.ca/api/todos',{headers:{cookie:'sb-demo-auth-token=forged'}}));expect(r.status).toBe(401);expect(authorized).not.toHaveBeenCalled();});
+it('keeps regular users on the original authorization path',async()=>{getUser.mockResolvedValue({data:{user:{id:'employee',email:'employee@example.com'}}});const r=await proxy(new NextRequest('https://tools.rftransparent.ca/api/todos'));expect(r.headers.get('x-middleware-rewrite')).toBeNull();expect(authorized).toHaveBeenCalledWith('employee@example.com');});
+it('rejects direct demo traffic without proxy authentication',async()=>{vi.stubEnv('RF_REVIEW_DEMO','1');const r=await proxy(new NextRequest('https://demo.vercel.app/api/todos'));expect(r.status).toBe(403);expect(getUser).not.toHaveBeenCalled();});
+it('requires the reviewer identity even behind an authenticated proxy',async()=>{vi.stubEnv('RF_REVIEW_DEMO','1');getUser.mockResolvedValue({data:{user:{id:'other'}}});const r=await proxy(new NextRequest('https://demo.vercel.app/api/todos',{headers:{'x-rf-review-proxy':'secret'.repeat(8)}}));expect(r.status).toBe(403);expect(authorized).not.toHaveBeenCalled();});

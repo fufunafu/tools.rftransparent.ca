@@ -96,6 +96,7 @@ beforeEach(() => {
 
 function leadInput(overrides: Partial<UpsertLeadInput> = {}): UpsertLeadInput {
   return {
+    store_id: "rf_transparent",
     source: "website",
     source_detail: "contact-form",
     form_id: "f1",
@@ -458,6 +459,7 @@ describe("findOrInsertLead", () => {
     });
     expect(sendNewLeadNotificationMock).toHaveBeenCalledWith({
       leadId: "new-lead-id",
+      storeId: "rf_transparent",
       source: "website",
       sourceDetail: "contact-form",
       pageUrl: "https://example.com/contact",
@@ -549,5 +551,22 @@ describe("findOrInsertLead", () => {
     const result = await findOrInsertLead(leadInput());
     expect(result).toEqual({ ok: false, error: "boom" });
     expect(sendNewLeadNotificationMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("extractContactFields fallback scan", () => {
+  it("finds an email and phone under unrecognised French field keys", async () => {
+    const { extractContactFields } = await import("@/lib/customer-service/leads");
+    const result = extractContactFields({
+      fields: {
+        "text-7": "Sylvie",
+        "text-8": "Mayer",
+        "courriel-1": "sylvie@example.com",
+        "tel-9": "+1 819 629 7443",
+        "select-1": "Noir mat",
+      },
+    });
+    expect(result.email).toBe("sylvie@example.com");
+    expect(result.phone).toBe("+1 819 629 7443");
   });
 });

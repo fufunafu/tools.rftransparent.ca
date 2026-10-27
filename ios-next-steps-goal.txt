@@ -1,0 +1,96 @@
+Goal: Complete the next phase of RF Tools iOS development
+
+Objective
+
+Improve the existing Capacitor iOS app from a reliable native shell into a production-ready employee app with native automation, deep links, push workflows, update enforcement, observability, and polished device behavior.
+
+Work in this priority order
+
+1. Native UI automation
+
+- Add XCTest and XCUITest targets to the Xcode project.
+- Cover cold launch, branded loading, offline recovery, retry behavior, privacy shielding, foreground refresh, and session expiry.
+- Cover Face ID success, cancellation, unavailable biometrics, and fallback behavior.
+- Cover location permission allowed, denied, restricted, inaccurate, timed out, and unavailable states.
+- Verify trusted links stay in the app and external links open outside the WebView.
+- Make native tests runnable through a package.json script and suitable for CI.
+
+2. Deep links and universal links
+
+- Configure Associated Domains and the required apple-app-site-association file.
+- Route supported links to Home, Clock, Tasks, warehouse reporting, customer-service follow-ups, and other permitted role destinations.
+- Preserve authentication and authorization checks before showing linked content.
+- Provide a safe fallback for unsupported, expired, or unauthorized links.
+
+3. Push notification workflows
+
+- Finish push registration and server-side device-token management.
+- Add useful notification categories for assigned tasks, overdue work, callbacks, follow-ups, and clock reminders.
+- Open the correct app destination when a notification is tapped.
+- Add per-category notification preferences.
+- Keep sensitive employee or customer information out of lock-screen notification copy.
+
+4. App update enforcement
+
+- Add a server endpoint that returns the minimum supported native build and current recommended build.
+- Compare the installed build on launch and foreground refresh.
+- Show a blocking update screen only when the installed build is no longer compatible.
+- Show a dismissible update prompt for recommended updates.
+- Link directly to the correct TestFlight or App Store destination.
+
+5. Native observability and diagnostics
+
+- Capture cold-start failures, WebView load failures, native plugin failures, authentication-gate failures, and unexpected lifecycle errors.
+- Include app version, build number, environment, connection type, and operating-system version in support diagnostics.
+- Add privacy-conscious crash reporting without recording passwords, session tokens, precise location, or sensitive employee and customer data.
+- Provide a user-facing way to copy or share safe diagnostic information with support.
+
+6. Native clock experience
+
+- Show location acquisition and accuracy progress before clock-in.
+- Provide clear recovery guidance for every permission and geofence error.
+- Add duplicate-tap prevention and haptic feedback for confirmed server-side clock actions.
+- Never show a successful clock action until the server confirms it.
+- Continue to prohibit offline clock records.
+- Evaluate a clock-status widget or Live Activity only after the core clock flow is stable and tested.
+
+7. Accessibility and device quality
+
+- Verify VoiceOver labels, focus order, error announcements, and control traits.
+- Verify Dynamic Type, reduced motion, contrast, keyboard behavior, and 44-point minimum targets.
+- Test iPhone SE, standard iPhone, Pro Max, and iPad layouts.
+- Test portrait and supported landscape layouts without clipped content or unintended horizontal scrolling.
+- Complete final checks on real devices in addition to simulators.
+
+8. Release automation
+
+- Add CI checks for native tests, native shell validation, production Capacitor configuration, and simulator builds.
+- Automate version and build-number validation.
+- Add a repeatable archive and TestFlight upload workflow.
+- Prevent releases containing localhost, cleartext traffic, debug WebView settings, or incomplete privacy declarations.
+
+9. Resilient maintenance experience
+
+- Add a bundled maintenance and service-unavailable screen that works when the remote site cannot load.
+- Show connection state, Retry, support contact, and safe diagnostics.
+- Distinguish offline, maintenance, authentication, and unexpected loading failures.
+- Ensure unsent work is never represented as submitted.
+
+10. Native settings and support
+
+- Add one settings surface for app version, build number, environment, connection status, notification permission, location permission, biometric availability, privacy information, and support actions.
+- Provide links to system settings when a denied permission must be changed outside the app.
+- Keep management-only diagnostics and actions restricted by server-side authorization.
+
+Acceptance criteria
+
+- The native test suite runs from the command line and covers all critical app lifecycle, authentication, location, offline, and navigation paths.
+- Supported web links and notification taps open the correct authorized destination in the installed app.
+- Push registration, preferences, delivery, and routing work without exposing sensitive lock-screen content.
+- Unsupported native builds receive an appropriate update experience.
+- Support can diagnose native failures without collecting sensitive information.
+- Clock actions remain server-confirmed, geofence-validated, duplicate-safe, and online-only.
+- Critical flows pass accessibility checks and work across the supported iPhone and iPad sizes.
+- CI rejects unsafe release configuration and verifies a successful simulator build.
+- Employees can recover from offline, maintenance, permission, and loading failures without mistaking unsent work for completed work.
+- The final implementation passes repository checks, native tests, mobile end-to-end tests, a production Capacitor sync, and a release simulator build.

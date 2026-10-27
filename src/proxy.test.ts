@@ -50,6 +50,29 @@ afterAll(() => {
 });
 
 describe("authentication proxy", () => {
+  it.each([
+    "/privacy",
+    "/support",
+    "/apple-app-site-association",
+    "/.well-known/apple-app-site-association",
+    "/api/native/version",
+    "/api/native/status",
+  ])("allows signed-out access to %s", async (path) => {
+    const response = await proxy(new NextRequest(`https://tools.rftransparent.ca${path}`));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
+  it("does not make future native API routes public by prefix", async () => {
+    const response = await proxy(new NextRequest(
+      "https://tools.rftransparent.ca/api/native/management-diagnostics",
+    ));
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ error: "Unauthorized" });
+  });
+
   it("internally rewrites Shopify's trailing-slash lead webhook", async () => {
     const response = await proxy(new NextRequest(
       "https://tools.rftransparent.ca/api/customer-service/leads/webhook/?shop=b03ab8-c8.myshopify.com&timestamp=123&signature=abc",

@@ -41,6 +41,15 @@ describe("fetchAllPages", () => {
     vi.unstubAllGlobals();
   });
 
+  it("rejects partial GraphQL data for sales synchronization without changing legacy callers", async () => {
+    const { shopifyGraphQL } = await importShopify();
+    fetchMock.mockResolvedValue({ ok: true, status: 200, json: async () => ({ data: { nodes: [null] }, errors: [{ message: "Access denied" }] }) });
+    await expect(shopifyGraphQL("store1", "query", {}, { rejectPartial: true })).rejects.toThrow("Access denied");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(shopifyGraphQL("store1", "query")).resolves.toEqual({ nodes: [null] });
+    warning.mockRestore();
+  });
+
   it("collects nodes across pages and passes the cursor as a variable", async () => {
     const { fetchAllPages } = await importShopify();
     fetchMock

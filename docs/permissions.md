@@ -1,22 +1,25 @@
 # Permissions
 
-Authorization has three independent levels. A person may be an admin without being management, or management without being an admin.
+Authorization has three levels. Management always implies admin (so managers can open every page); a person may be an admin without being management.
 
 | Level | Source | Typical capabilities |
 | --- | --- | --- |
 | Authenticated | Owner, allowed domain, active employee, or `admin_users` override | General operational dashboards and personal workflows |
-| Admin | Owner, allowed domain, or `admin_users` override | Access management, account provisioning, administrative mutations |
+| Admin | Owner, allowed domain, `admin_users` override, or active management employee | Access management, account provisioning, administrative mutations |
 | Management | Owner or active employee in the management department | Purchasing, reimbursement approval, and team-wide task oversight |
 
 ## Route expectations
 
 | Area | View access | Elevated actions |
 | --- | --- | --- |
-| Home, sales, pipeline, marketing, Shopify | Authenticated | Route-specific API checks |
+| Home, pipeline, marketing, Shopify | Authenticated | Route-specific API checks |
+| Personal sales (`/sales`) | Active sales employee | Management uses `/dashboards/sales` |
 | Role dashboards (`/dashboards/sales`, `/dashboards/store/[location]`, `/dashboards/marketing`) | Authenticated | None — an employee's role/location picks their default landing dashboard, never restricts access |
 | Sales commissions (`/api/kpi/commissions`) | Authenticated | Commission rates edited via admin-only employee routes |
-| Customer service | Authenticated | Admin checks for destructive or configuration actions |
-| Warehouse dashboard and reports | Authenticated | Authenticated report writes |
+| Personal customer-service queue (`/customer-service`) | Active customer-service employee | Assignment writes revalidate the employee role server-side |
+| Customer-service analytics | Authenticated | Admin checks for destructive or configuration actions |
+| Personal warehouse report | Active warehouse employee, or management with an employee profile | Shared-station name selector; a selected identity must be an active warehouse employee |
+| Warehouse dashboard | Management | Manager corrections use the separate management-only report endpoint |
 | Purchasing | Management | Management for all purchasing reads and writes |
 | Accounting and reimbursements | Authenticated | Management for approval and rejection |
 | Tasks | Authenticated | Management for all-employee oversight |

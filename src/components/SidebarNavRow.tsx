@@ -1,8 +1,8 @@
 "use client";
 
-import { cloneElement } from "react";
+import { cloneElement, Fragment } from "react";
 import Link from "next/link";
-import { matchesItem, type NavItem } from "@/components/nav-items";
+import { activeChildHref, matchesItem, type NavItem } from "@/components/nav-items";
 
 const ExternalArrow = ({ className }: { className: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className={className}>
@@ -10,7 +10,7 @@ const ExternalArrow = ({ className }: { className: string }) => (
   </svg>
 );
 
-// Only surfaced on children — a section is never half-built on its own.
+// Only surfaced on children: a section is never half-built on its own.
 const WipChip = () => (
   <span className="text-[9px] font-bold uppercase tracking-[0.07em] text-amber-700 bg-amber-50 rounded px-1 py-px">
     WIP
@@ -38,6 +38,7 @@ export default function SidebarNavRow({
 }) {
   const hasChildren = Boolean(item.children?.length);
   const sectionActive = matchesItem(item, pathname);
+  const activeChild = activeChildHref(pathname);
   const sectionId = `sidebar-section-${item.href.replace(/[^a-z0-9]+/gi, "-")}`;
 
   // Blue means "this exact page". A section that merely contains the current
@@ -47,31 +48,44 @@ export default function SidebarNavRow({
   const blueActive = collapsed ? sectionActive : sectionActive && !hasChildren;
   const containsActive = !collapsed && hasChildren && sectionActive;
 
+  // Three cues rather than one: a spine at the edge of the rail, a tint, and
+  // the weight. Colour on its own was doing all the work and the live row did
+  // not read as the live row.
+  // The rail's own padding is 12px either side, open or shut, so one offset
+  // puts the spine flush against the edge of the sidebar in both.
+  const spine =
+    "before:absolute before:left-[-12px] before:top-[3px] before:bottom-[3px] before:w-[3px] " +
+    "before:rounded-r-full before:bg-blue-600 before:content-['']";
+
   // Size is picked in one branch rather than layered, so there's never a
   // duplicate height/padding utility whose winner depends on CSS order.
-  const rowClass = `group flex items-center gap-[9px] rounded-lg text-[13px] transition-colors ${
-    collapsed ? "h-[30px] w-[34px] mx-auto justify-center" : "h-8 px-[9px]"
+  const rowClass = `group relative flex items-center gap-[10px] rounded-lg text-[13px] transition-colors ${
+    collapsed ? "h-9 w-10 mx-auto justify-center" : "h-[34px] px-[10px]"
   } ${
     blueActive
-      ? "bg-blue-50 font-semibold text-blue-700"
+      ? `bg-blue-50 font-semibold text-blue-700 ${spine}`
       : containsActive
-        ? "font-semibold text-slate-900 hover:bg-slate-50"
-        : "font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900"
+        ? "font-semibold text-slate-900 hover:bg-slate-100"
+        : "font-medium text-slate-700 hover:bg-slate-100 hover:text-slate-900"
   }`;
 
   // The icon is authored once in nav-items and restyled here, so size and
-  // colour live with the row rather than being repeated on every svg.
+  // colour live with the row rather than being repeated on every svg. A shut
+  // section holding the live page keeps its icon blue: it is the only thing
+  // left on screen saying where you are.
   const icon = cloneElement(item.icon, {
-    className: `w-4 h-4 shrink-0 ${blueActive ? "text-blue-600" : "text-slate-400"}`,
-    strokeWidth: blueActive ? 1.7 : 1.6,
+    className: `w-[17px] h-[17px] shrink-0 ${
+      blueActive || containsActive ? "text-blue-600" : "text-slate-400 group-hover:text-slate-600"
+    }`,
+    strokeWidth: blueActive ? 1.8 : 1.6,
   });
 
-  // Open problem tickets live under Customer Service — the count badge sits
+  // Open problem tickets live under Customer Service: the count badge sits
   // on that parent so it stays visible on every page.
   const showBadge = item.href === "/customer-service" && openProblems > 0;
   const badge = showBadge ? (
     <span
-      className="min-w-[19px] h-[18px] px-[5px] rounded-full bg-red-500 text-white text-[10.5px] font-semibold tabular-nums flex items-center justify-center"
+      className="min-w-[19px] h-[18px] px-[5px] rounded-full bg-red-500 text-white text-[10.5px] font-bold tabular-nums flex items-center justify-center"
       title={`${openProblems} open problem ticket${openProblems === 1 ? "" : "s"}`}
     >
       {openProblems}
@@ -79,6 +93,12 @@ export default function SidebarNavRow({
   ) : null;
 
   const trailing = collapsed ? null : badge;
+
+  // A shut section that holds the live page says so with a dot, since its
+  // children are not on screen to carry the highlight.
+  const closedMark = containsActive && !expanded ? (
+    <span className="w-[5px] h-[5px] shrink-0 rounded-full bg-blue-600" aria-hidden="true" />
+  ) : null;
 
   return (
     <div>
@@ -93,14 +113,15 @@ export default function SidebarNavRow({
           {icon}
           <span className="min-w-0 flex-1 truncate">{item.label}</span>
           {trailing}
-          {/* Points right when shut, down when open — rotating a down-chevron
+          {closedMark}
+          {/* Points right when shut, down when open: rotating a down-chevron
               would read as "up = open". */}
           <svg
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth={2}
-            className={`w-3 h-3 shrink-0 text-slate-300 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
+            className={`w-[13px] h-[13px] shrink-0 text-slate-400 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
           </svg>
@@ -117,7 +138,7 @@ export default function SidebarNavRow({
           {!collapsed && (
             <>
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
-              <ExternalArrow className="w-3 h-3 text-slate-300" />
+              <ExternalArrow className="w-3 h-3 text-slate-400" />
             </>
           )}
         </a>
@@ -130,7 +151,7 @@ export default function SidebarNavRow({
           {collapsed && showBadge ? (
             <span className="relative flex items-center justify-center">
               {icon}
-              {/* No room for the pill in the rail — a corner dot still
+              {/* No room for the pill in the rail: a corner dot still
                   signals open problem tickets. */}
               <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-red-500 ring-2 ring-white" />
             </span>
@@ -155,35 +176,42 @@ export default function SidebarNavRow({
           }`}
         >
           <div className="min-h-0 overflow-hidden">
-            {/* No connector line — at this indent the nesting already reads,
-                and the rule was the last thing dragging the eye down the rail. */}
-            <div className="flex flex-col gap-px pl-[34px] py-0.5">
-              {item.children!.map((child) => {
-                const childActive =
-                  !child.external && (pathname === child.href || pathname.startsWith(child.href + "/"));
+            {/* The rail down the left. Marketing now holds sixteen pages in
+                five clusters, and at that length an indent alone stops reading
+                as "these belong to the row above" and starts reading as a list
+                that got longer. The line is what makes it a tree. */}
+            <div className="relative flex flex-col gap-px pl-[33px] py-0.5
+              before:absolute before:left-[20px] before:top-0 before:bottom-[6px]
+              before:w-px before:bg-slate-200 before:content-['']">
+              {item.children!.map((child, childIndex) => {
+                const childActive = !child.external && child.href === activeChild;
                 const childBadge = child.href === "/customer-service/problems" && openProblems > 0;
-                const childClass = `flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors ${
+                // The live child marks the rail itself rather than wearing a
+                // fill of its own: the fill fought the parent's.
+                const childClass = `relative flex h-[26px] items-center gap-2 rounded-md px-2 text-[12.5px] transition-colors ${
                   childActive
-                    ? "bg-blue-50/60 font-semibold text-blue-700"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                    ? "font-semibold text-blue-700 bg-blue-50/70 before:absolute before:left-[-13px] " +
+                      "before:top-[4px] before:bottom-[4px] before:w-[2px] before:rounded-full " +
+                      "before:bg-blue-600 before:content-['']"
+                    : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
                 }`;
                 const childContent = (
                   <>
                     <span className="min-w-0 flex-1 truncate">{child.label}</span>
                     {childBadge ? (
-                      // Plain text, not a pill — the parent's pill stays the
+                      // Plain text, not a pill: the parent's pill stays the
                       // loudest thing in the group.
                       <span className="text-[11px] font-semibold text-red-500 tabular-nums">
                         {openProblems}
                       </span>
                     ) : child.external ? (
-                      <ExternalArrow className="w-3 h-3 text-slate-300" />
+                      <ExternalArrow className="w-3 h-3 text-slate-400" />
                     ) : child.status === "wip" ? (
                       <WipChip />
                     ) : null}
                   </>
                 );
-                return child.external ? (
+                const row = child.external ? (
                   <a
                     key={child.href}
                     href={child.href}
@@ -203,6 +231,21 @@ export default function SidebarNavRow({
                   >
                     {childContent}
                   </Link>
+                );
+                // A caption opens a cluster inside the list. It is a label on
+                // the children, not a destination, so it is not a row: nothing
+                // here is focusable or clickable.
+                return child.cap ? (
+                  <Fragment key={child.href}>
+                    <p
+                      className={`px-2 ${childIndex === 0 ? "pt-[2px]" : "pt-[7px]"} pb-[2px] text-[9.5px] font-bold uppercase tracking-[0.11em] text-slate-400`}
+                    >
+                      {child.cap}
+                    </p>
+                    {row}
+                  </Fragment>
+                ) : (
+                  row
                 );
               })}
             </div>

@@ -9,7 +9,10 @@ import {
   assessLeadSpam,
 } from "@/lib/customer-service/lead-spam";
 
-export type LeadSource = "website" | "meta";
+import type { LeadStoreId } from "@/lib/customer-service/lead-store";
+
+export type { LeadStoreId } from "@/lib/customer-service/lead-store";
+export type LeadSource = "website" | "meta" | "outreach";
 export type CallStatus = "not_called" | "no_answer" | "called";
 export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
@@ -43,6 +46,7 @@ export interface LeadSubmission {
 
 export interface Lead {
   id: string;
+  store_id: LeadStoreId;
   source: LeadSource;
   source_detail: string | null;
   form_id: string | null;
@@ -60,6 +64,11 @@ export interface Lead {
   quote_amount: string | number | null;
   quote_sent_at: string | null;
   first_quote_at?: string | null;
+  quote_draft_id?: string | null;
+  next_follow_up_at?: string | null;
+  next_action?: string | null;
+  last_reply_at?: string | null;
+  last_staff_reply_at?: string | null;
   lost_reason: string | null;
   not_applicable_reason: string | null;
   notes: string | null;
@@ -167,12 +176,36 @@ export function extractContactFields(payload: Record<string, unknown>): {
     "textarea-2",
   ]);
 
+  const resolvedEmail = cleanStr(mapped.email) ?? labeled.email ?? email;
+  const resolvedPhone = cleanStr(mapped.phone) ?? labeled.phone ?? phone;
+  // Last resort for forms whose keys and labels we do not recognise (e.g. a
+  // French form): find anything that looks like an email or phone number.
+  const scanned = resolvedEmail && resolvedPhone ? null : scanContactValues(fields);
+
   return {
     name: cleanStr(mapped.name) ?? labeled.name ?? heuristicName,
-    email: cleanStr(mapped.email) ?? labeled.email ?? email,
-    phone: cleanStr(mapped.phone) ?? labeled.phone ?? phone,
+    email: resolvedEmail ?? scanned?.email ?? null,
+    phone: resolvedPhone ?? scanned?.phone ?? null,
     message: cleanStr(mapped.message) ?? labeled.message ?? message,
   };
+}
+
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/i;
+const PHONE_PATTERN = /^\+?[\d\s().-]{10,20}$/;
+
+function scanContactValues(
+  fields: Record<string, unknown>,
+): { email: string | null; phone: string | null } {
+  let email: string | null = null;
+  let phone: string | null = null;
+  for (const [key, raw] of Object.entries(fields)) {
+    if (key.startsWith("_")) continue;
+    const value = cleanStr(Array.isArray(raw) ? raw[0] : raw);
+    if (!value) continue;
+    if (!email && EMAIL_PATTERN.test(value)) email = value;
+    else if (!phone && PHONE_PATTERN.test(value) && value.replace(/\D/g, "").length >= 10) phone = value;
+  }
+  return { email, phone };
 }
 
 /**
@@ -295,6 +328,7 @@ function prettifyFieldName(s: string): string {
  *     and matches on email or phone, enriches that row instead of inserting.
  */
 export interface UpsertLeadInput {
+  store_id: LeadStoreId;
   source: LeadSource;
   source_detail: string | null;
   form_id: string | null;
@@ -339,6 +373,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     const { data: providerMatch } = await supabase
       .from("leads")
       .select("id")
+      .eq("store_id", input.store_id)
       .eq("source", input.source)
       .contains("raw_payload", { meta_lead_id: input.external_id })
       .limit(1)
@@ -359,6 +394,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   let duplicateQuery = supabase
     .from("leads")
     .select("id,name,email,phone,message,installation_requested,raw_payload,outcome")
+    .eq("store_id", input.store_id)
     .eq("source", input.source)
     .gte("submitted_at", duplicateWindowStart);
   if (input.form_id) duplicateQuery = duplicateQuery.eq("form_id", input.form_id);
@@ -396,6 +432,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
   const { data, error } = await supabase
     .from("leads")
     .insert({
+      store_id: input.store_id,
       source: input.source,
       source_detail: input.source_detail,
       form_id: input.form_id,
@@ -423,6 +460,7 @@ export async function findOrInsertLead(input: UpsertLeadInput): Promise<UpsertLe
     try {
       await sendNewLeadNotification({
         leadId: data.id,
+        storeId: input.store_id,
         source: input.source,
         sourceDetail: input.source_detail,
         pageUrl: input.page_url,

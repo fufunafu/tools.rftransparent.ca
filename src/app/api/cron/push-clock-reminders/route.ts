@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { withCronRun } from "@/lib/automations";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { getSupabase } from "@/lib/supabase";
-import { apnsConfigured, deadTokens, sendPush } from "@/lib/apns";
+import {
+  apnsConfigured,
+  deadTokens,
+  sendRegisteredPush,
+  type RegisteredPushToken,
+} from "@/lib/apns";
 import { clockReminderText, shiftNeedsReminder } from "@/lib/push-notifications";
 
 export const dynamic = "force-dynamic";
@@ -37,14 +42,21 @@ async function handler(req: NextRequest) {
 
   const { data: tokens, error: tokenError } = await sb
     .from("push_tokens")
-    .select("token, employee_id")
+    .select("token, employee_id, apns_environment")
     .in("employee_id", due.map((s) => s.employee_id))
+    .eq("clock_reminders", true)
     .is("disabled_at", null);
   if (tokenError) throw new Error(tokenError.message);
 
-  const tokensByEmployee = new Map<string, string[]>();
+  const tokensByEmployee = new Map<string, RegisteredPushToken[]>();
   for (const t of tokens ?? []) {
-    tokensByEmployee.set(t.employee_id, [...(tokensByEmployee.get(t.employee_id) ?? []), t.token]);
+    tokensByEmployee.set(t.employee_id, [
+      ...(tokensByEmployee.get(t.employee_id) ?? []),
+      {
+        token: t.token,
+        apns_environment: t.apns_environment === "sandbox" ? "sandbox" : "production",
+      },
+    ]);
   }
 
   let reminded = 0;
@@ -52,9 +64,10 @@ async function handler(req: NextRequest) {
   for (const shift of due) {
     const employeeTokens = tokensByEmployee.get(shift.employee_id) ?? [];
     if (employeeTokens.length > 0) {
-      const results = await sendPush(employeeTokens, {
+      const results = await sendRegisteredPush(employeeTokens, {
         ...clockReminderText(shift.clock_in_at, now),
         url: "/clock",
+        category: "RF_CLOCK",
       });
       dead.push(...deadTokens(results));
       if (results.some((r) => r.ok)) reminded++;

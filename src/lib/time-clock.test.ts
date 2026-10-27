@@ -10,6 +10,7 @@ import {
   startOfWeekInTimeZone,
   timeEntriesCsv,
   totalMinutes,
+  validateClockPosition,
   validateSelfReportedClockOut,
   weekDayKeys,
   weekDays,
@@ -187,6 +188,27 @@ describe("geofence", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("treats the configured distance as an inclusive geofence boundary", () => {
+    const distance = distanceMeters(
+      cnTower.latitude,
+      cnTower.longitude,
+      rogersCentre.latitude,
+      rogersCentre.longitude,
+    );
+    expect(
+      checkGeofence(
+        { ...rogersCentre, accuracy: 0 },
+        { ...cnTower, radiusM: distance },
+      ).ok,
+    ).toBe(true);
+    expect(
+      checkGeofence(
+        { ...rogersCentre, accuracy: 0 },
+        { ...cnTower, radiusM: distance - 1 },
+      ).ok,
+    ).toBe(false);
+  });
+
   it("caps the accuracy credit so a bad GPS fix can't grant a kilometer", () => {
     const result = checkGeofence(
       { ...rogersCentre, accuracy: 5000 },
@@ -200,6 +222,67 @@ describe("geofence", () => {
     const result = checkGeofence({ ...cnTower, accuracy: 0 }, { ...cnTower });
     expect(result.ok).toBe(true);
     expect(result.allowedM).toBe(200);
+  });
+
+  it("accepts a fresh, accurate, finite location", () => {
+    const result = validateClockPosition(
+      {
+        ...cnTower,
+        accuracy: 18.2,
+        capturedAt: "2026-08-12T18:59:30.000Z",
+      },
+      NOW,
+    );
+    expect(result.ok).toBe(true);
+  });
+
+  it("rejects coordinates outside geographic ranges", () => {
+    expect(
+      validateClockPosition(
+        { latitude: 91, longitude: -79, accuracy: 10, capturedAt: NOW.toISOString() },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "invalid_location" });
+    expect(
+      validateClockPosition(
+        { latitude: 43, longitude: Number.NaN, accuracy: 10, capturedAt: NOW.toISOString() },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "invalid_location" });
+  });
+
+  it("rejects an inaccurate fix", () => {
+    expect(
+      validateClockPosition(
+        { ...cnTower, accuracy: 101, capturedAt: NOW.toISOString() },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "inaccurate_location" });
+  });
+
+  it("rejects stale and implausibly future readings", () => {
+    expect(
+      validateClockPosition(
+        { ...cnTower, accuracy: 20, capturedAt: "2026-08-12T18:57:59.000Z" },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "stale_location" });
+    expect(
+      validateClockPosition(
+        { ...cnTower, accuracy: 20, capturedAt: "2026-08-12T19:00:31.000Z" },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "stale_location" });
+  });
+
+  it("rejects a missing or malformed capture timestamp", () => {
+    expect(
+      validateClockPosition(
+        { ...cnTower, accuracy: 20, capturedAt: "not-a-date" },
+        NOW,
+      ),
+    ).toEqual({ ok: false, code: "invalid_location" });
+    expect(validateClockPosition(null, NOW)).toEqual({ ok: false, code: "invalid_location" });
   });
 });
 

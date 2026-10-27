@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isManagementUser } from "@/lib/admin-auth";
 import WarehouseDashboard from "@/components/warehouse/WarehouseDashboard";
 
 export const metadata: Metadata = {
@@ -9,8 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default async function WarehousePage() {
-  const authenticated = await isAuthenticated();
-  if (!authenticated) redirect("/login");
+  if (!(await isManagementUser())) redirect("/access-denied");
 
   return (
     <div className="max-w-[1400px] mx-auto space-y-6">

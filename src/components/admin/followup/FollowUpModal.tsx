@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { hasFixedFollowupSchedule, rfNextFollowup, RF_FOLLOWUP_LIMIT } from "@/lib/followup-policy";
 import { formatCADWhole } from "@/lib/format";
 import {
   FOLLOWUP_CATEGORIES,
@@ -59,17 +60,20 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
   // Optional: which competitor the customer went with (only when lost to one).
   const [competitor, setCompetitor] = useState("");
 
-  const nearMax = lead.followup_count >= MAX_ATTEMPTS - 1;
-  const atMax = lead.followup_count >= MAX_ATTEMPTS;
+  const fixedSchedule = hasFixedFollowupSchedule(lead.store_id);
+  const maxAttempts = fixedSchedule ? RF_FOLLOWUP_LIMIT : MAX_ATTEMPTS;
+  const nearMax = lead.followup_count >= maxAttempts - 1;
+  const atMax = lead.followup_count >= maxAttempts;
   const selectedCat = outcome ? FOLLOWUP_CATEGORIES[outcome] : null;
   const requiresNotes = selectedCat?.requiresNotes ?? false;
   const isLost = outcome === "lost";
-  const isFutureProject = outcome === "future_project";
+  const isFutureProject = outcome === "future_project" && !fixedSchedule;
   const isTooExpensive = isLost && closeReason === "Too expensive";
   const isWentWithCompetitor = isLost && closeReason === "Went with competitor";
 
   const canSubmit =
     outcome !== "" &&
+    (!fixedSchedule || !atMax || selectedCat?.terminal) &&
     (!requiresNotes || notes.trim()) &&
     (!isLost || closeReason) &&
     (!isLost || notes.trim().length >= 50) &&
@@ -144,7 +148,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="Log follow-up"
+        aria-label={fixedSchedule && atMax ? "Update outcome" : "Log follow-up"}
         tabIndex={-1}
         className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto focus:outline-none"
         onClick={(e) => e.stopPropagation()}
@@ -153,7 +157,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
         <div className="px-6 py-4 border-b border-sand-200/60">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-semibold text-sand-900">Log Follow-up</h3>
+              <h3 className="text-lg font-semibold text-sand-900">{fixedSchedule && atMax ? "Update Outcome" : "Log Follow-up"}</h3>
               <p className="text-sm text-sand-500 mt-0.5">
                 {lead.draft_name} &middot; {lead.customer_name || "Unknown customer"} &middot; {formatCADWhole(Number(lead.quote_amount))}
               </p>
@@ -171,17 +175,17 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
           {atMax && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3">
               <p className="text-sm font-medium text-red-700">
-                This lead has reached {MAX_ATTEMPTS} follow-up attempts.
+                This lead has reached {maxAttempts} follow-up attempts.
               </p>
               <p className="text-xs text-red-600 mt-1">
-                Consider closing as Lost if the customer remains unresponsive.
+                {fixedSchedule ? "Both follow-ups are complete. No further follow-ups are scheduled." : "Consider closing as Lost if the customer remains unresponsive."}
               </p>
             </div>
           )}
           {nearMax && !atMax && (
             <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
               <p className="text-sm text-amber-700">
-                Attempt {lead.followup_count + 1} of {MAX_ATTEMPTS} — one more before the recommended limit.
+                Attempt {lead.followup_count + 1} of {maxAttempts}. {fixedSchedule ? "This is the final follow-up." : "One more before the recommended limit."}
               </p>
             </div>
           )}
@@ -194,7 +198,8 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                 <button
                   key={opt.value}
                   onClick={() => setOutcome(opt.value)}
-                  className={`px-3 py-2.5 rounded-lg text-sm font-medium border-2 transition-all ${
+                  disabled={fixedSchedule && atMax && !FOLLOWUP_CATEGORIES[opt.value].terminal}
+                  className={`px-3 py-2.5 rounded-lg text-sm font-medium border-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
                     outcome === opt.value
                       ? `${opt.color} ring-2 ring-offset-1 ring-blue-400`
                       : "border-sand-200 text-sand-600 hover:border-sand-300 hover:bg-sand-50"
@@ -341,7 +346,11 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
           {outcome && (
             <div className="bg-sand-50 rounded-lg px-4 py-3">
               <p className="text-sm text-sand-600">
-                {getPreviewDate(outcome as LeadStatus, customDate, storeDays)}
+                {fixedSchedule && !selectedCat?.terminal
+                  ? (lead.followup_count + 1 >= RF_FOLLOWUP_LIMIT
+                    ? "No further follow-ups after this attempt."
+                    : `Next follow-up: ${new Date(rfNextFollowup(1, new Date().toISOString())!).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} (3 weeks)`)
+                  : getPreviewDate(outcome as LeadStatus, customDate, storeDays)}
               </p>
             </div>
           )}
@@ -364,7 +373,7 @@ export default function FollowUpModal({ lead, storeDays, onClose, onSubmit }: Pr
                 : "bg-sand-200 text-sand-400 cursor-not-allowed"
             }`}
           >
-            {submitting ? "Saving..." : "Log Follow-up"}
+            {submitting ? "Saving..." : fixedSchedule && atMax ? "Update Outcome" : "Log Follow-up"}
           </button>
         </div>
       </div>

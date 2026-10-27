@@ -150,7 +150,7 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
   })[0];
   const quoteLead = [...workflowGroup]
     .filter((lead) => lead.quote_number)
-    .sort((left, right) => workflowScore(right) - workflowScore(left))[0];
+    .sort((left, right) => Date.parse(right.quote_sent_at ?? right.submitted_at) - Date.parse(left.quote_sent_at ?? left.submitted_at))[0];
   // Calls can be linked to a historical duplicate when it was the newest row
   // for that phone number at sync time. Include those calls only when their
   // activity began after the current lifecycle. Older calls belong to the
@@ -190,6 +190,7 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     call_status: bestCallStatus(callGroup),
     outcome: bestOutcome(workflowGroup),
     quote_number: quoteLead?.quote_number ?? canonical.quote_number,
+    quote_draft_id: quoteLead?.quote_draft_id ?? canonical.quote_draft_id,
     quote_amount: quoteLead?.quote_amount ?? canonical.quote_amount,
     quote_sent_at: quoteLead?.quote_sent_at ?? canonical.quote_sent_at,
     first_quote_at: earliestDate(workflowGroup, (lead) => lead.first_quote_at ?? lead.quote_sent_at),

@@ -2,6 +2,7 @@
 // everywhere else; the plugin never enters the web bundle.
 
 import { isNativeApp } from "@/lib/app-biometrics";
+import { recordNativeDiagnosticEvent } from "@/lib/native-diagnostics";
 
 export async function hapticSuccess(): Promise<void> {
   if (!isNativeApp()) return;
@@ -9,7 +10,8 @@ export async function hapticSuccess(): Promise<void> {
     const { Haptics, NotificationType } = await import("@capacitor/haptics");
     await Haptics.notification({ type: NotificationType.Success });
   } catch {
-    // Feedback only — never worth an error.
+    recordNativeDiagnosticEvent("plugin_failed");
+    // Feedback remains optional and must not interrupt a clock action.
   }
 }
 
@@ -19,6 +21,7 @@ export async function hapticWarning(): Promise<void> {
     const { Haptics, NotificationType } = await import("@capacitor/haptics");
     await Haptics.notification({ type: NotificationType.Warning });
   } catch {
-    // Feedback only — never worth an error.
+    recordNativeDiagnosticEvent("plugin_failed");
+    // Feedback remains optional and must not interrupt recovery guidance.
   }
 }

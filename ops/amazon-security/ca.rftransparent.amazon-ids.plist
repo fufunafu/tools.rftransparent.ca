@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>ca.rftransparent.amazon-ids</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/suricata</string>
+		<string>-c</string>
+		<string>/Library/Application Support/RFToolsSecurity/suricata.yaml</string>
+		<string>--pcap=en0</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/var/log/rf-amazon-security/service.log</string>
+	<key>StandardOutPath</key>
+	<string>/var/log/rf-amazon-security/service.log</string>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+</dict>
+</plist>

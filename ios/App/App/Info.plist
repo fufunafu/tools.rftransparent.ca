@@ -27,7 +27,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSFaceIDUsageDescription</key>
-	<string>RF Tools uses Face ID to sign you in quickly and securely.</string>
+	<string>RF Tools uses Face ID to unlock your existing signed-in session.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>RF Tools checks that you&#8217;re at your store when you clock in.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

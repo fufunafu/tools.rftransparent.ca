@@ -1,32 +1,25 @@
-import type { Metadata } from "next";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
-import LeadAnalysisDashboard from "@/components/admin/LeadAnalysisDashboard";
 import { isAuthenticated } from "@/lib/admin-auth";
-import { getCachedLeads } from "@/lib/customer-service/lead-queries";
-import { leadTrendQueryBounds } from "@/lib/lead-analytics";
+import {
+  LEAD_STORE_COOKIE,
+  defaultLeadStoreForRegion,
+  isLeadStoreId,
+  leadsPath,
+} from "@/lib/customer-service/lead-store";
 
-export const metadata: Metadata = {
-  title: "Lead Analysis | Customer Service | RF Tools",
-  robots: { index: false, follow: false },
-};
-
-export default async function LeadAnalysisPage() {
+// Legacy URL without a store segment. Redirect to the store the visitor last
+// used (cookie set by the store switcher), else the region-based default.
+export default async function LeadAnalysisPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ store?: string }>;
+}) {
   if (!(await isAuthenticated())) redirect("/login");
-
-  // Keep relative date buckets stable through hydration.
-  // eslint-disable-next-line react-hooks/purity
-  const renderedAt = Date.now();
-  const initialBounds = leadTrendQueryBounds("30d", new Date(renderedAt));
-  const initialLeads = await getCachedLeads(
-    initialBounds?.from,
-    initialBounds?.to,
-  ).catch(() => null);
-
-  return (
-    <LeadAnalysisDashboard
-      initialLeads={initialLeads}
-      initialNow={renderedAt}
-      initialBounds={initialBounds}
-    />
-  );
+  const { store: storeParam } = await searchParams;
+  if (isLeadStoreId(storeParam)) redirect(leadsPath(storeParam, "analysis"));
+  const saved = (await cookies()).get(LEAD_STORE_COOKIE)?.value;
+  if (isLeadStoreId(saved)) redirect(leadsPath(saved, "analysis"));
+  const region = (await headers()).get("x-vercel-ip-region");
+  redirect(leadsPath(defaultLeadStoreForRegion(region), "analysis"));
 }

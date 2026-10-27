@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#1e3a8a" />
+    <title>RF Tools is offline</title>
+    <style>
+      :root { color-scheme: light; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      * { box-sizing: border-box; }
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        padding: calc(env(safe-area-inset-top) + 32px) 24px calc(env(safe-area-inset-bottom) + 32px);
+        display: grid;
+        place-items: center;
+        background: #1e3a8a;
+        color: #0f172a;
+      }
+      main { width: min(100%, 420px); border-radius: 28px; background: white; padding: 32px 24px; text-align: center; box-shadow: 0 24px 60px rgb(15 23 42 / 0.28); }
+      .mark { width: 64px; height: 64px; margin: 0 auto 22px; display: grid; place-items: center; border-radius: 18px; background: #2563eb; color: white; font-size: 22px; font-weight: 800; }
+      h1 { margin: 0; font-size: 24px; line-height: 1.2; }
+      p { margin: 12px 0 0; color: #64748b; font-size: 15px; line-height: 1.5; }
+      .status { margin-top: 20px; display: inline-flex; align-items: center; gap: 8px; color: #b45309; font-size: 13px; font-weight: 700; }
+      .dot { width: 8px; height: 8px; border-radius: 999px; background: #f59e0b; }
+      button, a { min-height: 44px; border-radius: 14px; font: inherit; font-weight: 700; }
+      button { width: 100%; margin-top: 24px; border: 0; background: #2563eb; color: white; padding: 12px 18px; }
+      a { margin-top: 10px; display: flex; align-items: center; justify-content: center; color: #475569; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="mark" aria-hidden="true">RF</div>
+      <h1 id="title">RF Tools cannot connect</h1>
+      <p id="message">Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.</p>
+      <div class="status" role="status"><span class="dot"></span><span id="connection">No connection</span></div>
+      <button type="button" id="retry">Try again</button>
+      <a href="mailto:info@glass-railing.com?subject=RF%20Tools%20connection%20help">Contact support</a>
+      <p id="diagnostics" aria-label="App diagnostics"></p>
+    </main>
+    <script>
+      const productionUrl = "https://tools.rftransparent.ca";
+      const connection = document.getElementById("connection");
+      const retry = document.getElementById("retry");
+      const title = document.getElementById("title");
+      const message = document.getElementById("message");
+      const diagnostics = document.getElementById("diagnostics");
+
+      function updateConnection(serviceStatus) {
+        if (!navigator.onLine || serviceStatus?.state === "offline") {
+          title.textContent = "You're offline";
+          message.textContent = "Your work has not been submitted. Reconnect to Wi-Fi or cellular data, then try again.";
+          connection.textContent = "No connection";
+        } else if (serviceStatus?.state === "maintenance") {
+          title.textContent = "Maintenance in progress";
+          message.textContent = serviceStatus.message || "RF Tools is temporarily unavailable while maintenance is completed. Your work has not been submitted.";
+          connection.textContent = "Internet available · planned maintenance";
+        } else {
+          title.textContent = "RF Tools is unavailable";
+          message.textContent = "The service could not load. Your work has not been submitted. Try again or contact support if the problem continues.";
+          connection.textContent = "Internet available · service unavailable";
+        }
+      }
+
+      async function refreshStatus() {
+        if (!navigator.onLine) {
+          updateConnection();
+          return;
+        }
+        try {
+          const serviceStatus = await window.Capacitor?.Plugins?.RFNativeSupport?.getServiceStatus?.();
+          updateConnection(serviceStatus);
+        } catch {
+          updateConnection();
+        }
+      }
+
+      async function retryLoad() {
+        retry.disabled = true;
+        try {
+          const nativeSupport = window.Capacitor?.Plugins?.RFNativeSupport;
+          if (nativeSupport?.retryRemoteLoad) {
+            await nativeSupport.retryRemoteLoad();
+            return;
+          }
+          // Android's error page has no native bridge. Old WebView history or
+          // referrers can point back to this error document after an update.
+          // Always retry the same trusted destination as the native handoff.
+          window.location.replace(productionUrl);
+        } catch {
+          await refreshStatus();
+          retry.disabled = false;
+        }
+      }
+
+      retry.addEventListener("click", () => void retryLoad());
+      window.addEventListener("online", refreshStatus);
+      window.addEventListener("offline", () => updateConnection());
+      void refreshStatus();
+
+      window.Capacitor?.Plugins?.RFNativeSupport?.recordWebViewLoadFailure?.().catch(() => {});
+
+      window.Capacitor?.Plugins?.App?.getInfo?.().then((info) => {
+        diagnostics.textContent = `Version ${info.version ?? "unknown"} · build ${info.build ?? "unknown"}`;
+      }).catch(() => {
+        diagnostics.textContent = "App version unavailable";
+      });
+
+      // This bundled page contains no employee or customer content, so it is
+      // safe to replace the app-switcher privacy cover after the recovery UI
+      // has rendered. Production never removes that cover on a blind timer.
+      document.documentElement.dataset.rfAppReady = "true";
+      requestAnimationFrame(() => {
+        window.Capacitor?.Plugins?.RFNativeSupport?.hidePrivacyShield?.().catch(() => {});
+      });
+      window.Capacitor?.Plugins?.SplashScreen?.hide?.();
+    </script>
+  </body>
+</html>

@@ -2,6 +2,10 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { isAuthorizedEmail } from "@/lib/authz";
 import { resolveLandingPage } from "@/lib/default-dashboard";
+import {
+  hasReviewProxyAccess, isDemoWorkspace, isReviewUser, REVIEW_PROXY_HEADER,
+  reviewProxySecret, reviewWorkspaceTarget,
+} from "@/lib/review-workspace";
 
 const LEAD_WEBHOOK_PATH = "/api/customer-service/leads/webhook";
 
@@ -45,6 +49,14 @@ function loginRedirect(request: NextRequest, error?: string): NextResponse {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // Demo requests must arrive through the authenticated production proxy.
+  // A review account never falls back to production data if configuration is missing.
+  if (isDemoWorkspace() && !hasReviewProxyAccess(request.headers.get(REVIEW_PROXY_HEADER))) {
+    return NextResponse.json({ error: "Review workspace access is unavailable" }, {
+      status: 403, headers: { "Cache-Control": "private, no-store" },
+    });
+  }
+
   // Shopify app proxies append a slash when the storefront calls the proxy
   // root. Rewriting instead of redirecting preserves the signed POST body and
   // keeps the browser on the same-origin /apps/rf-leads URL.
@@ -65,12 +77,20 @@ export async function proxy(request: NextRequest) {
   const isApi = pathname.startsWith("/api/");
   const isPublic =
     pathname === "/login" ||
+    pathname === "/privacy" ||
+    pathname === "/support" ||
     // Password recovery — reached from the reset email while signed out.
     pathname === "/forgot-password" ||
     pathname === "/reset-password" ||
     // Safari fetches the PWA manifest without auth cookies when the user
     // adds the site to their home screen; it holds no sensitive data.
     pathname === "/manifest.webmanifest" ||
+    // Lead-capture script loaded by the Shopify storefront themes.
+    pathname === "/rf-lead-capture.js" ||
+    pathname === "/apple-app-site-association" ||
+    pathname === "/.well-known/apple-app-site-association" ||
+    pathname === "/api/native/version" ||
+    pathname === "/api/native/status" ||
     pathname.startsWith("/api/auth/") ||
     pathname.startsWith("/api/cron/") ||
     pathname.startsWith("/survey/") ||
@@ -82,7 +102,44 @@ export async function proxy(request: NextRequest) {
     pathname === LEAD_WEBHOOK_PATH ||
     pathname === "/api/customer-service/leads/meta-webhook" ||
     pathname === "/api/webhooks/whatsapp" ||
+    pathname === "/api/webhooks/instantly" ||
     pathname === "/api/internal/whatsapp/employee-context";
+
+  // Review sessions use a separate authentication project and cookie namespace.
+  // Live authentication never receives the review account or its credentials.
+  const reviewUrl = process.env.NEXT_PUBLIC_RF_REVIEW_AUTH_URL;
+  const reviewKey = process.env.NEXT_PUBLIC_RF_REVIEW_AUTH_KEY;
+  if (!isDemoWorkspace() && reviewUrl && reviewKey) {
+    const project = new URL(reviewUrl).hostname.split(".")[0];
+    const cookiePrefix = `sb-${project}-auth-token`;
+    if (request.cookies.getAll().some(({ name }) => name === cookiePrefix || name.startsWith(`${cookiePrefix}.`))) {
+      let reviewResponse = NextResponse.next({ request });
+      const reviewAuth = createServerClient(reviewUrl, reviewKey, {
+        cookies: {
+          getAll: () => request.cookies.getAll(),
+          setAll: (values) => {
+            values.forEach(({ name, value }) => request.cookies.set(name, value));
+            reviewResponse = NextResponse.next({ request });
+            values.forEach(({ name, value, options }) => reviewResponse.cookies.set(name, value, options));
+          },
+        },
+      });
+      const { data: { user: reviewer } } = await reviewAuth.auth.getUser();
+      if (isReviewUser(reviewer)) {
+        try {
+          const headers = new Headers(request.headers);
+          headers.set(REVIEW_PROXY_HEADER, reviewProxySecret());
+          const response = NextResponse.rewrite(reviewWorkspaceTarget(new URL(request.url)), { request: { headers } });
+          response.headers.set("Cache-Control", "private, no-store");
+          response.headers.set("Vary", "Cookie, Authorization");
+          return copyCookies(reviewResponse, response);
+        } catch {
+          return apiAuthError(reviewResponse, 503, "The review workspace is temporarily unavailable");
+        }
+      }
+      if (!isPublic) return apiAuthError(reviewResponse, 401, "Review session expired. Please sign in again.");
+    }
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -118,6 +175,10 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  if (isDemoWorkspace() && !isReviewUser(user)) {
+    return apiAuthError(supabaseResponse, user ? 403 : 401, "Review account required");
+  }
 
   if (!user && !isPublic) {
     if (isApi) return apiAuthError(supabaseResponse, 401, "Unauthorized");

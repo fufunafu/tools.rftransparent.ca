@@ -1,19 +1,17 @@
 "use client";
 
-import type { Result, SalesByStore, CustomerServiceOps, TopPerformers, FollowupOverview } from "@/lib/ops-dashboard";
+import type { Result, SalesByStore, CustomerServiceOps, SalesTeamOverview, FollowupOverview } from "@/lib/ops-dashboard";
 import { Unavailable } from "@/components/admin/dashboard/widgets";
 import { DashboardPane } from "@/components/admin/dashboard/DashboardPane";
 import { DashboardSwitcher } from "@/components/admin/dashboard/DashboardSwitcher";
 import { SalesSection } from "@/components/admin/dashboard/SalesSection";
-import { PerformersSection } from "@/components/admin/dashboard/PerformersSection";
+import { SalesTeamTable } from "@/components/admin/dashboard/SalesTeamTable";
 import { QuotesCard } from "@/components/admin/dashboard/QuotesCard";
 import { FollowupCard } from "@/components/admin/dashboard/FollowupCard";
 
 // The sales manager's morning view: revenue vs target, quote flow, the
-// follow-up workload, and the sales leaderboard. Pure presentational —
+// follow-up workload, and the sales leaderboard. Pure presentational:
 // every number is server-fetched by the page.
-// TODO: drop CommissionsPanel back in here once the commissions feature
-// (panel + /api/kpi/commissions + its migration) has shipped.
 
 export default function SalesManagerDashboard({
   sales,
@@ -21,19 +19,30 @@ export default function SalesManagerDashboard({
   performers,
   followup,
   today,
+  asOf,
+  delayed = false,
 }: {
   sales: Result<SalesByStore>;
   customerService: Result<CustomerServiceOps>;
-  performers: Result<TopPerformers>;
+  performers: Result<SalesTeamOverview>;
   followup: Result<FollowupOverview>;
   today: string;
+  asOf?: string;
+  delayed?: boolean;
 }) {
+  const updated = asOf ? new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Toronto", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  }).format(new Date(asOf)) : null;
   return (
     <DashboardPane>
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-semibold text-slate-900">Sales Manager</h2>
           <p className="text-[12.5px] text-slate-500 mt-0.5">{today} · all stores</p>
+          {updated && <p className={`text-xs mt-1 ${delayed ? "text-amber-700" : "text-slate-500"}`}>
+            Sales data as of {updated} Toronto time. Updates every 5 minutes.
+            {delayed && " The latest refresh is delayed. Showing the last complete update."}
+          </p>}
         </div>
         <DashboardSwitcher current="/dashboards/sales" />
       </div>
@@ -58,9 +67,9 @@ export default function SalesManagerDashboard({
       </div>
 
       {performers.ok ? (
-        <PerformersSection p={performers.value} sections={["sales"]} />
+        <SalesTeamTable data={performers.value} />
       ) : (
-        <Unavailable label="Top performers" error={performers.error} />
+        <Unavailable label="Sales team" error={performers.error} />
       )}
     </DashboardPane>
   );

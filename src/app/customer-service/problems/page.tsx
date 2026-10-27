@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
-import { isAuthenticated, isAdminUser } from "@/lib/admin-auth";
+import { getAuthenticatedUser, isAdminUser } from "@/lib/admin-auth";
 import { getStores } from "@/lib/shopify";
 import ProblemsDashboard from "@/components/admin/ProblemsDashboard";
 
@@ -10,13 +10,14 @@ export const metadata: Metadata = {
 };
 
 export default async function ProblemsPage() {
-  if (!(await isAuthenticated())) redirect("/login");
+  const user = await getAuthenticatedUser();
+  if (!user?.email) redirect("/login");
   const canDelete = await isAdminUser();
   const stores = getStores().map((s) => ({ id: s.id, label: s.label }));
 
   return (
     <div className="max-w-[1400px] mx-auto">
-      <ProblemsDashboard stores={stores} canDelete={canDelete} />
+      <ProblemsDashboard stores={stores} canDelete={canDelete} currentUserEmail={user.email} />
     </div>
   );
 }

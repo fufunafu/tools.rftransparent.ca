@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { getSupabase } from "@/lib/supabase";
 import { OWNER_EMAIL } from "@/lib/authz";
+import { testLoginRequestAllowed } from "@/lib/test-login";
 
-// Development-only shortcut: signs the owner in with one tap so the app can
-// be tested in the simulator without Google (blocked in web views) or a
-// password. NODE_ENV is "development" only under `next dev` — production
-// builds compile this to a permanent 404, and the login page only renders
-// the button in dev. Never widen this beyond the owner account.
+// Local-only shortcut: signs the owner in with one tap so the app can be
+// tested without Google (blocked in web views) or a password. It is enabled
+// automatically by `next dev`, or explicitly with ENABLE_TEST_LOGIN=1 for a
+// local production build. The request must still originate on a loopback host.
+// Never widen this beyond the owner account.
 
-export async function POST() {
-  if (process.env.NODE_ENV !== "development") {
+export async function POST(request: Request) {
+  if (!testLoginRequestAllowed(request.url)) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 

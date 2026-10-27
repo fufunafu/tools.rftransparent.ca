@@ -1,0 +1,58 @@
+{
+  "baseline": "dpl_DhpPPzVZsG1Zkx8eoxjVmKpLC8jc",
+  "release": "/var/folders/_j/8clxzk097214s755hdhmg5hr0000gn/T/rf-marijac-filter-mqgenxk0",
+  "baselineFilesVerified": 821,
+  "changed": [
+    "src/lib/dashboard-sales.ts",
+    "src/lib/dashboard-sales.test.ts",
+    "src/lib/dashboard-sales-records.test.ts",
+    "src/lib/ops-dashboard.ts",
+    "src/lib/ops-dashboard-sales.test.ts",
+    "src/components/admin/dashboard/PerformersSection.tsx",
+    "src/components/admin/dashboard/SalesTeamTable.tsx",
+    "src/lib/dashboard-sales-records.ts"
+  ],
+  "sourceHashes": {
+    "src/lib/dashboard-sales.ts": "3683f961ab62b5f9e18237ce36089170ffa609e24fbca7a2e45381c1af543e2e",
+    "src/lib/dashboard-sales.test.ts": "b4a824e95cbbecf9b06e0e57ec1a2f1754c099c8fa10fec093500cbe03692806",
+    "src/lib/dashboard-sales-records.test.ts": "a7d577205ec1f247b0833032483473c446a131e0a6912e627d4a79ccf061c6d0",
+    "src/lib/ops-dashboard.ts": "649548547e793645e8d8cf882a77fa2e1c35671b0a780c19427a58dc6c184e4d",
+    "src/lib/ops-dashboard-sales.test.ts": "562c4552459dd0ea5fa9dd378f6048cb69617c225d7bda0cdac2b0bbe50f2264",
+    "src/components/admin/dashboard/PerformersSection.tsx": "c3c58045b43487098518d3b7d967937a365b318efbd92213f6c991d313b16842",
+    "src/components/admin/dashboard/SalesTeamTable.tsx": "659e7f95c9260f5942827c3e87edf14c5a9010376e2dd7353eec0d07c1b2f1f3",
+    "src/lib/dashboard-sales-records.ts": "86e883537a4ce57925d0892d84ef7c0c2b1e65959b832039fee040e5f50b229d"
+  },
+  "deploymentId": "dpl_8oUJS9SaaEnojHZCtRvy7TtX8AWb",
+  "status": "READY and verified on production",
+  "rule": "Marie: BC Transparent (store3), exact Marijac tag after case and whitespace normalization; sales and quote lists share this ownership rule.",
+  "checks": {
+    "tests": 54,
+    "typecheck": "passed",
+    "lint": "passed",
+    "productionBuild": "passed"
+  },
+  "updatedAt": "2026-09-16T14:47:08.396875+00:00",
+  "liveVerification": {
+    "allTenAmountsMatchBeforeAndAfterQueryOptimization": true,
+    "30d": {
+      "netSales": 38814.58,
+      "ordersWithActivity": 45,
+      "quoted": 105668.05,
+      "quotes": 46
+    },
+    "orderAndQuoteListsMatchTable": true,
+    "placeholderRemoved": true
+  },
+  "performanceFix": "Shopify query filters tag-only stores before pagination; RF territory records retain unfiltered attribution. Confirmed all ten Marie amounts unchanged.",
+  "queryDocumentation": [
+    "https://shopify.dev/docs/api/admin-graphql/latest/queries/orders",
+    "https://shopify.dev/docs/api/admin-graphql/2026-01/queries/draftOrders"
+  ],
+  "staleTabResolution": {
+    "verifiedAt": "2026-09-16T15:49:06.314177+00:00",
+    "productionDeploymentUnchanged": "dpl_8oUJS9SaaEnojHZCtRvy7TtX8AWb",
+    "diagnosis": "User existing tab displayed prior placeholder version while fresh production page displayed correct Marijac totals.",
+    "resolution": "Reloaded the user dashboard tab; confirmed Marie moved from rank 5 with zero placeholder to rank 2 with 38.8k net sales and 105.7k quoted over 30 days.",
+    "codeChangesRequired": false
+  }
+}

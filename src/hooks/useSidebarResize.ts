@@ -4,7 +4,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 400;
-const COLLAPSED_WIDTH = 56;
+// Wide enough for a 40px row with the rail's own 12px padding either side.
+// At 56 the rows were wider than the rail and sat over its edge.
+const COLLAPSED_WIDTH = 64;
 
 export function useSidebarResize(initialWidth = 240) {
   const [collapsed, setCollapsed] = useState(false);

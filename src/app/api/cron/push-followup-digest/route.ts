@@ -3,7 +3,12 @@ import { withCronRun } from "@/lib/automations";
 import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { getSupabase } from "@/lib/supabase";
 import { startOfDayInTimeZone } from "@/lib/dates";
-import { apnsConfigured, deadTokens, sendPush } from "@/lib/apns";
+import {
+  apnsConfigured,
+  deadTokens,
+  sendRegisteredPush,
+  type RegisteredPushToken,
+} from "@/lib/apns";
 import { followupDigestText, scopeForEmployeeLocationName } from "@/lib/push-notifications";
 
 export const dynamic = "force-dynamic";
@@ -64,12 +69,19 @@ async function handler(req: NextRequest) {
 
   const { data: tokens, error: tokenError } = await sb
     .from("push_tokens")
-    .select("token, employee_id")
+    .select("token, employee_id, apns_environment")
+    .eq("followup_updates", true)
     .is("disabled_at", null);
   if (tokenError) throw new Error(tokenError.message);
-  const tokensByEmployee = new Map<string, string[]>();
+  const tokensByEmployee = new Map<string, RegisteredPushToken[]>();
   for (const t of tokens ?? []) {
-    tokensByEmployee.set(t.employee_id, [...(tokensByEmployee.get(t.employee_id) ?? []), t.token]);
+    tokensByEmployee.set(t.employee_id, [
+      ...(tokensByEmployee.get(t.employee_id) ?? []),
+      {
+        token: t.token,
+        apns_environment: t.apns_environment === "sandbox" ? "sandbox" : "production",
+      },
+    ]);
   }
 
   let notified = 0;
@@ -95,7 +107,11 @@ async function handler(req: NextRequest) {
     const text = followupDigestText(due, overdue);
     if (!text) continue;
 
-    const results = await sendPush(employeeTokens, { ...text, url: "/customer-service/follow-up" });
+    const results = await sendRegisteredPush(employeeTokens, {
+      ...text,
+      url: "/customer-service/follow-up",
+      category: "RF_FOLLOW_UP",
+    });
     dead.push(...deadTokens(results));
     if (results.some((r) => r.ok)) notified++;
   }

@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   matchDraftOrdersToLeads,
   matchStaffToLinkedLeads,
+  resetLiveRematchThrottle,
+  shouldRematchAfterLiveSync,
   type DraftForLeadQuoteSync,
   type LeadForQuoteSync,
 } from "@/lib/lead-quote-sync";
@@ -35,6 +37,7 @@ function draft(
     quote_amount: "1250.50",
     shopify_created_at: "2026-08-01T13:00:00.000Z",
     shopify_status: "INVOICE_SENT",
+    last_invoice_sent_at: overrides.shopify_created_at ?? "2026-08-01T13:00:00.000Z",
     first_synced_at: "2026-08-01T13:05:00.000Z",
     last_invoice_sender: "Anne Seller",
     created_by_staff: "Chris Creator",
@@ -56,19 +59,20 @@ describe("matchDraftOrdersToLeads", () => {
         quoteNumber: "#D100",
         quoteAmount: 1250.5,
         quoteSentAt: "2026-08-01T13:00:00.000Z",
+        firstQuoteAt: "2026-08-01T13:00:00.000Z",
         outcome: "quoted",
         responsibleStaff: "Anne Seller",
       },
     ]);
   });
 
-  it("falls back to a normalized phone number when email does not match", () => {
+  it("does not override conflicting emails with a shared phone", () => {
     const matches = matchDraftOrdersToLeads(
       [lead("lead-1", { email: "other@example.com" })],
       [draft("D100", { customer_email: "unknown@example.com", customer_phone: "+1 514 555 1234" })],
     );
 
-    expect(matches.map((match) => match.leadId)).toEqual(["lead-1"]);
+    expect(matches.map((match) => match.leadId)).toEqual([]);
   });
 
   it("prefers an email match when email and phone identify different leads", () => {
@@ -153,6 +157,28 @@ describe("matchDraftOrdersToLeads", () => {
     expect(matches.map((match) => match.leadId)).toEqual(["current"]);
   });
 
+  it("links a historical import when no live lead exists and re-opens it", () => {
+    const matches = matchDraftOrdersToLeads(
+      [
+        lead("historical", {
+          outcome: "not_applicable",
+          not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown",
+        }),
+      ],
+      [draft("D100", { shopify_status: "COMPLETED" })],
+    );
+
+    expect(matches.map((match) => [match.leadId, match.outcome, match.reopenHistorical]))
+      .toEqual([["historical", "won", true]]);
+  });
+
+  it("still skips leads closed as not applicable for other reasons", () => {
+    expect(matchDraftOrdersToLeads(
+      [lead("spam", { outcome: "not_applicable", not_applicable_reason: "Spam" })],
+      [draft("D100")],
+    )).toEqual([]);
+  });
+
   it("marks a completed draft as won", () => {
     const [match] = matchDraftOrdersToLeads(
       [lead("lead-1")],
@@ -171,7 +197,7 @@ describe("matchDraftOrdersToLeads", () => {
     expect(match.responsibleStaff).toBe("Chris Creator");
   });
 
-  it("links only the earliest draft when one lead has multiple drafts", () => {
+  it("links the latest sent draft when one lead has multiple drafts", () => {
     const matches = matchDraftOrdersToLeads(
       [lead("lead-1")],
       [
@@ -180,7 +206,7 @@ describe("matchDraftOrdersToLeads", () => {
       ],
     );
 
-    expect(matches.map((match) => match.draftId)).toEqual(["D-FIRST"]);
+    expect(matches.map((match) => match.draftId)).toEqual(["D-LATER"]);
   });
 
   it("ignores open drafts and deduplicates repeated draft rows", () => {
@@ -212,7 +238,7 @@ describe("matchStaffToLinkedLeads", () => {
   it("uses phone as a fallback and never replaces a manual assignment", () => {
     expect(
       matchStaffToLinkedLeads(
-        [lead("lead-1", { email: "other@example.com", quote_number: "#D100" })],
+        [lead("lead-1", { email: null, quote_number: "#D100" })],
         [draft("D100", { customer_email: "unknown@example.com" })],
       ),
     ).toEqual([{ leadId: "lead-1", responsibleStaff: "Anne Seller" }]);
@@ -238,4 +264,49 @@ describe("matchStaffToLinkedLeads", () => {
       ),
     ).toEqual([]);
   });
+});
+
+describe("shouldRematchAfterLiveSync", () => {
+  const changed = { new_leads: 0, updated_leads: 1, auto_won: 0 };
+  const unchanged = { new_leads: 0, updated_leads: 0, auto_won: 0 };
+  const NOW = Date.parse("2026-10-26T16:00:00Z");
+
+  beforeEach(() => resetLiveRematchThrottle());
+
+  it("skips the re-match when the sync touched no drafts", () => {
+    expect(shouldRematchAfterLiveSync("store1", unchanged, NOW)).toBe(false);
+  });
+
+  it("re-matches after changes at most once per two minutes per store", () => {
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW)).toBe(true);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 60_000)).toBe(false);
+    expect(shouldRematchAfterLiveSync("store2", changed, NOW + 60_000)).toBe(true);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 120_000)).toBe(true);
+  });
+
+  it("does not start the wait on a tick that skipped for lack of changes", () => {
+    expect(shouldRematchAfterLiveSync("store1", unchanged, NOW)).toBe(false);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 1_000)).toBe(true);
+  });
+});
+
+it('updates an already linked quote after revision and conversion without losing the first response date', () => {
+  const original = lead('one', { quote_number: '#D100', quote_draft_id: 'D100', first_quote_at: '2026-08-01T13:00:00.000Z', outcome: 'quoted' });
+  const [match] = matchDraftOrdersToLeads([original], [draft('D100', { last_invoice_sent_at: '2026-08-03T12:00:00Z', quote_amount: 2200, shopify_status: 'COMPLETED' })]);
+  expect(match).toMatchObject({ quoteAmount: 2200, quoteSentAt: '2026-08-03T12:00:00Z', firstQuoteAt: original.first_quote_at, outcome: 'won' });
+});
+it('matches a draft created before interest but sent after it, using actual send time', () => {
+  const [match] = matchDraftOrdersToLeads([lead('one')], [draft('D100', { shopify_created_at: '2026-07-01T12:00:00Z', last_invoice_sent_at: '2026-08-02T12:00:00Z' })]);
+  expect(match).toMatchObject({ leadId: 'one', quoteSentAt: '2026-08-02T12:00:00Z' });
+});
+it('does not invent a send date when only draft creation is known', () => {
+  const [match] = matchDraftOrdersToLeads([lead('one')], [draft('D100', { last_invoice_sent_at: null })]);
+  expect(match).toMatchObject({ quoteSentAt: null, firstQuoteAt: null });
+});
+it('keeps quotes in the matching RF or BC store', () => {
+  expect(matchDraftOrdersToLeads([lead('one', { store_id: 'rf_transparent' })], [draft('D100', { store_id: 'store3' })])).toEqual([]);
+});
+it('does not reopen a won lead when a later quote is sent', () => {
+  const [match] = matchDraftOrdersToLeads([lead('one', { outcome: 'won' })], [draft('D100')]);
+  expect(match.outcome).toBe('won');
 });

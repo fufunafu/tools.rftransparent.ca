@@ -1,0 +1,25 @@
+{
+  "verifiedAt": "2026-10-26T20:30:00Z",
+  "productionDeployment": "dpl_65Rdm5uqdFMvoHS2VNT496ehrWT4",
+  "baseProductionDeployment": "dpl_3VG4yWs214dZ1k9YDZPD67rt4b6K",
+  "functionRegion": "pdx1",
+  "changes": ["vercel.json regions pdx1", "60s positive authorization grant cache", "Work in progress sidebar group"],
+  "sourceHashes": { "vercel.json": "0d21480ef26b8cbc039c2c1d201202b335e04456b1d98e155c3356d712b4737b","src/lib/authz.ts": "f2ce938d249a5115b4901a1b6c2c4bf67a822c909704dc905db16cb7779ab82d","src/components/nav-items.tsx": "c1f0f3e38d6dbfdde18a1dcfd3f4b9c90cc0f7efb0fa6a72e1ecc5a1afaabba8" },
+  "salesPreservation": "28 protected files match",
+  "tests": 1227,
+  "lint": "passed",
+  "typecheck": "passed",
+  "productionBuild": "passed",
+  "runtimeErrorsAfterDeploy": 0,
+  "liveSalesPage": {
+    "columns": ["7 days", "30 days", "90 days", "6 months", "1 year"],
+    "reps": ["Robert Glas", "Daniel Boudreau", "Marie Gauthier", "Craig Scarr", "Aaron"],
+    "pairedNetAndQuoted": true,
+    "allRepsTotals": true,
+    "recordDialog": "Daniel 30 days: 20 orders, $35,026.73, matches $35.0k cell; customer names, search, order links"
+  },
+  "warmPageTimingsMs": {
+    "before": { "/": "921-1262", "/dashboards/sales": "620-759", "/customer-service/leads/rf": "1952-2509", "/customer-service/follow-up": "490-590", "/pipeline": "449-735", "/employees": "456-537" },
+    "after": { "/": "512-1060", "/dashboards/sales": "379-411", "/customer-service/leads/rf": "2086-2088", "/customer-service/follow-up": "358-444", "/pipeline": "312-423", "/employees": "299-352" }
+  }
+}

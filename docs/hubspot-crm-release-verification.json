@@ -1,0 +1,72 @@
+{
+  "preparedAt": "2026-10-27T03:36:22.765156+00:00",
+  "status": "CRM source prepared and validated; production HubSpot credential setup remains separate",
+  "productionBaseline": "dpl_7JAuxFMdDoL64gThanVf7WmqppCm",
+  "direction": "HubSpot into Tools only; new records remain in Tools",
+  "access": [
+    "management",
+    "sales",
+    "customer_service"
+  ],
+  "validation": {
+    "lint": "passed",
+    "typecheck": "passed",
+    "tests": 1342,
+    "testFiles": 174,
+    "productionBuild": "passed",
+    "salesPreservationFiles": 36,
+    "largeRecordStreamingVerified": true,
+    "privateCredentialScanMatches": 0
+  },
+  "apiChecks": {
+    "verifiedAt": "2026-10-27T03:34:32.537Z",
+    "unauthenticatedStatus": 401,
+    "results": [
+      {
+        "check": "authenticated contact search",
+        "status": 200,
+        "milliseconds": 1535
+      },
+      {
+        "check": "decompressed record details",
+        "status": 200,
+        "milliseconds": 909
+      },
+      {
+        "check": "related record timeline",
+        "status": 200,
+        "milliseconds": 797
+      },
+      {
+        "check": "overview counts and import status",
+        "status": 200,
+        "milliseconds": 888
+      },
+      {
+        "check": "largest historical record streamed",
+        "status": 200,
+        "milliseconds": 2683
+      }
+    ],
+    "pageStatus": 200
+  },
+  "migrationVerification": {
+    "coreObjectCountsMatchedBackup": true,
+    "maintainedCountsMatchedTable": true,
+    "fullFieldsHistoryAndAssociationsVerified": true,
+    "anonymousDatabaseAccessDenied": true
+  },
+  "databaseMigrations": [
+    "20261027023000_hubspot_crm",
+    "20261027031500_crm_counts_index",
+    "20261027032500_crm_live_counts"
+  ],
+  "limitations": [
+    "Attachment and call recording files are not downloaded.",
+    "The current HubSpot key returns 403 for file metadata and custom-object definitions.",
+    "Custom objects, marketing assets, forms, lists, workflows, inbox conversations, sensitive fields needing additional scopes, and permanently deleted records are not covered.",
+    "HubSpot does not expose archived meetings through the used API.",
+    "Tasks have due-date queues; automatic notifications and calendar reminders are not implemented."
+  ],
+  "customerRecordsIncluded": false
+}

@@ -1,14 +1,10 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
+import NativeAppRuntime from "@/components/NativeAppRuntime";
 import PushRegistrar from "@/components/PushRegistrar";
-
-const inter = Inter({
-  subsets: ["latin"],
-  display: "swap",
-  variable: "--font-inter",
-});
+import { isDemoWorkspace } from "@/lib/review-workspace";
 
 export const metadata: Metadata = {
   title: {
@@ -25,7 +21,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#1c1917",
+  themeColor: "#1e3a8a",
   viewportFit: "cover",
   width: "device-width",
   initialScale: 1,
@@ -37,10 +33,21 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en">
       <body className="min-h-screen">
-        <PushRegistrar />
-        <SidebarLayout>{children}</SidebarLayout>
+        <NativeAppRuntime>
+          <PushRegistrar />
+          <SidebarLayout>
+            {isDemoWorkspace() && (
+              <div className="border-b border-blue-200 bg-blue-50 px-4 py-2 text-center text-sm text-blue-950" role="status">
+                Demo workspace. All records and actions use sample data.
+              </div>
+            )}
+            {children}
+          </SidebarLayout>
+        </NativeAppRuntime>
+        {/* Real-visitor load times, reported once Speed Insights is on in Vercel. */}
+        <SpeedInsights />
       </body>
     </html>
   );

@@ -11,6 +11,8 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    "android/**/build/**",
+    ".artifacts/**",
     "next-env.d.ts",
     "design_handoff_ops_dashboard/**",
     "tmp/**",

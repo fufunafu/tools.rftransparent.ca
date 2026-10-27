@@ -102,7 +102,7 @@ export async function shopifyGraphQL<T = unknown>(
   storeId: string,
   query: string,
   variables?: Record<string, unknown>,
-  opts?: { app?: ShopifyApp }
+  opts?: { app?: ShopifyApp; rejectPartial?: boolean }
 ): Promise<T> {
   const config = STORES.find((s) => s.id === storeId);
   if (!config) throw new Error(`Unknown store: ${storeId}`);
@@ -137,7 +137,7 @@ export async function shopifyGraphQL<T = unknown>(
   }
 
   const json = await res.json();
-  if (json.errors && !json.data) {
+  if (json.errors && (!json.data || opts?.rejectPartial)) {
     // Total failure — no usable data returned
     throw new Error(json.errors.map((e: { message: string }) => e.message).join(", "));
   }

@@ -5,6 +5,7 @@ import { CALL_STATUS_LABELS, type Lead } from "@/lib/customer-service/leads";
 function lead(id: string, overrides: Partial<Lead> = {}): Lead {
   return {
     id,
+    store_id: "rf_transparent",
     source: "website",
     source_detail: "Contact Us",
     form_id: null,
@@ -455,4 +456,13 @@ describe("consolidateDuplicateLeads", () => {
       expect.objectContaining({ id: "second", installation_requested: true }),
     ]);
   });
+});
+
+
+it("shows the newest quote across combined submissions while retaining the first quote time", () => {
+  const [merged] = consolidateDuplicateLeads([
+    lead("older", { quote_number: "Q1", quote_sent_at: "2026-08-04T12:00Z", outcome: "won" }),
+    lead("newer", { submitted_at: "2026-08-04T12:00Z", quote_number: "Q2", quote_sent_at: "2026-08-05T12:00Z", quote_amount: 2000, outcome: "quoted" }),
+  ]);
+  expect(merged).toMatchObject({ quote_number: "Q2", quote_amount: 2000, first_quote_at: "2026-08-04T12:00Z", outcome: "won" });
 });

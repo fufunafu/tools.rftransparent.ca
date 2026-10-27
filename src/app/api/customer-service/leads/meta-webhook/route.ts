@@ -176,6 +176,8 @@ async function processLead(
   const sourceDetail = formName ?? (formId ? `Meta form ${formId}` : null);
 
   const result = await findOrInsertLead({
+    // Only RF runs Meta lead ads; BC has website leads only.
+    store_id: "rf_transparent",
     source: "meta",
     source_detail: sourceDetail,
     form_id: formId,
