@@ -153,13 +153,16 @@ function StoreSelect({
   );
 }
 
+// Built once: Intl.DateTimeFormat construction is expensive in loops.
+const TORONTO_DATE_FORMAT = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Toronto",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
 function torontoDateKey(date: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/Toronto",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = TORONTO_DATE_FORMAT.formatToParts(date);
   const value = (type: Intl.DateTimeFormatPartTypes) => (
     parts.find((part) => part.type === type)?.value ?? ""
   );

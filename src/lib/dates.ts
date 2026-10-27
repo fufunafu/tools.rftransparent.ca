@@ -3,10 +3,13 @@
 // midnight, or leads within 4-5 hours of midnight land in the wrong day.
 export const BUSINESS_TIMEZONE = "America/Toronto";
 
-// Offset (ms) between a timezone's wall-clock time and UTC at a given instant.
-function tzOffsetMs(date: Date, timeZone: string): number {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-US", {
+// Formatter cache: Intl.DateTimeFormat construction is expensive in loops.
+const offsetFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function offsetFormatter(timeZone: string): Intl.DateTimeFormat {
+  let fmt = offsetFormatters.get(timeZone);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat("en-US", {
       timeZone,
       hour12: false,
       year: "numeric",
@@ -15,7 +18,16 @@ function tzOffsetMs(date: Date, timeZone: string): number {
       hour: "2-digit",
       minute: "2-digit",
       second: "2-digit",
-    })
+    });
+    offsetFormatters.set(timeZone, fmt);
+  }
+  return fmt;
+}
+
+// Offset (ms) between a timezone's wall-clock time and UTC at a given instant.
+function tzOffsetMs(date: Date, timeZone: string): number {
+  const parts = Object.fromEntries(
+    offsetFormatter(timeZone)
       .formatToParts(date)
       .map((p) => [p.type, p.value])
   );

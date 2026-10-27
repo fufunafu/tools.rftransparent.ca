@@ -51,14 +51,22 @@ export function entryMinutes(entry: ClockEntry, now: Date): number {
   return Math.max(0, Math.floor((now.getTime() - start) / MS_PER_MINUTE));
 }
 
+// Formatter cache: Intl.DateTimeFormat construction is expensive in loops.
+const dayKeyFormatters = new Map<string, Intl.DateTimeFormat>();
+
 export function dayKeyInTimeZone(date: Date, timeZone: string = BUSINESS_TIMEZONE): string {
-  // en-CA formats as YYYY-MM-DD.
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(date);
+  let fmt = dayKeyFormatters.get(timeZone);
+  if (!fmt) {
+    // en-CA formats as YYYY-MM-DD.
+    fmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    dayKeyFormatters.set(timeZone, fmt);
+  }
+  return fmt.format(date);
 }
 
 function weekdayLabel(date: Date, timeZone: string): string {
