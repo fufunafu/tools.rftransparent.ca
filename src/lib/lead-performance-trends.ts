@@ -17,16 +17,19 @@ export type LeadPerformanceMetricKey =
   | "sameDayCallRate"
   | "callRate"
   | "quoteRate"
+  | "quoteConversionRate"
   | "conversionRate"
   | "medianCallMs"
   | "medianQuoteMs";
 
 export type LeadPerformanceRateMetricKey = Extract<
   LeadPerformanceMetricKey,
-  "sameDayCallRate" | "callRate" | "quoteRate" | "conversionRate"
+  "sameDayCallRate" | "callRate" | "quoteRate" | "conversionRate" | "quoteConversionRate"
 >;
 
 export interface LeadPerformanceTrendSourceMetrics extends LeadFunnelMetrics {
+  quotedWon: number;
+  quoteConversionRate: number | null;
   sameDayCallRate: number | null;
   businessDayCalls: BusinessDayCallMetrics;
   medianCallMs: number | null;
@@ -85,9 +88,12 @@ function summarizeSource(
     lead.first_quote_at ?? lead.quote_sent_at,
   ));
 
+  const quotedWon = included.filter(lead => lead.quote_number?.trim() && lead.outcome === "won").length;
   const businessDayCalls = businessDayCallMetrics(sourceLeads, now);
   return {
     ...funnel,
+    quotedWon,
+    quoteConversionRate: funnel.quoted ? Math.round(quotedWon / funnel.quoted * 1000) / 10 : null,
     businessDayCalls,
     sameDayCallRate: businessDayCalls.sameDayCallRate,
     medianCallMs: medianLeadResponseTimeMs(callTimes),
@@ -132,6 +138,7 @@ function rateCounts(
   if (metric === "callRate") {
     return { count: source.attempted, denominator: source.callEligible };
   }
+  if (metric === "quoteConversionRate") return { count: source.quotedWon, denominator: source.quoted };
   if (metric === "quoteRate") {
     return { count: source.quoted, denominator: source.total };
   }
@@ -176,14 +183,16 @@ export function buildRollingLeadPerformanceRateTrend(
   });
 }
 
-/** Three calendar days of submission cohorts, pooling individual response times. */
-export function buildThreeDayQuoteTrend(
+/** Calendar-day submission windows, pooling individual response times. */
+export function buildRollingQuoteTrend(
   leads: PerformanceLead[],
   buckets: LeadTrendPoint[],
   now: number = Date.now(),
+  windowDays: number = 7,
 ): LeadPerformanceTrendPoint[] {
   if (!buckets.length) return [];
   const dayMs = 86_400_000;
+  const size = Math.max(1, Math.floor(windowDays));
   const start = Date.parse(`${buckets[0].rangeStart}T00:00:00Z`);
   const end = Date.parse(`${buckets[buckets.length - 1].rangeEnd}T00:00:00Z`);
   const dateFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" });
@@ -198,7 +207,7 @@ export function buildThreeDayQuoteTrend(
   const points: LeadPerformanceTrendPoint[] = [];
   for (let day = start; day <= end; day += dayMs) {
     // At the selected range's beginning use only the available selected days.
-    const windowStart = Math.max(start, day - 2 * dayMs);
+    const windowStart = Math.max(start, day - (size - 1) * dayMs);
     const rows: PerformanceLead[] = [];
     for (let includedDay = windowStart; includedDay <= day; includedDay += dayMs) {
       rows.push(...(byDay.get(new Date(includedDay).toISOString().slice(0, 10)) ?? []));

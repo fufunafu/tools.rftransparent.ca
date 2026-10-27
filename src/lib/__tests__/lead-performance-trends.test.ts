@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildCustomLeadTrend } from "@/lib/lead-analytics";
 import {
   buildLeadPerformanceTrend,
-  buildThreeDayQuoteTrend,
+  buildRollingQuoteTrend,
   buildRollingLeadPerformanceRateTrend,
 } from "@/lib/lead-performance-trends";
 
@@ -155,7 +155,7 @@ it("pools quote durations across three calendar days rather than averaging daily
     ...[2, 3, 4].map(hours => lead({ source: "website", submitted_at: "2026-10-02T12:00:00Z", first_quote_at: `2026-10-02T${12 + hours}:00:00Z` })),
     lead({ source: "meta", submitted_at: "2026-10-02T12:00:00Z", first_quote_at: "2026-10-03T12:00:00Z" }),
   ];
-  const result = buildThreeDayQuoteTrend(rows, buckets);
+  const result = buildRollingQuoteTrend(rows, buckets, Date.now(), 3);
   expect(result[2].website.medianQuoteMs).toBe(2.5 * 3600000);
   expect(result[2].website.quoteResponseCount).toBe(4);
   expect(result[2].meta.medianQuoteMs).toBe(24 * 3600000);
@@ -165,7 +165,33 @@ it("pools quote durations across three calendar days rather than averaging daily
 });
 it("uses calendar-day windows even when the other charts have weekly buckets", () => {
   const buckets = buildCustomLeadTrend([], "2026-07-01", "2026-09-28").points;
-  const result = buildThreeDayQuoteTrend([], buckets);
+  const result = buildRollingQuoteTrend([], buckets, Date.now(), 3);
   expect(result).toHaveLength(90);
   expect(result[30]).toMatchObject({ rangeStart: "2026-07-29", rangeEnd: "2026-07-31" });
+});
+
+
+it("defaults quote medians to seven calendar days and expires the oldest cohort on day eight", () => {
+  const buckets = buildCustomLeadTrend([], "2026-10-01", "2026-10-08").points;
+  const rows = [lead({ source: "website", submitted_at: "2026-10-01T12:00:00Z", first_quote_at: "2026-10-01T14:00:00Z" })];
+  const result = buildRollingQuoteTrend(rows, buckets);
+  expect(result[6].website.medianQuoteMs).toBe(7200000);
+  expect(result[6].rangeStart).toBe("2026-10-01");
+  expect(result[7].website.medianQuoteMs).toBeNull();
+  expect(result[7].rangeStart).toBe("2026-10-02");
+});
+
+it("counts only quoted wins and weights conversion by quoted leads", () => {
+  const buckets = buildCustomLeadTrend([], "2026-10-01", "2026-10-02").points;
+  const base = { source: "website" as const, submitted_at: "2026-10-01T12:00:00Z" };
+  const rows = [
+    lead({ ...base, quote_number: "D1", outcome: "won" }),
+    lead({ ...base, outcome: "won", quote_number: null }),
+    lead({ ...base, quote_number: "D2", outcome: "not_applicable" }),
+    ...Array.from({ length: 3 }, () => lead({ ...base, submitted_at: "2026-10-02T12:00:00Z", quote_number: "D3", outcome: "quoted" })),
+  ];
+  const result = buildRollingLeadPerformanceRateTrend(buildLeadPerformanceTrend(rows, buckets), "quoteConversionRate", 2);
+  expect(result[0].website).toEqual({ count: 1, denominator: 1, value: 100 });
+  expect(result[1].website).toEqual({ count: 1, denominator: 4, value: 25 });
+  expect(result[1].meta).toEqual({ count: 0, denominator: 0, value: null });
 });

@@ -13,7 +13,7 @@ it("labels source totals separately from rolling lines and omits the follow-up b
   const now = Date.parse("2026-10-27T22:00:00Z");
   const base = { store_id: "rf_transparent", source: "website", submitted_at: "2026-10-26T14:00:00Z", call_status: "not_called", phone: "4165550123", quote_number: null, outcome: "new", not_applicable_reason: null, raw_payload: {} };
   const leads = [
-    { ...base, id: "on-time", first_call_at: "2026-10-26T15:00:00Z", outcome: "won" },
+    { ...base, id: "on-time", first_call_at: "2026-10-26T15:00:00Z", outcome: "won", quote_number: "D1" },
     { ...base, id: "missed", first_call_at: null },
     { ...base, id: "pending", source: "outreach", submitted_at: "2026-10-27T22:00:00Z", first_call_at: null },
   ] as Lead[];
@@ -32,6 +32,10 @@ it("labels source totals separately from rolling lines and omits the follow-up b
     expect(order.textContent).toContain("1/2 won");
     expect(order.textContent).toContain("Selected-period totals");
     expect(order.textContent).toContain("Lines: 7-day rolling rates");
+    const conversion = cards.find(card => card.querySelector("h2")?.textContent === "Quote-to-order conversion")!;
+    expect(conversion.textContent).toContain("Website: 100%");
+    expect(conversion.textContent).toContain("1/1 quoted leads became orders");
+    expect(container.textContent).toContain("Time to quote · 7-day rolling median");
     const call = cards.find(card => card.querySelector("h2")?.textContent === "Called on the same business day")!;
     expect(call.textContent).toContain("Website: 50%");
     expect(call.textContent).toContain("1/2 due");
