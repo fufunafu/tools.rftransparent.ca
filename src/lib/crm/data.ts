@@ -5,7 +5,7 @@ import { CRM_TYPES, CRM_RECORD_VIEWS, type CrmPage, type CrmRecord, type CrmReco
 import { CrmInputError, crmId } from "./input";
 import { unpackProperties } from "./storage.mjs";
 
-const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email,reminder_enabled,reminder_minutes,view_fields,local_fields";
+export const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email,reminder_enabled,reminder_minutes,view_fields,local_fields";
 
 export async function listCrmRecords(params: URLSearchParams, email: string): Promise<CrmPage> {
   const page = Number(params.get("page") ?? 0);
@@ -74,7 +74,7 @@ export async function getCrmStatus(): Promise<CrmStatus> {
   return { configured: Boolean(process.env.HUBSPOT_ACCESS_TOKEN && process.env.HUBSPOT_PORTAL_ID), counts: counts.data ?? [], sync: sync.data };
 }
 
-function effectiveRecord(record: CrmRecord): CrmRecord {
+export function effectiveRecord(record: CrmRecord): CrmRecord {
   if (!record.local_fields || !Object.keys(record.local_fields).length) return record;
   return { ...record, title: record.local_fields.title || record.title, view_fields: { ...record.view_fields, ...record.local_fields } };
 }

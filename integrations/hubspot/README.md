@@ -4,6 +4,12 @@ The Tools CRM lives at `/hubspot-dupe`. Access is limited to management, active 
 
 HubSpot is a read-only source. New contacts, companies, deals, tickets, calls, meetings, email logs, notes, and tasks are saved in Tools. Logging an email does not send one. Contacts have a searchable table, named views, and an activity workspace with editable contact details. Tasks have upcoming, today, overdue, and completed views. Optional email reminders notify the task owner before due and once overdue.
 
+## Home workspace
+
+Home is the default CRM screen. It shows the viewer's local-day meetings and tasks, a filterable saved activity feed, recent contacts, overdue follow-ups, and weekly counts of contacts added, calls logged, and emails logged. My work filters by the signed-in owner's email; Team includes all CRM owners. Completed tasks on Home are completed tasks due that day. Weeks begin on Monday in the viewer's time zone, including daylight saving changes.
+
+Home preloads compact database summaries on the server and refreshes every minute. Full email bodies, original fields, and history load only after a record is opened. The feed does not claim email-open tracking or a calendar connection. Existing task forms and record workspaces handle creation, completion, and follow-up. Deals and Tickets are absent from navigation and relationship panels; their imported source records remain preserved. Attachment and recording migration remains available inside the collapsed HubSpot connection settings.
+
 ## Connection
 
 Configure `HUBSPOT_ACCESS_TOKEN` with a read-only HubSpot service key and set `HUBSPOT_PORTAL_ID` to the intended account. Keep the token in private server environment variables, never in source control or a public environment variable. A live account-info check prevents importing from a different account.
