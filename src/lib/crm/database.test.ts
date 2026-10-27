@@ -1,19 +1,36 @@
 import { readFile } from "node:fs/promises";
 import { PGlite } from "@electric-sql/pglite";
+import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { beforeAll, afterAll, describe, expect, it } from "vitest";
 import { normalizeHubspotRecord } from "./hubspot.mjs";
 
 let db: PGlite;
 beforeAll(async () => {
-  db = new PGlite();
+  db = new PGlite({ extensions: { pg_trgm } });
   await db.exec("create role anon; create role authenticated; create role service_role;");
   await db.exec(await readFile("supabase/migrations/20261027023000_hubspot_crm.sql", "utf8"));
   await db.exec(await readFile("supabase/migrations/20261027031500_crm_counts_index.sql", "utf8"));
   await db.exec("begin;" + await readFile("supabase/migrations/20261027032500_crm_live_counts.sql", "utf8") + "commit;");
+  await db.exec(await readFile("supabase/migrations/20261027170000_crm_browse_indexes.sql", "utf8"));
 }, 30000);
 afterAll(async () => { await db?.close(); });
 
 describe("CRM database", () => {
+  it("preserves substring/full-text searches and puts undated records last with the browse indexes", async () => {
+    await db.exec("begin");
+    try {
+      await db.query(`insert into crm_records(id,object_type,source,title,summary,body,occurred_at)
+        values ('tools:dated-old','contacts','tools','Glass shop','416-555-0199','','2026-01-01'),
+               ('tools:dated-new','contacts','tools','New customer','client@example.com','Custom railing details','2026-10-01'),
+               ('tools:undated','contacts','tools','Undated','','',null)`);
+      const rows = await db.query<{ id: string }>("select id from crm_records where object_type='contacts' and not archived order by occurred_at desc nulls last,id limit 50");
+      expect(rows.rows.map(row => row.id)).toEqual(['tools:dated-new', 'tools:dated-old', 'tools:undated']);
+      for (const [search, expected] of [['ass sh', 'tools:dated-old'], ['555-01', 'tools:dated-old'], ['railing', 'tools:dated-new']]) {
+        const results = await db.query<{ id: string }>("select id from crm_records where title ilike $1 or summary ilike $1 or search_document @@ websearch_to_tsquery('simple',$2)", [`%${search}%`, search]);
+        expect(results.rows.map(row => row.id)).toEqual([expected]);
+      }
+    } finally { await db.exec("rollback"); }
+  });
   it("denies browser roles direct access to CRM data and privileged functions", async () => {
     const result = await db.query<{ read: boolean; execute: boolean }>("select has_table_privilege('authenticated','crm_records','select') as read,has_function_privilege('authenticated','crm_import_page(jsonb,jsonb)','execute') as execute");
     expect(result.rows[0]).toEqual({ read: false, execute: false });

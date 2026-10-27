@@ -1,7 +1,7 @@
 import "server-only";
 import { getSupabase } from "@/lib/supabase";
 import { quotePostgrestValue } from "@/lib/postgrest";
-import { CRM_TYPES, type CrmPage, type CrmRecord, type CrmStatus } from "./types";
+import { CRM_TYPES, CRM_RECORD_VIEWS, type CrmPage, type CrmRecord, type CrmRecordView, type CrmStatus } from "./types";
 import { CrmInputError, crmId } from "./input";
 import { unpackProperties } from "./storage.mjs";
 
@@ -38,12 +38,20 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
   return { records: result.data as unknown as CrmRecord[], total: result.count ?? 0, page };
 }
 
-export async function getCrmRecord(id: string): Promise<CrmRecord> {
+export async function getCrmRecord(id: string, view: CrmRecordView = "full"): Promise<CrmRecord> {
   if (!crmId.safeParse(id).success) throw new CrmInputError("Invalid record");
-  const result = await getSupabase().from("crm_records").select(`${SUMMARY_COLUMNS},body,properties,property_history,source_created_at,source_updated_at,imported_at`).eq("id", id).maybeSingle();
+  if (!CRM_RECORD_VIEWS.includes(view)) throw new CrmInputError("Invalid record view");
+  const columns = [SUMMARY_COLUMNS];
+  if (view === "full" || view === "detail") columns.push("body,source_created_at,source_updated_at,imported_at");
+  if (view === "full" || view === "fields") columns.push("properties");
+  if (view === "full" || view === "history") columns.push("property_history");
+  const result = await getSupabase().from("crm_records").select(columns.join(",")).eq("id", id).maybeSingle();
   if (result.error) throw new Error("CRM record unavailable");
   if (!result.data) throw new CrmInputError("Record not found", 404);
-  return { ...result.data, properties: unpackProperties(result.data.properties), property_history: unpackProperties(result.data.property_history) } as CrmRecord;
+  const record = { ...(result.data as unknown as CrmRecord) };
+  if (record.properties) record.properties = unpackProperties(record.properties);
+  if (record.property_history) record.property_history = unpackProperties(record.property_history);
+  return record;
 }
 
 export async function getCrmStatus(): Promise<CrmStatus> {

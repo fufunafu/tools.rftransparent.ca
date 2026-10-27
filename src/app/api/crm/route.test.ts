@@ -12,6 +12,18 @@ const task = { id: "hubspot:40088916:tasks:11", version: 1, status: "completed",
 beforeEach(() => { vi.resetAllMocks(); mocks.user.mockResolvedValue({ email: "rep@example.com" }); mocks.manage.mockResolvedValue(false); mocks.access.mockResolvedValue(true); mocks.rpc.mockResolvedValue({ data: "tools:123", error: null }); });
 
 describe("CRM routes", () => {
+  it.each(["detail", "fields", "history"])("authorizes and forwards the on-demand %s view", async view => {
+    mocks.record.mockResolvedValue({ id: task.id });
+    const response = await GET(new Request(`https://tools.rftransparent.ca/api/crm?id=${task.id}&view=${view}`));
+    expect(response.status).toBe(200);
+    expect(mocks.record).toHaveBeenCalledWith(task.id, view);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  });
+  it("rejects unknown projections before reading the record", async () => {
+    const response = await GET(new Request(`https://tools.rftransparent.ca/api/crm?id=${task.id}&view=private`));
+    expect(response.status).toBe(400);
+    expect(mocks.record).not.toHaveBeenCalled();
+  });
   it("streams large record histories completely in bounded chunks after authorization", async () => {
     const record = { id: "hubspot:40088916:emails:1", properties: { text: "Montréal 客户 ".repeat(400_000) }, property_history: { previous: ["retained"] } };
     mocks.record.mockResolvedValue(record);

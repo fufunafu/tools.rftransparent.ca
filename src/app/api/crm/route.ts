@@ -4,6 +4,7 @@ import { getSupabase } from "@/lib/supabase";
 import { getCrmRecord, getCrmStatus, listCrmRecords } from "@/lib/crm/data";
 import { CrmInputError, createCrmRecord, readCrmJson, updateCrmTask } from "@/lib/crm/input";
 import { canAccessCrm } from "@/lib/crm/access";
+import { CRM_RECORD_VIEWS, type CrmRecordView } from "@/lib/crm/types";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -32,7 +33,11 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     if (params.get("statusOnly") === "true") return json(await getCrmStatus());
-    if (params.has("id")) return recordJson(await getCrmRecord(params.get("id")!));
+    if (params.has("id")) {
+      const view = (params.get("view") ?? "full") as CrmRecordView;
+      if (!CRM_RECORD_VIEWS.includes(view)) throw new CrmInputError("Invalid record view");
+      return recordJson(await getCrmRecord(params.get("id")!, view));
+    }
     return json(await listCrmRecords(params, user.email.toLowerCase()));
   } catch (error) { return fail(error); }
 }
@@ -45,7 +50,7 @@ export async function POST(request: Request) {
     const parsed = createCrmRecord.safeParse(await readCrmJson(request));
     if (!parsed.success) return json({ error: "Enter a title, valid activity date, and a due date for tasks." }, 400);
     const v = parsed.data;
-    if (v.relatedId) await getCrmRecord(v.relatedId);
+    if (v.relatedId) await getCrmRecord(v.relatedId, "summary");
     const result = await getSupabase().rpc("crm_create_record", {
       p_id: v.requestId, p_type: v.type, p_title: v.title, p_body: v.body,
       p_properties: { email: v.email, phone: v.phone, company: v.company },
@@ -65,7 +70,7 @@ export async function PATCH(request: Request) {
     const parsed = updateCrmTask.safeParse(await readCrmJson(request));
     if (!parsed.success) return json({ error: "Choose a status and valid due date." }, 400);
     const v = parsed.data;
-    const record = await getCrmRecord(v.id);
+    const record = await getCrmRecord(v.id, "summary");
     const canManage = await isManagementUser();
     if (record.owner_email !== user.email.toLowerCase() && !canManage) return json({ error: "Only the task owner or management may update this task." }, 403);
     const result = await getSupabase().rpc("crm_update_task", { p_id: v.id, p_version: v.version, p_status: v.status, p_due_at: v.dueAt, p_actor: user.email.toLowerCase(), p_can_manage: canManage });
