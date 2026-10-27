@@ -236,6 +236,15 @@ function extractContributors(draft: ShopifyDraftNode): {
   return { lastInvoiceSender, contributors };
 }
 
+// When the quote was most recently sent: Shopify's invoiceSentAt, else the
+// latest "sent an invoice" event. Quotes by Staff windows on this date, and
+// RF's fixed schedule counts from it.
+function latestInvoiceSentAt(draft: ShopifyDraftNode): string | null {
+  return draft.invoiceSentAt ?? draft.events.edges
+    .filter(({ node }) => / sent an invoice to /.test(node.message))
+    .map(({ node }) => node.createdAt).sort().at(-1) ?? null;
+}
+
 const MAX_PAGES = 80;
 
 // Columns the live sync compares before rewriting a row. Every 30s tick sees
@@ -446,12 +455,10 @@ export async function syncDraftOrdersForStore(
 
     const createdBy = extractCreator(draft);
     const contrib = extractContributors(draft);
-    const sentAt = draft.invoiceSentAt ?? draft.events.edges
-      .filter(({ node }) => / sent an invoice to /.test(node.message))
-      .map(({ node }) => node.createdAt).sort().at(-1) ?? existing?.last_invoice_sent_at ?? null;
-    const rfSchedule: Record<string, unknown> = {};
+    const sentAt = latestInvoiceSentAt(draft) ?? existing?.last_invoice_sent_at ?? null;
+    const sentFields = sentAt ? { last_invoice_sent_at: sentAt } : {};
+    const rfSchedule: Record<string, unknown> = { ...sentFields };
     if (hasFixedFollowupSchedule(storeId)) {
-      if (sentAt) rfSchedule.last_invoice_sent_at = sentAt;
       if (existing && !existing.closed_at && !FOLLOWUP_CATEGORIES[existing.lead_status]?.terminal) {
         if (existing.followup_count >= 2) rfSchedule.next_followup_at = null;
         else if (existing.followup_count === 0) {
@@ -485,6 +492,7 @@ export async function syncDraftOrdersForStore(
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
+          ...sentFields,
           contributors: contrib.contributors,
         });
       } else {
@@ -524,6 +532,7 @@ export async function syncDraftOrdersForStore(
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
+          ...sentFields,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
@@ -612,6 +621,8 @@ export async function syncDraftOrdersForStore(
     const amount = parseFloat(draft.subtotalPriceSet.shopMoney.amount) || 0;
     const createdBy = extractCreator(draft);
     const contrib = extractContributors(draft);
+    const completedSentAt = latestInvoiceSentAt(draft);
+    const completedSentFields = completedSentAt ? { last_invoice_sent_at: completedSentAt } : {};
     const ordersCount = draft.customer?.numberOfOrders != null
       ? parseInt(draft.customer.numberOfOrders, 10)
       : null;
@@ -627,6 +638,7 @@ export async function syncDraftOrdersForStore(
           created_by_staff: createdBy,
           customer_orders_count: ordersCount,
           last_invoice_sender: contrib.lastInvoiceSender,
+          ...completedSentFields,
           contributors: contrib.contributors,
         }).eq("id", existing.id).then(async ({ error }) => {
           if (error) {
@@ -663,6 +675,7 @@ export async function syncDraftOrdersForStore(
         created_by_staff: createdBy,
         customer_orders_count: ordersCount,
         last_invoice_sender: contrib.lastInvoiceSender,
+        ...completedSentFields,
         contributors: contrib.contributors,
       });
     } else {
@@ -671,6 +684,7 @@ export async function syncDraftOrdersForStore(
         created_by_staff: createdBy,
         customer_orders_count: ordersCount,
         last_invoice_sender: contrib.lastInvoiceSender,
+        ...completedSentFields,
         contributors: contrib.contributors,
       };
       if (incremental && followupRowUnchanged(existing, fields)) continue;

@@ -668,6 +668,36 @@ describe("syncDraftOrdersForStore (incremental, RF schedule)", () => {
   });
 });
 
+describe("syncDraftOrdersForStore (last sent date)", () => {
+  it("records when the quote was last sent, for every store", async () => {
+    const draft = makeDraft({ events: [
+      "Alice created this draft order.",
+      "Alice sent an invoice to jane@example.com.",
+      "Bob sent an invoice to jane@example.com.",
+    ] });
+    draft.events.edges[1].node.createdAt = "2026-07-02T12:00:00Z";
+    draft.events.edges[2].node.createdAt = "2026-07-09T12:00:00Z";
+    setShopifyDrafts([draft], []);
+
+    await syncDraftOrdersForStore("store2");
+
+    expect(upsertedRows()[0]).toMatchObject({
+      last_invoice_sender: "Bob",
+      last_invoice_sent_at: "2026-07-09T12:00:00Z",
+    });
+  });
+
+  it("leaves the stored date alone when Shopify shows no invoice", async () => {
+    const draft = makeDraft({ status: "COMPLETED" });
+    db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1", lead_status: "won" })];
+    setShopifyDrafts([], [draft]);
+
+    await syncDraftOrdersForStore("store2");
+
+    expect(db.updates.find((u) => u.id === "L1")?.values).not.toHaveProperty("last_invoice_sent_at");
+  });
+});
+
 describe("followupRowUnchanged", () => {
   it("treats Postgres and Shopify spellings of the same value as equal", () => {
     expect(followupRowUnchanged(
