@@ -12,7 +12,7 @@ import {
 import type { LeadStoreId } from "@/lib/customer-service/lead-store";
 
 export type { LeadStoreId } from "@/lib/customer-service/lead-store";
-export type LeadSource = "website" | "meta";
+export type LeadSource = "website" | "meta" | "outreach";
 export type CallStatus = "not_called" | "no_answer" | "called";
 export type Outcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 

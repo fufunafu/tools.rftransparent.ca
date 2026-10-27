@@ -13,7 +13,7 @@ const TOOLS_ORIGIN = "https://tools.rftransparent.ca";
 export interface NewLeadNotification {
   leadId: string;
   storeId?: LeadStoreId;
-  source: "website" | "meta";
+  source: "website" | "meta" | "outreach";
   sourceDetail: string | null;
   pageUrl: string | null;
   name: string | null;
@@ -31,7 +31,7 @@ export async function sendNewLeadNotification(
   lead: NewLeadNotification,
 ): Promise<boolean> {
   const storeId: LeadStoreId = lead.storeId ?? "rf_transparent";
-  const sourceLabel = lead.source === "meta"
+  const sourceLabel = lead.source === "outreach" ? "Outreach" : lead.source === "meta"
     ? "Meta"
     : storeId === "bc_transparent"
       ? `${leadStoreLabel(storeId)} website`

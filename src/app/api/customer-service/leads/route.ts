@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
   }
 
   const sourceParam = req.nextUrl.searchParams.get("source");
-  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta"
+  const source: LeadSource | undefined = sourceParam === "website" || sourceParam === "meta" || sourceParam === "outreach"
     ? sourceParam
     : undefined;
   try {

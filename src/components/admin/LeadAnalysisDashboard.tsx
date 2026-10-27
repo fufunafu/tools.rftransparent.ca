@@ -264,10 +264,10 @@ function SourceToggle({
         checked={checked}
         disabled={disabled}
         onChange={onChange}
-        className={`h-4 w-4 ${website ? "accent-blue-600" : "accent-pink-600"}`}
+        className={`h-4 w-4 ${website ? "accent-blue-600" : source === "outreach" ? "accent-violet-600" : "accent-pink-600"}`}
       />
-      <span className={`h-2.5 w-2.5 rounded-sm ${website ? "bg-blue-600" : "bg-pink-600"}`} />
-      {website ? "Website" : "Meta"}
+      <span className={`h-2.5 w-2.5 rounded-sm ${website ? "bg-blue-600" : source === "outreach" ? "bg-violet-600" : "bg-pink-600"}`} />
+      {source === "outreach" ? "Outreach" : website ? "Website" : "Meta"}
     </label>
   );
 }
@@ -278,6 +278,7 @@ function SnapshotCard({
   detail,
   website,
   meta,
+  outreach,
   tone,
 }: {
   label: string;
@@ -285,6 +286,7 @@ function SnapshotCard({
   detail: string;
   website: string | number;
   meta: string | number;
+  outreach: string | number;
   tone: string;
 }) {
   return (
@@ -295,7 +297,7 @@ function SnapshotCard({
       </div>
       <p className="mt-2 text-2xl font-semibold tracking-tight text-sand-900">{value}</p>
       <p className="mt-1 min-h-8 text-xs leading-4 text-sand-500">{detail}</p>
-      <div className="mt-3 grid grid-cols-2 gap-3 border-t border-sand-100 pt-3 text-xs">
+      <div className="mt-3 grid grid-cols-3 gap-3 border-t border-sand-100 pt-3 text-xs">
         <div>
           <p className="flex items-center gap-1.5 text-sand-500">
             <span className="h-2 w-2 rounded-sm bg-blue-600" />Website
@@ -307,6 +309,12 @@ function SnapshotCard({
             <span className="h-2 w-2 rounded-sm bg-pink-600" />Meta
           </p>
           <p className="mt-1 font-semibold text-sand-800">{meta}</p>
+        </div>
+        <div>
+          <p className="flex items-center gap-1.5 text-sand-500">
+            <span className="h-2 w-2 rounded-sm bg-violet-600" />Outreach
+          </p>
+          <p className="mt-1 font-semibold text-sand-800">{outreach}</p>
         </div>
       </div>
     </article>
@@ -330,6 +338,7 @@ function MetricChartCard({
   data,
   showWebsite,
   showMeta,
+  showOutreach,
   rollingWindow,
   summary,
   loading = false,
@@ -341,6 +350,7 @@ function MetricChartCard({
   data: LeadPerformanceTrendPoint[];
   showWebsite: boolean;
   showMeta: boolean;
+  showOutreach: boolean;
   rollingWindow: { size: number; label: string };
   summary: LeadPerformanceTrendPoint | null;
   loading?: boolean;
@@ -359,6 +369,7 @@ function MetricChartCard({
             <>
               <span className="font-semibold text-blue-700">{metricDisplay(metric, summary.website)}</span>
               <span className="font-semibold text-pink-700">{metricDisplay(metric, summary.meta)}</span>
+              <span className="font-semibold text-violet-700">{metricDisplay(metric, summary.outreach)}</span>
             </>
           )}
           <span className="rounded-full bg-sand-100 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
@@ -379,6 +390,7 @@ function MetricChartCard({
             metric={metric}
             showWebsite={showWebsite}
             showMeta={showMeta}
+          showOutreach={showOutreach}
             rollingWindowSize={rollingWindow.size}
           />
         )}
@@ -407,6 +419,7 @@ export default function LeadAnalysisDashboard({
   const [sources, setSources] = useState<Record<LeadSource, boolean>>({
     website: true,
     meta: true,
+    outreach: true,
   });
   const requestedBounds = useMemo(
     () => leadTrendQueryBounds(trendRange, now, customFrom, customTo),
@@ -460,6 +473,7 @@ export default function LeadAnalysisDashboard({
   const quoteResponsesBySource = useMemo(() => ({
     website: responseSummary(analysisLeads, "website"),
     meta: responseSummary(analysisLeads, "meta"),
+    outreach: responseSummary(analysisLeads, "outreach"),
   }), [analysisLeads]);
   const responseAnalysisLeads = useMemo(() => {
     const first = trend.points[0];
@@ -478,6 +492,7 @@ export default function LeadAnalysisDashboard({
   const callResponsesBySource = useMemo(() => ({
     website: responseSummary(responseAnalysisLeads, "website"),
     meta: responseSummary(responseAnalysisLeads, "meta"),
+    outreach: responseSummary(responseAnalysisLeads, "outreach"),
   }), [responseAnalysisLeads]);
   const performanceTrend = useMemo(
     () => buildLeadPerformanceTrend(leads, trend.points),
@@ -500,6 +515,7 @@ export default function LeadAnalysisDashboard({
       rangeEnd: last.rangeEnd,
       website: trendCurrent.website,
       meta: trendCurrent.meta,
+      outreach: trendCurrent.outreach,
       total: trendCurrent.total,
     }])[0] ?? null;
   }, [leads, trendCurrent, trendPoints]);
@@ -514,15 +530,15 @@ export default function LeadAnalysisDashboard({
       rangeEnd: last.rangeEnd,
       website: 0,
       meta: 0,
+      outreach: 0,
       total: 0,
     }])[0] ?? null;
   }, [responsePerformanceLeads, trendPoints]);
   const rollingWindow = performanceRateWindow(trendRange, customFrom, customTo);
   const excluded = analysisLeads.length - funnel.total;
   const toggleSource = (source: LeadSource) => {
-    const other = source === "website" ? "meta" : "website";
     setSources((current) => {
-      if (current[source] && !current[other]) return current;
+      if (current[source] && Object.values(current).filter(Boolean).length === 1) return current;
       return { ...current, [source]: !current[source] };
     });
   };
@@ -585,16 +601,24 @@ export default function LeadAnalysisDashboard({
             <SourceToggle
               source="website"
               checked={sources.website}
-              disabled={sources.website && !sources.meta}
+              disabled={sources.website && !sources.meta && !sources.outreach}
               onChange={() => toggleSource("website")}
             />
             {hasMeta && (
+              <>
               <SourceToggle
                 source="meta"
                 checked={sources.meta}
-                disabled={sources.meta && !sources.website}
+                disabled={sources.meta && !sources.website && !sources.outreach}
                 onChange={() => toggleSource("meta")}
               />
+              <SourceToggle
+                source="outreach"
+                checked={sources.outreach}
+                disabled={sources.outreach && !sources.website && !sources.meta}
+                onChange={() => toggleSource("outreach")}
+              />
+              </>
             )}
             <span className="text-xs text-sand-400">{formatSelectedPeriod(trend.points)}</span>
           </div>
@@ -660,6 +684,7 @@ export default function LeadAnalysisDashboard({
                 detail="All consolidated leads first submitted in this period"
                 website={trend.current.website.toLocaleString()}
                 meta={trend.current.meta.toLocaleString()}
+                outreach={trend.current.outreach.toLocaleString()}
                 tone="bg-indigo-500"
               />
               <SnapshotCard
@@ -668,6 +693,7 @@ export default function LeadAnalysisDashboard({
                 detail={`${funnel.attempted} of ${funnel.callEligible} callable leads attempted`}
                 website={`${funnelBySource.website.callRate}%`}
                 meta={`${funnelBySource.meta.callRate}%`}
+                outreach={`${funnelBySource.outreach.callRate}%`}
                 tone="bg-amber-400"
               />
               <SnapshotCard
@@ -676,6 +702,7 @@ export default function LeadAnalysisDashboard({
                 detail={`${funnel.quoted} of ${funnel.total} included leads quoted`}
                 website={`${funnelBySource.website.quoteRate}%`}
                 meta={`${funnelBySource.meta.quoteRate}%`}
+                outreach={`${funnelBySource.outreach.quoteRate}%`}
                 tone="bg-cyan-500"
               />
               <SnapshotCard
@@ -684,6 +711,7 @@ export default function LeadAnalysisDashboard({
                 detail={`${funnel.won} of ${funnel.total} included leads became orders`}
                 website={`${funnelBySource.website.conversionRate}%`}
                 meta={`${funnelBySource.meta.conversionRate}%`}
+                outreach={`${funnelBySource.outreach.conversionRate}%`}
                 tone="bg-emerald-500"
               />
               <SnapshotCard
@@ -694,6 +722,7 @@ export default function LeadAnalysisDashboard({
                   : `${callResponses.callCount} completed first-call records`}
                 website={formatLeadResponseTime(callResponsesBySource.website.medianCallMs)}
                 meta={formatLeadResponseTime(callResponsesBySource.meta.medianCallMs)}
+                outreach={formatLeadResponseTime(callResponsesBySource.outreach.medianCallMs)}
                 tone="bg-blue-500"
               />
               <SnapshotCard
@@ -702,6 +731,7 @@ export default function LeadAnalysisDashboard({
                 detail={`${quoteResponses.quoteCount} completed first-quote records`}
                 website={formatLeadResponseTime(quoteResponsesBySource.website.medianQuoteMs)}
                 meta={formatLeadResponseTime(quoteResponsesBySource.meta.medianQuoteMs)}
+                outreach={formatLeadResponseTime(quoteResponsesBySource.outreach.medianQuoteMs)}
                 tone="bg-pink-500"
               />
             </div>
@@ -712,11 +742,11 @@ export default function LeadAnalysisDashboard({
               <div>
                 <h2 className="text-sm font-semibold text-sand-900">Lead volume by source</h2>
                 <p className="mt-0.5 text-xs text-sand-500">
-                  Consolidated website and Meta leads grouped by first submission date.
+                  Consolidated website, Meta, and outreach leads grouped by first submission date.
                 </p>
               </div>
               <p className="text-xs font-medium text-sand-500">
-                {trend.current.website.toLocaleString()} Website · {trend.current.meta.toLocaleString()} Meta
+                {trend.current.website.toLocaleString()} Website · {trend.current.meta.toLocaleString()} Meta · {trend.current.outreach.toLocaleString()} Outreach
               </p>
             </header>
             <div className="h-72 px-3 pb-3 pt-4 sm:h-80 sm:px-5">
@@ -724,6 +754,7 @@ export default function LeadAnalysisDashboard({
                 data={trend.points}
                 showWebsite={sources.website}
                 showMeta={sources.meta}
+                showOutreach={sources.outreach}
                 onSelectRange={selectChartRange}
               />
             </div>
@@ -737,6 +768,7 @@ export default function LeadAnalysisDashboard({
                 data={chart.metric === "medianCallMs" ? callPerformanceTrend : performanceTrend}
                 showWebsite={sources.website}
                 showMeta={sources.meta}
+                showOutreach={sources.outreach}
                 rollingWindow={rollingWindow}
                 summary={chart.metric === "medianCallMs" ? callSummaryPoint : summaryPoint}
                 loading={chart.metric === "medianCallMs" && responsePerformanceLoading}
