@@ -17,7 +17,7 @@ vi.mock("@/lib/supabase", () => ({
   getSupabase: () => supabaseMock(),
 }));
 
-import { reportCronFailure, alertOnSoftFailures, recordCronRun } from "@/lib/cron-monitor";
+import { reportCronFailure, alertOnSoftFailures, recordCronRun, resetCronPruneThrottle } from "@/lib/cron-monitor";
 
 beforeEach(() => {
   sendMock.mockReset();
@@ -32,6 +32,7 @@ beforeEach(() => {
   insertMock.mockResolvedValue({ error: null });
   deleteLtMock.mockReset();
   deleteLtMock.mockResolvedValue({ error: null });
+  resetCronPruneThrottle();
   supabaseMock.mockReset();
   supabaseMock.mockReturnValue({
     from: () => ({ insert: insertMock, delete: () => ({ lt: deleteLtMock }) }),
@@ -120,6 +121,22 @@ describe("recordCronRun", () => {
     // Roughly 90 days back — exact to the day, not the millisecond.
     const daysBack = (Date.now() - new Date(cutoff as string).getTime()) / 86400000;
     expect(Math.round(daysBack)).toBe(90);
+  });
+
+  it("prunes at most once an hour", async () => {
+    vi.useFakeTimers();
+    try {
+      await recordCronRun("job", "success", "ok");
+      await recordCronRun("job", "success", "ok");
+      expect(insertMock).toHaveBeenCalledTimes(2);
+      expect(deleteLtMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(60 * 60 * 1000);
+      await recordCronRun("job", "success", "ok");
+      expect(deleteLtMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still records the run when pruning fails", async () => {
