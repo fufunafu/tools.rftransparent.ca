@@ -15,7 +15,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 it("uses the server records immediately without duplicate initial requests, then fetches changed tabs", async () => {
   const fetcher = vi.fn(async () => Response.json({ records: [{ ...initialPage.records[0], object_type: "companies", title: "Loaded company" }], total: 1, page: 0 }));
   vi.stubGlobal("fetch", fetcher);
-  await act(async () => root.render(<CrmWorkspace email="rep@example.com" canManage={false} initialPage={initialPage} initialStatus={initialStatus} />));
+  await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} initialPage={initialPage} initialStatus={initialStatus} />));
   expect(container.textContent).toContain("Server loaded customer");
   expect(fetcher).not.toHaveBeenCalled();
   const companies = [...container.querySelectorAll("nav button")].find(button => button.textContent === "Companies") as HTMLButtonElement;
@@ -29,14 +29,14 @@ it("uses the server records immediately without duplicate initial requests, then
 it("retries through the API when server preload data is unavailable", async () => {
   const fetcher = vi.fn(async (url: string) => Response.json(url.includes("statusOnly") ? initialStatus : initialPage));
   vi.stubGlobal("fetch", fetcher);
-  await act(async () => root.render(<CrmWorkspace email="rep@example.com" canManage={false} />));
+  await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} />));
   expect(container.textContent).toContain("Server loaded customer");
   expect(fetcher).toHaveBeenCalledTimes(2);
 });
 it("hydrates preloaded dates consistently before formatting them in the viewer's time zone", async () => {
   const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
   const records = { ...initialPage, records: [{ ...initialPage.records[0], occurred_at: "2026-10-27T12:34:00Z" }] };
-  const page = <CrmWorkspace email="rep@example.com" canManage={false} initialPage={records} initialStatus={initialStatus} />;
+  const page = <CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} initialPage={records} initialStatus={initialStatus} />;
   await act(async () => root.unmount());
   container.innerHTML = renderToString(page);
   expect(container.textContent).toContain("UTC");

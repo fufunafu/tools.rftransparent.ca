@@ -1,0 +1,30 @@
+{
+  "verifiedAt": "2026-10-27",
+  "baselineDeployment": "dpl_EDrr4eV6tcto8NatJWr6AcWqAjPt",
+  "baselineGit": "3878b4310a0137552ae79cedc99d0abc0019e4fa",
+  "productionReconciliation": "Preserved the newest deployed LeadsDashboard, LeadFilterDropdown, and tests. Other application files matched the prior release.",
+  "scope": [
+    "Default Home screen with meetings, daily tasks, activity, metrics and contacts",
+    "Remove Deals and Tickets from CRM navigation and relationship panels without deleting imported records",
+    "Move file migration into connection settings"
+  ],
+  "checks": {
+    "tests": 1521,
+    "testFiles": 205,
+    "lint": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "protectedSalesFiles": 36,
+    "readOnlyDatabase": "passed",
+    "homeDataSampleMilliseconds": 543,
+    "homeDataSampleBytes": 20666,
+    "browser": "Not verified. The scoped browser connector could not start; automatic approval review rejected the broader Chrome binding."
+  },
+  "databaseWrites": false,
+  "newMigrations": false,
+  "limitations": [
+    "Activity feed uses saved CRM records, not email-open telemetry.",
+    "CRM meetings are shown without a new calendar integration.",
+    "Completed tasks are grouped by due date."
+  ]
+}
