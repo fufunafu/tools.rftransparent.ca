@@ -30,3 +30,12 @@ it('retains newer manual entries and does not double count the same call',()=>{
 it('does not match inbound missed calls as conversations',()=>{
  expect(deriveAutomaticActivity([lead],[{...call,direction:'inbound',from_number:lead.phone,duration_min:0}],[]).size).toBe(0);
 });
+it('matches answered inbound calls and uses the latest attempt without changing the lead stage',()=>{
+ const inbound={...call,id:'incoming',direction:'inbound',from_number:lead.phone,to_number:'18005550100',call_start:'2026-10-27T15:00:00Z',endpoint:'Marisa'};
+ const history=deriveAutomaticActivity([lead],[call,inbound],[]).get('one')!;
+ expect(applyAutomaticActivity(lead,history)).toMatchObject({last_call_at:inbound.call_start,last_called_by_name:'Marisa',last_call_result:'connected',call_count:2,stage:'new'});
+});
+it('matches an older draft sent after interest and sorts quotes by actual send time',()=>{
+ const history=deriveAutomaticActivity([lead],[],[draft,{...draft,shopify_draft_id:'150',draft_name:'#D150',shopify_created_at:'2026-10-01T12:00:00Z',first_synced_at:'2026-10-01T12:00:00Z',last_invoice_sent_at:'2026-10-28T12:00:00Z'}]).get('one')!;
+ expect(applyAutomaticActivity(lead,history)).toMatchObject({quote_number:'#D150',quote_sent_at:'2026-10-28T12:00:00Z',quote_date_kind:'sent'});
+});

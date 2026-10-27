@@ -7,8 +7,9 @@ import { leadIsClosed, type StaffLead, type LeadActivity } from './staff-leads';
 
 const email = (value: string | null) => value?.trim().toLowerCase() || '';
 const time = (value: string | null) => value ? Date.parse(value) : 0;
+export type ActivityDraft = DraftForLeadQuoteSync & { last_invoice_sent_at?: string | null };
 export type ActivityLead = StaffLead & { interested_at?: string };
-export function deriveAutomaticActivity(leads: ActivityLead[], calls: PhoneCallForLeadSync[], drafts: DraftForLeadQuoteSync[]) {
+export function deriveAutomaticActivity(leads: ActivityLead[], calls: PhoneCallForLeadSync[], drafts: ActivityDraft[]) {
   const history = new Map<string, LeadActivity[]>();
   const inputs = leads.map(lead => ({id:lead.id,email:lead.contact.email,phone:lead.phone,
     submitted_at:lead.interested_at || lead.created_at,quote_number:null,outcome:'new' as const,
@@ -26,13 +27,14 @@ export function deriveAutomaticActivity(leads: ActivityLead[], calls: PhoneCallF
       return phone && phone.length>=10 && sanitizePhone(lead.phone)===phone;
     });
     if (!email(draft.customer_email) && new Set(candidates.map(l=>email(l.email))).size>1) continue;
-    for (const match of matchDraftOrdersToLeads(candidates,[draft])) {
+    for (const match of matchDraftOrdersToLeads(candidates,[{...draft,shopify_created_at:draft.last_invoice_sent_at || draft.shopify_created_at}])) {
       const host=getStores().find(s=>s.id==='store2')?.store;
       const draftId=match.draftId.split('/').pop();
       const url=host && /^[\w.-]+\.myshopify\.com$/.test(host) && /^\d+$/.test(draftId||'') ? `https://${host}/admin/draft_orders/${draftId}` : null;
       const activity:LeadActivity={id:`shopify:${match.draftId}`,lead_id:match.leadId,kind:'quote',actor_email:'',
         actor_name:match.responsibleStaff || 'Staff not recorded',occurred_at:match.quoteSentAt,created_at:match.quoteSentAt,
-        note:'Shopify sent quote. Date is the draft creation date, as on the Leads page.',call_result:null,
+        note:draft.last_invoice_sent_at?'Shopify sent quote. Date is the latest invoice send time.':'Shopify sent quote. Send time unavailable; showing draft creation date.',call_result:null,
+        quote_date_kind:draft.last_invoice_sent_at?'sent':'created',
         quote_number:match.quoteNumber,quote_amount:match.quoteAmount,quote_currency:null,quote_url:url};
       history.set(match.leadId,[...(history.get(match.leadId)||[]),activity]);
     }
@@ -51,7 +53,7 @@ export function applyAutomaticActivity(lead: StaffLead, history: LeadActivity[])
   result.call_count=Math.max(lead.call_count||0,calls.length);
   if(quote && time(quote.occurred_at)>=time(lead.quote_sent_at)) Object.assign(result,{
     quote_sent_at:quote.occurred_at,quote_number:quote.quote_number,quote_amount:quote.quote_amount,
-    quote_currency:quote.quote_currency,quote_url:quote.quote_url,quoted_by:null,quoted_by_name:quote.actor_name,quote_source:'automatic',
+    quote_currency:quote.quote_currency,quote_url:quote.quote_url,quote_date_kind:quote.quote_date_kind,quoted_by:null,quoted_by_name:quote.actor_name,quote_source:'automatic',
   });
   return result;
 }
@@ -81,7 +83,7 @@ async function readActivity(){
   const since=new Date(Math.min(...leads.map(l=>time(l.interested_at||l.created_at)))).toISOString();
   const [calls,drafts]=await Promise.all([
     all<PhoneCallForLeadSync>((from,to)=>db.from('call_records').select('id,store_id,call_start,call_end,from_number,to_number,direction,duration_min,charge,endpoint,source').gte('call_start',since).order('call_start').order('id').range(from,to)),
-    all<DraftForLeadQuoteSync>((from,to)=>db.from('followup_leads').select('shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,shopify_status,first_synced_at,last_invoice_sender,created_by_staff').eq('store_id','store2').in('shopify_status',['INVOICE_SENT','COMPLETED']).gte('first_synced_at',since).order('id').range(from,to)),
+    all<ActivityDraft>((from,to)=>db.from('followup_leads').select('shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,shopify_status,first_synced_at,last_invoice_sender,created_by_staff,last_invoice_sent_at').eq('store_id','store2').in('shopify_status',['INVOICE_SENT','COMPLETED']).or(`last_invoice_sent_at.gte.${since},shopify_created_at.gte.${since},first_synced_at.gte.${since}`).order('id').range(from,to)),
   ]);
   const history=deriveAutomaticActivity(leads,calls,drafts);
   return {leads:leads.map(l=>applyAutomaticActivity(l,history.get(l.id)||[])),history};
