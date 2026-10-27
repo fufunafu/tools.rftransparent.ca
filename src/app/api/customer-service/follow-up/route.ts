@@ -18,7 +18,7 @@ import {
   getFollowupByStaff,
   type FollowupStaffRow,
 } from "@/lib/customer-service/followup-queries";
-import { syncLeadQuotesFromFollowups } from "@/lib/lead-quote-sync";
+import { shouldRematchAfterLiveSync, syncLeadQuotesFromFollowups } from "@/lib/lead-quote-sync";
 
 export const dynamic = "force-dynamic";
 // Matches /api/cron/sync-followup — the manual Sync button does the same work
@@ -890,8 +890,18 @@ export async function POST(req: NextRequest) {
       // Anything else → the full all-time sync (manual button, cron).
       const incremental = req.nextUrl.searchParams.get("mode") === "incremental";
       const result = await syncDraftOrdersForStore(storeId, { incremental });
-      const leadQuoteSync = await syncLeadQuotesFromFollowups([storeId]);
-      revalidateTag(`cs:followup:${storeId}`, "max");
+      const leadQuoteSync = !incremental || shouldRematchAfterLiveSync(storeId, result)
+        ? await syncLeadQuotesFromFollowups([storeId])
+        : null;
+      // A live tick that touched no drafts changed nothing the cached summary
+      // and staff views depend on; dropping them anyway made every open tab
+      // re-run those queries twice a minute.
+      const draftsTouched = result.new_leads + result.updated_leads + result.auto_won
+        + result.stale_detected > 0;
+      const leadsChanged = (leadQuoteSync?.linked ?? 0) + (leadQuoteSync?.staffAssigned ?? 0) > 0;
+      if (!incremental || draftsTouched || leadsChanged) {
+        revalidateTag(`cs:followup:${storeId}`, "max");
+      }
       return NextResponse.json({
         status: "success",
         synced_at: new Date().toISOString(),

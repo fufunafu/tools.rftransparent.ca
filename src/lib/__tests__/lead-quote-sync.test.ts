@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   matchDraftOrdersToLeads,
   matchStaffToLinkedLeads,
+  resetLiveRematchThrottle,
+  shouldRematchAfterLiveSync,
   type DraftForLeadQuoteSync,
   type LeadForQuoteSync,
 } from "@/lib/lead-quote-sync";
@@ -259,5 +261,29 @@ describe("matchStaffToLinkedLeads", () => {
         ],
       ),
     ).toEqual([]);
+  });
+});
+
+describe("shouldRematchAfterLiveSync", () => {
+  const changed = { new_leads: 0, updated_leads: 1, auto_won: 0 };
+  const unchanged = { new_leads: 0, updated_leads: 0, auto_won: 0 };
+  const NOW = Date.parse("2026-10-26T16:00:00Z");
+
+  beforeEach(() => resetLiveRematchThrottle());
+
+  it("skips the re-match when the sync touched no drafts", () => {
+    expect(shouldRematchAfterLiveSync("store1", unchanged, NOW)).toBe(false);
+  });
+
+  it("re-matches after changes at most once per two minutes per store", () => {
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW)).toBe(true);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 60_000)).toBe(false);
+    expect(shouldRematchAfterLiveSync("store2", changed, NOW + 60_000)).toBe(true);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 120_000)).toBe(true);
+  });
+
+  it("does not start the wait on a tick that skipped for lack of changes", () => {
+    expect(shouldRematchAfterLiveSync("store1", unchanged, NOW)).toBe(false);
+    expect(shouldRematchAfterLiveSync("store1", changed, NOW + 1_000)).toBe(true);
   });
 });
