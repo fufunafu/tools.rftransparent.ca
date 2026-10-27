@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import "./globals.css";
 import SidebarLayout from "@/components/SidebarLayout";
 import NativeAppRuntime from "@/components/NativeAppRuntime";
@@ -45,6 +46,8 @@ export default function RootLayout({
             {children}
           </SidebarLayout>
         </NativeAppRuntime>
+        {/* Real-visitor load times, reported once Speed Insights is on in Vercel. */}
+        <SpeedInsights />
       </body>
     </html>
   );
