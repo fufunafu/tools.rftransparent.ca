@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { hydrateReply } from "./instantly";
+import { hydrateReply, getLeadProfile } from "./instantly";
 import { normalizeInstantlyEvent, type OutreachConfig } from "./domain";
 
 const config: OutreachConfig = { workspaceId: "11111111-1111-4111-8111-111111111111", campaignIds: { installer_network: "22222222-2222-4222-8222-222222222222", materials_sales: "33333333-3333-4333-8333-333333333333" }, webhookSecret: "x".repeat(40) };
@@ -46,4 +46,18 @@ describe("reply hydration", () => {
     await hydrateReply({ ...event, bodyComplete: true }, "test-key", fetcher);
     expect(fetcher).not.toHaveBeenCalled();
   });
+});
+
+
+describe('lead contact profile',()=>{
+ const profile={email:event.email,organization:event.workspaceId,campaign:event.campaignId,company_name:'Example Builder',first_name:'Alex',last_name:'Client',phone:'+1 555 010 0100'};
+ it('loads contact details from the exact workspace, campaign and email',async()=>{
+  const fetcher=vi.fn().mockResolvedValue(Response.json({items:[profile]}));
+  expect(await getLeadProfile(event,'test-key',fetcher)).toEqual({company:'Example Builder',name:'Alex Client',phone:'+1 555 010 0100'});
+  expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({campaign:event.campaignId,contacts:[event.email],limit:2});
+ });
+ it.each([{email:'different@example.com'},{organization:'other'},{campaign:config.campaignIds.materials_sales}])('rejects a mismatched source record %j',async(override)=>{
+  await expect(getLeadProfile(event,'test-key',vi.fn().mockResolvedValue(Response.json({items:[{...profile,...override}]})))).rejects.toThrow('instantly_lead_mismatch');
+ });
+ it('does not guess between duplicate matches',async()=>{await expect(getLeadProfile(event,'test-key',vi.fn().mockResolvedValue(Response.json({items:[profile,profile]})))).rejects.toThrow('instantly_lead_mismatch');});
 });
