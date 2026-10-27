@@ -404,7 +404,9 @@ export default function LeadAnalysisDashboard({
   initialNow,
   initialBounds,
   store,
+  embedded = false,
 }: {
+  embedded?: boolean;
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
@@ -558,7 +560,7 @@ export default function LeadAnalysisDashboard({
 
   return (
     <div className="mx-auto max-w-[1900px] space-y-5">
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      {!embedded && <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-500">Lead intelligence</p>
           <h1 className="mt-1 text-2xl font-bold text-sand-900">Lead analysis</h1>
@@ -576,7 +578,7 @@ export default function LeadAnalysisDashboard({
             Back to leads
           </Link>
         </div>
-      </header>
+      </header>}
 
       <section className="rounded-xl border border-sand-200 bg-white p-3 shadow-sm shadow-slate-200/30 sm:p-4">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">

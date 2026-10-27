@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
 import type {
@@ -39,6 +40,10 @@ import {
   leadsPath,
   type LeadStoreId,
 } from "@/lib/customer-service/lead-store";
+
+const LeadAnalysisDashboard = dynamic(() => import("./LeadAnalysisDashboard"), {
+  loading: () => <p className="p-4 text-sm text-sand-500">Loading analytics...</p>,
+});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -1122,6 +1127,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
 }) {
   const setStore = useStoreNavigation();
   const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d" });
+  const [showAnalytics, setShowAnalytics] = useState(false);
   const [restored, setRestored] = useState(false);
   const [now, setNow] = useState(initialNow);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
@@ -1166,6 +1172,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const scoped = sourceLeads.filter((lead) => leadMatchesOwner(lead, filters.owner, currentUserEmail));
   const spamCount = scoped.filter((lead) => isLeadSpamReason(lead.not_applicable_reason)).length;
   const visible = scoped.filter((lead) => {
+    if (filters.status !== "spam" && isLeadSpamReason(lead.not_applicable_reason)) return false;
     if (filters.status === "overdue" ? !isFollowUpDue(lead, now) : filters.status === "replies" ? !isOpenLead(lead) || !hasUnansweredReply(lead) : !tab.match(lead)) return false;
     const q = filters.search.trim().toLowerCase();
     if (!q) return true;
@@ -1200,6 +1207,13 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[{ label: "Open leads", value: open.length, status: "open" }, { label: "Follow-ups due", value: open.filter((lead) => isFollowUpDue(lead, now)).length, status: "overdue" }, { label: "Need a call", value: open.filter((lead) => lead.call_status === "not_called" && isCallablePhone(lead.phone)).length, status: "uncalled" }, { label: "Unassigned", value: open.filter((lead) => !lead.assigned_to?.trim()).length, status: "open", owner: "unassigned" }].map((card) => <button key={card.label} onClick={() => setQuickView(card.status, card.owner)} className="rounded-lg border border-sand-200 bg-white p-3 text-left hover:border-indigo-300"><span className="text-xs text-sand-500">{card.label}</span><span className="mt-1 block text-2xl font-semibold tabular-nums text-sand-900">{card.value}</span></button>)}
     </div>
+    <section className="rounded-lg border border-sand-200 bg-white">
+      <button type="button" aria-expanded={showAnalytics} aria-controls="lead-analytics" onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+        <span><span className="block text-sm font-semibold text-sand-900">Analytics</span><span className="text-xs text-sand-500">Lead volume, source performance, conversion, and response times</span></span>
+        <span className="shrink-0 text-xs font-medium text-blue-700">{showAnalytics ? "Hide analytics" : "Show analytics"}</span>
+      </button>
+      {showAnalytics && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
+    </section>
     <details className="rounded-lg border border-sand-200 bg-white px-3 py-2 text-xs">
       <summary className="cursor-pointer text-sand-600">Sync status {healthError ? "· unavailable" : health?.sources?.some((source) => source.needsAttention) ? "· needs attention" : "· automatic updates"}</summary>
       {healthError && <p className="mt-2 text-amber-700">Sync history is unavailable. Lead records remain available.</p>}

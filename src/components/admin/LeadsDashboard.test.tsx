@@ -150,3 +150,26 @@ it('explains excluded spam and keeps phone numbers readable and callable', async
   expect(container.textContent).toContain('1 spam excluded');
   expect(container.querySelector('a[href="tel:+14165550123"]')).not.toBeNull();
 });
+
+it('keeps open summary and queue consistent when a legacy spam record has an open stage', async () => {
+  const leads = makeLeads(2);
+  leads[1].not_applicable_reason = 'Spam: marketing solicitation';
+  await render(leads);
+  expect(leadRows()).toHaveLength(1);
+  expect(container.textContent).toContain('Open leads1');
+  expect(container.textContent).toContain('1 lead matching filters');
+  const status = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by status"]')!;
+  await act(async () => { status.value = 'spam'; status.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(leadRows()).toHaveLength(1);
+  expect(leadRows()[0].textContent).toContain('Customer 1');
+});
+
+it('keeps analytics accessible on the queue page without expanding it by default', async () => {
+  await render(makeLeads(2));
+  const analytics = [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Show analytics'))!;
+  expect(analytics.getAttribute('aria-expanded')).toBe('false');
+  await act(async () => analytics.click());
+  expect(analytics.getAttribute('aria-expanded')).toBe('true');
+  expect(container.querySelector('#lead-analytics')).not.toBeNull();
+  expect(leadRows()).toHaveLength(2);
+});
