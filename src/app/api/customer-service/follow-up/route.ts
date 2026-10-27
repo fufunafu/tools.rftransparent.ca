@@ -18,6 +18,7 @@ import {
   getFollowupByStaff,
   type FollowupStaffRow,
 } from "@/lib/customer-service/followup-queries";
+import { hasFixedFollowupSchedule, RF_FOLLOWUP_LIMIT } from "@/lib/followup-policy";
 import { shouldRematchAfterLiveSync, syncLeadQuotesFromFollowups } from "@/lib/lead-quote-sync";
 
 export const dynamic = "force-dynamic";
@@ -415,8 +416,12 @@ export async function GET(req: NextRequest) {
             .select("created_by_staff, last_invoice_sender, lead_status, quote_amount")
             .eq("store_id", storeId)
             .not("shopify_status", "in", "(OPEN,DELETED)")
-            .gte("shopify_created_at", start)
-            .lt("shopify_created_at", today)
+            // Window by when the quote was last sent (fall back to creation),
+            // matching the RPC's coalesce(last_invoice_sent_at, shopify_created_at).
+            .or(
+              `and(last_invoice_sent_at.gte.${start},last_invoice_sent_at.lt.${today}),` +
+              `and(last_invoice_sent_at.is.null,shopify_created_at.gte.${start},shopify_created_at.lt.${today})`,
+            )
             .range(from, from + PAGE - 1);
           if (error) throw new Error(error.message);
           if (!data || data.length === 0) break;
@@ -508,6 +513,7 @@ export async function GET(req: NextRequest) {
       const PAGE = 1000;
       const rows: {
         shopify_created_at: string | null;
+        last_invoice_sent_at: string | null;
         closed_at: string | null;
         lead_status: string;
         quote_amount: number;
@@ -516,7 +522,7 @@ export async function GET(req: NextRequest) {
       for (let from = 0; ; from += PAGE) {
         let q = supabase
           .from("followup_leads")
-          .select("shopify_created_at, closed_at, lead_status, quote_amount")
+          .select("shopify_created_at, last_invoice_sent_at, closed_at, lead_status, quote_amount")
           .eq("store_id", storeId)
           .not("shopify_status", "in", "(OPEN,DELETED)");
         if (cutoff) q = q.gte("shopify_created_at", cutoff);
@@ -552,7 +558,9 @@ export async function GET(req: NextRequest) {
       // Monthly bucketing (same shape as the `analytics` view).
       const monthMap = new Map<string, { total: number; won: number; lost: number; quoted_value: number; won_value: number }>();
       for (const r of rows) {
-        const dateStr = r.shopify_created_at || r.closed_at;
+        // Bucket by last-sent date (fall back to creation/close) so the trend
+        // aligns with the last-sender windowing in Quotes-by-Staff.
+        const dateStr = r.last_invoice_sent_at || r.shopify_created_at || r.closed_at;
         if (!dateStr) continue;
         const month = dateStr.slice(0, 7);
         const entry = monthMap.get(month) ?? { total: 0, won: 0, lost: 0, quoted_value: 0, won_value: 0 };
@@ -933,6 +941,37 @@ export async function POST(req: NextRequest) {
       const now = new Date().toISOString();
       const cat = FOLLOWUP_CATEGORIES[outcome];
 
+      const { data: currentLead, error: readError } = await supabase
+        .from("followup_leads")
+        .select("followup_count, store_id")
+        .eq("id", lead_id)
+        .eq("store_id", storeId)
+        .single();
+      if (readError || !currentLead) {
+        return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      }
+      if (hasFixedFollowupSchedule(currentLead.store_id)
+        && currentLead.followup_count >= RF_FOLLOWUP_LIMIT && !cat.terminal) {
+        return NextResponse.json({ error: "Both follow-ups are complete. No further follow-ups are scheduled." }, { status: 409 });
+      }
+      if (hasFixedFollowupSchedule(currentLead.store_id)) {
+        const { data: updatedLead, error } = await supabase.rpc("log_rf_followup", {
+          p_lead_id: lead_id,
+          p_expected_count: currentLead.followup_count,
+          p_outcome: outcome,
+          p_notes: notes || null,
+          p_logged_by: loggedBy,
+          p_close_reason: close_reason || null,
+        });
+        if (error?.code === "40001" || error?.code === "P0002") {
+          return NextResponse.json({ error: error.message }, { status: error.code === "P0002" ? 404 : 409 });
+        }
+        if (error) throw new Error(error.message);
+        revalidateTag(`cs:followup:${storeId}`, "max");
+        return NextResponse.json({ status: "success", lead: updatedLead });
+      }
+      const completedAttempts = currentLead.followup_count + 1;
+
       // Insert log entry
       const { error: logError } = await supabase.from("followup_logs").insert({
         lead_id,
@@ -944,21 +983,16 @@ export async function POST(req: NextRequest) {
 
       // Update lead — use store-specific follow-up days
       const storeDays = await getFollowupDaysForStore(storeId);
-      const nextFollowup = computeNextFollowup(outcome, storeDays, custom_date);
+      const nextFollowup = computeNextFollowup(outcome, storeDays, custom_date, {
+        storeId: currentLead.store_id, completedAttempts, anchor: now,
+      });
       const updateData: Record<string, unknown> = {
         lead_status: outcome,
         next_followup_at: nextFollowup,
         updated_at: now,
       };
 
-      // Increment followup_count (need to read current first)
-      const { data: currentLead } = await supabase
-        .from("followup_leads")
-        .select("followup_count")
-        .eq("id", lead_id)
-        .single();
-
-      updateData.followup_count = (currentLead?.followup_count ?? 0) + 1;
+      updateData.followup_count = completedAttempts;
 
       if (cat.terminal) {
         updateData.closed_at = now;
@@ -995,7 +1029,7 @@ export async function POST(req: NextRequest) {
       const supabase = getSupabase();
       const now = new Date().toISOString();
       const storeDays = await getFollowupDaysForStore(storeId);
-      const nextFollowup = computeNextFollowup("new", storeDays);
+      const nextFollowup = computeNextFollowup("new", storeDays, undefined, { storeId, completedAttempts: 0, anchor: now });
 
       const { data: updatedLead, error: updateError } = await supabase
         .from("followup_leads")
@@ -1008,6 +1042,7 @@ export async function POST(req: NextRequest) {
           updated_at: now,
         })
         .eq("id", lead_id)
+        .eq("store_id", storeId)
         .select()
         .single();
       if (updateError) throw new Error(updateError.message);
@@ -1017,7 +1052,8 @@ export async function POST(req: NextRequest) {
       const { error: stampErr } = await supabase
         .from("followup_leads")
         .update({ requoted_at: now })
-        .eq("id", lead_id);
+        .eq("id", lead_id)
+        .eq("store_id", storeId);
       if (stampErr) console.warn("[Follow-up requote] requoted_at not stamped:", stampErr.message);
 
       // Record it in the lead's history.
@@ -1192,6 +1228,15 @@ export async function PATCH(req: NextRequest) {
     const now = new Date().toISOString();
     const updateData: Record<string, unknown> = { updated_at: now };
 
+    if (next_followup_at !== undefined) {
+      const { data: lead, error: readError } = await supabase.from("followup_leads")
+        .select("store_id").eq("id", id).single();
+      if (readError || !lead) return NextResponse.json({ error: "Lead not found" }, { status: 404 });
+      if (hasFixedFollowupSchedule(lead.store_id)) {
+        return NextResponse.json({ error: "RF Transparent follow-up dates follow the fixed two-follow-up schedule." }, { status: 400 });
+      }
+    }
+
     if (notes !== undefined) updateData.notes = notes;
     if (next_followup_at !== undefined) updateData.next_followup_at = next_followup_at;
 
@@ -1238,6 +1283,10 @@ export async function PUT(req: NextRequest) {
 
     if (!store_id || !config) {
       return NextResponse.json({ error: "store_id and config required" }, { status: 400 });
+    }
+
+    if (hasFixedFollowupSchedule(store_id)) {
+      return NextResponse.json({ error: "RF Transparent uses two follow-ups: one week after the quote, then three weeks after the first follow-up." }, { status: 400 });
     }
 
     const entries = Object.entries(config);

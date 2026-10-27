@@ -17,6 +17,7 @@ const db: {
   upserts: { table: string; rows: Row[] }[];
   updates: { table: string; values: Row; id: unknown }[];
   logInserts: Row[];
+  beforeUpdate?: () => void;
 } = { configRows: [], leadRows: [], upserts: [], updates: [], logInserts: [] };
 
 interface Filter {
@@ -40,13 +41,16 @@ function makeChain(table: string) {
         if (f.method === "in") rows = rows.filter((r) => (f.val as unknown[]).includes(r[f.col]));
       }
       if (range) rows = rows.slice(range[0], range[1] + 1);
-      return { data: rows, error: null };
+      return { data: rows.map((row) => ({ ...row })), error: null };
     }
     if (op === "upsert") {
       db.upserts.push({ table, rows: values as Row[] });
       return { data: null, error: null };
     }
     if (op === "update") {
+      db.beforeUpdate?.();
+      const matches = db.leadRows.some((row) => filters.every((f) => f.method !== "eq" || row[f.col] === f.val));
+      if (!matches) return { data: null, error: null };
       const idFilter = filters.find((f) => f.method === "eq" && f.col === "id");
       db.updates.push({ table, values: values as Row, id: idFilter?.val });
       return { data: null, error: null };
@@ -138,6 +142,7 @@ function makeDraft(over: {
     id: over.id ?? `gid://shopify/DraftOrder/${draftSeq}`,
     name: `#D${draftSeq}`,
     createdAt: "2026-07-01T12:00:00Z",
+    invoiceSentAt: null as string | null,
     status: over.status ?? "INVOICE_SENT",
     subtotalPriceSet: { shopMoney: { amount: over.amount ?? "100.00" } },
     tags: [] as string[],
@@ -173,7 +178,7 @@ function setShopifyDrafts(invoiceSent: Draft[], completed: Draft[]) {
 function existingLead(over: Partial<Row> & { shopify_draft_id: string }): Row {
   return {
     id: `lead-${over.shopify_draft_id}`,
-    store_id: "store1",
+    store_id: "store2",
     lead_status: "new",
     shopify_status: "INVOICE_SENT",
     ...over,
@@ -190,6 +195,7 @@ beforeEach(() => {
   db.upserts = [];
   db.updates = [];
   db.logInserts = [];
+  db.beforeUpdate = undefined;
   mockShopifyGraphQL.mockReset();
 });
 
@@ -279,31 +285,31 @@ describe("computeNextFollowup", () => {
 
 describe("getFollowupDaysForStore", () => {
   it("returns the defaults when the store has no overrides", async () => {
-    const days = await getFollowupDaysForStore("store1");
+    const days = await getFollowupDaysForStore("store2");
     expect(days).toEqual(DEFAULT_FOLLOWUP_DAYS);
     expect(days).not.toBe(DEFAULT_FOLLOWUP_DAYS); // fresh copy, not the shared object
   });
 
   it("applies store-specific overrides, including null", async () => {
     db.configRows = [
-      { store_id: "store1", category: "new", followup_days: 5 },
-      { store_id: "store1", category: "no_answer", followup_days: null },
+      { store_id: "store2", category: "new", followup_days: 5 },
+      { store_id: "store2", category: "no_answer", followup_days: null },
     ];
-    const days = await getFollowupDaysForStore("store1");
+    const days = await getFollowupDaysForStore("store2");
     expect(days["new"]).toBe(5);
     expect(days["no_answer"]).toBeNull();
     expect(days["hot_lead"]).toBe(1); // untouched default
   });
 
   it("ignores rows for unknown categories", async () => {
-    db.configRows = [{ store_id: "store1", category: "bogus", followup_days: 9 }];
-    const days = await getFollowupDaysForStore("store1");
+    db.configRows = [{ store_id: "store2", category: "bogus", followup_days: 9 }];
+    const days = await getFollowupDaysForStore("store2");
     expect("bogus" in days).toBe(false);
   });
 
   it("only reads rows for the requested store", async () => {
-    db.configRows = [{ store_id: "store2", category: "new", followup_days: 9 }];
-    const days = await getFollowupDaysForStore("store1");
+    db.configRows = [{ store_id: "store3", category: "new", followup_days: 9 }];
+    const days = await getFollowupDaysForStore("store2");
     expect(days["new"]).toBe(3);
   });
 });
@@ -315,7 +321,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     const draft = makeDraft({ amount: "1234.56", events: ["Alice Smith created this draft order."] });
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.new_leads).toBe(1);
     expect(result.auto_won).toBe(0);
@@ -324,7 +330,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     const rows = upsertedRows();
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
-      store_id: "store1",
+      store_id: "store2",
       shopify_draft_id: draft.id,
       lead_status: "new",
       shopify_status: "INVOICE_SENT",
@@ -341,10 +347,10 @@ describe("syncDraftOrdersForStore (full sync)", () => {
   });
 
   it("honors the store's follow-up day override for new leads", async () => {
-    db.configRows = [{ store_id: "store1", category: "new", followup_days: 1 }];
+    db.configRows = [{ store_id: "store2", category: "new", followup_days: 1 }];
     setShopifyDrafts([makeDraft()], []);
 
-    await syncDraftOrdersForStore("store1");
+    await syncDraftOrdersForStore("store2");
 
     const dueIn = new Date(upsertedRows()[0].next_followup_at as string).getTime() - Date.now();
     expect(dueIn).toBeGreaterThan(0.9 * 86_400_000);
@@ -357,7 +363,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     });
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.new_leads).toBe(0);
     expect(result.auto_won).toBe(1);
@@ -376,7 +382,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1", lead_status: "considering" })];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.auto_won).toBe(1);
     expect(result.stale_detected).toBe(0);
@@ -403,7 +409,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1", lead_status: "lost" })];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.auto_won).toBe(0);
     expect(result.updated_leads).toBe(1);
@@ -417,7 +423,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1" })];
     setShopifyDrafts([], [draft]);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.auto_won).toBe(1);
     expect(result.stale_detected).toBe(0); // completed this run — must NOT be marked stale
@@ -439,7 +445,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     const draft = makeDraft({ status: "COMPLETED" });
     setShopifyDrafts([], [draft]);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.auto_won).toBe(1);
     const rows = upsertedRows();
@@ -459,7 +465,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     ];
     setShopifyDrafts([], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.stale_detected).toBe(1);
     expect(db.updates).toHaveLength(1);
@@ -472,7 +478,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L-system" })];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.new_leads).toBe(0);
     expect(upsertedRows()).toHaveLength(0);
@@ -494,7 +500,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     });
     setShopifyDrafts([draft], []);
 
-    await syncDraftOrdersForStore("store1");
+    await syncDraftOrdersForStore("store2");
 
     const row = upsertedRows()[0];
     expect(row.created_by_staff).toBe("Jane Doe");
@@ -515,7 +521,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     });
     setShopifyDrafts([invoiced, createdOnly], []);
 
-    await syncDraftOrdersForStore("store1");
+    await syncDraftOrdersForStore("store2");
 
     const rows = upsertedRows();
     const invoicedRow = rows.find((r) => r.shopify_draft_id === invoiced.id)!;
@@ -533,7 +539,7 @@ describe("syncDraftOrdersForStore (full sync)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1" })];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.updated_leads).toBe(1);
     expect(result.new_leads).toBe(0);
@@ -549,7 +555,7 @@ describe("syncDraftOrdersForStore (incremental)", () => {
     db.leadRows = [existingLead({ shopify_draft_id: "gid://gone/1", id: "L1" })];
     setShopifyDrafts([], []);
 
-    const result = await syncDraftOrdersForStore("store1", { incremental: true });
+    const result = await syncDraftOrdersForStore("store2", { incremental: true });
 
     expect(result.stale_detected).toBe(0);
     expect(db.updates).toHaveLength(0);
@@ -578,6 +584,7 @@ function storedCopyOf(draft: Draft, over: Partial<Row> = {}): Row {
     customer_orders_count: 1,
     last_invoice_sender: null,
     contributors: [],
+    updated_at: "2026-07-01T12:00:00+00:00",
     ...over,
   });
 }
@@ -588,7 +595,7 @@ describe("syncDraftOrdersForStore (incremental, unchanged rows)", () => {
     db.leadRows = [storedCopyOf(draft)];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1", { incremental: true });
+    const result = await syncDraftOrdersForStore("store2", { incremental: true });
 
     expect(db.updates).toHaveLength(0);
     expect(result.updated_leads).toBe(0);
@@ -599,7 +606,7 @@ describe("syncDraftOrdersForStore (incremental, unchanged rows)", () => {
     db.leadRows = [storedCopyOf(draft)];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1", { incremental: true });
+    const result = await syncDraftOrdersForStore("store2", { incremental: true });
 
     expect(result.updated_leads).toBe(1);
     expect(db.updates.find((u) => u.id === "L1")!.values).toMatchObject({ quote_amount: 250 });
@@ -610,7 +617,7 @@ describe("syncDraftOrdersForStore (incremental, unchanged rows)", () => {
     db.leadRows = [storedCopyOf(draft, { lead_status: "won", shopify_status: "COMPLETED" })];
     setShopifyDrafts([], [draft]);
 
-    await syncDraftOrdersForStore("store1", { incremental: true });
+    await syncDraftOrdersForStore("store2", { incremental: true });
 
     expect(db.updates).toHaveLength(0);
   });
@@ -620,9 +627,74 @@ describe("syncDraftOrdersForStore (incremental, unchanged rows)", () => {
     db.leadRows = [storedCopyOf(draft)];
     setShopifyDrafts([draft], []);
 
-    const result = await syncDraftOrdersForStore("store1");
+    const result = await syncDraftOrdersForStore("store2");
 
     expect(result.updated_leads).toBe(1);
+  });
+});
+
+describe("syncDraftOrdersForStore (incremental, RF schedule)", () => {
+  function rfStored(draft: Draft, nextFollowupAt: string) {
+    return storedCopyOf(draft, {
+      store_id: "store1",
+      followup_count: 0,
+      closed_at: null,
+      last_invoice_sent_at: "2026-10-20T14:00:00Z",
+      next_followup_at: nextFollowupAt,
+    });
+  }
+
+  it("still saves a moved follow-up date when nothing else changed", async () => {
+    const draft = makeDraft();
+    draft.invoiceSentAt = "2026-10-20T14:00:00Z";
+    db.leadRows = [rfStored(draft, "2026-10-23T14:00:00Z")];
+    setShopifyDrafts([draft], []);
+
+    await syncDraftOrdersForStore("store1", { incremental: true });
+
+    expect(db.updates.find((u) => u.id === "L1")?.values.next_followup_at)
+      .toBe("2026-10-27T14:00:00.000Z");
+  });
+
+  it("skips the write when the follow-up date is already right", async () => {
+    const draft = makeDraft();
+    draft.invoiceSentAt = "2026-10-20T14:00:00Z";
+    db.leadRows = [rfStored(draft, "2026-10-27T14:00:00+00:00")];
+    setShopifyDrafts([draft], []);
+
+    await syncDraftOrdersForStore("store1", { incremental: true });
+
+    expect(db.updates).toHaveLength(0);
+  });
+});
+
+describe("syncDraftOrdersForStore (last sent date)", () => {
+  it("records when the quote was last sent, for every store", async () => {
+    const draft = makeDraft({ events: [
+      "Alice created this draft order.",
+      "Alice sent an invoice to jane@example.com.",
+      "Bob sent an invoice to jane@example.com.",
+    ] });
+    draft.events.edges[1].node.createdAt = "2026-07-02T12:00:00Z";
+    draft.events.edges[2].node.createdAt = "2026-07-09T12:00:00Z";
+    setShopifyDrafts([draft], []);
+
+    await syncDraftOrdersForStore("store2");
+
+    expect(upsertedRows()[0]).toMatchObject({
+      last_invoice_sender: "Bob",
+      last_invoice_sent_at: "2026-07-09T12:00:00Z",
+    });
+  });
+
+  it("leaves the stored date alone when Shopify shows no invoice", async () => {
+    const draft = makeDraft({ status: "COMPLETED" });
+    db.leadRows = [existingLead({ shopify_draft_id: draft.id, id: "L1", lead_status: "won" })];
+    setShopifyDrafts([], [draft]);
+
+    await syncDraftOrdersForStore("store2");
+
+    expect(db.updates.find((u) => u.id === "L1")?.values).not.toHaveProperty("last_invoice_sent_at");
   });
 });
 
@@ -645,4 +717,85 @@ describe("followupRowUnchanged", () => {
   it("treats a column the row never loaded as changed", () => {
     expect(followupRowUnchanged({}, { created_by_staff: "Carol Jones" })).toBe(false);
   });
+});
+
+describe("RF Transparent follow-up sequence", () => {
+  it("schedules the first follow-up from the sent date, even when sync is late", async () => {
+    const draft = makeDraft({ events: ["Alice sent an invoice to jane@example.com."] });
+    draft.events.edges[0].node.createdAt = "2026-07-10T12:00:00Z";
+    setShopifyDrafts([draft], []);
+    db.configRows = [{ store_id: "store1", category: "new", followup_days: 1 }];
+    await syncDraftOrdersForStore("store1");
+    expect(upsertedRows()[0].next_followup_at).toBe("2026-07-17T12:00:00.000Z");
+  });
+
+  it.each(["hot_lead", "considering", "price_shopping", "no_answer", "future_project"])(
+    "schedules the second follow-up three calendar weeks after the first for %s", (status) => {
+      expect(computeNextFollowup(status, DEFAULT_FOLLOWUP_DAYS, "2027-01-01", {
+        storeId: "store1", completedAttempts: 1, anchor: "2026-10-23T14:00:00Z",
+      })).toBe("2026-11-13T14:00:00.000Z");
+    },
+  );
+
+  it.each([2, 3, 5])("stops after %i completed attempts, including custom dates", (completedAttempts) => {
+    expect(computeNextFollowup("future_project", DEFAULT_FOLLOWUP_DAYS, "2027-01-01", {
+      storeId: "store1", completedAttempts,
+    })).toBeNull();
+  });
+
+  it("restarts a re-quote at one calendar week", () => {
+    expect(computeNextFollowup("new", DEFAULT_FOLLOWUP_DAYS, undefined, {
+      storeId: "store1", completedAttempts: 0, anchor: "2026-10-23T14:00:00Z",
+    })).toBe("2026-10-30T14:00:00.000Z");
+  });
+
+  it.each(["won", "lost", "duplicate"])("does not schedule closed outcome %s", (status) => {
+    expect(computeNextFollowup(status, DEFAULT_FOLLOWUP_DAYS, undefined, {
+      storeId: "store1", completedAttempts: 1,
+    })).toBeNull();
+  });
+});
+
+
+it("uses Shopify's sent timestamp when the invoice event is missing from the timeline", async () => {
+  const draft = makeDraft();
+  draft.invoiceSentAt = "2026-10-20T14:00:00Z";
+  setShopifyDrafts([draft], []);
+  await syncDraftOrdersForStore("store1");
+  expect(upsertedRows()[0]).toMatchObject({
+    next_followup_at: "2026-10-27T14:00:00.000Z",
+    last_invoice_sent_at: "2026-10-20T14:00:00Z",
+  });
+});
+
+it("repairs the first date on sync without restarting completed sequences", async () => {
+  const drafts = [makeDraft(), makeDraft(), makeDraft()];
+  for (const draft of drafts) draft.invoiceSentAt = "2026-10-20T14:00:00Z";
+  db.leadRows = drafts.map((draft, i) => existingLead({
+    id: `rf-${i}`, shopify_draft_id: draft.id, store_id: "store1", followup_count: i,
+  }));
+  setShopifyDrafts(drafts, []);
+  await syncDraftOrdersForStore("store1");
+  expect(db.updates.find((u) => u.id === "rf-0")?.values.next_followup_at).toBe("2026-10-27T14:00:00.000Z");
+  expect(db.updates.find((u) => u.id === "rf-1")?.values).not.toHaveProperty("next_followup_at");
+  expect(db.updates.find((u) => u.id === "rf-2")?.values.next_followup_at).toBeNull();
+});
+
+
+it("does not overwrite a follow-up saved after the sync read its snapshot", async () => {
+  const draft = makeDraft();
+  draft.invoiceSentAt = "2026-10-20T14:00:00Z";
+  db.leadRows = [existingLead({
+    shopify_draft_id: draft.id, store_id: "store1", followup_count: 0,
+    updated_at: "2026-10-20T14:00:00Z",
+  })];
+  db.beforeUpdate = () => {
+    db.leadRows[0].followup_count = 2;
+    db.leadRows[0].next_followup_at = null;
+    db.leadRows[0].updated_at = "2026-10-21T14:00:00Z";
+  };
+  setShopifyDrafts([draft], []);
+  await syncDraftOrdersForStore("store1");
+  expect(db.updates).toHaveLength(0);
+  expect(db.leadRows[0].next_followup_at).toBeNull();
 });

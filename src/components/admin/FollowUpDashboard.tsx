@@ -12,6 +12,7 @@ import CalendarViewImpl from "@/components/admin/followup/CalendarView";
 import StaffBreakdownImpl from "@/components/admin/followup/StaffBreakdown";
 import RecentActivityPanelImpl, { type ActivityDrillKind } from "@/components/admin/followup/RecentActivityPanel";
 import { FOLLOWUP_CATEGORIES, DEFAULT_FOLLOWUP_DAYS, type LeadStatus, type FollowUpLead, type FollowUpLog } from "@/lib/followup";
+import { hasFixedFollowupSchedule } from "@/lib/followup-policy";
 import { formatCADWhole } from "@/lib/format";
 
 // ── Chart panels: loaded via next/dynamic so recharts stays out of the
@@ -356,6 +357,15 @@ function TimingEditor({ store }: { store: string }) {
       setSaving(false);
     }
   };
+
+  if (hasFixedFollowupSchedule(store)) {
+    return (
+      <div className="bg-white rounded-xl border border-sand-200/60 px-5 py-4">
+        <p className="text-sm font-medium text-sand-700">Follow-up schedule</p>
+        <p className="mt-1 text-sm text-sand-500">First follow-up: 1 week after the quote is sent. Second follow-up: 3 weeks after the first follow-up. No further follow-ups.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="bg-white rounded-xl border border-sand-200/60 overflow-hidden">
@@ -907,6 +917,13 @@ export default function FollowUpDashboard({
                 </button>
               </div>
 
+              {hasFixedFollowupSchedule(store) ? (
+                <ol className="list-decimal list-inside space-y-2">
+                  <li><strong>First follow-up:</strong> 1 week after the quote is sent.</li>
+                  <li><strong>Second follow-up:</strong> 3 weeks after the first follow-up.</li>
+                  <li><strong>Done:</strong> No further follow-ups are scheduled.</li>
+                </ol>
+              ) : (<>
               <ol className="list-decimal list-inside space-y-2">
                 <li><strong>Sync</strong> &mdash; Click &ldquo;Sync from Shopify&rdquo; to pull in all open quotes (draft orders).</li>
                 <li><strong>First follow-up</strong> &mdash; New quotes are automatically scheduled for a follow-up call in 3 days.</li>
@@ -925,8 +942,10 @@ export default function FollowUpDashboard({
                 </div>
               </div>
 
+              </>)}
+
               <div className="text-xs text-sand-500 border-t border-sand-100 pt-2 space-y-1">
-                <p>After <strong>5 attempts</strong> without conversion, the system suggests closing the lead.</p>
+                {!hasFixedFollowupSchedule(store) && <p>After <strong>5 attempts</strong> without conversion, the system suggests closing the lead.</p>}
                 <p>When a quote is marked as <strong>Lost</strong>, you must select a reason (for trending).</p>
                 <p>Quotes that convert in Shopify are automatically marked as <strong>Won</strong>.</p>
               </div>
