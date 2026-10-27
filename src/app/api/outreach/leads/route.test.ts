@@ -3,6 +3,7 @@ vi.mock('server-only',()=>({}));
 const mock=vi.hoisted(()=>({user:vi.fn(),rpc:vi.fn(),from:vi.fn()}));
 vi.mock('@/lib/admin-auth',()=>({getAuthenticatedUser:mock.user}));
 vi.mock('@/lib/supabase',()=>({getSupabase:()=>({rpc:mock.rpc,from:mock.from})}));
+vi.mock('@/lib/outreach/automatic-activity',()=>({getAutomaticActivity:vi.fn(async()=>({leads:[],history:new Map()})),applyAutomaticActivity:(lead:unknown)=>lead,automaticSummary:()=>({needsCall:3,quoted:3})}));
 import {GET,POST} from './route';
 const payload={id:'11111111-1111-4111-8111-111111111111',version:1,stage:'contacted',due:'2026-10-27T12:00:00Z',action:'Request project plans',note:'Spoke to prospect',claim:true};
 function request(body=payload,origin='https://tools.example'){return new Request('https://tools.example/api/outreach/leads',{method:'POST',headers:{'Content-Type':'application/json',origin},body:JSON.stringify(body)});}
