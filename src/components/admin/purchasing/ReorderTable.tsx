@@ -1,324 +1,145 @@
 "use client";
 
-import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
-
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  SOP_LABEL_DISPLAY,
-  type Category,
-  type InventoryForecast,
-  type OrderType,
-  type ProductWithMetrics,
-  type PurchasingSettings,
-  type SopLabel,
-} from "@/lib/purchasing/types";
 import dynamic from "next/dynamic";
+import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
 import { formatCADWhole } from "@/lib/format";
+import { SOP_LABEL_DISPLAY, ORDER_TYPE_DISPLAY, type Category, type InventoryForecast, type OrderType, type ProductWithMetrics, type PurchasingSettings } from "@/lib/purchasing/types";
+import PurchasingPageHeader from "./PurchasingPageHeader";
+import ProductFilters from "./ProductFilters";
 
-// Loaded on demand so recharts stays out of the route's initial bundle.
 const ForecastDrawer = dynamic(() => import("./ForecastDrawer"), { ssr: false });
+interface Props { initialProducts: ProductWithMetrics[]; initialForecasts: Record<string, InventoryForecast>; settings: PurchasingSettings }
+const fmt = (n: number | null, digits = 0) => n === null || !Number.isFinite(n) ? "-" : n.toLocaleString("en-CA", { maximumFractionDigits: digits });
+const recommendation = (p: ProductWithMetrics, type: OrderType) => type === "china" ? p.suggested_qty : p.transfer_requirement;
 
-const ACTIONABLE_STATUSES: SopLabel[] = [
-  "reorder_plus_montreal",
-  "montreal_transfer",
-  "reorder",
-];
-
-interface Props {
-  initialProducts: ProductWithMetrics[];
-  initialForecasts: Record<string, InventoryForecast>;
-  settings: PurchasingSettings;
-}
-
-const SOP_BADGE: Record<SopLabel, string> = {
-  reorder_plus_montreal: "bg-red-50 text-red-700 border-red-200",
-  montreal_transfer: "bg-orange-50 text-orange-700 border-orange-200",
-  reorder: "bg-amber-50 text-amber-700 border-amber-200",
-  no_sales_data: "bg-sand-100 text-sand-600 border-sand-200",
-  ok: "bg-green-50 text-green-700 border-green-200",
-};
-
-function fmt(n: number | null, digits = 1): string {
-  if (n === null || !Number.isFinite(n)) return "-";
-  return n.toLocaleString("en-CA", { maximumFractionDigits: digits });
-}
 export default function ReorderTable({ initialProducts, initialForecasts, settings }: Props) {
   const router = useRouter();
   const [forecastId, setForecastId] = useState<string | null>(null);
-  const [category, setCategory] = useState<Category>("glass");
-  const [showOk, setShowOk] = useState(false);
+  const [category, setCategory] = useState<Category | "all">("all");
   const [search, setSearch] = useState("");
-  // null = show all actionable statuses; otherwise pin to a single one.
-  const [statusFilter, setStatusFilter] = useState<SopLabel | null>(null);
-  const [quantities, setQuantities] = useState<Record<string, string>>({});
-  const [notes, setNotes] = useState("");
-  const [creating, setCreating] = useState<OrderType | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [orderType, setOrderType] = useState<OrderType>("china");
+  const [drafts, setDrafts] = useState<Record<OrderType, Record<string, string>>>({ china: {}, montreal: {} });
+  const [notes, setNotes] = useState<Record<OrderType, string>>({ china: "", montreal: "" });
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const quantities = drafts[orderType];
+  const visible = useMemo(() => initialProducts.filter(p =>
+    (category === "all" || p.category === category) &&
+    (showAll || recommendation(p, orderType) > 0) &&
+    `${p.sku} ${p.name}`.toLowerCase().includes(search.trim().toLowerCase())
+  ), [initialProducts, category, showAll, orderType, search]);
+  const selected = useMemo(() => initialProducts.flatMap(product => {
+    const qty = Number(quantities[product.id]);
+    return Number.isFinite(qty) && qty > 0 ? [{ product, qty, lineValue: qty * product.unit_cost_landed }] : [];
+  }), [initialProducts, quantities]);
+  const totalQty = selected.reduce((sum, row) => sum + row.qty, 0);
+  const totalValue = selected.reduce((sum, row) => sum + row.lineValue, 0);
+  const visibleIds = new Set(visible.map(p => p.id));
+  const hiddenSelected = selected.filter(row => !visibleIds.has(row.product.id)).length;
+  const invalidQuantity = Object.values(quantities).some(value => value.trim() !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0));
+  const recommendationCount = (type: OrderType) => initialProducts.filter(p => recommendation(p, type) > 0).length;
 
-  const statusCounts = useMemo(() => {
-    const counts: Record<SopLabel, number> = {
-      reorder_plus_montreal: 0,
-      montreal_transfer: 0,
-      reorder: 0,
-      ok: 0,
-      no_sales_data: 0,
-    };
-    for (const p of initialProducts) counts[p.sop_label]++;
-    return counts;
-  }, [initialProducts]);
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return initialProducts.filter((p) => {
-      if (p.category !== category) return false;
-      if (!showOk && p.sop_label === "ok") return false;
-      if (statusFilter && p.sop_label !== statusFilter) return false;
-      if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
-      return true;
+  function setQuantity(id: string, value: string) {
+    setDrafts(current => ({ ...current, [orderType]: { ...current[orderType], [id]: value } }));
+  }
+  function fillSuggested() {
+    setDrafts(current => {
+      const next = { ...current[orderType] };
+      for (const p of visible) if (recommendation(p, orderType) > 0) next[p.id] = String(recommendation(p, orderType));
+      return { ...current, [orderType]: next };
     });
-  }, [initialProducts, category, showOk, statusFilter, search]);
-
-  const selected = useMemo(() => {
-    const rows: Array<{ product: ProductWithMetrics; qty: number; lineValue: number }> = [];
-    for (const p of initialProducts) {
-      const raw = quantities[p.id];
-      if (!raw) continue;
-      const n = parseFloat(raw);
-      if (!Number.isFinite(n) || n <= 0) continue;
-      rows.push({ product: p, qty: n, lineValue: n * p.unit_cost_landed });
-    }
-    return rows;
-  }, [initialProducts, quantities]);
-
-  const totalQty = selected.reduce((s, r) => s + r.qty, 0);
-  const totalValue = selected.reduce((s, r) => s + r.lineValue, 0);
-
-  // Two independent actions per SKU:
-  //   applyTransfer  → loads the Montreal bridge qty into Order qty
-  //   applySuggested → loads the crate-rounded China refill into Order qty
-  function applyTransfer(p: ProductWithMetrics) {
-    setQuantities((q) => ({ ...q, [p.id]: String(p.transfer_requirement) }));
   }
-  function applySuggested(p: ProductWithMetrics) {
-    setQuantities((q) => ({ ...q, [p.id]: String(p.suggested_qty) }));
-  }
-  function applyAllSuggested() {
-    const next: Record<string, string> = { ...quantities };
-    for (const p of visible) if (p.suggested_qty > 0) next[p.id] = String(p.suggested_qty);
-    setQuantities(next);
-  }
-  function applyAllTransfer() {
-    const next: Record<string, string> = { ...quantities };
-    for (const p of visible) if (p.transfer_requirement > 0) next[p.id] = String(p.transfer_requirement);
-    setQuantities(next);
-  }
-  function clearAll() { setQuantities({}); }
-
-  async function createDraftPO(order_type: OrderType) {
-    if (selected.length === 0) return;
-    setCreating(order_type); setError(null);
+  async function createDraft() {
+    if (!selected.length || invalidQuantity || creating) return;
+    setCreating(true); setError(null);
     try {
-      const res = await fetch("/api/purchasing/orders", {
+      const response = await fetch("/api/purchasing/orders", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          order_type,
-          notes: notes || null,
-          items: selected.map((r) => ({ product_id: r.product.id, qty_ordered: r.qty })),
-        }),
+        body: JSON.stringify({ order_type: orderType, notes: notes[orderType] || null, items: selected.map(row => ({ product_id: row.product.id, qty_ordered: row.qty })) }),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? "Failed to create order");
-      }
-      const data = await res.json();
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not create the draft order.");
       router.push(`/warehouse/purchasing/orders/${data.order.id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create order");
-      setCreating(null);
+      setError(err instanceof Error ? err.message : "Could not create the draft order.");
+      setCreating(false);
     }
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["glass", "hardware"] as const).map((c) => (
-            <button key={c} onClick={() => setCategory(c)}
-              className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>
-              {c}
-            </button>
-          ))}
-        </div>
-        <label className="inline-flex items-center gap-2 text-sm text-sand-700 px-2">
-          <input type="checkbox" checked={showOk} onChange={(e) => setShowOk(e.target.checked)} />
-          Show products that don&apos;t need reordering
-        </label>
-        <input type="text" placeholder="Search SKU or name" value={search} onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 flex-1 min-w-[200px]" />
-        <button type="button" onClick={applyAllSuggested}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 bg-white hover:bg-sand-50">Apply suggested (China) to all</button>
-        <button type="button" onClick={applyAllTransfer}
-          className="px-3 py-1.5 text-sm rounded-lg border border-orange-300 bg-white text-orange-700 hover:bg-orange-50">Apply transfer (MTL) to all</button>
-        <button type="button" onClick={clearAll}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 bg-white hover:bg-sand-50">Clear</button>
-      </div>
-
-      {/* Status filter pills */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs text-sand-500 uppercase tracking-wider font-medium">Filter:</span>
-        <button type="button" onClick={() => setStatusFilter(null)}
-          className={"px-3 py-1 text-xs rounded-full border " +
-            (statusFilter === null
-              ? "bg-accent text-white border-accent"
-              : "bg-white text-sand-700 border-sand-300 hover:bg-sand-50")}>
-          All actionable
-        </button>
-        {ACTIONABLE_STATUSES.map((s) => {
-          const active = statusFilter === s;
-          const count = statusCounts[s] ?? 0;
-          if (count === 0 && !active) return null;
-          const color = s === "reorder_plus_montreal" ? "red" : s === "montreal_transfer" ? "orange" : "amber";
-          return (
-            <button key={s} type="button"
-              onClick={() => setStatusFilter(active ? null : s)}
-              className={"px-3 py-1 text-xs rounded-full border " +
-                (active
-                  ? `bg-${color}-600 text-white border-${color}-600`
-                  : `bg-${color}-50 text-${color}-700 border-${color}-200 hover:bg-${color}-100`)}>
-              {SOP_LABEL_DISPLAY[s]} ({count})
-            </button>
-          );
-        })}
-      </div>
-
-      {error && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-3 py-2">{error}</div>}
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
-        <table className="w-full text-sm tabular-nums">
-          <thead className="sticky top-0 z-20 bg-sand-50 text-sand-500 text-[11px] uppercase tracking-wider">
-            <tr>
-              <th className="sticky left-0 z-30 min-w-48 bg-sand-50 text-left px-3 py-2 font-medium">Product</th>
-
-              <th className="text-left px-3 py-2 font-medium">Status</th>
-              <th className="text-right px-3 py-2 font-medium">On hand</th>
-              <th className="text-right px-3 py-2 font-medium">Inbound</th>
-              <th className="text-right px-3 py-2 font-medium">Capacity</th>
-              <th className="text-right px-3 py-2 font-medium" title="Annual net units from RF + GRS divided by 12, multiplied by this month’s seasonality. Click to inspect history.">Monthly</th>
-              <th className="text-right px-3 py-2 font-medium" title="Days you can keep selling using only what's on hand (ignores inbound): on_hand / (monthly / 30) - seasonality and growth applied.">Days left</th>
-              <th className="text-right px-3 py-2 font-medium" title="The exact math result - reach the restock target after covering lead-time demand">Perfect</th>
-              <th className="text-right px-3 py-2 font-medium" title="Minimum to transfer from Montreal so we don't stock out before the next China shipment lands. Click to copy into Order qty (then use 'Create draft Montreal transfer'). Independent of the China refill on the right - for a 'Reorder + Montreal transfer' SKU you may want to do BOTH (a Montreal transfer now AND a China order to refill long-term).">Transfer</th>
-              <th className="text-right px-3 py-2 font-medium" title="Crate-rounded China refill - what you'd actually order from the main supplier. Click to copy into Order qty (then use 'Create draft China order').">Suggested</th>
-              <th className="text-right px-3 py-2 font-medium">Order qty</th>
-              <th className="text-right px-3 py-2 font-medium">Line value</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-sand-100">
-            {visible.map((p) => {
-              const raw = quantities[p.id] ?? "";
-              const q = parseFloat(raw);
-              const lineValue = Number.isFinite(q) ? q * p.unit_cost_landed : 0;
-              return (
-                <tr key={p.id}>
-                  <td className="sticky left-0 z-10 min-w-48 bg-white px-3 py-2 font-mono text-xs">
-                    <span className="inline-flex items-center gap-1.5">
-                      {p.sku}
-                      <button type="button" onClick={() => setForecastId(p.id)} title="Projected inventory & how the order point was calculated"
-                        className="text-sand-400 hover:text-accent text-sm">📈</button>
-                    </span>
-                    <span className="mt-1 block max-w-60 font-sans text-xs text-sand-500">{p.name.replaceAll("\u2014", "-")}</span>
-                  </td>
-                  <td className="px-3 py-2">
-                    <span className={"inline-block px-2 py-0.5 rounded-md border text-[11px] " + (SOP_BADGE[p.sop_label] ?? "bg-sand-100 text-sand-600 border-sand-200")}>
-                      {SOP_LABEL_DISPLAY[p.sop_label] ?? p.sop_label}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2 text-right">{fmt(p.current_inventory, 0)}</td>
-                  <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmt(p.inbound, 0) : "-"}</td>
-                  <td className="px-3 py-2 text-right text-sand-500">{fmt(p.storage_capacity, 0)}</td>
-                  <td className="px-3 py-2 text-right text-sand-500"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="text-accent hover:underline">{fmt(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</Link></td>
-                  <td className="px-3 py-2 text-right">{fmt(p.days_of_stock_left, 0)}</td>
-                  <td className="px-3 py-2 text-right text-sand-600 tabular-nums">
-                    {fmt(p.perfect_qty, 0)}
-                    {p.inbound > 0 && (
-                      <div className="text-[10px] text-sand-400 tabular-nums">after {fmt(p.inbound, 0)} in transit</div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right tabular-nums">
-                    {p.transfer_requirement > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => applyTransfer(p)}
-                        className="text-orange-700 font-medium hover:underline"
-                        title="Click to copy into Order qty for a Montreal transfer"
-                      >
-                        {fmt(p.transfer_requirement, 0)}
-                      </button>
-                    ) : (
-                      <span className="text-sand-300">-</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {p.suggested_qty > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => applySuggested(p)}
-                        className="text-accent hover:underline tabular-nums"
-                        title="Click to copy into Order qty for a China order"
-                      >
-                        {fmt(p.suggested_qty, 0)}
-                      </button>
-                    ) : (
-                      <span className="text-sand-300 tabular-nums">-</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-1 text-right">
-                    <input type="number" step="any" min="0" value={raw}
-                      onChange={(e) => setQuantities((qmap) => ({ ...qmap, [p.id]: e.target.value }))}
-                      placeholder="0"
-                      className="w-20 px-1.5 py-1 text-right rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none" />
-                  </td>
-                  <td className="px-3 py-2 text-right text-sand-700">{lineValue > 0 ? formatCADWhole(lineValue) : "-"}</td>
-                </tr>
-              );
-            })}
-            {visible.length === 0 && (
-              <tr><td colSpan={12} className="px-3 py-10 text-center text-sand-500">
-                Nothing needs reordering right now. Toggle &ldquo;Show products that don&apos;t need reordering&rdquo; above to top up anyway.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="bg-white rounded-xl border border-sand-200/60 p-4 flex flex-wrap items-center gap-4">
-        <div className="text-sm">
-          <span className="text-sand-500">Selected:</span> <span className="font-semibold text-sand-900">{selected.length} {selected.length === 1 ? "line" : "lines"}</span>
-          {" · "}<span className="text-sand-500">Qty:</span> <span className="font-semibold tabular-nums">{fmt(totalQty, 0)}</span>
-          {" · "}<span className="text-sand-500">Value:</span> <span className="font-semibold tabular-nums">{formatCADWhole(totalValue)}</span>
-        </div>
-        <input type="text" placeholder="Notes (optional, saved on the PO)" value={notes} onChange={(e) => setNotes(e.target.value)}
-          className="flex-1 min-w-[240px] px-3 py-1.5 text-sm rounded-lg border border-sand-300" />
-        <button type="button" onClick={() => createDraftPO("china")}
-          disabled={selected.length === 0 || creating !== null}
-          title="Create a draft purchase order to the China supplier (~90-day lead)"
-          className="px-4 py-1.5 text-sm font-medium rounded-lg bg-accent text-white hover:bg-accent/90 disabled:bg-sand-300 disabled:cursor-not-allowed">
-          {creating === "china" ? "Creating…" : "Create draft China order"}
-        </button>
-        <button type="button" onClick={() => createDraftPO("montreal")}
-          disabled={selected.length === 0 || creating !== null}
-          title="Create a draft internal transfer from the Montreal warehouse (fast)"
-          className="px-4 py-1.5 text-sm font-medium rounded-lg bg-orange-600 text-white hover:bg-orange-700 disabled:bg-sand-300 disabled:cursor-not-allowed">
-          {creating === "montreal" ? "Creating…" : "Create draft Montreal transfer"}
-        </button>
-      </div>
-      {forecastId && (() => {
-        const p = initialProducts.find((x) => x.id === forecastId);
-        if (!p) return null;
-        return (
-          <ForecastDrawer product={p} forecast={initialForecasts[forecastId] ?? null}
-            settings={settings} onClose={() => setForecastId(null)} />
-        );
-      })()}
+  return <div className="space-y-4">
+    <PurchasingPageHeader title="Plan your next order" description="Choose the source, review suggested quantities, then create a draft for approval and tracking." actions={<Link href="/warehouse/purchasing/orders" className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm font-medium hover:bg-sand-50">View purchase orders</Link>} />
+    <div className="grid grid-cols-2 gap-3" role="group" aria-label="Order source">
+      {(["china", "montreal"] as const).map(type => <button type="button" key={type} disabled={creating} aria-pressed={orderType === type}
+        onClick={() => { setOrderType(type); setError(null); }}
+        className={"rounded-xl border p-4 text-left transition-colors disabled:opacity-50 " + (orderType === type ? "border-accent bg-blue-50/60 ring-1 ring-accent" : "border-sand-200 bg-white hover:border-sand-400")}>
+        <span className="flex flex-wrap items-center justify-between gap-2"><span className="text-sm font-semibold text-sand-900">{ORDER_TYPE_DISPLAY[type]}</span><span className="rounded-full bg-white px-2 py-0.5 text-xs tabular-nums text-sand-600">{recommendationCount(type)} suggested</span></span>
+        <span className="mt-1 hidden text-xs leading-relaxed text-sand-500 sm:block">{type === "china" ? `Replenish from the main supplier. Planning lead time: ${settings.lead_time_days} days.` : "Move stock from Montreal to cover a shortage before replenishment arrives."}</span>
+      </button>)}
     </div>
-  );
+    <div className="space-y-3 rounded-xl border border-sand-200 bg-white p-3 sm:p-4">
+      <ProductFilters category={category} onCategory={setCategory} search={search} onSearch={setSearch} />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-sand-100 pt-3 text-xs">
+        <div className="flex flex-wrap items-center gap-4"><span className="font-medium text-sand-900">{visible.length} products shown</span><label className="inline-flex items-center gap-2 text-sand-600"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> Include products without a suggestion</label></div>
+        <button type="button" onClick={fillSuggested} disabled={creating || !visible.some(p => recommendation(p, orderType) > 0)} className="font-medium text-accent hover:underline disabled:opacity-40">Fill suggested quantities for shown products</button>
+      </div>
+    </div>
+    {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+      <div className="min-w-0 space-y-2">
+        <div className="max-h-[65vh] overflow-auto rounded-xl border border-sand-200 bg-white">
+          <table className="w-full min-w-[320px] text-sm tabular-nums md:min-w-[850px]">
+            <caption className="sr-only">{ORDER_TYPE_DISPLAY[orderType]} recommendations. Edit quantities to add products to your draft.</caption>
+            <thead className="sticky top-0 z-20 bg-sand-50 text-xs text-sand-500"><tr>
+              <th scope="col" className="sticky left-0 z-30 min-w-36 bg-sand-50 md:min-w-48 px-3 py-3 text-left font-medium">Product</th>
+              <th scope="col" className="hidden px-3 py-3 text-right font-medium md:table-cell">On hand</th>
+              <th scope="col" className="hidden px-3 py-3 text-right font-medium md:table-cell">Inbound</th>
+              <th scope="col" className="hidden px-3 py-3 text-right font-medium md:table-cell">Monthly demand</th>
+              <th scope="col" className="hidden px-3 py-3 text-right font-medium md:table-cell">Days of stock</th>
+              <th scope="col" className="px-3 py-3 text-right font-medium">Suggested qty</th>
+              <th scope="col" className="bg-blue-50 px-3 py-3 text-right font-semibold text-accent">Your qty</th>
+              <th scope="col" className="hidden px-3 py-3 text-right font-medium md:table-cell">Value</th>
+            </tr></thead>
+            <tbody className="divide-y divide-sand-100">{visible.map(p => {
+              const raw = quantities[p.id] ?? "";
+              const qty = Number(raw);
+              const suggested = recommendation(p, orderType);
+              const valid = raw === "" || (Number.isFinite(qty) && qty >= 0);
+              return <tr key={p.id} className={qty > 0 ? "bg-blue-50/30" : "hover:bg-sand-50/60"}>
+                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3">
+                  <button type="button" onClick={() => setForecastId(p.id)} aria-label={`View forecast for ${p.sku}`} className="block text-left"><span className="block font-mono text-xs font-semibold text-accent hover:underline">{p.sku}</span><span className="mt-1 block max-w-56 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span></button>
+                  {p.sop_label !== "ok" && <span className={"mt-1.5 inline-block text-[10px] font-medium " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span>}
+                </td>
+                <td className="hidden md:table-cell px-3 py-3 text-right">{fmt(p.current_inventory)}</td>
+                <td className="hidden md:table-cell px-3 py-3 text-right text-sand-500">{p.inbound > 0 ? fmt(p.inbound) : "-"}</td>
+                <td className="hidden md:table-cell px-3 py-3 text-right"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="text-accent hover:underline">{fmt(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</Link></td>
+                <td className="hidden md:table-cell px-3 py-3 text-right">{fmt(p.days_of_stock_left)}</td>
+                <td className="px-3 py-3 text-right"><button type="button" disabled={!suggested || creating} onClick={() => setQuantity(p.id, String(suggested))} aria-label={`Use suggested quantity for ${p.sku}`} className="font-medium text-accent hover:underline disabled:text-sand-400">{fmt(suggested)}</button>{orderType === "china" && suggested > 0 && <span className="mt-1 block text-[10px] text-sand-400">Before rounding: {fmt(p.perfect_qty)}</span>}</td>
+                <td className="bg-blue-50/40 px-3 py-2 text-right"><input type="number" min="0" step="any" value={raw} aria-label={`Order quantity for ${p.sku}`} aria-invalid={!valid} disabled={creating} onChange={e => setQuantity(p.id, e.target.value)} placeholder="0" className="w-20 rounded-lg border border-sand-300 bg-white px-2 py-2 text-right focus:border-accent focus:outline-none focus:ring-1 focus:ring-accent aria-invalid:border-red-500" /></td>
+                <td className="hidden md:table-cell px-3 py-3 text-right text-sand-600">{valid && qty > 0 ? formatCADWhole(qty * p.unit_cost_landed) : "-"}</td>
+              </tr>;
+            })}</tbody>
+          </table>
+          {visible.length === 0 && <div className="px-4 py-12 text-center"><p className="text-sm font-medium text-sand-700">No products match this view.</p><p className="mt-1 text-xs text-sand-500">Change the filters or include products without a suggestion to plan a manual top-up.</p></div>}
+        </div>
+        <p className="text-xs leading-relaxed text-sand-500">Suggested quantities account for current stock and inbound orders. Select a product to see the full calculation and arrival forecast.</p>
+      </div>
+      <aside aria-label="Draft order summary" className="order-first rounded-xl border border-sand-200 bg-white p-4 xl:sticky xl:top-4 xl:order-last">
+        <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold text-sand-900">Your draft</h3><span className="text-xs text-sand-500">{ORDER_TYPE_DISPLAY[orderType]}</span></div>
+        <div className="mt-3 flex items-end justify-between gap-3"><div><span className="text-2xl font-semibold tabular-nums tracking-tight text-sand-900">{formatCADWhole(totalValue)}</span><p className="mt-1 text-xs text-sand-500">{selected.length} products · {fmt(totalQty, 1)} units</p></div>{selected.length > 0 && <button type="button" disabled={creating} onClick={() => setDrafts(current => ({ ...current, [orderType]: {} }))} className="text-xs text-sand-500 hover:text-red-700">Clear draft</button>}</div>
+        {selected.length > 0 ? <details className="mt-3 border-t border-sand-100 pt-3"><summary className="cursor-pointer text-xs font-medium text-accent">Review selected products{hiddenSelected > 0 ? ` (${hiddenSelected} hidden by filters)` : ""}</summary><ul className="mt-2 max-h-48 space-y-2 overflow-auto">{selected.map(row => <li key={row.product.id} className="flex items-center justify-between gap-2 text-xs"><span className="min-w-0"><span className="font-mono">{row.product.sku}</span><span className="ml-2 text-sand-500">× {fmt(row.qty, 1)}</span></span><button type="button" disabled={creating} onClick={() => setQuantity(row.product.id, "")} aria-label={`Remove ${row.product.sku} from draft`} className="text-sand-500 hover:text-red-700">Remove</button></li>)}</ul></details> : <p className="mt-3 hidden text-xs leading-relaxed text-sand-500 sm:block">Enter quantities or use the suggestions to build this order. China and Montreal quantities are kept separately while you stay on this page.</p>}
+        <details className="mt-3"><summary className="cursor-pointer text-xs font-medium text-sand-600">Add order notes</summary><label className="mt-2 block text-xs font-medium text-sand-600">Order notes <span className="font-normal text-sand-400">(optional)</span><textarea rows={2} value={notes[orderType]} disabled={creating} onChange={e => setNotes(current => ({ ...current, [orderType]: e.target.value }))} className="mt-1.5 block w-full resize-y rounded-lg border border-sand-300 px-3 py-2 text-sm font-normal" placeholder="Add a note for this order" /></label></details>
+        {invalidQuantity && <p role="alert" className="mt-2 text-xs text-red-700">Quantities must be zero or more. Correct the highlighted entry before creating a draft.</p>}
+        <button type="button" disabled={!selected.length || creating || invalidQuantity} onClick={createDraft} className="mt-3 w-full rounded-lg bg-accent px-4 py-2.5 text-sm font-medium text-white hover:bg-accent/90 disabled:cursor-not-allowed disabled:bg-sand-200 disabled:text-sand-500">{creating ? "Creating draft…" : `Create draft ${orderType === "china" ? "China order" : "Montreal transfer"}`}</button>
+        <p className="mt-2 text-center text-[11px] text-sand-400">Creates an internal draft. Nothing is sent to a supplier.</p>
+      </aside>
+    </div>
+    {forecastId && (() => {
+      const product = initialProducts.find(p => p.id === forecastId);
+      return product ? <ForecastDrawer product={product} forecast={initialForecasts[forecastId] ?? null} settings={settings} onClose={() => setForecastId(null)} /> : null;
+    })()}
+  </div>;
 }
