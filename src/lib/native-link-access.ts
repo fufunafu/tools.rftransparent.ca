@@ -4,6 +4,7 @@ export type NativeLinkAccessRequirement =
   | "warehouse-or-management"
   | "sales-or-management"
   | "customer-service-or-management"
+  | "crm-team"
   | "management";
 
 export interface NativeLinkViewer {
@@ -17,6 +18,7 @@ export function nativeLinkAccessRequirement(
 ): NativeLinkAccessRequirement {
   if (pathname === "/privacy" || pathname === "/support") return "public";
   if (pathname === "/warehouse/report") return "warehouse-or-management";
+  if (pathname === "/hubspot-dupe") return "crm-team";
   if (pathname === "/sales" || pathname === "/field-sales") return "sales-or-management";
   if (pathname === "/customer-service") {
     return "customer-service-or-management";
@@ -38,6 +40,7 @@ export function canAccessNativeDestination(
   if (requirement === "public") return true;
   if (!viewer.authenticated) return false;
   if (requirement === "authenticated") return true;
+  if (requirement === "crm-team") return viewer.management || viewer.department === "sales" || viewer.department === "customer_service";
   if (requirement === "warehouse-or-management") {
     return viewer.department === "warehouse" || viewer.management;
   }

@@ -197,6 +197,7 @@ export default function SidebarLayout({ children }: { children: React.ReactNode 
         setViewerAccess({
           isAdmin: me.isAdmin === true,
           isManagement: me.isManagement === true,
+          canAccessCrm: me.canAccessCrm === true,
         });
         setViewer({
           name: typeof me.name === "string" ? me.name : null,

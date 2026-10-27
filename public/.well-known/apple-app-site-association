@@ -16,6 +16,7 @@
           { "/": "/customer-service/problems", "comment": "Problem tickets" },
           { "/": "/sales", "comment": "Personal sales" },
           { "/": "/field-sales", "comment": "Field sales workspace" },
+          { "/": "/hubspot-dupe", "comment": "CRM workspace" },
           { "/": "/dashboards/marketing", "comment": "Marketing summary" },
           { "/": "/employees", "comment": "Employee management" },
           { "/": "/warehouse", "comment": "Warehouse management" },

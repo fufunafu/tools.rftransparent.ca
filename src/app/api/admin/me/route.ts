@@ -10,6 +10,7 @@ import { deriveDefaultDashboard } from "@/lib/default-dashboard";
 import { OWNER_EMAIL } from "@/lib/authz";
 import { quotePostgrestValue } from "@/lib/postgrest";
 import { getProfileAvatarUrl } from "@/lib/profile-avatar";
+import { canAccessCrm } from "@/lib/crm/access";
 
 interface EmployeeProfile {
   name: string | null;
@@ -92,5 +93,6 @@ export async function GET() {
     resolvedDashboard,
     isAdmin,
     isManagement,
+    canAccessCrm: await canAccessCrm(),
   });
 }
