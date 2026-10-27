@@ -23,6 +23,12 @@ export interface NavChild {
   href: string;
   label: string;
   status: Status;
+  // Opens a cluster inside an expanded section: the caption is printed above
+  // this child. A label on the rows that follow, not a destination, so it is
+  // never focusable and never a search target. Marketing needs it because it
+  // carries the whole image library now, and sixteen links in one column read
+  // as a list that got longer rather than as five kinds of page.
+  cap?: string;
   // Same meaning as on NavItem — an absolute URL to a separate site.
   external?: boolean;
   // Same meaning as on NavItem — this app's domain, but not this app's router.
@@ -143,20 +149,42 @@ export const NAV_ITEMS: NavSection[] = [
     tint: "#B4552C",
     status: "done",
     group: "revenue",
+    // The library's pages live under /library, not under /marketing, so
+    // without this the section did not count as active on any of them: the
+    // dropdown shut itself on arrival, the row went grey, and the rail had
+    // nothing at all to say about where you were. Every library page is
+    // reached from this section, so the section owns the prefix.
+    match: ["/marketing", "/library"],
     icon: (
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
       </svg>
     ),
-    // The image library (six framed pages of the separate app under
-    // src/app/library) lives here as children: it's marketing material, so it
-    // sits under Marketing rather than as its own band.
+    // The image library (the separate app under src/app/library, framed) lives
+    // here as children: it's marketing material, so it sits under Marketing
+    // rather than as its own band.
+    //
+    // Six of its pages were listed here. It has sixteen, and the six were the
+    // ones it had in the spring. The clusters below are the library's own:
+    // the file groups its rail into Library, Sales, Marketing, Private and
+    // Mine, and a page that moves between groups there should move here too.
     children: [
       { href: "/marketing", label: "Analytics", status: "done" },
-      { href: "/library/photos", label: "Photo library", status: "done" },
-      { href: "/library/shows", label: "Trade shows", status: "done" },
+      { cap: "Library", href: "/library/photos", label: "Photo library", status: "done" },
+      { href: "/library/videos", label: "Videos", status: "done" },
+      { cap: "Sales", href: "/library/shows", label: "Trade shows", status: "done" },
       { href: "/library/stores", label: "Stores", status: "done" },
-      { href: "/library/workspace", label: "My workspace", status: "done" },
+      // "Campaigns" rather than the library's own word for this group, which
+      // is Marketing: inside a section already called Marketing it would read
+      // as the section repeating itself.
+      { cap: "Campaigns", href: "/library/ads", label: "Ads analytics", status: "done" },
+      { href: "/library/ads-meta", label: "Meta ads", status: "done" },
+      { href: "/library/ads-google", label: "Google ads", status: "done" },
+      { href: "/library/ads-report", label: "Ads report", status: "done" },
+      { href: "/library/paid-posts", label: "Paid posts", status: "done" },
+      { cap: "Mine", href: "/library/workspace", label: "My workspace", status: "done" },
+      { href: "/library/assistant", label: "Assistant", status: "done" },
+      { href: "/library/updates", label: "Update requests", status: "done" },
       // Both are gated inside the library as well, on its own permissions —
       // the flag here only decides who is shown the door. `admin` is a
       // deliberate under-offer: the vault opens at the library's `view` rung,
@@ -164,8 +192,11 @@ export const NAV_ITEMS: NavSection[] = [
       // put a row in everyone's menu that bounces them with a toast. A door
       // that misfires for the majority is worse than no door. Anyone who needs
       // it today is an admin; canView("passwords") is what actually decides.
-      { href: "/library/vault", label: "Accounts & Passwords", status: "done", access: "admin" },
+      // The caption rides on the first row of the cluster, so when these are
+      // filtered out for a non-admin the heading goes with them.
+      { cap: "Private", href: "/library/vault", label: "Accounts & Passwords", status: "done", access: "admin" },
       { href: "/library/team", label: "Team & access", status: "done", access: "admin" },
+      { href: "/library/new-employee", label: "New employee", status: "done", access: "admin" },
     ],
   },
   {
