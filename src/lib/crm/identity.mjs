@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { unpackProperties } from "./storage.mjs";
+import { projectCrmImages } from "./record-images.mjs";
 
 // Keep exact mailbox identity. Do not remove dots or plus tags, which can
 // identify different customers outside providers with special alias rules.
@@ -30,6 +31,7 @@ export function projectCrmRecord(record, stages = {}) {
     stage: field("lifecyclestage", "hs_lead_status", "dealstage", "hs_pipeline_stage"),
     amount: field("amount"), close_date: field("closedate"), domain: field("domain"),
     preview: String(record.body_preview ?? "").slice(0, 500),
+    ...(["contacts", "companies"].includes(record.object_type) ? projectCrmImages(source, record.portal_id) : {}),
   };
   if (stages[`${record.portal_id}:${record.object_type}:${view_fields.stage}`]) view_fields.stage_label = stages[`${record.portal_id}:${record.object_type}:${view_fields.stage}`];
   const identities = new Map();
