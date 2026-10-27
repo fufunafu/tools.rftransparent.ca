@@ -1,10 +1,16 @@
 import { sanitizePhone } from "@/lib/call-metrics";
+import { STORE_SCOPES } from "@/lib/store-scopes";
 import { getSupabase } from "@/lib/supabase";
 import { HISTORICAL_UNKNOWN_REASON } from "@/lib/customer-service/leads";
 
 type LeadOutcome = "new" | "contacted" | "quoted" | "won" | "lost" | "not_applicable";
 
 export interface LeadForQuoteSync {
+  store_id?: string;
+  quote_draft_id?: string | null;
+  quote_amount?: number | string | null;
+  quote_sent_at?: string | null;
+  first_quote_at?: string | null;
   id: string;
   email: string | null;
   phone: string | null;
@@ -16,6 +22,8 @@ export interface LeadForQuoteSync {
 }
 
 export interface DraftForLeadQuoteSync {
+  store_id?: string;
+  last_invoice_sent_at?: string | null;
   shopify_draft_id: string;
   draft_name: string;
   customer_email: string | null;
@@ -33,7 +41,8 @@ export interface LeadQuoteMatch {
   draftId: string;
   quoteNumber: string;
   quoteAmount: number;
-  quoteSentAt: string;
+  quoteSentAt: string | null;
+  firstQuoteAt: string | null;
   outcome: "quoted" | "won";
   responsibleStaff: string | null;
   // A historical import that this quote proves was actually worked; the
@@ -83,106 +92,58 @@ function responsibleStaff(draft: DraftForLeadQuoteSync): string | null {
   return draft.last_invoice_sender?.trim() || draft.created_by_staff?.trim() || null;
 }
 
-function latestLeadBeforeDraft(
-  candidates: IndexedLead[] | undefined,
-  draftTime: number,
-): IndexedLead | null {
-  if (!candidates) return null;
-  for (let index = candidates.length - 1; index >= 0; index--) {
-    const candidate = candidates[index];
-    if (candidate.submittedTime <= draftTime) return candidate;
-  }
-  return null;
-}
+const sameStore = (lead: LeadForQuoteSync, draft: DraftForLeadQuoteSync) => !lead.store_id || !draft.store_id
+    || Object.values(STORE_SCOPES).some((scope) => scope.phoneStoreIds.includes(lead.store_id!) && scope.shopifyStoreIds.includes(draft.store_id!));
 
-/**
- * Match each sent draft to the most recent lead submitted before it. Protected
- * leads are skipped without falling back to an older record for that contact.
- * Email is authoritative when present; phone is the fallback.
- */
 export function matchDraftOrdersToLeads(
-  leads: LeadForQuoteSync[],
-  drafts: DraftForLeadQuoteSync[],
+  leads: LeadForQuoteSync[], drafts: DraftForLeadQuoteSync[],
 ): LeadQuoteMatch[] {
-  // Live leads are matched first. Historical imports (closed as
-  // not_applicable because their workflow was never tracked) are only used
-  // when no live lead exists for the contact, so a repeat customer's fresh
-  // submission always wins over their old record.
-  const leadsByEmail = new Map<string, IndexedLead[]>();
-  const leadsByPhone = new Map<string, IndexedLead[]>();
-  const historicalByEmail = new Map<string, IndexedLead[]>();
-  const historicalByPhone = new Map<string, IndexedLead[]>();
-
+  const byEmail = new Map<string, IndexedLead[]>();
+  const byPhone = new Map<string, IndexedLead[]>();
   for (const lead of leads) {
-    const submittedTime = new Date(lead.submitted_at).getTime();
-    if (Number.isNaN(submittedTime)) continue;
-
+    const submittedTime = Date.parse(lead.submitted_at);
+    if (!Number.isFinite(submittedTime)) continue;
     const indexed = { ...lead, submittedTime };
-    const email = normalizedEmail(lead.email);
-    const phone = normalizedPhone(lead.phone);
-    const byEmail = isHistoricalLead(lead) ? historicalByEmail : leadsByEmail;
-    const byPhone = isHistoricalLead(lead) ? historicalByPhone : leadsByPhone;
+    const email = normalizedEmail(lead.email), phone = normalizedPhone(lead.phone);
     if (email) byEmail.set(email, [...(byEmail.get(email) ?? []), indexed]);
     if (phone) byPhone.set(phone, [...(byPhone.get(phone) ?? []), indexed]);
   }
-
-  for (const candidates of [
-    ...leadsByEmail.values(),
-    ...leadsByPhone.values(),
-    ...historicalByEmail.values(),
-    ...historicalByPhone.values(),
-  ]) {
-    candidates.sort((a, b) => a.submittedTime - b.submittedTime);
-  }
-
-  const eligibleDrafts = drafts
-    .filter((draft) => draft.shopify_status === "INVOICE_SENT" || draft.shopify_status === "COMPLETED")
-    .map((draft) => {
-      const quoteSentAt = draft.shopify_created_at ?? draft.first_synced_at;
-      return { draft, quoteSentAt, draftTime: new Date(quoteSentAt).getTime() };
-    })
-    .filter((entry) => !Number.isNaN(entry.draftTime))
-    .sort((a, b) => a.draftTime - b.draftTime);
-
-  const matchedLeadIds = new Set<string>();
-  const matchedDraftIds = new Set<string>();
-  const matches: LeadQuoteMatch[] = [];
-
-  for (const { draft, quoteSentAt, draftTime } of eligibleDrafts) {
-    if (matchedDraftIds.has(draft.shopify_draft_id)) continue;
-
-    const email = normalizedEmail(draft.customer_email);
-    const phone = normalizedPhone(draft.customer_phone);
-    const lead =
-      latestLeadBeforeDraft(email ? leadsByEmail.get(email) : undefined, draftTime) ??
-      latestLeadBeforeDraft(phone ? leadsByPhone.get(phone) : undefined, draftTime) ??
-      latestLeadBeforeDraft(email ? historicalByEmail.get(email) : undefined, draftTime) ??
-      latestLeadBeforeDraft(phone ? historicalByPhone.get(phone) : undefined, draftTime);
-    if (!lead) continue;
-    const historical = isHistoricalLead(lead);
-    if (
-      matchedLeadIds.has(lead.id) ||
-      lead.quote_number ||
-      lead.outcome === "won" ||
-      lead.outcome === "lost" ||
-      (lead.outcome === "not_applicable" && !historical)
-    ) continue;
-
-    matchedLeadIds.add(lead.id);
-    matchedDraftIds.add(draft.shopify_draft_id);
-    matches.push({
-      leadId: lead.id,
-      draftId: draft.shopify_draft_id,
-      quoteNumber: draft.draft_name,
-      quoteAmount: Number(draft.quote_amount) || 0,
-      quoteSentAt,
-      outcome: draft.shopify_status === "COMPLETED" ? "won" : "quoted",
+  const validTime = (value: string | null | undefined) => value && Number.isFinite(Date.parse(value)) ? value : null;
+  const sent = drafts.filter((draft) => ['INVOICE_SENT', 'COMPLETED'].includes(draft.shopify_status)).map((draft) => {
+    const quoteSentAt = validTime(draft.last_invoice_sent_at);
+    // Creation time can establish a historical association, but must never be
+    // presented as proof of when a quote was actually sent.
+    const observedAt = quoteSentAt ?? validTime(draft.shopify_created_at) ?? validTime(draft.first_synced_at);
+    return { draft, quoteSentAt, draftTime: observedAt ? Date.parse(observedAt) : NaN };
+  }).filter((entry) => Number.isFinite(entry.draftTime)).sort((a, b) => a.draftTime - b.draftTime || a.draft.shopify_draft_id.localeCompare(b.draft.shopify_draft_id));
+  const byNumber = new Map<string, DraftForLeadQuoteSync[]>();
+  for (const { draft } of sent) byNumber.set(draft.draft_name, [...(byNumber.get(draft.draft_name) ?? []), draft]);
+  const matches = new Map<string, LeadQuoteMatch>();
+  for (const { draft, quoteSentAt, draftTime } of sent) {
+    const email = normalizedEmail(draft.customer_email), phone = normalizedPhone(draft.customer_phone);
+    const choose = (candidates: IndexedLead[]) => {
+      const eligible = candidates.filter((lead) => sameStore(lead, draft) && lead.submittedTime <= draftTime);
+      const live = eligible.filter((lead) => !isHistoricalLead(lead));
+      return (live.length ? live : eligible).sort((a, b) => b.submittedTime - a.submittedTime)[0];
+    };
+    const lead = choose(email ? byEmail.get(email) ?? [] : []) ?? choose((phone ? byPhone.get(phone) ?? [] : []).filter((candidate) => !email || !normalizedEmail(candidate.email)));
+    if (!lead || lead.outcome === 'lost' || (lead.outcome === 'not_applicable' && !isHistoricalLead(lead))) continue;
+    // Preserve manually entered references that cannot be verified in Shopify.
+    if (lead.quote_number && !lead.quote_draft_id && !(byNumber.get(lead.quote_number) ?? []).some((candidate) => sameStore(lead, candidate) &&
+      ((normalizedEmail(lead.email) && normalizedEmail(candidate.customer_email) === normalizedEmail(lead.email)) ||
+       ((!normalizedEmail(lead.email) || !normalizedEmail(candidate.customer_email)) && normalizedPhone(lead.phone) && normalizedPhone(candidate.customer_phone) === normalizedPhone(lead.phone))))) continue;
+    const previous = matches.get(lead.id);
+    const firstTimes = [lead.first_quote_at, previous?.firstQuoteAt, quoteSentAt].filter((value): value is string => Boolean(value));
+    const firstQuoteAt = firstTimes.sort((a, b) => Date.parse(a) - Date.parse(b))[0] ?? null;
+    matches.set(lead.id, {
+      leadId: lead.id, draftId: draft.shopify_draft_id, quoteNumber: draft.draft_name,
+      quoteAmount: Number(draft.quote_amount) || 0, quoteSentAt, firstQuoteAt,
+      outcome: lead.outcome === 'won' || previous?.outcome === 'won' || draft.shopify_status === 'COMPLETED' ? 'won' : 'quoted',
       responsibleStaff: responsibleStaff(draft),
-      ...(historical ? { reopenHistorical: true } : {}),
+      ...(isHistoricalLead(lead) ? { reopenHistorical: true } : {}),
     });
   }
-
-  return matches;
+  return [...matches.values()];
 }
 
 /** Match already-linked quotes to staff without changing the quote linkage. */
@@ -202,12 +163,12 @@ export function matchStaffToLinkedLeads(
   const matches: LeadStaffMatch[] = [];
   for (const lead of leads) {
     if (isHistoricalLead(lead) || !lead.quote_number || lead.assigned_to) continue;
-    const candidates = draftsByNumber.get(lead.quote_number) ?? [];
+    const candidates = (draftsByNumber.get(lead.quote_number) ?? []).filter((draft) => sameStore(lead, draft));
     const email = normalizedEmail(lead.email);
     const phone = normalizedPhone(lead.phone);
     const draft =
       candidates.find((candidate) => email && normalizedEmail(candidate.customer_email) === email) ??
-      candidates.find((candidate) => phone && normalizedPhone(candidate.customer_phone) === phone);
+      candidates.find((candidate) => phone && (!email || !normalizedEmail(candidate.customer_email)) && normalizedPhone(candidate.customer_phone) === phone);
     const staff = draft ? responsibleStaff(draft) : null;
     if (staff) matches.push({ leadId: lead.id, responsibleStaff: staff });
   }
@@ -262,7 +223,7 @@ export async function syncLeadQuotesFromFollowups(
   const leads = await fetchAllRows<LeadForQuoteSync>((from, to) =>
     supabase
       .from("leads")
-      .select("id,email,phone,submitted_at,outcome,quote_number,assigned_to,not_applicable_reason")
+      .select("id,store_id,email,phone,submitted_at,outcome,quote_number,quote_amount,quote_sent_at,first_quote_at,quote_draft_id,assigned_to,not_applicable_reason")
       .order("submitted_at", { ascending: true })
       .range(from, to),
   );
@@ -270,7 +231,7 @@ export async function syncLeadQuotesFromFollowups(
   const drafts = await fetchAllRows<DraftForLeadQuoteSync>((from, to) => {
     let query = supabase
       .from("followup_leads")
-      .select("shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,shopify_status,first_synced_at,last_invoice_sender,created_by_staff")
+      .select("shopify_draft_id,draft_name,customer_email,customer_phone,quote_amount,shopify_created_at,last_invoice_sent_at,shopify_status,first_synced_at,last_invoice_sender,created_by_staff,store_id")
       .in("shopify_status", ["INVOICE_SENT", "COMPLETED"])
       .order("shopify_created_at", { ascending: true })
       .range(from, to);
@@ -278,9 +239,15 @@ export async function syncLeadQuotesFromFollowups(
     return query;
   });
 
-  const matches = matchDraftOrdersToLeads(leads, drafts);
-  const staffMatches = matchStaffToLinkedLeads(leads, drafts);
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
+  const allMatches = matchDraftOrdersToLeads(leads, drafts);
+  const matches = allMatches.filter((match) => {
+    const lead = leadById.get(match.leadId)!;
+    return lead.quote_number !== match.quoteNumber || lead.quote_draft_id !== match.draftId
+      || Number(lead.quote_amount) !== match.quoteAmount || lead.quote_sent_at !== match.quoteSentAt
+      || lead.first_quote_at !== match.firstQuoteAt || lead.outcome !== match.outcome;
+  });
+  const staffMatches = matchStaffToLinkedLeads(leads, drafts);
   const linkedLeadIds = new Set<string>();
   const summary: LeadQuoteSyncSummary = {
     leadsScanned: leads.length,
@@ -303,14 +270,18 @@ export async function syncLeadQuotesFromFollowups(
           quote_number: match.quoteNumber,
           quote_amount: match.quoteAmount,
           quote_sent_at: match.quoteSentAt,
+          first_quote_at: match.firstQuoteAt,
+          quote_draft_id: match.draftId,
           outcome: match.outcome,
           ...(match.reopenHistorical ? { not_applicable_reason: null } : {}),
         })
-        .eq("id", match.leadId)
-        .is("quote_number", null);
+        .eq("id", match.leadId);
+      const prior = leadById.get(match.leadId)!;
+      query = query.eq("outcome", prior.outcome);
+      query = prior.quote_number == null ? query.is("quote_number", null) : query.eq("quote_number", prior.quote_number);
       query = match.reopenHistorical
         ? query.eq("not_applicable_reason", HISTORICAL_UNKNOWN_REASON)
-        : query.not("outcome", "in", "(won,lost,not_applicable)");
+        : query.not("outcome", "in", "(lost,not_applicable)");
       const { data, error } = await query.select("id");
       return { match, updated: data?.length ?? 0, error };
     }));
@@ -332,7 +303,7 @@ export async function syncLeadQuotesFromFollowups(
   }
 
   const staffByLeadId = new Map<string, string>();
-  for (const match of matches) {
+  for (const match of allMatches) {
     const lead = leadById.get(match.leadId);
     if (linkedLeadIds.has(match.leadId) && match.responsibleStaff && !lead?.assigned_to) {
       staffByLeadId.set(match.leadId, match.responsibleStaff);

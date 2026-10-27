@@ -20,6 +20,7 @@ beforeAll(async () => {
   }
   await event();
   await db.exec(await readFile('supabase/migrations/20261027200000_outreach_rf_leads.sql', 'utf8'));
+  await db.exec(await readFile('supabase/migrations/20261027213000_lead_work_queue.sql', 'utf8'));
 }, 30000);
 afterAll(async () => { await db.close(); });
 describe('RF outreach acquisition bridge', () => {
@@ -48,7 +49,29 @@ describe('RF outreach acquisition bridge', () => {
       await db.exec("select outreach_lead_receive_mail(id,'message','thread','inbound','2026-10-24T12:00Z','Please quote 40 feet','Project',false,false) from outreach_leads");
       expect(await rf()).toEqual(expect.arrayContaining([expect.objectContaining({ source: 'website', email: 'website@example.com' }), expect.objectContaining({ source: 'outreach', message: 'Please quote 40 feet' })]));
     });
-    it('denies public invocation of the bridge', async () => {
+    it('preserves an RF follow-up plan on profile changes and makes a newer inbound reply due', async () => {
+      await event();
+      await db.exec("update leads set next_action='Confirm drawings',next_follow_up_at='2026-11-01T12:00Z',workflow_updated_at='2026-10-23T13:00Z'; update outreach_leads set phone='+14165551234'");
+      expect((await rf())[0]).toMatchObject({ next_action: 'Confirm drawings', next_follow_up_at: new Date('2026-11-01T12:00Z') });
+      await db.exec("select outreach_lead_receive_mail(id,'new-message','thread','inbound','2026-10-24T12:00Z','New project details','Project',false,false) from outreach_leads");
+      expect((await rf())[0]).toMatchObject({ next_action: 'Reply to the new prospect message', next_follow_up_at: new Date('2026-10-24T12:00Z'), last_reply_at: new Date('2026-10-24T12:00Z') });
+    });
+    it('preserves the first recorded quote time and closes follow-up scheduling on won', async () => {
+      await event();
+      await db.exec("update leads set quote_sent_at='2026-10-24T12:00Z'; update leads set quote_sent_at='2026-10-25T12:00Z',outcome='won'");
+      expect((await rf())[0]).toMatchObject({ first_quote_at: new Date('2026-10-24T12:00Z'), quote_sent_at: new Date('2026-10-25T12:00Z'), next_follow_up_at: null });
+    });
+    it('mirrors staff reply times without overwriting RF ownership', async () => {
+      await event();
+      await db.exec("update leads set assigned_to='owner@example.com'; update outreach_leads set last_reply_at='2026-10-24T12:00Z'; select outreach_lead_receive_mail(id,'staff-message','thread','outbound','2026-10-25T12:00Z','Thanks for the details','Project',false,false) from outreach_leads");
+      expect((await rf())[0]).toMatchObject({ assigned_to: 'owner@example.com', last_staff_reply_at: new Date('2026-10-25T12:00Z') });
+    });
+    it('uses persisted staff mail from before delayed ticket creation', async () => {
+      await event();
+      await db.exec("select outreach_lead_receive_mail(id,'delayed-staff-message','thread','outbound','2026-10-23T13:00Z','Thanks for the details','Project',false,false) from outreach_leads");
+      expect((await rf())[0]).toMatchObject({ last_staff_reply_at: new Date('2026-10-23T13:00Z') });
+    });
+    it('denies public invocation of the bridge' , async () => {
       for (const role of ['anon', 'authenticated']) {
         await db.exec(`set role ${role}`);
         await expect(db.query('select outreach_sync_rf_lead($1)', [randomUUID()])).rejects.toThrow('permission denied');

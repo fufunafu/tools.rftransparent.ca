@@ -12,7 +12,7 @@ const PAGE_SIZE = 1000;
 const REVALIDATE_SECONDS = 60;
 const LEADS_CACHE_TAG = "customer-service:leads";
 const LEAD_LIST_COLUMNS =
-  "id,store_id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to";
+  "id,store_id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to,next_follow_up_at,next_action,last_reply_at,last_staff_reply_at,first_quote_at,quote_draft_id";
 const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 
 type LeadRow = { id: string; [key: string]: unknown };
@@ -21,6 +21,7 @@ type AttemptRow = { lead_id: string; staff: string; called_at: string };
 interface LoadLeadsOptions {
   store?: LeadStoreId;
   source?: LeadSource;
+  includeOpen?: boolean;
   from?: string | null;
   to?: string | null;
 }
@@ -104,8 +105,14 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
       .order("submitted_at", { ascending: false });
     if (options.store) query = query.eq("store_id", options.store);
     if (options.source) query = query.eq("source", options.source);
-    if (options.from) query = query.gte("submitted_at", startOfQueryWindow(options.from));
-    if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
+    if (options.includeOpen && (options.from || options.to)) {
+      const dates = [options.from ? `submitted_at.gte.${startOfQueryWindow(options.from)}` : null,
+        options.to ? `submitted_at.lt.${endOfQueryWindow(options.to)}` : null].filter(Boolean);
+      query = query.or(`outcome.in.(new,contacted,quoted),and(${dates.join(',')})`);
+    } else {
+      if (options.from) query = query.gte("submitted_at", startOfQueryWindow(options.from));
+      if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
+    }
     return query.range(from, to);
   });
   const attemptsPromise = fetchAllPages<AttemptRow>((from, to) => {
@@ -113,7 +120,7 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
       .from("lead_call_attempts")
       .select("lead_id, staff, called_at")
       .order("called_at", { ascending: false });
-    if (options.from) query = query.gte("called_at", startOfQueryWindow(options.from));
+    if (options.from && !options.includeOpen) query = query.gte("called_at", startOfQueryWindow(options.from));
     return query.range(from, to);
   });
 
@@ -263,7 +270,7 @@ export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
 }
 
 export const getCachedLeads = unstable_cache(
-  (from?: string | null, to?: string | null, store?: LeadStoreId) => loadLeads({ from, to, store }),
+  (from?: string | null, to?: string | null, store?: LeadStoreId, includeOpen = false) => loadLeads({ from, to, store, includeOpen }),
   ["customer-service:leads:list"],
   { tags: [LEADS_CACHE_TAG], revalidate: REVALIDATE_SECONDS },
 );

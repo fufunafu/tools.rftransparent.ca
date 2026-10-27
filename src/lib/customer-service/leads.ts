@@ -64,6 +64,11 @@ export interface Lead {
   quote_amount: string | number | null;
   quote_sent_at: string | null;
   first_quote_at?: string | null;
+  quote_draft_id?: string | null;
+  next_follow_up_at?: string | null;
+  next_action?: string | null;
+  last_reply_at?: string | null;
+  last_staff_reply_at?: string | null;
   lost_reason: string | null;
   not_applicable_reason: string | null;
   notes: string | null;

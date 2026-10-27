@@ -32,7 +32,7 @@ export function deriveAutomaticActivity(leads: ActivityLead[], calls: PhoneCallF
       const draftId=match.draftId.split('/').pop();
       const url=host && /^[\w.-]+\.myshopify\.com$/.test(host) && /^\d+$/.test(draftId||'') ? `https://${host}/admin/draft_orders/${draftId}` : null;
       const activity:LeadActivity={id:`shopify:${match.draftId}`,lead_id:match.leadId,kind:'quote',actor_email:'',
-        actor_name:match.responsibleStaff || 'Staff not recorded',occurred_at:match.quoteSentAt,created_at:match.quoteSentAt,
+        actor_name:match.responsibleStaff || 'Staff not recorded',occurred_at:match.quoteSentAt ?? draft.shopify_created_at ?? draft.first_synced_at,created_at:match.quoteSentAt ?? draft.shopify_created_at ?? draft.first_synced_at,
         note:draft.last_invoice_sent_at?'Shopify sent quote. Date is the latest invoice send time.':'Shopify sent quote. Send time unavailable; showing draft creation date.',call_result:null,
         quote_date_kind:draft.last_invoice_sent_at?'sent':'created',
         quote_number:match.quoteNumber,quote_amount:match.quoteAmount,quote_currency:null,quote_url:url};
