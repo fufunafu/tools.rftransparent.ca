@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LeadFilterDropdown, { filterSelections } from "./LeadFilterDropdown";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
@@ -18,10 +19,9 @@ import {
   extractSubmissionDetails,
 } from "@/lib/customer-service/leads";
 import { isLeadInCustomDateRange, leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
-import { compareLeadPriority, hasUnansweredReply, isFollowUpDue, isOpenLead, leadMatchesOwner } from "@/lib/customer-service/lead-queue";
+import { hasUnansweredReply, isFollowUpDue, isOpenLead, leadMatchesOwner } from "@/lib/customer-service/lead-queue";
 import { formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
-import { getAutomationDetailFailure } from "@/lib/automation-status";
 import {
   LEAD_NO_CALL_INSTALLATION_REASON,
   LEAD_SPAM_REASON,
@@ -156,13 +156,6 @@ const FILTER_TABS: { value: string; label: string; match: (l: Lead) => boolean }
   { value: "not_applicable", label: "Not Applicable", match: (l) => l.outcome === "not_applicable" },
 ];
 
-type SyncAutomationJob = "sync-calls" | "sync-lead-quotes" | "process-outreach" | "sync-followup";
-const SYNC_LABELS: Record<SyncAutomationJob, string> = { "sync-calls": "Calls", "sync-lead-quotes": "Quotes", "process-outreach": "Outreach", "sync-followup": "Shopify import" };
-interface LeadSyncHealth {
-  canSync: boolean;
-  sources: { job: string; label: string; lastSuccessAt: string | null; needsAttention: boolean; error: string | null }[];
-}
-
 async function fetcher<T>(url: string): Promise<T> {
   const response = redirectOnUnauthorized(await fetch(url));
   const body = await response.json().catch(() => ({}));
@@ -216,25 +209,6 @@ function StoreSelect({
       ))}
     </select>
   );
-}
-
-async function triggerSyncAutomation(job: SyncAutomationJob, label: string): Promise<void> {
-  const response = redirectOnUnauthorized(await fetch("/api/settings/automations", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ job }),
-  }));
-  const body = await response.json().catch(() => ({})) as {
-    ok?: boolean;
-    error?: string;
-    detail?: string;
-  };
-  if (!response.ok || !body.ok) {
-    throw new Error(body.error ?? `${label} sync failed with status ${response.status}`);
-  }
-
-  const detailFailure = getAutomationDetailFailure(body.detail);
-  if (detailFailure) throw new Error(detailFailure);
 }
 
 // ─── Lead detail panel ───────────────────────────────────────────────────────
@@ -1126,10 +1100,12 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   currentUserEmail?: string;
 }) {
   const setStore = useStoreNavigation();
-  const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" });
+  const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "newest", history: "30d", olderOpen: "false" });
   const [classicView, setClassicView] = useState(false);
   const [viewRestored, setViewRestored] = useState(false);
   useEffect(() => {
+    // Restore browser-only preferences after hydration to match the server render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     try { setClassicView(localStorage.getItem("lead-layout") === "classic"); } catch { /* Optional preference. */ }
     setViewRestored(true);
   }, []);
@@ -1140,8 +1116,6 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const [restored, setRestored] = useState(false);
   const [now, setNow] = useState(initialNow);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState<string | null>(null);
-  const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const { mutate } = useSWRConfig();
   const storageKey = `rf-lead-queue:v2:${store}`;
@@ -1150,10 +1124,14 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
       if (saved && typeof saved === "object") {
-        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned"], sort: ["priority", "newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
+        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned", "others"], sort: ["newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
+        // Restore session preferences only after the initial server-matching render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setFilters((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key,
           key === "search" ? typeof saved[key] === "string" ? saved[key].slice(0, 200) : value
-          : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
+          : ["status", "source", "owner"].includes(key) && typeof saved[key] === "string"
+            ? saved[key].split(",").filter((item: string) => allowed[key]?.includes(item)).join(",")
+            : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
       }
     } catch { /* Storage can be unavailable in private browsing. */ }
     setRestored(true);
@@ -1169,39 +1147,36 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     fallbackData: initialLeads && url === initialUrl ? { leads: initialLeads } : undefined,
     revalidateOnMount: initialLeads && url === initialUrl ? false : undefined,
   });
-  const { data: health, error: healthError, mutate: refreshHealth } = useSWR<LeadSyncHealth>("/api/customer-service/leads/sync-status", fetcher, { refreshInterval: 60_000 });
   const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
   const queue = useMemo(() => leads.filter((lead) =>
     !bounds?.from || isLeadInCustomDateRange(lead, bounds.from, bounds.to)
       || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, filters.olderOpen]);
   const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
-  const sourceLeads = queue.filter((lead) => filters.source === "all" || lead.source === filters.source);
-  const tab = FILTER_TABS.find((item) => item.value === filters.status) ?? FILTER_TABS[0];
-  const scoped = sourceLeads.filter((lead) => leadMatchesOwner(lead, filters.owner, currentUserEmail));
-  const spamCount = scoped.filter((lead) => isLeadSpamReason(lead.not_applicable_reason)).length;
+  const sources = filterSelections(filters.source, ["website", "meta", "outreach"]);
+  const statuses = filterSelections(filters.status, FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value));
+  const owners = filterSelections(filters.owner, ["mine", "unassigned", "others"]);
+  const sourceLeads = queue.filter((lead) => sources.includes(lead.source));
+  const scoped = sourceLeads.filter((lead) => owners.some(owner => owner === "others"
+    ? !!lead.assigned_to?.trim() && !leadMatchesOwner(lead, "mine", currentUserEmail)
+    : leadMatchesOwner(lead, owner, currentUserEmail)));
   const visible = scoped.filter((lead) => {
-    if (filters.status !== "spam" && isLeadSpamReason(lead.not_applicable_reason)) return false;
-    if (filters.status === "overdue" ? !isFollowUpDue(lead, now) : filters.status === "replies" ? !isOpenLead(lead) || !hasUnansweredReply(lead) : !tab.match(lead)) return false;
+    const spam = isLeadSpamReason(lead.not_applicable_reason);
+    if (spam && !statuses.includes("spam")) return false;
+    if (!spam && !statuses.some(status => status === "overdue" ? isFollowUpDue(lead, now)
+      : status === "replies" ? isOpenLead(lead) && hasUnansweredReply(lead)
+      : FILTER_TABS.find(item => item.value === status)?.match(lead))) return false;
     const q = filters.search.trim().toLowerCase();
     if (!q) return true;
     const text = [lead.name, lead.email, lead.phone, lead.assigned_to, lead.next_action, lead.quote_number].filter(Boolean).join(" ").toLowerCase();
     const phoneQuery = q.replace(/\D/g, "");
     return text.includes(q) || (phoneQuery.length >= 4 && (lead.phone ?? "").replace(/\D/g, "").includes(phoneQuery));
-  }).sort((a, b) => filters.sort === "priority" ? compareLeadPriority(a, b, now) :
-    (Date.parse(b.submitted_at) - Date.parse(a.submitted_at)) * (filters.sort === "oldest" ? -1 : 1));
+  }).sort((a, b) => (Date.parse(b.submitted_at) - Date.parse(a.submitted_at)) * (filters.sort === "oldest" ? -1 : 1));
   const pagingKey = JSON.stringify(filters);
   const [paging, setPaging] = useState({ key: pagingKey, count: LEAD_ROWS_PER_PAGE });
   const count = paging.key === pagingKey ? paging.count : LEAD_ROWS_PER_PAGE;
   const showMore = useCallback(() => setPaging((old) => ({ key: pagingKey, count: (old.key === pagingKey ? old.count : LEAD_ROWS_PER_PAGE) + LEAD_ROWS_PER_PAGE })), [pagingKey]);
   const selected = leads.find((lead) => lead.id === selectedLeadId);
   const refresh = () => mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"));
-  const runSync = async (job: SyncAutomationJob) => {
-    if (syncing) return;
-    setSyncing(job); setSyncMessage(null);
-    try { await triggerSyncAutomation(job, SYNC_LABELS[job]); await Promise.all([refresh(), refreshHealth()]); setSyncMessage(`${SYNC_LABELS[job]} updated.`); }
-    catch (err) { setSyncMessage(err instanceof Error ? err.message : "Sync failed. Try again."); }
-    finally { setSyncing(null); }
-  };
   const copy = async (value: string, label: string) => {
     try { await navigator.clipboard.writeText(value); setCopyMessage(`${label} copied.`); }
     catch { setCopyMessage("Copy was unavailable. Select the contact text to copy it."); }
@@ -1210,7 +1185,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h1 className="text-2xl font-bold text-sand-900">Leads</h1><p className="mt-1 text-sm text-sand-500">Call, reply, and follow up. Choose a received date range for your work queue.</p></div>
-      <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><button type="button" aria-pressed={classicView} onClick={() => setClassicView((value) => !value)} className="rounded-md border border-sand-300 bg-white px-3 py-2 text-sm text-sand-700">{classicView ? "Switch to compact view" : "Switch to old view"}</button><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); void refreshHealth(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
+      <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><button type="button" aria-pressed={classicView} onClick={() => setClassicView((value) => !value)} className="rounded-md border border-sand-300 bg-white px-3 py-2 text-sm text-sand-700">{classicView ? "Switch to compact view" : "Switch to old view"}</button><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
     </div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[{ label: "Open leads", value: open.length, status: "open" }, { label: "Follow-ups due", value: open.filter((lead) => isFollowUpDue(lead, now)).length, status: "overdue" }, { label: "Need a call", value: open.filter((lead) => lead.call_status === "not_called" && isCallablePhone(lead.phone)).length, status: "uncalled" }, { label: "Unassigned", value: open.filter((lead) => !lead.assigned_to?.trim()).length, status: "open", owner: "unassigned" }].map((card) => <button key={card.label} onClick={() => setQuickView(card.status, card.owner)} className="rounded-lg border border-sand-200 bg-white p-3 text-left hover:border-indigo-300"><span className="text-xs text-sand-500">{card.label}</span><span className="mt-1 block text-2xl font-semibold tabular-nums text-sand-900">{card.value}</span></button>)}
@@ -1226,28 +1201,22 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
       {(classicView || showAnalytics) && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded sidePanel={classicView} initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
     </section>
     <div className="min-w-0 space-y-4">
-    <details className="rounded-lg border border-sand-200 bg-white px-3 py-2 text-xs">
-      <summary className="cursor-pointer text-sand-600">Sync status {healthError ? "· unavailable" : health?.sources?.some((source) => source.needsAttention) ? "· needs attention" : "· automatic updates"}</summary>
-      {healthError && <p className="mt-2 text-amber-700">Sync history is unavailable. Lead records remain available.</p>}
-      <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{health?.sources?.filter((source) => store === "rf_transparent" || source.job !== "process-outreach").map((source) => <div key={source.job} className="rounded border border-sand-100 p-2"><div className="font-medium">{source.label}</div><div className="mt-1 text-sand-500">Last success: {source.lastSuccessAt ? formatDateTime(source.lastSuccessAt) : "Not recorded"}</div>{source.needsAttention && <div className="mt-1 text-amber-700">{source.error || "No recent successful update"}</div>}{health.canSync && <button disabled={syncing !== null} onClick={() => void runSync(source.job as SyncAutomationJob)} className="mt-2 text-blue-700 disabled:opacity-50">{syncing === source.job ? "Updating..." : `Update ${source.label.toLowerCase()}`}</button>}</div>)}</div>
-      {syncMessage && <p role="status" className="mt-2">{syncMessage}</p>}
-    </details>
-    <section className="overflow-hidden rounded-lg border border-sand-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div>{filters.status !== "spam" && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
+    <section className="rounded-lg border border-sand-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div></div>
       <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
         <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
-        <select aria-label="Filter leads by status" value={filters.status} onChange={(event) => change("status", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs">{FILTER_TABS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-        <select aria-label="Filter leads by source" value={filters.source} onChange={(event) => change("source", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">All sources</option>{(["website", "meta", "outreach"] as const).filter((source) => store === "rf_transparent" || source === "website").map((source) => <option key={source} value={source}>{SOURCE_BADGE[source].label} ({queue.filter((lead) => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length})</option>)}</select>
-        <select aria-label="Filter leads by owner" value={filters.owner} onChange={(event) => change("owner", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">Everyone</option><option value="mine" disabled={!currentUserEmail}>My leads</option><option value="unassigned">Unassigned</option></select>
-        <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="priority">Priority first</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+        <LeadFilterDropdown label="Filter leads by status" allLabel="All except spam" value={filters.status} onChange={value => change("status", value)} options={FILTER_TABS.filter(item => item.value !== "all")} allValues={FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value)} />
+        <LeadFilterDropdown label="Filter leads by source" allLabel="All sources" value={filters.source} onChange={value => change("source", value)} options={(["website", "meta", "outreach"] as const).filter(source => store === "rf_transparent" || source === "website").map(source => ({ value: source, label: SOURCE_BADGE[source].label, count: queue.filter(lead => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length }))} />
+        <LeadFilterDropdown label="Filter leads by owner" allLabel="Everyone" value={filters.owner} onChange={value => change("owner", value)} options={[{ value: "mine", label: "My leads", disabled: !currentUserEmail }, { value: "unassigned", label: "Unassigned" }, { value: "others", label: "Other assigned leads" }]} />
+        <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
         <label className="text-xs text-sand-500">Received <select aria-label="Lead received date range" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
         {filters.history !== "all" && <label className="flex items-center gap-2 text-xs text-sand-600"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={(event) => change("olderOpen", String(event.target.checked))} />Include older open leads</label>}
-        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" })}>Reset</button>
+        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "newest", history: "30d", olderOpen: "false" })}>Reset</button>
       </div>
       {error && <div role="alert" className="flex items-center justify-between gap-3 bg-amber-50 px-4 py-3 text-sm text-amber-800"><span>{data ? "The latest refresh failed. Showing the last loaded records." : "Lead data could not be loaded."}</span><button className="shrink-0 underline" onClick={() => void reload()}>Try again</button></div>}
       {isLoading && !data ? <p className="p-8 text-center text-sm text-sand-500">Loading leads...</p> : visible.length === 0 ? <p className="p-8 text-center text-sm text-sand-500">No leads match these filters.</p> : <div className="overflow-x-auto">
-        <table className="w-full min-w-[1050px] table-fixed text-sm"><thead className="bg-sand-50 text-left text-[11px] uppercase tracking-wider text-sand-500"><tr><th className="w-[26%] px-4 py-3">Lead / contact</th><th className="w-[23%] px-3 py-3">Next action / owner</th><th className="w-[17%] px-3 py-3">Last call</th><th className="w-[17%] px-3 py-3">Latest quote</th><th className="w-[11%] px-3 py-3">Stage</th><th className="w-[6%]"><span className="sr-only">Open lead</span></th></tr></thead>
-          <tbody>{visible.slice(0, count).map((lead) => <tr key={lead.id} className="border-t border-sand-100 align-top hover:bg-sand-50/50">
+        <table className="w-full min-w-[980px] table-fixed text-sm"><thead className="bg-sand-50 text-left text-[11px] uppercase tracking-wider text-sand-500"><tr><th className="w-[29%] px-4 py-3">Lead / contact</th><th className="w-[26%] px-3 py-3">Next action / owner</th><th className="w-[17%] px-3 py-3">Last call</th><th className="w-[17%] px-3 py-3">Latest quote</th><th className="w-[11%] px-3 py-3">Stage</th></tr></thead>
+          <tbody>{visible.slice(0, count).map((lead) => <tr key={lead.id} onClick={(event) => { if (!(event.target as HTMLElement).closest("a, button, input, select, textarea, summary, details")) setSelectedLeadId(lead.id); }} className="cursor-pointer border-t border-sand-100 align-top hover:bg-sand-50/50">
             <td className="px-4 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-left font-semibold text-sand-900 hover:text-blue-700"><span className="line-clamp-2 break-words">{lead.name || "Unnamed"}</span></button><div className="my-1 flex flex-wrap items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE[lead.source].className}`}>{SOURCE_BADGE[lead.source].label}</span><span className="text-[10px] text-sand-400" title={formatDateTime(lead.submitted_at)}>Received {formatDate(lead.submitted_at)}</span></div>
               {lead.email && <div className="flex items-start gap-2 text-xs"><a href={`mailto:${lead.email}`} className="break-all text-blue-700">{lead.email}</a><button aria-label={`Copy email for ${lead.name || lead.email}`} onClick={() => void copy(lead.email!, "Email")} className="shrink-0 text-[10px] text-sand-500">Copy</button></div>}
               {lead.phone && <div className="mt-1 flex items-center gap-2 text-xs"><a href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`} className="text-blue-700">{lead.phone}</a><button aria-label={`Copy phone for ${lead.name || lead.phone}`} onClick={() => void copy(lead.phone!, "Phone")} className="text-[10px] text-sand-500">Copy</button></div>}
@@ -1255,7 +1224,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
             <td className="px-3 py-3"><div className="break-words text-xs text-sand-700">{isOpenLead(lead) ? lead.next_action || (hasUnansweredReply(lead) ? "Reply to prospect" : lead.call_status === "not_called" ? "Make first contact" : "Set the next action") : "Closed"}</div><div className={`mt-1 text-xs ${isFollowUpDue(lead, now) ? "font-medium text-amber-700" : "text-sand-500"}`}>{isOpenLead(lead) ? lead.next_follow_up_at ? `${isFollowUpDue(lead, now) ? "Due: " : "Follow up: "}${formatDateTime(lead.next_follow_up_at)}` : "No follow-up scheduled" : ""}</div><div className="mt-1 break-words text-xs text-sand-500">{lead.assigned_to || "Unassigned"}</div><button onClick={() => setSelectedLeadId(lead.id)} className="mt-1 text-xs text-blue-700">Assign / schedule</button></td>
             <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : CALL_STATUS_LABELS[lead.call_status]}</span>{lead.last_call_at && <div className="mt-1 text-xs text-sand-600">{formatDateTime(lead.last_call_at)}<div className="break-words text-sand-400">{lead.last_called_by || "Staff not recorded"}</div></div>}<details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
             <td className="px-3 py-3">{lead.quote_number ? <><span className="font-medium">{lead.quote_number}</span>{lead.quote_amount != null && <div className="text-xs text-sand-600">{formatCADWhole(Number(lead.quote_amount))}</div>}<div className="mt-1 text-[11px] text-sand-500">{lead.quote_sent_at ? `Sent ${formatDateTime(lead.quote_sent_at)}` : "Send date not recorded"}</div></> : <span className="text-xs text-sand-400">No quote recorded</span>}</td>
-            <td className="px-3 py-3"><span className={`inline-block rounded-full px-2 py-0.5 text-xs ${OUTCOME_BADGE[lead.outcome]}`}>{OUTCOME_LABELS[lead.outcome] || "New"}</span></td><td className="px-2 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-xs text-blue-700">View</button></td>
+            <td className="px-3 py-3"><span className={`inline-block rounded-full px-2 py-0.5 text-xs ${OUTCOME_BADGE[lead.outcome]}`}>{OUTCOME_LABELS[lead.outcome] || "New"}</span></td>
           </tr>)}</tbody></table>{count < visible.length && <LoadMoreRows shown={count} total={visible.length} onLoadMore={showMore} />}
       </div>}
     </section>

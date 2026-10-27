@@ -46,6 +46,18 @@ function leadRows(): HTMLTableRowElement[] {
     .filter((row) => row.textContent?.includes("Customer "));
 }
 
+async function chooseFilters(kind: string, values: string[]) {
+  const button = container.querySelector<HTMLButtonElement>(`button[aria-label="Filter leads by ${kind}"]`)!;
+  if (button.getAttribute("aria-expanded") !== "true") await act(async () => button.click());
+  const group = container.querySelector<HTMLElement>(`[role="group"][aria-label="Filter leads by ${kind}"]`)!;
+  const clear = [...group.querySelectorAll("button")].find(button => button.textContent === "Clear")!;
+  await act(async () => clear.click());
+  for (const value of values) await act(async () => group.querySelector<HTMLInputElement>(`input[value="${value}"]`)!.click());
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  await act(async () => button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+}
+
 function listRequests(): string[] {
   return vi.mocked(fetch).mock.calls
     .map(([url]) => String(url))
@@ -116,9 +128,7 @@ it("labels outreach leads and filters them without hiding website leads from All
   await render(leads, "rf_transparent");
   expect(leadRows()).toHaveLength(2);
   expect(leadRows().some((row) => row.textContent?.includes("Outreach"))).toBe(true);
-  const source = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by source"]')!;
-  expect(source.textContent).toContain("Outreach (1)");
-  await act(async () => { source.value = "outreach"; source.dispatchEvent(new Event("change", { bubbles: true })); });
+  await chooseFilters("source", ["outreach"]);
   expect(leadRows()).toHaveLength(1);
   expect(leadRows()[0].textContent).toContain("Customer 1");
 });
@@ -129,8 +139,7 @@ it('excludes old website leads by default and only includes older open work when
   leads[1].submitted_at = '2024-01-02T00:00:00Z';
   leads[1].outcome = 'won';
   await render(leads, 'rf_transparent');
-  const source = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by source"]')!;
-  await act(async () => { source.value = 'website'; source.dispatchEvent(new Event('change', { bubbles: true })); });
+  await chooseFilters("source", ["website"]);
   expect(leadRows()).toHaveLength(1);
   expect(leadRows()[0].textContent).toContain('Customer 2');
   expect(container.textContent).toContain('Received in the last 30 days');
@@ -148,22 +157,31 @@ it('allows historical website leads through the explicit All time received filte
   await act(async () => { dates.value = 'all'; dates.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(leadRows()).toHaveLength(1);
 });
-it('puts overdue work first and supports the My leads view', async () => {
+it('defaults to newest despite a saved priority preference and supports the My leads view', async () => {
   const leads = makeLeads(3);
+  sessionStorage.setItem('rf-lead-queue:v2:bc_transparent', JSON.stringify({ sort: 'priority' }));
+  leads[0].submitted_at = '2026-10-26T14:00:00Z';
+  leads[1].submitted_at = '2026-10-25T14:00:00Z';
+  leads[2].submitted_at = '2026-10-24T14:00:00Z';
   leads[2].next_follow_up_at = '2026-10-25T10:00:00Z';
   leads[2].assigned_to = 'employee@example.com';
   await render(leads);
+  expect(leadRows()[0].textContent).toContain('Customer 0');
+  const sort = container.querySelector<HTMLSelectElement>('select[aria-label="Sort leads"]')!;
+  expect(sort.value).toBe('newest');
+  expect([...sort.options].map(option => option.value)).toEqual(['newest', 'oldest']);
+  await act(async () => { sort.value = 'oldest'; sort.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(leadRows()[0].textContent).toContain('Customer 2');
-  const owner = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by owner"]')!;
-  await act(async () => { owner.value = 'mine'; owner.dispatchEvent(new Event('change', { bubbles: true })); });
+  await chooseFilters("owner", ["mine"]);
   expect(leadRows()).toHaveLength(1);
 });
-it('explains excluded spam and keeps phone numbers readable and callable', async () => {
+it('keeps spam out of the queue without a persistent banner and keeps phone numbers callable', async () => {
   const leads = makeLeads(2);
   leads[0].phone = '+1 416 555 0123';
   leads[1].outcome = 'not_applicable'; leads[1].not_applicable_reason = 'Spam: marketing solicitation';
   await render(leads);
-  expect(container.textContent).toContain('1 spam excluded');
+  expect(container.textContent).not.toContain('spam excluded');
+  expect(leadRows()).toHaveLength(1);
   expect(container.querySelector('a[href="tel:+14165550123"]')).not.toBeNull();
 });
 
@@ -174,8 +192,7 @@ it('keeps open summary and queue consistent when a legacy spam record has an ope
   expect(leadRows()).toHaveLength(1);
   expect(container.textContent).toContain('Open leads1');
   expect(container.textContent).toContain('1 lead matching filters');
-  const status = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by status"]')!;
-  await act(async () => { status.value = 'spam'; status.dispatchEvent(new Event('change', { bubbles: true })); });
+  await chooseFilters("status", ["spam"]);
   expect(leadRows()).toHaveLength(1);
   expect(leadRows()[0].textContent).toContain('Customer 1');
 });
@@ -188,4 +205,49 @@ it('keeps analytics accessible on the queue page without expanding it by default
   expect(analytics.getAttribute('aria-expanded')).toBe('true');
   expect(container.querySelector('#lead-analytics')).not.toBeNull();
   expect(leadRows()).toHaveLength(2);
+});
+
+it("combines sources, statuses and owner selections, persists them and resets", async () => {
+  const leads = makeLeads(5);
+  leads[0].source = "website";
+  leads[0].assigned_to = "employee@example.com";
+  leads[1].source = "meta";
+  leads[1].outcome = "won";
+  leads[2].source = "outreach";
+  leads[3].source = "meta";
+  leads[3].assigned_to = "another@example.com";
+  leads[4].source = "website";
+  leads[4].outcome = "lost";
+  await render(leads, "rf_transparent");
+  await chooseFilters("source", ["website", "meta"]);
+  await chooseFilters("status", ["open", "won"]);
+  await chooseFilters("owner", ["mine", "unassigned"]);
+  expect(leadRows().map(row => row.textContent?.match(/Customer \d/)?.[0])).toEqual(["Customer 0", "Customer 1"]);
+  const saved = JSON.parse(sessionStorage.getItem("rf-lead-queue:v2:rf_transparent")!);
+  expect(saved.source).toBe("website,meta");
+  expect(saved.status).toBe("open,won");
+  expect(saved.owner).toBe("mine,unassigned");
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  await render(leads, "rf_transparent");
+  expect(leadRows()).toHaveLength(2);
+  await chooseFilters("source", []);
+  expect(leadRows()).toHaveLength(0);
+  const reset = [...container.querySelectorAll("button")].find(button => button.textContent === "Reset")!;
+  await act(async () => reset.click());
+  expect(leadRows()).toHaveLength(3);
+});
+
+it("can exclude Outreach directly from All sources and closes on outside click", async () => {
+  const leads = makeLeads(3); leads[1].source = "meta"; leads[2].source = "outreach";
+  await render(leads, "rf_transparent");
+  const trigger = container.querySelector<HTMLButtonElement>('button[aria-label="Filter leads by source"]')!;
+  await act(async () => trigger.click());
+  const group = container.querySelector('[role="group"][aria-label="Filter leads by source"]')!;
+  expect([...group.querySelectorAll<HTMLInputElement>("input")].every(input => input.checked)).toBe(true);
+  await act(async () => group.querySelector<HTMLInputElement>('input[value="outreach"]')!.click());
+  expect(leadRows()).toHaveLength(2);
+  expect(trigger.textContent).toContain("Website, Meta");
+  await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
 });
