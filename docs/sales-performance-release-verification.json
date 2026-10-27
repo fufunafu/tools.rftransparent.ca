@@ -1,5 +1,5 @@
 {
-  "status": "candidate-ready",
+  "status": "deployed-and-verified",
   "sourceProduction": "dpl_Hd74UqXAEtPJ7NwqorHAtkE9ymky",
   "priorSourceProduction": "dpl_14EcAdKc8KofMMKFywqmxq7LvUx2",
   "migration": "20261027024500_sales_shopify_mirror",
@@ -125,5 +125,57 @@
       }
     }
   },
-  "browserVerification": "Pending. Existing browser automation connection unavailable; temporary owner authentication requires explicit approval."
+  "browserVerification": {
+    "method": "Existing authenticated Chrome session, separate window; no new owner login created",
+    "navigation": {
+      "ttfbMs": 39,
+      "domReadyMs": 1261,
+      "fullLoadMs": 1283,
+      "largestContentfulPaintMs": 1300
+    },
+    "earlierHardReload": {
+      "domReadyMs": 1540,
+      "fullLoadMs": 2400,
+      "note": "Earlier measurement in the shared browser window before isolating the verification window. Load times depend on asset cache and network."
+    },
+    "fivePeriods": true,
+    "fiveReps": true,
+    "pairedSalesQuotesAndTotals": true,
+    "danielSevenDayOrderTotalMatches": true,
+    "marieOneYearQuoteTotalMatches": true,
+    "customerNameSearchFiltersRecords": true
+  },
+  "deploymentId": "dpl_7JAuxFMdDoL64gThanVf7WmqppCm",
+  "deploymentUrl": "https://tools-rftransparent-ka8rdi4wn-fuannes-projects.vercel.app",
+  "productionUrl": "https://tools.rftransparent.ca/dashboards/sales",
+  "sourceCommit": "d5e1d250fcdaa7a007aa72f8c313d9144219ac35",
+  "liveProtectedSourceFilesVerified": 36,
+  "preservationManifestSha256": "7c99ca70804019a2b6cc764f9d36f6368f2f48795467aacaafbbfe1c5cadf7f3",
+  "liveChecks": {
+    "cronRuns": [
+      {
+        "status": "success",
+        "detail": "{\"status\":\"success\",\"asOf\":\"2026-10-27T03:00:47.919Z\",\"sync\":{\"recordsSynced\":0,\"deleted\":0,\"bootstrapped\":0}}",
+        "duration_ms": 29481,
+        "started_at": "2026-10-27T03:00:47.919+00:00"
+      },
+      {
+        "status": "success",
+        "detail": "{\"status\":\"success\",\"asOf\":\"2026-10-27T02:55:47.741Z\",\"sync\":{\"recordsSynced\":0,\"deleted\":0,\"bootstrapped\":0}}",
+        "duration_ms": 9945,
+        "started_at": "2026-10-27T02:55:47.737+00:00"
+      },
+      {
+        "status": "success",
+        "detail": "{\"status\":\"success\",\"asOf\":\"2026-10-27T02:50:54.499Z\",\"sync\":{\"recordsSynced\":0,\"deleted\":0,\"bootstrapped\":0}}",
+        "duration_ms": 22455,
+        "started_at": "2026-10-27T02:50:54.498+00:00"
+      }
+    ],
+    "anonymousAccess": {
+      "/dashboards/sales": 307,
+      "/api/dashboards/sales/records?repId=rob&period=7d&kind=orders": 401,
+      "/api/cron/refresh-sales-dashboard": 401
+    }
+  }
 }

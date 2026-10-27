@@ -139,19 +139,6 @@ export const NAV_ITEMS: NavSection[] = [
     ),
   },
   {
-    href: "/hubspot-dupe",
-    label: "HubSpot Dupe",
-    tint: "#C45D27",
-    status: "wip",
-    group: "revenue",
-    access: "crm",
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="w-5 h-5">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2m20 0v-2a4 4 0 0 0-3-3.87M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7-7.87a4 4 0 0 1 0 7.75" />
-      </svg>
-    ),
-  },
-  {
     href: "/marketing",
     label: "Marketing",
     tint: "#B4552C",
@@ -275,6 +262,7 @@ export const NAV_ITEMS: NavSection[] = [
     status: "wip",
     group: "wip",
     match: [
+      "/hubspot-dupe",
       "/customer-service/outreach",
       "/customer-service/tmp",
       "/amazon",
@@ -287,6 +275,7 @@ export const NAV_ITEMS: NavSection[] = [
       </svg>
     ),
     children: [
+      { href: "/hubspot-dupe", label: "HubSpot Dupe", status: "wip", access: "crm" },
       { href: "/customer-service/outreach/leads", label: "Outreach leads", status: "wip" },
       // TEMPORARY combined Leads + Follow-up; remove with src/app/customer-service/tmp.
       { href: "/customer-service/tmp", label: "Leads (TMP)", status: "wip" },
