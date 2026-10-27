@@ -1,5 +1,7 @@
 "use client";
 
+import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
+
 import { useEffect, useMemo } from "react";
 import {
   LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceDot,
@@ -89,7 +91,7 @@ function reorderReasons(
 
   if (monthly === 0) {
     reasons.push(
-      `No sales history yet — hardware SKUs are kept at a minimum of 50 units, and on hand + inbound is only ${fmtN(total)}.`,
+      `No sales history yet - hardware SKUs are kept at a minimum of 50 units, and on hand + inbound is only ${fmtN(total)}.`,
     );
     return reasons;
   }
@@ -101,7 +103,7 @@ function reorderReasons(
         ? `the next inbound PO arrives in ~${fmtN(waitDays)} days`
         : `new stock can arrive (lead time is ${lead} days)`;
     reasons.push(
-      `On hand alone covers about ${fmtN(product.days_of_stock_left ?? 0)} days — not enough to last until ${waitLabel}, so a Montreal transfer is needed to bridge the gap.`,
+      `On hand alone covers about ${fmtN(product.days_of_stock_left ?? 0)} days - not enough to last until ${waitLabel}, so a Montreal transfer is needed to bridge the gap.`,
     );
   }
 
@@ -127,7 +129,7 @@ function reorderReasons(
         );
       } else {
         reasons.push(
-          `The ${fmtN(target)}-unit target is ${fmtN(settings.restock_cover_pct)}% of one lead time of sales (~${fmtN(leadDemand)}) — the cover set in Settings.`,
+          `The ${fmtN(target)}-unit target is ${fmtN(settings.restock_cover_pct)}% of one lead time of sales (~${fmtN(leadDemand)}) - the cover set in Settings.`,
         );
       }
     }
@@ -194,7 +196,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
             <Stat label="On hand" value={product.current_inventory.toLocaleString("en-CA")} />
             <Stat label="Inbound" value={product.inbound.toLocaleString("en-CA")} />
-            <Stat label="Monthly sales" value={(product.avg_monthly_sales_grs + product.avg_monthly_sales_rf).toFixed(1)} />
+            <Stat label="Monthly sales" value={seasonalMonthlySales(product.avg_monthly_sales_grs + product.avg_monthly_sales_rf, settings).toFixed(1)} />
             <Stat label="Capacity" value={product.storage_capacity.toLocaleString("en-CA")} />
           </div>
           <div className="bg-sand-50 rounded-xl border border-sand-200/60 p-4 text-sm">
@@ -210,7 +212,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                 </div>
               </div>
             ) : (() => {
-              // No projected stockout doesn't always mean "safe" — for SKUs
+              // No projected stockout doesn't always mean "safe" - for SKUs
               // flagged for reorder because they're under the target stock
               // (especially hardware with no sales data → 50-unit floor),
               // the forecast can't predict a stockout because daily_sales
@@ -237,7 +239,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                       order point is {fmtN(target)}. Short by{" "}
                       {fmtN(gap)}.
                       {product.avg_monthly_sales_grs + product.avg_monthly_sales_rf === 0 &&
-                        " The chart shows no stockout because this SKU has no sales history yet — we still want to keep the minimum on hand."}
+                        " The chart shows no stockout because this SKU has no sales history yet - we still want to keep the minimum on hand."}
                     </div>
                   </div>
                 );
@@ -246,7 +248,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               return (
                 <div>
                   <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
-                  <div className="text-xl font-semibold text-green-700">Safe — no stockout within the next year</div>
+                  <div className="text-xl font-semibold text-green-700">Safe - no stockout within the next year</div>
                   {arrivals.length > 0 && (
                     <div className="text-sand-600 text-xs mt-0.5">
                       {arrivals.length} incoming PO{arrivals.length === 1 ? "" : "s"} included
@@ -371,12 +373,12 @@ function CalcNote({
     rows.push([
       "Target at arrival",
       product.category === "hardware"
-        ? "no sales history — kept at the 50-unit minimum"
-        : `no sales history — min stock floor: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(product.storage_capacity)} = ${fmtN(product.restock_target)}`,
+        ? "no sales history - kept at the 50-unit minimum"
+        : `no sales history - min stock floor: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(product.storage_capacity)} = ${fmtN(product.restock_target)}`,
     ]);
     rows.push([
       "Order point",
-      `${fmtN(product.reorder_point)} — same as the target, since nothing sells during the lead time`,
+      `${fmtN(product.reorder_point)} - same as the target, since nothing sells during the lead time`,
     ]);
   } else {
     const scaledMonthly = product.daily_sales * 30;

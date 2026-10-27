@@ -1,17 +1,19 @@
 "use client";
 
+import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
+
 import { useMemo, useState } from "react";
-import type { Category, ProductWithMetrics } from "@/lib/purchasing/types";
+import type { Category, ProductWithMetrics, PurchasingSettings } from "@/lib/purchasing/types";
 import ColumnHint from "./ColumnHint";
 
-interface Props { initialProducts: ProductWithMetrics[] }
+interface Props { initialProducts: ProductWithMetrics[]; settings: PurchasingSettings }
 
 type SortKey =
   | "sort_order" | "sku" | "overstock"
   | "current_inventory" | "storage_capacity" | "days_until_capacity";
 
 function fmtNum(n: number | null, digits = 0): string {
-  if (n === null || !Number.isFinite(n)) return "—";
+  if (n === null || !Number.isFinite(n)) return "-";
   return n.toLocaleString("en-CA", { maximumFractionDigits: digits });
 }
 function daysUntilCapacity(p: ProductWithMetrics): number | null {
@@ -20,7 +22,7 @@ function daysUntilCapacity(p: ProductWithMetrics): number | null {
   return p.overstock / p.daily_sales;
 }
 
-export default function OverstockTable({ initialProducts }: Props) {
+export default function OverstockTable({ initialProducts, settings }: Props) {
   const [category, setCategory] = useState<Category>("glass");
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -103,7 +105,7 @@ export default function OverstockTable({ initialProducts }: Props) {
               <Th sortKey="sku" current={sortKey} dir={sortDir} onToggle={toggleSort}>SKU</Th>
               <th className="text-left px-3 py-2 font-medium">Name</th>
               <Th sortKey="current_inventory" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">On hand<ColumnHint>Units currently in the warehouse — what you have right now, not counting what&apos;s on its way.</ColumnHint></span>
+                <span className="inline-flex items-center">On hand<ColumnHint>Units currently in the warehouse - what you have right now, not counting what&apos;s on its way.</ColumnHint></span>
               </Th>
               <Th sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Capacity<ColumnHint>The most units you ever want to keep on hand for this SKU. Anything above this is &ldquo;overstock&rdquo;.</ColumnHint></span>
@@ -112,7 +114,7 @@ export default function OverstockTable({ initialProducts }: Props) {
                 <span className="inline-flex items-center">Overstock<ColumnHint>How many units you&apos;re over capacity by: <span className="font-mono">on_hand − capacity</span>. Positive (red) means you have more than you want.</ColumnHint></span>
               </Th>
               <th className="text-right px-3 py-2 font-medium">
-                <span className="inline-flex items-center justify-end w-full">Monthly<ColumnHint>Average units sold per month = GRS + RF channels. From the trailing-12-month rolling average.</ColumnHint></span>
+                <span className="inline-flex items-center justify-end w-full">Monthly<ColumnHint>Annual net units from RF + GRS divided by 12, multiplied by this month&apos;s seasonality. Growth is applied separately to stock projections.</ColumnHint></span>
               </th>
               <Th sortKey="days_until_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">Days to clear<ColumnHint>How long the excess takes to burn off at the current sales rate: <span className="font-mono">overstock / (monthly / 30)</span>. &ldquo;No sales&rdquo; means it&apos;ll never clear on its own.</ColumnHint></span>
@@ -131,9 +133,9 @@ export default function OverstockTable({ initialProducts }: Props) {
                   <td className={"px-3 py-2 text-right " + (isOver ? "text-red-700 font-medium" : "text-sand-500")}>
                     {p.overstock > 0 ? "+" : ""}{fmtNum(p.overstock, 0)}
                   </td>
-                  <td className="px-3 py-2 text-right text-sand-500">{fmtNum(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, 1)}</td>
+                  <td className="px-3 py-2 text-right text-sand-500">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</td>
                   <td className="px-3 py-2 text-right">
-                    {!isOver ? "—" : p.days_until_capacity === null ? "no sales" : fmtNum(p.days_until_capacity, 0)}
+                    {!isOver ? "-" : p.days_until_capacity === null ? "no sales" : fmtNum(p.days_until_capacity, 0)}
                   </td>
                 </tr>
               );

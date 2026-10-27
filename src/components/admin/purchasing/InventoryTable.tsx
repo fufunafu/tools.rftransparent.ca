@@ -1,7 +1,10 @@
 "use client";
 
+import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
+
 import { useState, useMemo, useRef } from "react";
 import useSWR from "swr";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   SOP_LABEL_DISPLAY,
@@ -50,11 +53,11 @@ const SOP_BADGE: Record<SopLabel, string> = {
 };
 
 function fmtNum(n: number | null, digits = 1): string {
-  if (n === null || !Number.isFinite(n)) return "—";
+  if (n === null || !Number.isFinite(n)) return "-";
   return n.toLocaleString("en-CA", { minimumFractionDigits: 0, maximumFractionDigits: digits });
 }
 function heightBucket(h: number | null): string {
-  if (h === null) return "—";
+  if (h === null) return "-";
   if (h < 35) return '34"';
   if (h < 42) return '40"';
   return '46"';
@@ -272,7 +275,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <summary className="cursor-pointer">Show skipped rows</summary>
                 <ul className="mt-1 ml-4 list-disc">
                   {bulkResult.skipped.slice(0, 50).map((s, i) => (
-                    <li key={i}><span className="font-mono">{s.sku}</span> — {s.reason}</li>
+                    <li key={i}><span className="font-mono">{s.sku}</span> - {s.reason}</li>
                   ))}
                   {bulkResult.skipped.length > 50 && <li>…and {bulkResult.skipped.length - 50} more.</li>}
                 </ul>
@@ -288,9 +291,9 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
           <thead className="sticky top-0 z-20 bg-sand-50 text-sand-500 text-[11px] uppercase tracking-wider">
             <tr>
               <Th sortable sortKey="sku" current={sortKey} dir={sortDir} onToggle={toggleSort}>
-                <span className="inline-flex items-center">SKU<ColumnHint>The product code — unique across the catalog.</ColumnHint></span>
+                <span className="inline-flex items-center">Product<ColumnHint>The product code - unique across the catalog.</ColumnHint></span>
               </Th>
-              <th className="text-left px-3 py-2 font-medium">Name</th>
+
               <Th sortable sortKey="current_inventory" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">On hand<ColumnHint>Units in the warehouse right now. Click the blue number to edit. Also bumps automatically when you mark a PO line as received.</ColumnHint></span>
               </Th>
@@ -298,22 +301,22 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center">Inbound<ColumnHint>Units already ordered but not yet received. Computed live as <span className="font-mono">SUM(qty_ordered − qty_received)</span> across every PO whose status is <em>Ordered</em> or <em>In transit</em>.</ColumnHint></span>
               </Th>
               <Th sortable sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: auto-derived target = <span className="font-mono">max(50, 3 × monthly × season × growth)</span> — three months of cover at the current month&apos;s sales rate, with a 50-unit floor for SKUs with no sales data. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
+                <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: auto-derived target = <span className="font-mono">max(50, 3 × monthly × growth)</span> - three months of cover at the current month&apos;s sales rate, with a 50-unit floor for SKUs with no sales data. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
               </Th>
               {showSalesDetail && (
                 <>
                   <th className="text-right px-3 py-2 font-medium">
-                    <span className="inline-flex items-center">GRS/mo<ColumnHint>Average monthly sales from the GRS channel.</ColumnHint></span>
+                    <span className="inline-flex items-center">GRS/mo<ColumnHint>GRS annual net units divided by 12, multiplied by this month’s seasonality.</ColumnHint></span>
                   </th>
                   <th className="text-right px-3 py-2 font-medium">
-                    <span className="inline-flex items-center">RF/mo<ColumnHint>Average monthly sales from the RF channel.</ColumnHint></span>
+                    <span className="inline-flex items-center">RF/mo<ColumnHint>RF annual net units divided by 12, multiplied by this month’s seasonality.</ColumnHint></span>
                   </th>
                 </>
               )}
               <Th sortable sortKey="daily_sales" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center gap-1">
                   Monthly
-                  <ColumnHint>Average units sold per month: <span className="font-mono">GRS + RF</span>.</ColumnHint>
+                  <ColumnHint>Annual net units from RF + GRS ÷ 12 × this month&apos;s seasonality multiplier. Click a value to inspect the annual baseline and actual monthly history. Growth settings apply separately to stock projections.</ColumnHint>
                   <button type="button" onClick={(e) => { e.stopPropagation(); setShowSalesDetail((v) => !v); }}
                     title={showSalesDetail ? "Hide GRS/RF" : "Show GRS/RF"}
                     className="text-sand-400 hover:text-accent text-[10px]">
@@ -332,11 +335,11 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
               </Th>
               <th className="text-left px-3 py-2 font-medium">
                 <span className="inline-flex items-center gap-1">Status<ColumnHint>
-                  <span className="block"><strong>Reorder + Montreal transfer</strong> — on hand runs out before the next PO arrives AND total stock (on hand + inbound) is below the reorder point. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
-                  <span className="block mt-1"><strong>Montreal transfer</strong> — on hand runs out before the next PO arrives, but total stock is still above the reorder point. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
-                  <span className="block mt-1"><strong>Reorder now</strong> — total stock (on hand + inbound) is below the reorder point, i.e. ordering today would no longer land you at the target stock when the PO arrives (see Settings for the target cover and fill floor).</span>
-                  <span className="block mt-1"><strong>OK</strong> — sufficient cover and inbound timing is safe.</span>
-                  <span className="block mt-1"><strong>No sales data</strong> — monthly sales is 0.</span>
+                  <span className="block"><strong>Reorder + Montreal transfer</strong> - on hand runs out before the next PO arrives AND total stock (on hand + inbound) is below the reorder point. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
+                  <span className="block mt-1"><strong>Montreal transfer</strong> - on hand runs out before the next PO arrives, but total stock is still above the reorder point. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
+                  <span className="block mt-1"><strong>Reorder now</strong> - total stock (on hand + inbound) is below the reorder point, i.e. ordering today would no longer land you at the target stock when the PO arrives (see Settings for the target cover and fill floor).</span>
+                  <span className="block mt-1"><strong>OK</strong> - sufficient cover and inbound timing is safe.</span>
+                  <span className="block mt-1"><strong>No sales data</strong> - monthly sales is 0.</span>
                 </ColumnHint>
                 <button type="button" onClick={(e) => { e.stopPropagation(); setShowPricingDetail((v) => !v); }}
                   title={showPricingDetail ? "Hide Value / Unit cost" : "Show Value / Unit cost"}
@@ -361,19 +364,18 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
           <tbody className="divide-y divide-sand-100">
             {visible.map((p) => (
               <tr key={p.id} className={savingId === p.id ? "bg-amber-50/40" : ""}>
-                <td className="px-3 py-2 font-mono text-xs">{p.sku}</td>
-                <td className="px-3 py-2 text-sand-700">{p.name}</td>
+                <td className="sticky left-0 z-10 min-w-48 bg-white px-3 py-2"><span className="block font-mono text-xs font-medium">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-500">{p.name.replaceAll("\u2014", "-")}</span></td>
                 <EditableCell value={p.current_inventory}
                   onSave={(v) => saveField(p.id, "current_inventory", v)} saving={savingId === p.id} />
-                <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "—"}</td>
+                <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "-"}</td>
                 <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.storage_capacity, 0)}</td>
                 {showSalesDetail && (
                   <>
-                    <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.avg_monthly_sales_grs, 2)}</td>
-                    <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.avg_monthly_sales_rf, 2)}</td>
+                    <td className="px-3 py-2 text-right text-sand-700">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs, settings), 2)}</td>
+                    <td className="px-3 py-2 text-right text-sand-700">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_rf, settings), 2)}</td>
                   </>
                 )}
-                <td className="px-3 py-2 text-right text-sand-500">{fmtNum(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, 1)}</td>
+                <td className="px-3 py-2 text-right text-sand-500"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="text-accent hover:underline">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</Link></td>
                 <td className="px-3 py-2 text-right text-sand-700">{fmtNum(p.days_of_stock_left, 0)}</td>
                 <td className={"px-3 py-2 text-right " + (p.inbound > 0 ? "text-sand-900 font-medium" : "text-sand-500")}>
                   {fmtNum(p.days_of_stock_with_inbound, 0)}
@@ -448,7 +450,7 @@ function Th({ children, sortable, sortKey, current, dir, onToggle, align = "left
   }
   const active = current === sortKey;
   return (
-    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-2 font-medium"}>
+    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-2 font-medium" + (sortKey === "sku" ? " sticky left-0 z-30 min-w-48 bg-sand-50" : "")}>
       <button type="button" onClick={() => onToggle(sortKey)}
         className={"inline-flex items-center gap-1 hover:text-sand-700 " + (active ? "text-sand-700" : "")}>
         {children}

@@ -1,6 +1,9 @@
 "use client";
 
+import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
+
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   SOP_LABEL_DISPLAY,
@@ -38,7 +41,7 @@ const SOP_BADGE: Record<SopLabel, string> = {
 };
 
 function fmt(n: number | null, digits = 1): string {
-  if (n === null || !Number.isFinite(n)) return "—";
+  if (n === null || !Number.isFinite(n)) return "-";
   return n.toLocaleString("en-CA", { maximumFractionDigits: digits });
 }
 export default function ReorderTable({ initialProducts, initialForecasts, settings }: Props) {
@@ -195,17 +198,17 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
         <table className="w-full text-sm tabular-nums">
           <thead className="sticky top-0 z-20 bg-sand-50 text-sand-500 text-[11px] uppercase tracking-wider">
             <tr>
-              <th className="text-left px-3 py-2 font-medium">SKU</th>
-              <th className="text-left px-3 py-2 font-medium">Name</th>
+              <th className="sticky left-0 z-30 min-w-48 bg-sand-50 text-left px-3 py-2 font-medium">Product</th>
+
               <th className="text-left px-3 py-2 font-medium">Status</th>
               <th className="text-right px-3 py-2 font-medium">On hand</th>
               <th className="text-right px-3 py-2 font-medium">Inbound</th>
               <th className="text-right px-3 py-2 font-medium">Capacity</th>
-              <th className="text-right px-3 py-2 font-medium" title="Average monthly sales = GRS + RF channels">Monthly</th>
-              <th className="text-right px-3 py-2 font-medium" title="Days you can keep selling using only what's on hand (ignores inbound): on_hand / (monthly / 30) — seasonality and growth applied.">Days left</th>
-              <th className="text-right px-3 py-2 font-medium" title="The exact math result — reach the restock target after covering lead-time demand">Perfect</th>
-              <th className="text-right px-3 py-2 font-medium" title="Minimum to transfer from Montreal so we don't stock out before the next China shipment lands. Click to copy into Order qty (then use 'Create draft Montreal transfer'). Independent of the China refill on the right — for a 'Reorder + Montreal transfer' SKU you may want to do BOTH (a Montreal transfer now AND a China order to refill long-term).">Transfer</th>
-              <th className="text-right px-3 py-2 font-medium" title="Crate-rounded China refill — what you'd actually order from the main supplier. Click to copy into Order qty (then use 'Create draft China order').">Suggested</th>
+              <th className="text-right px-3 py-2 font-medium" title="Annual net units from RF + GRS divided by 12, multiplied by this month’s seasonality. Click to inspect history.">Monthly</th>
+              <th className="text-right px-3 py-2 font-medium" title="Days you can keep selling using only what's on hand (ignores inbound): on_hand / (monthly / 30) - seasonality and growth applied.">Days left</th>
+              <th className="text-right px-3 py-2 font-medium" title="The exact math result - reach the restock target after covering lead-time demand">Perfect</th>
+              <th className="text-right px-3 py-2 font-medium" title="Minimum to transfer from Montreal so we don't stock out before the next China shipment lands. Click to copy into Order qty (then use 'Create draft Montreal transfer'). Independent of the China refill on the right - for a 'Reorder + Montreal transfer' SKU you may want to do BOTH (a Montreal transfer now AND a China order to refill long-term).">Transfer</th>
+              <th className="text-right px-3 py-2 font-medium" title="Crate-rounded China refill - what you'd actually order from the main supplier. Click to copy into Order qty (then use 'Create draft China order').">Suggested</th>
               <th className="text-right px-3 py-2 font-medium">Order qty</th>
               <th className="text-right px-3 py-2 font-medium">Line value</th>
             </tr>
@@ -217,23 +220,23 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
               const lineValue = Number.isFinite(q) ? q * p.unit_cost_landed : 0;
               return (
                 <tr key={p.id}>
-                  <td className="px-3 py-2 font-mono text-xs">
+                  <td className="sticky left-0 z-10 min-w-48 bg-white px-3 py-2 font-mono text-xs">
                     <span className="inline-flex items-center gap-1.5">
                       {p.sku}
                       <button type="button" onClick={() => setForecastId(p.id)} title="Projected inventory & how the order point was calculated"
                         className="text-sand-400 hover:text-accent text-sm">📈</button>
                     </span>
+                    <span className="mt-1 block max-w-60 font-sans text-xs text-sand-500">{p.name.replaceAll("\u2014", "-")}</span>
                   </td>
-                  <td className="px-3 py-2 text-sand-700">{p.name}</td>
                   <td className="px-3 py-2">
                     <span className={"inline-block px-2 py-0.5 rounded-md border text-[11px] " + (SOP_BADGE[p.sop_label] ?? "bg-sand-100 text-sand-600 border-sand-200")}>
                       {SOP_LABEL_DISPLAY[p.sop_label] ?? p.sop_label}
                     </span>
                   </td>
                   <td className="px-3 py-2 text-right">{fmt(p.current_inventory, 0)}</td>
-                  <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmt(p.inbound, 0) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-sand-500">{p.inbound > 0 ? fmt(p.inbound, 0) : "-"}</td>
                   <td className="px-3 py-2 text-right text-sand-500">{fmt(p.storage_capacity, 0)}</td>
-                  <td className="px-3 py-2 text-right text-sand-500">{fmt(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, 1)}</td>
+                  <td className="px-3 py-2 text-right text-sand-500"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="text-accent hover:underline">{fmt(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</Link></td>
                   <td className="px-3 py-2 text-right">{fmt(p.days_of_stock_left, 0)}</td>
                   <td className="px-3 py-2 text-right text-sand-600 tabular-nums">
                     {fmt(p.perfect_qty, 0)}
@@ -252,7 +255,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
                         {fmt(p.transfer_requirement, 0)}
                       </button>
                     ) : (
-                      <span className="text-sand-300">—</span>
+                      <span className="text-sand-300">-</span>
                     )}
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -266,7 +269,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
                         {fmt(p.suggested_qty, 0)}
                       </button>
                     ) : (
-                      <span className="text-sand-300 tabular-nums">—</span>
+                      <span className="text-sand-300 tabular-nums">-</span>
                     )}
                   </td>
                   <td className="px-3 py-1 text-right">
@@ -275,12 +278,12 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
                       placeholder="0"
                       className="w-20 px-1.5 py-1 text-right rounded border border-sand-300 focus:border-accent focus:ring-1 focus:ring-accent focus:outline-none" />
                   </td>
-                  <td className="px-3 py-2 text-right text-sand-700">{lineValue > 0 ? formatCADWhole(lineValue) : "—"}</td>
+                  <td className="px-3 py-2 text-right text-sand-700">{lineValue > 0 ? formatCADWhole(lineValue) : "-"}</td>
                 </tr>
               );
             })}
             {visible.length === 0 && (
-              <tr><td colSpan={14} className="px-3 py-10 text-center text-sand-500">
+              <tr><td colSpan={12} className="px-3 py-10 text-center text-sand-500">
                 Nothing needs reordering right now. Toggle &ldquo;Show products that don&apos;t need reordering&rdquo; above to top up anyway.
               </td></tr>
             )}

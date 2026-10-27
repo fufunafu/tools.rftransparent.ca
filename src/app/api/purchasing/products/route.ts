@@ -51,13 +51,13 @@ export async function POST(req: NextRequest) {
     for (const [k, v] of Object.entries(body)) {
       if (EDITABLE_FIELDS.has(k)) payload[k] = v;
     }
+    payload.sku = typeof body.sku === "string" ? body.sku.trim() : "";
     if (!payload.sku || !payload.name || !payload.category) {
       return NextResponse.json(
         { error: "sku, name, and category are required" },
         { status: 400 },
       );
     }
-    payload.sku = body.sku;
     const { data, error } = await getSupabase()
       .from("purchasing_products")
       .insert(payload)
@@ -106,6 +106,9 @@ export async function PATCH(req: NextRequest) {
       .eq("id", id)
       .maybeSingle();
 
+    if (before?.sales_updated_at && ("avg_monthly_sales_rf" in payload || "avg_monthly_sales_grs" in payload)) {
+      return NextResponse.json({ error: "Monthly sales come from order history. Review the product matches in Sales history to correct them." }, { status: 409 });
+    }
     const { data, error } = await supabase
       .from("purchasing_products")
       .update(payload)
