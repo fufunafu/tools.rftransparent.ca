@@ -1,3 +1,4 @@
+import { businessDayCallMetrics, type BusinessDayCallMetrics } from "@/lib/lead-business-day";
 import type { Lead, LeadSource } from "@/lib/customer-service/leads";
 import {
   calculateLeadFunnel,
@@ -13,6 +14,7 @@ import {
 } from "@/lib/lead-response-times";
 
 export type LeadPerformanceMetricKey =
+  | "sameDayCallRate"
   | "callRate"
   | "quoteRate"
   | "conversionRate"
@@ -21,10 +23,12 @@ export type LeadPerformanceMetricKey =
 
 export type LeadPerformanceRateMetricKey = Extract<
   LeadPerformanceMetricKey,
-  "callRate" | "quoteRate" | "conversionRate"
+  "sameDayCallRate" | "callRate" | "quoteRate" | "conversionRate"
 >;
 
 export interface LeadPerformanceTrendSourceMetrics extends LeadFunnelMetrics {
+  sameDayCallRate: number | null;
+  businessDayCalls: BusinessDayCallMetrics;
   medianCallMs: number | null;
   callResponseCount: number;
   medianQuoteMs: number | null;
@@ -68,6 +72,7 @@ type PerformanceLead = Pick<
 function summarizeSource(
   leads: PerformanceLead[],
   source: LeadSource,
+  now: number,
 ): LeadPerformanceTrendSourceMetrics {
   const sourceLeads = leads.filter((lead) => lead.source === source);
   const funnel = calculateLeadFunnel(sourceLeads);
@@ -80,8 +85,11 @@ function summarizeSource(
     lead.first_quote_at ?? lead.quote_sent_at,
   ));
 
+  const businessDayCalls = businessDayCallMetrics(sourceLeads, now);
   return {
     ...funnel,
+    businessDayCalls,
+    sameDayCallRate: businessDayCalls.sameDayCallRate,
     medianCallMs: medianLeadResponseTimeMs(callTimes),
     callResponseCount: callTimes.filter((duration) => duration != null).length,
     medianQuoteMs: medianLeadResponseTimeMs(quoteTimes),
@@ -95,6 +103,7 @@ function summarizeSource(
 export function buildLeadPerformanceTrend(
   leads: PerformanceLead[],
   buckets: LeadTrendPoint[],
+  now: number = Date.now(),
 ): LeadPerformanceTrendPoint[] {
   return buckets.map((bucket) => {
     const bucketLeads = leads.filter((lead) => isLeadInCustomDateRange(
@@ -108,9 +117,9 @@ export function buildLeadPerformanceTrend(
       fullLabel: bucket.fullLabel,
       rangeStart: bucket.rangeStart,
       rangeEnd: bucket.rangeEnd,
-      website: summarizeSource(bucketLeads, "website"),
-      meta: summarizeSource(bucketLeads, "meta"),
-      outreach: summarizeSource(bucketLeads, "outreach"),
+      website: summarizeSource(bucketLeads, "website", now),
+      meta: summarizeSource(bucketLeads, "meta", now),
+      outreach: summarizeSource(bucketLeads, "outreach", now),
     };
   });
 }
@@ -119,6 +128,7 @@ function rateCounts(
   source: LeadPerformanceTrendSourceMetrics,
   metric: LeadPerformanceRateMetricKey,
 ): { count: number; denominator: number } {
+  if (metric === "sameDayCallRate") return { count: source.businessDayCalls.dueOnTime, denominator: source.businessDayCalls.due };
   if (metric === "callRate") {
     return { count: source.attempted, denominator: source.callEligible };
   }

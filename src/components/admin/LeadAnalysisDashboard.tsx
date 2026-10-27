@@ -2,7 +2,9 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import LeadCallDeadlineBreakdown from "./LeadCallDeadlineBreakdown";
+import { businessDayCallMetrics } from "@/lib/lead-business-day";
+import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
 import type { Lead, LeadSource } from "@/lib/customer-service/leads";
 import { useRouter } from "next/navigation";
@@ -65,9 +67,9 @@ const PERFORMANCE_CHARTS: Array<{
   description: string;
 }> = [
   {
-    metric: "callRate",
-    title: "Call attempt rate",
-    description: "Share of callable leads with at least one call attempt. Higher is better.",
+    metric: "sameDayCallRate",
+    title: "Called on the same business day",
+    description: "Called by 5 p.m. Toronto time on the assigned weekday. After-hours and weekend requests move to the next weekday. Only passed deadlines are scored.",
   },
   {
     metric: "quoteRate",
@@ -78,11 +80,6 @@ const PERFORMANCE_CHARTS: Array<{
     metric: "conversionRate",
     title: "Lead-to-order rate",
     description: "Share of included leads that became an order. Higher is better.",
-  },
-  {
-    metric: "medianCallMs",
-    title: "Median elapsed time to call",
-    description: "Median elapsed time among leads with a recorded first call. Lower is better.",
   },
   {
     metric: "medianQuoteMs",
@@ -325,9 +322,10 @@ function metricDisplay(
   metric: LeadPerformanceMetricKey,
   source: LeadPerformanceTrendPoint["website"],
 ): string {
-  if (metric === "callRate") return `${source.callRate}%`;
-  if (metric === "quoteRate") return `${source.quoteRate}%`;
-  if (metric === "conversionRate") return `${source.conversionRate}%`;
+  if (metric === "sameDayCallRate") return source.sameDayCallRate == null ? "No data" : `${source.sameDayCallRate}%`;
+  if (metric === "callRate") return source.callEligible ? `${source.callRate}%` : "No data";
+  if (metric === "quoteRate") return source.total ? `${source.quoteRate}%` : "No data";
+  if (metric === "conversionRate") return source.total ? `${source.conversionRate}%` : "No data";
   return formatLeadResponseTime(source[metric]);
 }
 
@@ -356,7 +354,7 @@ function MetricChartCard({
   loading?: boolean;
   error?: string | null;
 }) {
-  const rateMetric = metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
+  const rateMetric = metric === "sameDayCallRate" || metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
   return (
     <article className="overflow-hidden rounded-xl border border-sand-200 bg-white shadow-sm shadow-slate-200/30">
       <header className="flex flex-col gap-3 border-b border-sand-100 px-4 py-3 sm:flex-row sm:items-start sm:justify-between">
@@ -364,17 +362,15 @@ function MetricChartCard({
           <h2 className="text-sm font-semibold text-sand-900">{title}</h2>
           <p className="mt-0.5 text-xs leading-5 text-sand-500">{description}</p>
         </div>
-        <div className="flex shrink-0 items-center gap-3 text-xs">
-          {summary && (
-            <>
-              <span className="font-semibold text-blue-700">{metricDisplay(metric, summary.website)}</span>
-              <span className="font-semibold text-pink-700">{metricDisplay(metric, summary.meta)}</span>
-              <span className="font-semibold text-violet-700">{metricDisplay(metric, summary.outreach)}</span>
-            </>
-          )}
-          <span className="rounded-full bg-sand-100 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
-            {rateMetric ? rollingWindow.label : "Cohort median"}
-          </span>
+        <div className="min-w-0 text-xs sm:max-w-[290px]">
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-sand-400">Selected-period totals</p>
+          {summary && <div className="flex flex-wrap gap-x-3 gap-y-1">
+            {(["website", "meta", "outreach"] as const).filter(source => ({ website: showWebsite, meta: showMeta, outreach: showOutreach })[source]).map(source => <div key={source} className={source === "website" ? "text-blue-700" : source === "meta" ? "text-pink-700" : "text-violet-700"}>
+              <span>{source === "website" ? "Website" : source === "meta" ? "Meta" : "Outreach"}: </span><strong>{metricDisplay(metric, summary[source])}</strong>
+              {rateMetric && <span className="ml-1 text-[10px] text-sand-500">({metric === "sameDayCallRate" ? `${summary[source].businessDayCalls.dueOnTime}/${summary[source].businessDayCalls.due} due` : metric === "conversionRate" ? `${summary[source].won}/${summary[source].total} won` : `${summary[source].quoted}/${summary[source].total} quoted`})</span>}
+            </div>)}
+          </div>}
+          <p className="mt-2 text-[10px] text-sand-500">{rateMetric ? `Lines: ${rollingWindow.label} rates` : "Lines: median for each submission cohort"}</p>
         </div>
       </header>
       <div className="h-64 px-2 pb-3 pt-4 sm:h-72 sm:px-4">
@@ -416,7 +412,9 @@ export default function LeadAnalysisDashboard({
 }) {
   const setStore = useStoreNavigation("analysis");
   const hasMeta = store === "rf_transparent";
-  const now = useMemo(() => new Date(initialNow), [initialNow]);
+  const [currentTime, setCurrentTime] = useState(initialNow);
+  useEffect(() => { const timer = setInterval(() => setCurrentTime(Date.now()), 60_000); return () => clearInterval(timer); }, []);
+  const now = useMemo(() => new Date(currentTime), [currentTime]);
   const [trendRange, setTrendRange] = useState<TrendSelection>("30d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -499,12 +497,12 @@ export default function LeadAnalysisDashboard({
     outreach: responseSummary(responseAnalysisLeads, "outreach"),
   }), [responseAnalysisLeads]);
   const performanceTrend = useMemo(
-    () => buildLeadPerformanceTrend(leads, trend.points),
-    [leads, trend.points],
+    () => buildLeadPerformanceTrend(leads, trend.points, currentTime),
+    [leads, trend.points, currentTime],
   );
   const callPerformanceTrend = useMemo(
-    () => buildLeadPerformanceTrend(responsePerformanceLeads, trend.points),
-    [responsePerformanceLeads, trend.points],
+    () => buildLeadPerformanceTrend(responsePerformanceLeads, trend.points, currentTime),
+    [responsePerformanceLeads, trend.points, currentTime],
   );
   const trendPoints = trend.points;
   const trendCurrent = trend.current;
@@ -521,8 +519,8 @@ export default function LeadAnalysisDashboard({
       meta: trendCurrent.meta,
       outreach: trendCurrent.outreach,
       total: trendCurrent.total,
-    }])[0] ?? null;
-  }, [leads, trendCurrent, trendPoints]);
+    }], currentTime)[0] ?? null;
+  }, [leads, trendCurrent, trendPoints, currentTime]);
   const callSummaryPoint = useMemo<LeadPerformanceTrendPoint | null>(() => {
     const first = trendPoints[0];
     const last = trendPoints.at(-1);
@@ -536,8 +534,15 @@ export default function LeadAnalysisDashboard({
       meta: 0,
       outreach: 0,
       total: 0,
-    }])[0] ?? null;
-  }, [responsePerformanceLeads, trendPoints]);
+    }], currentTime)[0] ?? null;
+  }, [responsePerformanceLeads, trendPoints, currentTime]);
+  const businessCalls = useMemo(() => businessDayCallMetrics(responseAnalysisLeads, currentTime), [responseAnalysisLeads, currentTime]);
+  const businessCallsBySource = useMemo(() => ({
+    website: businessDayCallMetrics(responseAnalysisLeads.filter(lead => lead.source === "website"), currentTime),
+    meta: businessDayCallMetrics(responseAnalysisLeads.filter(lead => lead.source === "meta"), currentTime),
+    outreach: businessDayCallMetrics(responseAnalysisLeads.filter(lead => lead.source === "outreach"), currentTime),
+  }), [responseAnalysisLeads, currentTime]);
+  const sameDayDisplay = (rate: number | null) => rate == null ? "No data" : `${rate}%`;
   const rollingWindow = performanceRateWindow(trendRange, customFrom, customTo);
   const excluded = analysisLeads.length - funnel.total;
   const toggleSource = (source: LeadSource) => {
@@ -692,12 +697,12 @@ export default function LeadAnalysisDashboard({
                 tone="bg-indigo-500"
               />
               <SnapshotCard
-                label="Call attempt rate"
-                value={`${funnel.callRate}%`}
-                detail={`${funnel.attempted} of ${funnel.callEligible} callable leads attempted`}
-                website={`${funnelBySource.website.callRate}%`}
-                meta={`${funnelBySource.meta.callRate}%`}
-                outreach={`${funnelBySource.outreach.callRate}%`}
+                label="Same-business-day calls"
+                value={responsePerformanceLoading ? "Loading..." : sameDayDisplay(businessCalls.sameDayCallRate)}
+                detail={`${businessCalls.dueOnTime} of ${businessCalls.due} leads with passed deadlines called on time`}
+                website={sameDayDisplay(businessCallsBySource.website.sameDayCallRate)}
+                meta={sameDayDisplay(businessCallsBySource.meta.sameDayCallRate)}
+                outreach={sameDayDisplay(businessCallsBySource.outreach.sameDayCallRate)}
                 tone="bg-amber-400"
               />
               <SnapshotCard
@@ -719,7 +724,7 @@ export default function LeadAnalysisDashboard({
                 tone="bg-emerald-500"
               />
               <SnapshotCard
-                label="Median time to call"
+                label="Median elapsed time to call"
                 value={responsePerformanceLoading ? "Loading..." : formatLeadResponseTime(callResponses.medianCallMs)}
                 detail={responsePerformanceData?.tracking_started_at
                   ? `${callResponses.callCount} records since ${formatDateKey(responsePerformanceData.tracking_started_at.slice(0, 10))}`
@@ -765,18 +770,19 @@ export default function LeadAnalysisDashboard({
           </section>
 
           <section className={sidePanel ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"} aria-label="Performance trends">
+            <LeadCallDeadlineBreakdown metrics={businessCallsBySource} sources={sources} loading={responsePerformanceLoading} error={responsePerformanceError?.message} period={formatSelectedPeriod(trendPoints)} trackingStartedAt={responsePerformanceData?.tracking_started_at} />
             {PERFORMANCE_CHARTS.map((chart) => (
               <MetricChartCard
                 key={chart.metric}
                 {...chart}
-                data={chart.metric === "medianCallMs" ? callPerformanceTrend : performanceTrend}
+                data={chart.metric === "sameDayCallRate" ? callPerformanceTrend : performanceTrend}
                 showWebsite={sources.website}
                 showMeta={sources.meta}
                 showOutreach={sources.outreach}
                 rollingWindow={rollingWindow}
-                summary={chart.metric === "medianCallMs" ? callSummaryPoint : summaryPoint}
-                loading={chart.metric === "medianCallMs" && responsePerformanceLoading}
-                error={chart.metric === "medianCallMs" ? responsePerformanceError?.message ?? null : null}
+                summary={chart.metric === "sameDayCallRate" ? callSummaryPoint : summaryPoint}
+                loading={chart.metric === "sameDayCallRate" && responsePerformanceLoading}
+                error={chart.metric === "sameDayCallRate" ? responsePerformanceError?.message ?? null : null}
               />
             ))}
           </section>
@@ -785,8 +791,7 @@ export default function LeadAnalysisDashboard({
             <p className="font-semibold text-sand-700">How to read these charts</p>
             <p className="mt-1">
               Rate charts use rolling windows to reduce noise from small daily samples. At the start of a chart,
-              each rate uses the days available so far, then settles into the full rolling window. Response-time
-              charts use completed first responses only and measure elapsed time, including nights and weekends.
+              each rate uses the days available so far, then settles into the full rolling window. Header totals cover the whole selected period. Same-business-day call rates exclude leads whose deadlines have not passed and calls with unknown timing. Quote response times still measure elapsed time.
               Recent lead cohorts can improve as calls, quotes, and orders are completed.
             </p>
           </section>
