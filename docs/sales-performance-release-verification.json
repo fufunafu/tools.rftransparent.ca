@@ -1,7 +1,10 @@
 {
   "status": "candidate-ready",
   "sourceProduction": "dpl_Hd74UqXAEtPJ7NwqorHAtkE9ymky",
-  "deploymentId": "dpl_7JAuxFMdDoL64gThanVf7WmqppCm",
+  "priorSourceProduction": "dpl_14EcAdKc8KofMMKFywqmxq7LvUx2",
+  "migration": "20261027024500_sales_shopify_mirror",
+  "migrationApplied": true,
+  "migrationRlsVerified": true,
   "checks": {
     "fullSuitePassed": 1308,
     "additionalStrictGraphqlRegressionPassed": 1,
@@ -10,13 +13,117 @@
     "productionBuild": "passed",
     "preservationFiles": 36
   },
+  "mirrorSync": [
+    {
+      "phase": "initial",
+      "elapsedMs": 51094,
+      "recordsSynced": 6181,
+      "deleted": 0,
+      "bootstrapped": 4
+    },
+    {
+      "phase": "incremental",
+      "elapsedMs": 9929,
+      "recordsSynced": 0,
+      "deleted": 0,
+      "bootstrapped": 0
+    }
+  ],
   "dataBenchmark": {
     "comparedCells": 50,
-    "allDialogTotalsMatched": true,
-    "customerNameSearchVerified": true
+    "reads": [
+      154,
+      190,
+      157,
+      180,
+      134
+    ],
+    "recordsChecks": [
+      {
+        "rep": "Robert Glas",
+        "kind": "orders",
+        "count": 1091,
+        "namedCustomers": 1088,
+        "elapsedMs": 1392
+      },
+      {
+        "rep": "Robert Glas",
+        "kind": "quotes",
+        "count": 679,
+        "namedCustomers": 675,
+        "elapsedMs": 1887
+      },
+      {
+        "rep": "Marie Gauthier",
+        "kind": "orders",
+        "count": 210,
+        "namedCustomers": 210,
+        "elapsedMs": 473
+      },
+      {
+        "rep": "Marie Gauthier",
+        "kind": "quotes",
+        "count": 299,
+        "namedCustomers": 299,
+        "elapsedMs": 413
+      },
+      {
+        "rep": "Daniel Boudreau",
+        "kind": "orders",
+        "count": 78,
+        "namedCustomers": 78,
+        "elapsedMs": 1627
+      },
+      {
+        "rep": "Daniel Boudreau",
+        "kind": "quotes",
+        "count": 173,
+        "namedCustomers": 172,
+        "elapsedMs": 2000
+      },
+      {
+        "rep": "Craig Scarr",
+        "kind": "orders",
+        "count": 15,
+        "namedCustomers": 15,
+        "elapsedMs": 1322
+      },
+      {
+        "rep": "Craig Scarr",
+        "kind": "quotes",
+        "count": 17,
+        "namedCustomers": 17,
+        "elapsedMs": 1515
+      },
+      {
+        "rep": "Aaron",
+        "kind": "orders",
+        "count": 2,
+        "namedCustomers": 2,
+        "elapsedMs": 1935
+      },
+      {
+        "rep": "Aaron",
+        "kind": "quotes",
+        "count": 5,
+        "namedCustomers": 5,
+        "elapsedMs": 1839
+      }
+    ],
+    "note": "Server data reads only; browser navigation and authentication are not included."
   },
-  "migration": "20261027024500_sales_shopify_mirror",
-  "migrationApplied": true,
-  "migrationRlsVerified": true,
-  "customerRecordsIncluded": false
+  "prewarm": {
+    "status": 200,
+    "elapsedMs": 22937,
+    "result": {
+      "status": "success",
+      "asOf": "2026-10-27T02:50:54.499Z",
+      "sync": {
+        "recordsSynced": 0,
+        "deleted": 0,
+        "bootstrapped": 0
+      }
+    }
+  },
+  "browserVerification": "Pending. Existing browser automation connection unavailable; temporary owner authentication requires explicit approval."
 }
