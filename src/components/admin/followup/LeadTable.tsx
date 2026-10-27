@@ -2,6 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { FOLLOWUP_CATEGORIES, MAX_ATTEMPTS, LOSS_REASONS, type LeadStatus } from "@/lib/followup";
+import { hasFixedFollowupSchedule, RF_FOLLOWUP_LIMIT } from "@/lib/followup-policy";
 import type { FollowUpLead } from "@/lib/followup";
 import DuplicatesPanel, { type DupGroup } from "./DuplicatesPanel";
 import { formatCADWhole } from "@/lib/format";
@@ -299,11 +300,14 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
             </thead>
             <tbody>
               {sorted.map((lead) => {
-                const due = formatDueDate(lead.next_followup_at);
+                const sequenceComplete = hasFixedFollowupSchedule(lead.store_id) && lead.followup_count >= RF_FOLLOWUP_LIMIT;
+                const due = sequenceComplete && !lead.closed_at
+                  ? { text: "Follow-ups complete", className: "text-sand-500" }
+                  : formatDueDate(lead.next_followup_at);
                 const statusLabel = FOLLOWUP_CATEGORIES[lead.lead_status as LeadStatus]?.label ?? lead.lead_status;
                 const statusColor = STATUS_COLORS[lead.lead_status] ?? "bg-sand-100 text-sand-600";
                 const isStale = lead.shopify_status === "DELETED";
-                const nearMax = lead.followup_count >= MAX_ATTEMPTS && !lead.closed_at;
+                const nearMax = !hasFixedFollowupSchedule(lead.store_id) && lead.followup_count >= MAX_ATTEMPTS && !lead.closed_at;
                 const isSelected = selected.has(lead.id);
 
                 return (
@@ -399,7 +403,7 @@ export default function LeadTable({ leads, filter, onFilterChange, onLogFollowUp
                           onClick={(e) => { e.stopPropagation(); onLogFollowUp(lead); }}
                           className="text-xs text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
                         >
-                          Log Follow-up
+                          {sequenceComplete ? "Update Outcome" : "Log Follow-up"}
                         </button>
                       )}
                     </td>

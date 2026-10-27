@@ -1,5 +1,6 @@
 import { shopifyGraphQL } from "@/lib/shopify";
 import { getSupabase } from "@/lib/supabase";
+import { hasFixedFollowupSchedule, rfNextFollowup } from "@/lib/followup-policy";
 
 // ─── Category Configuration ─────────────────────────────────────────────────
 
@@ -91,6 +92,7 @@ export interface FollowUpLead {
   // Everyone who created or invoiced the quote (parsed from the Shopify event
   // timeline). last_invoice_sender drives Quotes-by-Staff attribution.
   last_invoice_sender: string | null;
+  last_invoice_sent_at?: string | null;
   contributors: string[] | null;
   // Set by the Re-Quote action when an existing quote is refreshed (new
   // measurements, or a lost lead that came back). Optional — populated once the
@@ -117,6 +119,7 @@ interface ShopifyDraftNode {
   id: string;
   name: string;
   createdAt: string;
+  invoiceSentAt: string | null;
   status: string;
   subtotalPriceSet: { shopMoney: { amount: string } };
   tags: string[];
@@ -148,7 +151,7 @@ function makeFollowUpDraftQuery(dateFilter: string, statusFilter: string, cursor
       draftOrders(first: 250, sortKey: ID, reverse: true, query: "${dateField}:>='${dateFilter}' AND ${statusFilter}"${after}) {
         edges {
           node {
-            id name createdAt status
+            id name createdAt invoiceSentAt status
             subtotalPriceSet { shopMoney { amount } }
             tags
             order { id createdAt staffMember { firstName lastName } }
@@ -387,7 +390,7 @@ export async function syncDraftOrdersForStore(
   // 2. Get existing leads. Full sync loads every row for the store (needed for
   //    stale detection); incremental loads only the rows matching the drafts we
   //    just fetched, which is far cheaper.
-  type ExistingLead = { id: string; shopify_draft_id: string; lead_status: string; shopify_status: string } & Record<string, unknown>;
+  type ExistingLead = Pick<FollowUpLead, "id" | "shopify_draft_id" | "lead_status" | "shopify_status" | "followup_count" | "requoted_at" | "closed_at" | "updated_at" | "last_invoice_sent_at"> & Record<string, unknown>;
   const existingLeads: ExistingLead[] = [];
   if (incremental) {
     // The completed-drafts pass (step 4) needs the matching rows too, so load
@@ -398,7 +401,7 @@ export async function syncDraftOrdersForStore(
     for (let i = 0; i < wantedIds.length; i += PAGE) {
       const { data } = await supabase
         .from("followup_leads")
-        .select(`id, shopify_draft_id, lead_status, shopify_status, ${LIVE_COMPARE_COLUMNS}`)
+        .select(`id, shopify_draft_id, lead_status, shopify_status, followup_count, requoted_at, closed_at, updated_at, last_invoice_sent_at, next_followup_at, ${LIVE_COMPARE_COLUMNS}`)
         .eq("store_id", storeId)
         .in("shopify_draft_id", wantedIds.slice(i, i + PAGE));
       if (data) existingLeads.push(...(data as ExistingLead[]));
@@ -411,7 +414,7 @@ export async function syncDraftOrdersForStore(
     while (true) {
       const { data } = await supabase
         .from("followup_leads")
-        .select("id, shopify_draft_id, lead_status, shopify_status")
+        .select("id, shopify_draft_id, lead_status, shopify_status, followup_count, requoted_at, closed_at, updated_at, last_invoice_sent_at")
         .eq("store_id", storeId)
         .range(from, from + PAGE - 1);
       if (!data || data.length === 0) break;
@@ -443,6 +446,20 @@ export async function syncDraftOrdersForStore(
 
     const createdBy = extractCreator(draft);
     const contrib = extractContributors(draft);
+    const sentAt = draft.invoiceSentAt ?? draft.events.edges
+      .filter(({ node }) => / sent an invoice to /.test(node.message))
+      .map(({ node }) => node.createdAt).sort().at(-1) ?? existing?.last_invoice_sent_at ?? null;
+    const rfSchedule: Record<string, unknown> = {};
+    if (hasFixedFollowupSchedule(storeId)) {
+      if (sentAt) rfSchedule.last_invoice_sent_at = sentAt;
+      if (existing && !existing.closed_at && !FOLLOWUP_CATEGORIES[existing.lead_status]?.terminal) {
+        if (existing.followup_count >= 2) rfSchedule.next_followup_at = null;
+        else if (existing.followup_count === 0) {
+          rfSchedule.next_followup_at = rfNextFollowup(0,
+            [existing.requoted_at, sentAt].filter((date): date is string => !!date).sort().at(-1) ?? draft.createdAt);
+        }
+      }
+    }
     const ordersCount = draft.customer?.numberOfOrders != null
       ? parseInt(draft.customer.numberOfOrders, 10)
       : null;
@@ -472,6 +489,7 @@ export async function syncDraftOrdersForStore(
         });
       } else {
         newActiveLeads.push({
+          ...rfSchedule,
           store_id: storeId,
           shopify_draft_id: draft.id,
           draft_name: draft.name,
@@ -482,7 +500,9 @@ export async function syncDraftOrdersForStore(
           shopify_created_at: draft.createdAt,
           shopify_status: draft.status,
           lead_status: "new",
-          next_followup_at: firstFollowup,
+          next_followup_at: hasFixedFollowupSchedule(storeId)
+            ? rfNextFollowup(0, sentAt ?? draft.createdAt)
+            : firstFollowup,
           followup_count: 0,
           first_synced_at: now,
           last_synced_at: now,
@@ -522,6 +542,7 @@ export async function syncDraftOrdersForStore(
       );
     } else if (existing) {
       const fields = {
+        ...rfSchedule,
         draft_name: draft.name,
         customer_name: draft.customer?.displayName || null,
         customer_email: draft.customer?.email || null,
@@ -535,16 +556,19 @@ export async function syncDraftOrdersForStore(
         contributors: contrib.contributors,
       };
       if (incremental && followupRowUnchanged(existing, fields)) continue;
-      updateFns.push(() =>
-        supabase.from("followup_leads").update({
+      updateFns.push(() => {
+        const update = supabase.from("followup_leads").update({
           ...fields,
           last_synced_at: now,
           updated_at: now,
-        }).eq("id", existing.id).then(({ error }) => {
+        }).eq("id", existing.id);
+        // A sync that read an older snapshot must not overwrite a logged attempt.
+        if (hasFixedFollowupSchedule(storeId)) update.eq("updated_at", existing.updated_at);
+        return update.then(({ error }) => {
           if (error) recordError(result, `update lead ${existing.id}`, error);
           else result.updated_leads++;
-        })
-      );
+        });
+      });
     }
   }
 
@@ -717,9 +741,13 @@ export function computeNextFollowup(
   status: LeadStatus,
   storeDays: Record<string, number | null>,
   customDate?: string,
+  sequence?: { storeId: string; completedAttempts: number; anchor?: string },
 ): string | null {
   const cat = FOLLOWUP_CATEGORIES[status];
   if (cat.terminal) return null;
+  if (sequence && hasFixedFollowupSchedule(sequence.storeId)) {
+    return rfNextFollowup(sequence.completedAttempts, sequence.anchor ?? new Date().toISOString());
+  }
   // future_project: the user explicitly picked a date — respect it as-is.
   if (status === "future_project" && customDate) return new Date(customDate).toISOString();
   const days = storeDays[status] ?? cat.followupDays;
