@@ -175,3 +175,45 @@ export function buildRollingLeadPerformanceRateTrend(
     };
   });
 }
+
+/** Three calendar days of submission cohorts, pooling individual response times. */
+export function buildThreeDayQuoteTrend(
+  leads: PerformanceLead[],
+  buckets: LeadTrendPoint[],
+  now: number = Date.now(),
+): LeadPerformanceTrendPoint[] {
+  if (!buckets.length) return [];
+  const dayMs = 86_400_000;
+  const start = Date.parse(`${buckets[0].rangeStart}T00:00:00Z`);
+  const end = Date.parse(`${buckets[buckets.length - 1].rangeEnd}T00:00:00Z`);
+  const dateFormat = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" });
+  const byDay = new Map<string, PerformanceLead[]>();
+  for (const lead of leads) {
+    const time = Date.parse(lead.submitted_at);
+    if (!Number.isFinite(time)) continue;
+    const parts = Object.fromEntries(dateFormat.formatToParts(time).map(part => [part.type, part.value]));
+    const key = `${parts.year}-${parts.month}-${parts.day}`;
+    byDay.set(key, [...(byDay.get(key) ?? []), lead]);
+  }
+  const points: LeadPerformanceTrendPoint[] = [];
+  for (let day = start; day <= end; day += dayMs) {
+    // At the selected range's beginning use only the available selected days.
+    const windowStart = Math.max(start, day - 2 * dayMs);
+    const rows: PerformanceLead[] = [];
+    for (let includedDay = windowStart; includedDay <= day; includedDay += dayMs) {
+      rows.push(...(byDay.get(new Date(includedDay).toISOString().slice(0, 10)) ?? []));
+    }
+    const rangeStart = new Date(windowStart).toISOString().slice(0, 10);
+    const rangeEnd = new Date(day).toISOString().slice(0, 10);
+    points.push({
+      label: new Date(day).toLocaleDateString("en-US", { timeZone: "UTC", month: "short", day: "numeric" }),
+      fullLabel: `${rangeStart} to ${rangeEnd}`,
+      rangeStart,
+      rangeEnd,
+      website: summarizeSource(rows, "website", now),
+      meta: summarizeSource(rows, "meta", now),
+      outreach: summarizeSource(rows, "outreach", now),
+    });
+  }
+  return points;
+}

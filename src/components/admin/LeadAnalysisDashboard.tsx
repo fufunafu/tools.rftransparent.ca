@@ -26,6 +26,7 @@ import {
 } from "@/lib/lead-analytics";
 import {
   buildLeadPerformanceTrend,
+  buildThreeDayQuoteTrend,
   type LeadPerformanceMetricKey,
   type LeadPerformanceTrendPoint,
 } from "@/lib/lead-performance-trends";
@@ -82,8 +83,8 @@ const PERFORMANCE_CHARTS: Array<{
   },
   {
     metric: "medianQuoteMs",
-    title: "Median elapsed time to quote",
-    description: "Median elapsed time among leads with a recorded first quote. Lower is better.",
+    title: "Time to quote · 3-day rolling median",
+    description: "Typical elapsed time to first quote, combining leads received across three calendar days. Lower is better.",
   },
 ];
 
@@ -362,14 +363,14 @@ function MetricChartCard({
           <p className="mt-0.5 text-xs leading-5 text-sand-500">{description}</p>
         </div>
         <div className="min-w-0 text-xs sm:max-w-[290px]">
-          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-sand-400">Selected-period totals</p>
+          <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-sand-400">{rateMetric ? "Selected-period totals" : "Selected-period median"}</p>
           {summary && <div className="flex flex-wrap gap-x-3 gap-y-1">
             {(["website", "meta", "outreach"] as const).filter(source => ({ website: showWebsite, meta: showMeta, outreach: showOutreach })[source]).map(source => <div key={source} className={source === "website" ? "text-blue-700" : source === "meta" ? "text-pink-700" : "text-violet-700"}>
               <span>{source === "website" ? "Website" : source === "meta" ? "Meta" : "Outreach"}: </span><strong>{metricDisplay(metric, summary[source])}</strong>
               {rateMetric && <span className="ml-1 text-[10px] text-sand-500">({metric === "sameDayCallRate" ? `${summary[source].businessDayCalls.dueOnTime}/${summary[source].businessDayCalls.due} due` : metric === "conversionRate" ? `${summary[source].won}/${summary[source].total} won` : `${summary[source].quoted}/${summary[source].total} quoted`})</span>}
             </div>)}
           </div>}
-          <p className="mt-2 text-[10px] text-sand-500">{rateMetric ? `Lines: ${rollingWindow.label} rates` : "Lines: median for each submission cohort"}</p>
+          <p className="mt-2 text-[10px] text-sand-500">{rateMetric ? `Lines: ${rollingWindow.label} rates` : "Lines: 3-day rolling median"}</p>
         </div>
       </header>
       <div className="h-64 px-2 pb-3 pt-4 sm:h-72 sm:px-4">
@@ -497,6 +498,10 @@ export default function LeadAnalysisDashboard({
   }), [responseAnalysisLeads]);
   const performanceTrend = useMemo(
     () => buildLeadPerformanceTrend(leads, trend.points, currentTime),
+    [leads, trend.points, currentTime],
+  );
+  const quotePerformanceTrend = useMemo(
+    () => buildThreeDayQuoteTrend(leads, trend.points, currentTime),
     [leads, trend.points, currentTime],
   );
   const callPerformanceTrend = useMemo(
@@ -773,7 +778,7 @@ export default function LeadAnalysisDashboard({
               <MetricChartCard
                 key={chart.metric}
                 {...chart}
-                data={chart.metric === "sameDayCallRate" ? callPerformanceTrend : performanceTrend}
+                data={chart.metric === "sameDayCallRate" ? callPerformanceTrend : chart.metric === "medianQuoteMs" ? quotePerformanceTrend : performanceTrend}
                 showWebsite={sources.website}
                 showMeta={sources.meta}
                 showOutreach={sources.outreach}
@@ -789,7 +794,7 @@ export default function LeadAnalysisDashboard({
             <p className="font-semibold text-sand-700">How to read these charts</p>
             <p className="mt-1">
               Rate charts use rolling windows to reduce noise from small daily samples. At the start of a chart,
-              each rate uses the days available so far, then settles into the full rolling window. Header totals cover the whole selected period. Same-business-day call rates exclude leads whose deadlines have not passed and calls with unknown timing. Quote response times still measure elapsed time.
+              each rate uses the days available so far, then settles into the full rolling window. Header totals cover the whole selected period. Same-business-day call rates exclude leads whose deadlines have not passed and calls with unknown timing. Quote response times use a 3-day rolling median of individual response times, including nights and weekends. The first two points use the available selected days.
               Recent lead cohorts can improve as calls, quotes, and orders are completed.
             </p>
           </section>
