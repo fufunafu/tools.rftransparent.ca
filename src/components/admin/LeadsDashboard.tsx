@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import LeadFilterDropdown, { filterSelections } from "./LeadFilterDropdown";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import useSWR, { useSWRConfig } from "swr";
@@ -1123,12 +1124,14 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
       if (saved && typeof saved === "object") {
-        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned"], sort: ["newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
+        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned", "others"], sort: ["newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
         // Restore session preferences only after the initial server-matching render.
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setFilters((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key,
           key === "search" ? typeof saved[key] === "string" ? saved[key].slice(0, 200) : value
-          : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
+          : ["status", "source", "owner"].includes(key) && typeof saved[key] === "string"
+            ? saved[key].split(",").filter((item: string) => allowed[key]?.includes(item)).join(",")
+            : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
       }
     } catch { /* Storage can be unavailable in private browsing. */ }
     setRestored(true);
@@ -1149,13 +1152,19 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     !bounds?.from || isLeadInCustomDateRange(lead, bounds.from, bounds.to)
       || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, filters.olderOpen]);
   const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
-  const sourceLeads = queue.filter((lead) => filters.source === "all" || lead.source === filters.source);
-  const tab = FILTER_TABS.find((item) => item.value === filters.status) ?? FILTER_TABS[0];
-  const scoped = sourceLeads.filter((lead) => leadMatchesOwner(lead, filters.owner, currentUserEmail));
-  const spamCount = scoped.filter((lead) => isLeadSpamReason(lead.not_applicable_reason)).length;
+  const sources = filterSelections(filters.source, ["website", "meta", "outreach"]);
+  const statuses = filterSelections(filters.status, FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value));
+  const owners = filterSelections(filters.owner, ["mine", "unassigned", "others"]);
+  const sourceLeads = queue.filter((lead) => sources.includes(lead.source));
+  const scoped = sourceLeads.filter((lead) => owners.some(owner => owner === "others"
+    ? !!lead.assigned_to?.trim() && !leadMatchesOwner(lead, "mine", currentUserEmail)
+    : leadMatchesOwner(lead, owner, currentUserEmail)));
   const visible = scoped.filter((lead) => {
-    if (filters.status !== "spam" && isLeadSpamReason(lead.not_applicable_reason)) return false;
-    if (filters.status === "overdue" ? !isFollowUpDue(lead, now) : filters.status === "replies" ? !isOpenLead(lead) || !hasUnansweredReply(lead) : !tab.match(lead)) return false;
+    const spam = isLeadSpamReason(lead.not_applicable_reason);
+    if (spam && !statuses.includes("spam")) return false;
+    if (!spam && !statuses.some(status => status === "overdue" ? isFollowUpDue(lead, now)
+      : status === "replies" ? isOpenLead(lead) && hasUnansweredReply(lead)
+      : FILTER_TABS.find(item => item.value === status)?.match(lead))) return false;
     const q = filters.search.trim().toLowerCase();
     if (!q) return true;
     const text = [lead.name, lead.email, lead.phone, lead.assigned_to, lead.next_action, lead.quote_number].filter(Boolean).join(" ").toLowerCase();
@@ -1192,13 +1201,13 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
       {(classicView || showAnalytics) && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded sidePanel={classicView} initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
     </section>
     <div className="min-w-0 space-y-4">
-    <section className="overflow-hidden rounded-lg border border-sand-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div>{filters.status !== "spam" && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
+    <section className="rounded-lg border border-sand-200 bg-white">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div></div>
       <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
         <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
-        <select aria-label="Filter leads by status" value={filters.status} onChange={(event) => change("status", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs">{FILTER_TABS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
-        <select aria-label="Filter leads by source" value={filters.source} onChange={(event) => change("source", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">All sources</option>{(["website", "meta", "outreach"] as const).filter((source) => store === "rf_transparent" || source === "website").map((source) => <option key={source} value={source}>{SOURCE_BADGE[source].label} ({queue.filter((lead) => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length})</option>)}</select>
-        <select aria-label="Filter leads by owner" value={filters.owner} onChange={(event) => change("owner", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">Everyone</option><option value="mine" disabled={!currentUserEmail}>My leads</option><option value="unassigned">Unassigned</option></select>
+        <LeadFilterDropdown label="Filter leads by status" allLabel="All except spam" value={filters.status} onChange={value => change("status", value)} options={FILTER_TABS.filter(item => item.value !== "all")} allValues={FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value)} />
+        <LeadFilterDropdown label="Filter leads by source" allLabel="All sources" value={filters.source} onChange={value => change("source", value)} options={(["website", "meta", "outreach"] as const).filter(source => store === "rf_transparent" || source === "website").map(source => ({ value: source, label: SOURCE_BADGE[source].label, count: queue.filter(lead => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length }))} />
+        <LeadFilterDropdown label="Filter leads by owner" allLabel="Everyone" value={filters.owner} onChange={value => change("owner", value)} options={[{ value: "mine", label: "My leads", disabled: !currentUserEmail }, { value: "unassigned", label: "Unassigned" }, { value: "others", label: "Other assigned leads" }]} />
         <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
         <label className="text-xs text-sand-500">Received <select aria-label="Lead received date range" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
         {filters.history !== "all" && <label className="flex items-center gap-2 text-xs text-sand-600"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={(event) => change("olderOpen", String(event.target.checked))} />Include older open leads</label>}
