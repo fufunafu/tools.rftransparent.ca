@@ -33,14 +33,11 @@ export async function GET(req: NextRequest) {
 
   const [admin, management] = await Promise.all([isAdminUser(), isManagementUser()]);
 
-  let employeeId: string | null;
-  if (admin || management) {
-    // Only these two may name somebody else.
-    employeeId = req.nextUrl.searchParams.get("employeeId");
-    if (!employeeId) {
-      return NextResponse.json({ error: "employeeId is required" }, { status: 400 });
-    }
-  } else {
+  // Only these two may name somebody else. Without a name, everybody gets their
+  // own list, admins included: My access asks without one, and an admin is an
+  // employee too.
+  let employeeId = admin || management ? req.nextUrl.searchParams.get("employeeId") : null;
+  if (!employeeId) {
     employeeId = await ownEmployeeId(user.email);
     if (!employeeId) {
       // Signed in without an employee profile (the owner, a domain account).

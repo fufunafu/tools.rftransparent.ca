@@ -105,6 +105,18 @@ export async function POST(req: NextRequest) {
     .select("*, locations(id, name)")
     .single();
 
+  // A retry after a half-finished onboarding lands here, because the first
+  // attempt already created the person. Point at the profile instead of
+  // showing the raw duplicate-key error.
+  if (employeeError?.code === "23505") {
+    return NextResponse.json(
+      {
+        error: `An employee with ${workEmail} already exists. Open them from the employee list to edit their profile and access.`,
+        field: "email",
+      },
+      { status: 409 },
+    );
+  }
   if (employeeError || !employee) {
     return NextResponse.json({ error: employeeError?.message ?? "Could not create the employee" }, { status: 500 });
   }

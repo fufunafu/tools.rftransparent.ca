@@ -162,7 +162,7 @@ export function buildOnboardingHtml(message: OnboardingMessage): string {
 
   const rows =
     message.rows.length === 0
-      ? `<tr><td colspan="4" style="padding:10px 0;color:#64748b">Nothing is set up yet. Your manager will follow up.</td></tr>`
+      ? `<tr><td colspan="5" style="padding:10px 0;color:#64748b">Nothing is set up yet. Your manager will follow up.</td></tr>`
       : message.rows
           .map((row) => {
             const secret =

@@ -453,6 +453,7 @@ export default function NewEmployeeForm({
                       </label>
                       <input
                         className={FIELD_CLS}
+                        autoComplete="off"
                         value={row.password}
                         onChange={(e) => editRow(row.key, "password", e.target.value)}
                         disabled={row.login_method === "google_sso"}

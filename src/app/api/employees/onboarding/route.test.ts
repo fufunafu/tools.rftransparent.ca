@@ -33,23 +33,37 @@ const EMPLOYEE = {
   hire_date: "2026-09-01",
 };
 
-// Everything handed to employee_access.insert during a test, so the assertion
-// below is about what the table really receives.
-const inserted: unknown[] = [];
+// Everything handed to an insert during a test, the employees row and the
+// employee_access rows alike, so the assertion below is about what the tables
+// really receive. Each entry is a list of rows.
+const inserted: Record<string, unknown>[][] = [];
 
-function makeClient(opts: { accessError?: { message: string } | null } = {}) {
+function rowsOf(payload: unknown): Record<string, unknown>[] {
+  return (Array.isArray(payload) ? payload : [payload]) as Record<string, unknown>[];
+}
+
+function makeClient(opts: {
+  accessError?: { message: string } | null;
+  employeeError?: { message: string; code?: string } | null;
+} = {}) {
   return {
     from(table: string) {
       if (table === "employees") {
         return {
-          insert: () => ({
-            select: () => ({ single: async () => ({ data: EMPLOYEE, error: null }) }),
-          }),
+          insert: (payload: unknown) => {
+            inserted.push(rowsOf(payload));
+            const result = opts.employeeError
+              ? { data: null, error: opts.employeeError }
+              : { data: EMPLOYEE, error: null };
+            return {
+              select: () => ({ single: async () => result }),
+            };
+          },
         };
       }
       return {
         insert: async (payload: unknown) => {
-          inserted.push(payload);
+          inserted.push(rowsOf(payload));
           return { error: opts.accessError ?? null };
         },
       };
@@ -157,13 +171,16 @@ describe("POST /api/employees/onboarding", () => {
     expect(message.rows[0].password).toBe("shopify-secret-1");
 
     // It reaches nothing else. This is the boundary the feature is built on:
-    // the welcome message is the only copy.
+    // the welcome message is the only copy. Both inserts are checked, the
+    // employees row as well as the access rows, so spreading the request body
+    // into either one would fail here.
+    expect(inserted).toHaveLength(2);
     const serializedInserts = JSON.stringify(inserted);
     expect(serializedInserts).not.toContain("shopify-secret-1");
     expect(serializedInserts).not.toContain("tools-password-1");
     // No column carries one either — "password" is a legitimate login_method
     // value, so this checks the keys rather than the serialized text.
-    for (const payload of inserted as Record<string, unknown>[][]) {
+    for (const payload of inserted) {
       for (const row of payload) {
         expect(Object.keys(row)).not.toContain("password");
       }
@@ -189,6 +206,21 @@ describe("POST /api/employees/onboarding", () => {
 
     expect(response.status).toBe(201);
     await expect(response.json()).resolves.toMatchObject({ emailed: false });
+  });
+
+  it("points at the existing profile when the employee was already created", async () => {
+    mocks.getSupabase.mockReturnValue(makeClient({
+      employeeError: { message: "duplicate key value violates unique constraint", code: "23505" },
+    }));
+
+    const response = await POST(request(VALID));
+    const body = await response.json();
+
+    expect(response.status).toBe(409);
+    expect(body).toMatchObject({ field: "email" });
+    expect(body.error).toContain("dilan@glass-railing.com already exists");
+    expect(body.error).not.toContain("duplicate key");
+    expect(mocks.sendOnboardingEmail).not.toHaveBeenCalled();
   });
 
   it("reports when the access rows could not be saved", async () => {
