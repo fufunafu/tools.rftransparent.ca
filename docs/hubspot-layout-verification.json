@@ -11,8 +11,8 @@
   "maintenance": "Collapsed HubSpot connection settings",
   "databaseChanges": false,
   "checks": {
-    "testFiles": 212,
-    "tests": 1561,
+    "testFiles": 214,
+    "tests": 1574,
     "lint": "passed",
     "typecheck": "passed",
     "productionBuild": "passed",
@@ -21,6 +21,7 @@
   },
   "preservedConcurrentReleases": [
     "Purchasing sales history",
-    "Leads quote-response rolling median"
+    "Leads quote-response rolling median",
+    "Employee onboarding merged into main"
   ]
 }
