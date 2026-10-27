@@ -17,7 +17,7 @@ import {
   CALL_STATUS_LABELS,
   extractSubmissionDetails,
 } from "@/lib/customer-service/leads";
-import { leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
+import { isLeadInCustomDateRange, leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
 import { compareLeadPriority, hasUnansweredReply, isFollowUpDue, isOpenLead, leadMatchesOwner } from "@/lib/customer-service/lead-queue";
 import { formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
@@ -172,9 +172,9 @@ async function fetcher<T>(url: string): Promise<T> {
   return body as T;
 }
 
-function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId): string | null {
+function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId, includeOlderOpen = false): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ store, to: bounds.to, include_open: "true" });
+  const params = new URLSearchParams({ store, to: bounds.to, include_open: String(includeOlderOpen) });
   if (bounds.from) params.set("from", bounds.from);
   return `/api/customer-service/leads?${params.toString()}`;
 }
@@ -1126,7 +1126,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   currentUserEmail?: string;
 }) {
   const setStore = useStoreNavigation();
-  const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d" });
+  const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" });
   const [classicView, setClassicView] = useState(false);
   const [viewRestored, setViewRestored] = useState(false);
   useEffect(() => {
@@ -1144,13 +1144,13 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const { mutate } = useSWRConfig();
-  const storageKey = `rf-lead-queue:${store}`;
+  const storageKey = `rf-lead-queue:v2:${store}`;
   useEffect(() => {
     // Restore only after hydration so the server and first client render agree.
     try {
       const saved = JSON.parse(sessionStorage.getItem(storageKey) ?? "null");
       if (saved && typeof saved === "object") {
-        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned"], sort: ["priority", "newest", "oldest"], history: ["30d", "90d", "all"] };
+        const allowed: Record<string, string[]> = { status: FILTER_TABS.map((tab) => tab.value), source: ["all", "website", "meta", "outreach"], owner: ["all", "mine", "unassigned"], sort: ["priority", "newest", "oldest"], history: ["30d", "90d", "all"], olderOpen: ["false", "true"] };
         setFilters((current) => Object.fromEntries(Object.entries(current).map(([key, value]) => [key,
           key === "search" ? typeof saved[key] === "string" ? saved[key].slice(0, 200) : value
           : allowed[key]?.includes(saved[key]) ? saved[key] : value])) as typeof current);
@@ -1162,7 +1162,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
   const change = (key: keyof typeof filters, value: string) => setFilters((current) => ({ ...current, [key]: value }));
   const bounds = useMemo(() => leadTrendQueryBounds(filters.history as "30d" | "90d" | "all", new Date(now)), [filters.history, now]);
-  const url = leadListUrl(bounds, store);
+  const url = leadListUrl(bounds, store, filters.olderOpen === "true");
   const initialUrl = leadListUrl(initialBounds, store);
   const { data, error, isLoading, mutate: reload, isValidating } = useSWR<{ leads: Lead[] }>(url, fetcher, {
     refreshInterval: 60_000, revalidateOnFocus: true,
@@ -1171,10 +1171,9 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   });
   const { data: health, error: healthError, mutate: refreshHealth } = useSWR<LeadSyncHealth>("/api/customer-service/leads/sync-status", fetcher, { refreshInterval: 60_000 });
   const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
-  const queue = useMemo(() => {
-    const from = filters.history === "all" ? null : now - (filters.history === "90d" ? 90 : 30) * 86_400_000;
-    return leads.filter((lead) => isOpenLead(lead) || from == null || Date.parse(lead.submitted_at) >= from);
-  }, [leads, filters.history, now]);
+  const queue = useMemo(() => leads.filter((lead) =>
+    !bounds?.from || isLeadInCustomDateRange(lead, bounds.from, bounds.to)
+      || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, filters.olderOpen]);
   const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
   const sourceLeads = queue.filter((lead) => filters.source === "all" || lead.source === filters.source);
   const tab = FILTER_TABS.find((item) => item.value === filters.status) ?? FILTER_TABS[0];
@@ -1210,7 +1209,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const setQuickView = (status: string, owner = "all") => setFilters((current) => ({ ...current, status, owner, source: "all", search: "" }));
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 className="text-2xl font-bold text-sand-900">Leads</h1><p className="mt-1 text-sm text-sand-500">Call, reply, and follow up. Open leads stay visible until closed.</p></div>
+      <div><h1 className="text-2xl font-bold text-sand-900">Leads</h1><p className="mt-1 text-sm text-sand-500">Call, reply, and follow up. Choose a received date range for your work queue.</p></div>
       <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><button type="button" aria-pressed={classicView} onClick={() => setClassicView((value) => !value)} className="rounded-md border border-sand-300 bg-white px-3 py-2 text-sm text-sand-700">{classicView ? "Switch to compact view" : "Switch to old view"}</button><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); void refreshHealth(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
     </div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -1234,15 +1233,16 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
       {syncMessage && <p role="status" className="mt-2">{syncMessage}</p>}
     </details>
     <section className="overflow-hidden rounded-lg border border-sand-200 bg-white">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · Open leads from all dates</p></div>{filters.status !== "spam" && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div>{filters.status !== "spam" && spamCount > 0 && <button className="text-xs text-sand-500 underline" onClick={() => change("status", "spam")}>{spamCount} spam excluded</button>}</div>
       <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
         <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
         <select aria-label="Filter leads by status" value={filters.status} onChange={(event) => change("status", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs">{FILTER_TABS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
         <select aria-label="Filter leads by source" value={filters.source} onChange={(event) => change("source", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">All sources</option>{(["website", "meta", "outreach"] as const).filter((source) => store === "rf_transparent" || source === "website").map((source) => <option key={source} value={source}>{SOURCE_BADGE[source].label} ({queue.filter((lead) => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length})</option>)}</select>
         <select aria-label="Filter leads by owner" value={filters.owner} onChange={(event) => change("owner", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="all">Everyone</option><option value="mine" disabled={!currentUserEmail}>My leads</option><option value="unassigned">Unassigned</option></select>
         <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="priority">Priority first</option><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
-        <label className="text-xs text-sand-500">Closed history <select aria-label="Closed lead history" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
-        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d" })}>Reset</button>
+        <label className="text-xs text-sand-500">Received <select aria-label="Lead received date range" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
+        {filters.history !== "all" && <label className="flex items-center gap-2 text-xs text-sand-600"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={(event) => change("olderOpen", String(event.target.checked))} />Include older open leads</label>}
+        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d", olderOpen: "false" })}>Reset</button>
       </div>
       {error && <div role="alert" className="flex items-center justify-between gap-3 bg-amber-50 px-4 py-3 text-sm text-amber-800"><span>{data ? "The latest refresh failed. Showing the last loaded records." : "Lead data could not be loaded."}</span><button className="shrink-0 underline" onClick={() => void reload()}>Try again</button></div>}
       {isLoading && !data ? <p className="p-8 text-center text-sm text-sand-500">Loading leads...</p> : visible.length === 0 ? <p className="p-8 text-center text-sm text-sand-500">No leads match these filters.</p> : <div className="overflow-x-auto">

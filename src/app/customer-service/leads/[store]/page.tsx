@@ -32,7 +32,7 @@ export default async function LeadsPage({ params }: { params: Params }) {
     initialBounds?.from,
     initialBounds?.to,
     store,
-    true,
+    false,
   ).catch(() => null);
 
   return (

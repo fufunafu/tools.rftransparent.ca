@@ -123,14 +123,30 @@ it("labels outreach leads and filters them without hiding website leads from All
   expect(leadRows()[0].textContent).toContain("Customer 1");
 });
 
-it('retains old open leads while keeping old closed leads outside recent history', async () => {
-  const leads = makeLeads(2);
-  leads.forEach((lead) => { lead.submitted_at = '2025-01-01T00:00:00Z'; });
+it('excludes old website leads by default and only includes older open work when requested', async () => {
+  const leads = makeLeads(3);
+  leads[0].submitted_at = '2024-01-01T00:00:00Z';
+  leads[1].submitted_at = '2024-01-02T00:00:00Z';
   leads[1].outcome = 'won';
-  await render(leads);
+  await render(leads, 'rf_transparent');
+  const source = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by source"]')!;
+  await act(async () => { source.value = 'website'; source.dispatchEvent(new Event('change', { bubbles: true })); });
   expect(leadRows()).toHaveLength(1);
-  expect(leadRows()[0].textContent).toContain('Customer 0');
-  expect(container.textContent).toContain('Open leads from all dates');
+  expect(leadRows()[0].textContent).toContain('Customer 2');
+  expect(container.textContent).toContain('Received in the last 30 days');
+  const older = container.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+  await act(async () => older.click());
+  expect(leadRows()).toHaveLength(2);
+  expect(listRequests().some(url => url.includes('include_open=true'))).toBe(true);
+  await act(async () => older.click());
+  expect(leadRows()).toHaveLength(1);
+});
+it('allows historical website leads through the explicit All time received filter', async () => {
+  const leads = makeLeads(1); leads[0].submitted_at = '2024-01-01T00:00:00Z';
+  await render(leads, 'rf_transparent'); expect(leadRows()).toHaveLength(0);
+  const dates = container.querySelector<HTMLSelectElement>('select[aria-label="Lead received date range"]')!;
+  await act(async () => { dates.value = 'all'; dates.dispatchEvent(new Event('change', { bubbles: true })); });
+  expect(leadRows()).toHaveLength(1);
 });
 it('puts overdue work first and supports the My leads view', async () => {
   const leads = makeLeads(3);
