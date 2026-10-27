@@ -27,7 +27,6 @@ export interface EditDraft {
 
 interface Props {
   open: boolean;
-  mode: "create" | "edit";
   draft: EditDraft;
   setField: <K extends keyof EditDraft>(key: K, value: EditDraft[K]) => void;
   locations: Location[];
@@ -56,7 +55,6 @@ const LABEL_CLS = "mb-1.5 block text-xs font-semibold text-slate-700";
 
 export default function EmployeeDrawer({
   open,
-  mode,
   draft,
   setField,
   locations,
@@ -163,7 +161,7 @@ export default function EmployeeDrawer({
       <aside
         role="dialog"
         aria-modal="true"
-        aria-label={mode === "create" ? "New employee" : "Edit employee"}
+        aria-label="Edit employee"
         className={`fixed right-0 top-0 z-50 flex h-full w-full max-w-lg flex-col border-l border-slate-200 bg-white shadow-2xl transition-transform duration-200 ${
           open ? "translate-x-0" : "translate-x-full"
         }`}
@@ -174,15 +172,14 @@ export default function EmployeeDrawer({
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} className="h-5 w-5" aria-hidden="true">
                 <circle cx="12" cy="8.25" r="3.25" />
                 <path strokeLinecap="round" d="M5.5 19.5a6.5 6.5 0 0 1 13 0" />
-                {mode === "create" && <path strokeLinecap="round" d="M18.5 4v5M16 6.5h5" />}
               </svg>
             </span>
             <div>
               <h2 className="text-base font-semibold text-slate-950">
-                {mode === "create" ? "Add employee" : "Edit employee"}
+                Edit employee
               </h2>
               <p className="mt-0.5 text-xs text-slate-400">
-                {mode === "create" ? "Create a new team profile" : "Update profile and access details"}
+                Update profile and access details
               </p>
             </div>
           </div>
@@ -352,7 +349,7 @@ export default function EmployeeDrawer({
               </p>
             </div>
 
-            {mode === "edit" && draft.department === "sales" && (
+            {draft.department === "sales" && (
               <div>
                 <label className={LABEL_CLS}>
                   Commission Rate
@@ -382,7 +379,7 @@ export default function EmployeeDrawer({
               </div>
             )}
 
-            {isAdmin && mode === "edit" && (
+            {isAdmin && (
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4">
                 <label className={LABEL_CLS}>
                   Sign-in & Password
@@ -430,7 +427,7 @@ export default function EmployeeDrawer({
           </div>
 
           <footer className="flex items-center gap-2 border-t border-slate-200 bg-slate-50/70 px-5 py-4 sm:px-6">
-            {mode === "edit" && onDelete && (
+            {onDelete && (
               <button
                 type="button"
                 onClick={() => setConfirmDelete(true)}
@@ -454,7 +451,7 @@ export default function EmployeeDrawer({
                 disabled={saving || deleting || !draft.name.trim()}
                 className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {saving ? "Saving…" : mode === "create" ? "Add employee" : "Save changes"}
+                {saving ? "Saving…" : "Save changes"}
               </button>
             </div>
           </footer>
