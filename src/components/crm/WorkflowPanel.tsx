@@ -14,11 +14,11 @@ export default function WorkflowPanel({ view, canManage, onSelect }: { view: str
   const dateLabel = useDateLabel();
   const { data, error } = useSWR<WorkflowStatus>("/api/crm/workflows", fetchJson, OPTIONS);
   return <section className="min-w-0 space-y-5" aria-label={WORKFLOW_LABELS[view]}>
-    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
-      <ErrorMessage error={error} />
+    <ErrorMessage error={error} />
+    {view !== "reminders" && <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-600">
       {data && <><p>Background update: {data.latestRun ? `${dateLabel(data.latestRun.finished_at || data.latestRun.started_at)} · ${data.latestRun.status}` : "Waiting for the first scheduled run"}</p>
         {data.pendingIndex > 0 && <p className="mt-1">Preparing {data.pendingIndex.toLocaleString()} records for matching and file migration. {data.contactIndexPending > 0 ? "Customer matching starts when the contact index is ready." : "The contact index is ready."}</p>}</>}
-    </div>
+    </div>}
     {view === "duplicates" && <DuplicateReview onSelect={onSelect} />}
     {view === "capture" && <ActivityReview onSelect={onSelect} startedAt={data?.capture?.started_at} />}
     {view === "reminders" && <Reminders onSelect={onSelect} configured={data?.remindersConfigured} />}

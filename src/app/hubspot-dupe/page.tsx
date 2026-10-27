@@ -17,7 +17,7 @@ export default async function HubspotDupePage({ searchParams }: { searchParams?:
   const email = user.email.toLowerCase();
   const params = await searchParams;
   const linkedRecord = crmId.safeParse(params?.record);
-  const initialTab = typeof params?.section === "string" && ["contacts", "companies", "activities", "tasks"].includes(params.section) ? params.section : "home";
+  const initialTab = typeof params?.section === "string" && ["contacts", "companies", "tasks"].includes(params.section) ? params.section : "home";
   const initialQuery = new URLSearchParams(CRM_INITIAL_LIST_URL.split("?")[1]);
   initialQuery.set("type", initialTab);
   const [initialHome, initialPage, initialStatus, canManage] = await Promise.all([

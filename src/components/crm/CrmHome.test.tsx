@@ -27,7 +27,8 @@ it("opens Home with preloaded data and removes Deals, Tickets and migration file
   expect(container.querySelector('nav [aria-current="page"]')?.textContent).toBe("Home");
   const nav = container.querySelector("nav")!.textContent;
   expect(nav).toContain("Contacts"); expect(nav).toContain("Companies");
-  expect(nav).not.toMatch(/Deals|Tickets|Files|recordings/);
+  expect(nav).not.toMatch(/Deals|Tickets|Files|recordings|Activity log|My reminders|Duplicate review|Activity review/);
+  expect([...container.querySelectorAll("nav button")].map(button => button.textContent)).toEqual(["Home", "Contacts", "Companies", "Tasks"]);
   expect(container.textContent).toContain("Robin"); expect(container.textContent).toContain("Example customer");
   expect(container.textContent).toContain("76"); expect(container.textContent).not.toContain("pipeline");
   expect(container.querySelector("details")?.textContent).toContain("Imported attachments & call recordings");

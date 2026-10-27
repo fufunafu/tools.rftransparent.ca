@@ -32,6 +32,8 @@ it("opens Home by default with server data and no unused contact list", async ()
   const page = await Page();
   expect(page.props).toMatchObject({ initialTab: "home", initialHome: { metrics: { contacts: 76 } } });
   expect(mocks.list).not.toHaveBeenCalled();
-  const oldTab = await Page({ searchParams: Promise.resolve({ section: "deals" }) });
-  expect(oldTab.props.initialTab).toBe("home");
+  for (const section of ["deals", "activities", "reminders", "duplicates", "capture"]) {
+    const oldTab = await Page({ searchParams: Promise.resolve({ section }) });
+    expect(oldTab.props.initialTab).toBe("home");
+  }
 });
