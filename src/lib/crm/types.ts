@@ -1,5 +1,8 @@
 export const CRM_TYPES = ["contacts", "companies", "deals", "tickets", "calls", "meetings", "emails", "notes", "tasks"] as const;
 export type CrmType = typeof CRM_TYPES[number];
+export const CRM_RECORD_VIEWS = ["full", "summary", "detail", "fields", "history"] as const;
+export type CrmRecordView = typeof CRM_RECORD_VIEWS[number];
+export const CRM_INITIAL_LIST_URL = "/api/crm?type=contacts&q=&page=0&status=open&mine=false&overdue=false&archived=false";
 export const CRM_LABELS: Record<CrmType, string> = {
   contacts: "Contacts", companies: "Companies", deals: "Deals", tickets: "Tickets", calls: "Calls", meetings: "Meetings", emails: "Emails", notes: "Notes", tasks: "Tasks",
 };

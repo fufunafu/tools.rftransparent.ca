@@ -1,0 +1,81 @@
+{
+  "verifiedAt": "2026-10-27T17:02:11.239Z",
+  "baselineCommit": "94ea303bae59bde33779ebaf2b954ffcd85f451b",
+  "environment": "Local production builds with the existing CRM database. Three authenticated read-only samples per metric, including authorization and network time. Timings are observations, not production latency guarantees.",
+  "api": {
+    "contacts": {
+      "before": {
+        "medianMilliseconds": 1077,
+        "responseBytes": 20633
+      },
+      "after": {
+        "medianMilliseconds": 903,
+        "responseBytes": 20633
+      }
+    },
+    "activities": {
+      "before": {
+        "medianMilliseconds": 3951,
+        "responseBytes": 22637
+      },
+      "after": {
+        "medianMilliseconds": 775,
+        "responseBytes": 22637
+      }
+    },
+    "search": {
+      "before": {
+        "medianMilliseconds": 1006,
+        "responseBytes": 21022
+      },
+      "after": {
+        "medianMilliseconds": 893,
+        "responseBytes": 21022
+      }
+    },
+    "largest_record_initial": {
+      "before": {
+        "medianMilliseconds": 3322,
+        "responseBytes": 4500160
+      },
+      "after": {
+        "medianMilliseconds": 716,
+        "responseBytes": 1175
+      }
+    }
+  },
+  "databaseQueryMilliseconds": {
+    "contacts": {
+      "before": 339.848,
+      "after": 4.905
+    },
+    "activities": {
+      "before": 5402.635,
+      "after": 23.933
+    }
+  },
+  "dataPreservation": {
+    "legacyFullRecordUnchanged": true,
+    "deferredFieldsExactlyMatchFullRecord": true,
+    "deferredHistoryExactlyMatchesFullRecord": true,
+    "databaseRecordChanges": false
+  },
+  "initialRendering": {
+    "firstRecordsAndCountsServerRendered": true,
+    "duplicateInitialClientRequests": false,
+    "viewerTimeZoneHydrationVerified": true
+  },
+  "validation": {
+    "testFiles": 182,
+    "tests": 1396,
+    "lint": "passed",
+    "typecheck": "passed",
+    "productionBuild": "passed",
+    "salesPreservationFiles": 36,
+    "automatedUiTests": "passed",
+    "manualBrowserVerification": "not completed"
+  },
+  "databaseMigration": "20261027170000_crm_browse_indexes",
+  "migrationApplied": true,
+  "indexesCreatedConcurrently": true
+}
