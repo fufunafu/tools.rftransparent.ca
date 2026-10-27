@@ -2,7 +2,6 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import LeadCallDeadlineBreakdown from "./LeadCallDeadlineBreakdown";
 import { businessDayCallMetrics } from "@/lib/lead-business-day";
 import { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
@@ -69,7 +68,7 @@ const PERFORMANCE_CHARTS: Array<{
   {
     metric: "sameDayCallRate",
     title: "Called on the same business day",
-    description: "Called by 5 p.m. Toronto time on the assigned weekday. After-hours and weekend requests move to the next weekday. Only passed deadlines are scored.",
+    description: "Called by 5 p.m. Toronto time on the assigned weekday. After-hours and weekend requests move to the next weekday. Only passed deadlines are scored. Not-applicable leads are excluded.",
   },
   {
     metric: "quoteRate",
@@ -770,7 +769,6 @@ export default function LeadAnalysisDashboard({
           </section>
 
           <section className={sidePanel ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"} aria-label="Performance trends">
-            <LeadCallDeadlineBreakdown metrics={businessCallsBySource} sources={sources} loading={responsePerformanceLoading} error={responsePerformanceError?.message} period={formatSelectedPeriod(trendPoints)} trackingStartedAt={responsePerformanceData?.tracking_started_at} />
             {PERFORMANCE_CHARTS.map((chart) => (
               <MetricChartCard
                 key={chart.metric}

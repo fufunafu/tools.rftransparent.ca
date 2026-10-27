@@ -9,7 +9,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
 import LeadAnalysisDashboard from "./LeadAnalysisDashboard";
 
-it("labels source totals separately from rolling lines and shows actionable first-call buckets", async () => {
+it("labels source totals separately from rolling lines and omits the follow-up breakdown", async () => {
   const now = Date.parse("2026-10-27T22:00:00Z");
   const base = { store_id: "rf_transparent", source: "website", submitted_at: "2026-10-26T14:00:00Z", call_status: "not_called", phone: "4165550123", quote_number: null, outcome: "new", not_applicable_reason: null, raw_payload: {} };
   const leads = [
@@ -36,8 +36,7 @@ it("labels source totals separately from rolling lines and shows actionable firs
     expect(call.textContent).toContain("Website: 50%");
     expect(call.textContent).toContain("1/2 due");
     expect(call.textContent).toContain("Outreach: No data");
-    expect(container.querySelector('[aria-label="Website call follow-up"] [role="img"]')?.getAttribute("aria-label")).toContain("Called on time: 1, Called late: 0, Overdue, not called: 1");
-    expect(container.querySelector('[aria-label="Outreach call follow-up"] [role="img"]')?.getAttribute("aria-label")).toContain("Still within deadline: 1");
+    expect(container.textContent).not.toContain("First-call follow-up");
     expect(cards.some(card => card.querySelector("h2")?.textContent === "Median elapsed time to call")).toBe(false);
   } finally { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); }
 });

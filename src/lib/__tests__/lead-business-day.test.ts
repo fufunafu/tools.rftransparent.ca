@@ -37,3 +37,15 @@ describe("business-day call deadline", () => {
     expect(callDeadlineStatus({ ...row, first_call_at: "2026-10-22T22:00:00Z" }, now)).toBe("unknown");
   });
 });
+
+it("excludes every not-applicable lead from both rate counts, including historical imports", () => {
+  const now = Date.parse("2026-10-27T22:00:00Z");
+  const eligible = lead("2026-10-22T12:00:00Z", "2026-10-22T16:00:00Z");
+  const excluded = [
+    { ...lead("2026-10-22T12:00:00Z"), outcome: "not_applicable" as const, raw_payload: { historical_import: {} } },
+    { ...eligible, outcome: "not_applicable" as const, raw_payload: { historical_import: {} } },
+    { ...lead("2026-10-22T12:00:00Z"), outcome: "not_applicable" as const, not_applicable_reason: null },
+  ];
+  expect(businessDayCallMetrics([eligible, ...excluded], now)).toMatchObject({ total: 1, due: 1, dueOnTime: 1, sameDayCallRate: 100 });
+  expect(businessDayCallMetrics(excluded, now).sameDayCallRate).toBeNull();
+});
