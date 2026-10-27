@@ -59,10 +59,13 @@ interface MetricChartPoint {
   fullLabel: string;
   website: number | null;
   meta: number | null;
+  outreach: number | null;
   websiteCount: number;
   websiteDenominator: number;
   metaCount: number;
+  outreachCount: number;
   metaDenominator: number;
+  outreachDenominator: number;
 }
 
 function MetricTooltip({
@@ -85,15 +88,13 @@ function MetricTooltip({
     <div className="min-w-[210px] rounded-lg border border-sand-200 bg-white px-3 py-2 text-xs shadow-lg">
       <p className="mb-1.5 font-medium text-sand-700">{point.fullLabel}</p>
       {payload?.map((entry) => {
-        const source = entry.dataKey === "meta" ? "meta" : "website";
-        const count = source === "website" ? point.websiteCount : point.metaCount;
-        const denominator = source === "website"
-          ? point.websiteDenominator
-          : point.metaDenominator;
+        const source = entry.dataKey === "outreach" ? "outreach" : entry.dataKey === "meta" ? "meta" : "website";
+        const count = point[`${source}Count`];
+        const denominator = point[`${source}Denominator`];
         return (
           <div key={source} className="flex items-start justify-between gap-5 py-0.5">
             <span className="flex items-center gap-1.5 text-sand-500">
-              <span className={`h-2 w-2 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
+              <span className={`h-2 w-2 rounded-sm ${source === "website" ? "bg-blue-600" : source === "outreach" ? "bg-violet-600" : "bg-pink-600"}`} />
               {entry.name}
             </span>
             <span className="text-right">
@@ -116,12 +117,14 @@ export default function LeadPerformanceTrendChart({
   metric,
   showWebsite,
   showMeta,
+  showOutreach = false,
   rollingWindowSize,
 }: {
   data: LeadPerformanceTrendPoint[];
   metric: LeadPerformanceMetricKey;
   showWebsite: boolean;
   showMeta: boolean;
+  showOutreach?: boolean;
   rollingWindowSize: number;
 }) {
   const rateMetric = isRateMetric(metric);
@@ -135,10 +138,13 @@ export default function LeadPerformanceTrendChart({
           : `${formatRangeDate(point.rangeStart)} to ${formatRangeDate(point.rangeEnd)}`,
         website: point.website.value,
         meta: point.meta.value,
+        outreach: point.outreach.value,
         websiteCount: point.website.count,
         websiteDenominator: point.website.denominator,
         metaCount: point.meta.count,
+        outreachCount: point.outreach.count,
         metaDenominator: point.meta.denominator,
+        outreachDenominator: point.outreach.denominator,
       }))
     : data.map((point) => ({
         label: point.label,
@@ -147,6 +153,7 @@ export default function LeadPerformanceTrendChart({
         fullLabel: point.fullLabel,
         website: metricValue(point.website, metric),
         meta: metricValue(point.meta, metric),
+        outreach: metricValue(point.outreach, metric),
         websiteCount: metric === "medianCallMs"
           ? point.website.callResponseCount
           : point.website.quoteResponseCount,
@@ -156,12 +163,18 @@ export default function LeadPerformanceTrendChart({
         metaCount: metric === "medianCallMs"
           ? point.meta.callResponseCount
           : point.meta.quoteResponseCount,
+        outreachCount: metric === "medianCallMs"
+          ? point.outreach.callResponseCount
+          : point.outreach.quoteResponseCount,
         metaDenominator: metric === "medianCallMs"
           ? point.meta.callEligible
           : point.meta.total,
+        outreachDenominator: metric === "medianCallMs"
+          ? point.outreach.callEligible
+          : point.outreach.total,
       }));
   const hasData = chartData.some((point) => (
-    (showWebsite && point.website != null) || (showMeta && point.meta != null)
+    (showWebsite && point.website != null) || (showMeta && point.meta != null) || (showOutreach && point.outreach != null)
   ));
   const labelsByDate = new Map(chartData.map((point) => [point.rangeEnd, point.label]));
 
@@ -217,6 +230,18 @@ export default function LeadPerformanceTrendChart({
             stroke="#db2777"
             strokeWidth={2.5}
             dot={chartData.length <= 14 ? { r: 3, fill: "#db2777", strokeWidth: 0 } : false}
+            activeDot={{ r: 5 }}
+            connectNulls={false}
+          />
+        )}
+        {showOutreach && (
+          <Line
+            type="monotone"
+            dataKey="outreach"
+            name="Outreach"
+            stroke="#7c3aed"
+            strokeWidth={2.5}
+            dot={chartData.length <= 14 ? { r: 3, fill: "#7c3aed", strokeWidth: 0 } : false}
             activeDot={{ r: 5 }}
             connectNulls={false}
           />

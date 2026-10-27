@@ -110,6 +110,7 @@ function timeAgo(iso: string, now: number): string {
 const SOURCE_BADGE: Record<LeadSource, { label: string; className: string }> = {
   website: { label: "Website", className: "bg-blue-100 text-blue-700" },
   meta: { label: "Meta", className: "bg-rose-100 text-rose-700" },
+  outreach: { label: "Outreach", className: "bg-violet-100 text-violet-700" },
 };
 
 type TrendSelection = LeadTrendRange | "custom";
@@ -1225,7 +1226,7 @@ export default function LeadsDashboard({
   const [trendRange, setTrendRange] = useState<TrendSelection>("30d");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
-  const [chartSources, setChartSources] = useState({ website: true, meta: true });
+  const [chartSources, setChartSources] = useState({ website: true, meta: true, outreach: true });
   const [selectedPerformanceMetric, setSelectedPerformanceMetric] = useState<LeadPerformanceMetricKey | null>(null);
   const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
@@ -1462,10 +1463,12 @@ export default function LeadsDashboard({
     const uncalledBySource = {
       website: uncalledLeads.filter((lead) => lead.source === "website").length,
       meta: uncalledLeads.filter((lead) => lead.source === "meta").length,
+      outreach: uncalledLeads.filter((lead) => lead.source === "outreach").length,
     };
     const overdueUncalledBySource = {
       website: overdueUncalled.filter((lead) => lead.source === "website").length,
       meta: overdueUncalled.filter((lead) => lead.source === "meta").length,
+      outreach: overdueUncalled.filter((lead) => lead.source === "outreach").length,
     };
     const pipelineBySource = {
       website: pipelineLeads
@@ -1474,10 +1477,12 @@ export default function LeadsDashboard({
       meta: pipelineLeads
         .filter((lead) => lead.source === "meta")
         .reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
+      outreach: pipelineLeads.filter((lead) => lead.source === "outreach").reduce((sum, lead) => sum + Number(lead.quote_amount ?? 0), 0),
     };
     const openQuoteCountBySource = {
       website: pipelineLeads.filter((lead) => lead.source === "website").length,
       meta: pipelineLeads.filter((lead) => lead.source === "meta").length,
+      outreach: pipelineLeads.filter((lead) => lead.source === "outreach").length,
     };
     return {
       ...funnel,
@@ -1518,7 +1523,7 @@ export default function LeadsDashboard({
         )).length,
       };
     };
-    return { website: summarize("website"), meta: summarize("meta") };
+    return { website: summarize("website"), meta: summarize("meta"), outreach: summarize("outreach") };
   }, [analysisLeads]);
   const performanceTrend = useMemo(
     () => buildLeadPerformanceTrend(
@@ -1539,6 +1544,7 @@ export default function LeadsDashboard({
     all: queueLeads.length,
     website: queueLeads.filter((lead) => lead.source === "website").length,
     meta: queueLeads.filter((lead) => lead.source === "meta").length,
+    outreach: queueLeads.filter((lead) => lead.source === "outreach").length,
   }), [queueLeads]);
   const selectedDateRange = trend.points[0] && trend.points.at(-1)
     ? formatCustomDateRange(trend.points[0].rangeStart, trend.points.at(-1)!.rangeEnd)
@@ -1557,8 +1563,7 @@ export default function LeadsDashboard({
 
   const toggleChartSource = (source: LeadSource) => {
     setChartSources((current) => {
-      const other = source === "website" ? "meta" : "website";
-      if (current[source] && !current[other]) return current;
+      if (current[source] && Object.values(current).filter(Boolean).length === 1) return current;
       return { ...current, [source]: !current[source] };
     });
   };
@@ -1626,6 +1631,9 @@ export default function LeadsDashboard({
                 meta: {
                   value: trend.current.meta,
                 },
+                outreach: {
+                  value: trend.current.outreach,
+                },
               }}
             />
             <SummaryMetric
@@ -1640,6 +1648,9 @@ export default function LeadsDashboard({
                 meta: {
                   value: metrics.uncalledBySource.meta,
                 },
+                outreach: {
+                  value: metrics.uncalledBySource.outreach,
+                },
               }}
             />
             <SummaryMetric
@@ -1653,6 +1664,9 @@ export default function LeadsDashboard({
                 },
                 meta: {
                   value: formatCADShort(metrics.pipelineBySource.meta),
+                },
+                outreach: {
+                  value: formatCADShort(metrics.pipelineBySource.outreach),
                 },
               }}
             />
@@ -1669,7 +1683,7 @@ export default function LeadsDashboard({
         <div className="flex flex-col justify-between gap-2.5 border-b border-sand-200 px-4 py-2.5 lg:flex-row lg:items-center xl:items-stretch xl:flex-col">
           <div>
             <h2 className="text-base font-semibold text-sand-900">Lead volume</h2>
-            <p className="text-xs text-sand-500 mt-0.5">{hasMeta ? "Website and Meta leads" : "Website leads"}; matching submissions within 7 days count once</p>
+            <p className="text-xs text-sand-500 mt-0.5">{hasMeta ? "Website, Meta, and outreach leads" : "Website leads"}; matching submissions within 7 days count once</p>
           </div>
           <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center xl:items-start xl:flex-col">
             <div className="flex items-center gap-3 text-xs">
@@ -1677,7 +1691,7 @@ export default function LeadsDashboard({
                 <input
                   type="checkbox"
                   checked={chartSources.website}
-                  disabled={chartSources.website && !chartSources.meta}
+                  disabled={chartSources.website && !chartSources.meta && !chartSources.outreach}
                   onChange={() => toggleChartSource("website")}
                   className="w-4 h-4 accent-blue-600"
                 />
@@ -1688,12 +1702,23 @@ export default function LeadsDashboard({
                 <input
                   type="checkbox"
                   checked={chartSources.meta}
-                  disabled={chartSources.meta && !chartSources.website}
+                  disabled={chartSources.meta && !chartSources.website && !chartSources.outreach}
                   onChange={() => toggleChartSource("meta")}
                   className="w-4 h-4 accent-pink-600"
                 />
                 <span className="w-2.5 h-2.5 rounded-sm bg-pink-600" />
                 Meta
+              </label>
+              <label className="flex items-center gap-2 text-sand-700 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chartSources.outreach}
+                  disabled={chartSources.outreach && !chartSources.website && !chartSources.meta}
+                  onChange={() => toggleChartSource("outreach")}
+                  className="w-4 h-4 accent-violet-600"
+                />
+                <span className="w-2.5 h-2.5 rounded-sm bg-violet-600" />
+                Outreach
               </label>
             </div>
             <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-md border border-sand-200 bg-sand-50 p-0.5 text-[11px] font-medium">
@@ -1744,12 +1769,14 @@ export default function LeadsDashboard({
                 data={trend.points}
                 showWebsite={chartSources.website}
                 showMeta={chartSources.meta}
+                showOutreach={chartSources.outreach}
                 onSelectRange={selectChartRange}
               />
             </div>
-            <div className="grid gap-3 border-t border-sand-200 px-3 py-2.5 sm:grid-cols-3">
+            <div className="grid gap-3 border-t border-sand-200 px-3 py-2.5 sm:grid-cols-4">
               <SourceTotal label="Website" value={trend.current.website} total={trend.current.total} color="bg-blue-600" />
               <SourceTotal label="Meta" value={trend.current.meta} total={trend.current.total} color="bg-pink-600" />
+              <SourceTotal label="Outreach" value={trend.current.outreach} total={trend.current.total} color="bg-violet-600" />
               <div className="border-t border-sand-200 pt-3 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
                 <p className="text-xs text-sand-500">All sources</p>
                 <p className="mt-0.5 text-xl font-semibold text-sand-900">{trend.current.total}</p>
@@ -1845,6 +1872,7 @@ export default function LeadsDashboard({
               <option value="all">All sources ({sourceCounts.all})</option>
               <option value="website">Website ({sourceCounts.website})</option>
               {hasMeta && <option value="meta">Meta ({sourceCounts.meta})</option>}
+              {hasMeta && <option value="outreach">Outreach ({sourceCounts.outreach})</option>}
             </select>
             <select
               value={sortOrder}
@@ -1882,7 +1910,7 @@ export default function LeadsDashboard({
               : queueLeads.length === 0
                 ? "No leads were received in this date range."
                 : sourceLeads.length === 0
-                  ? `No ${sourceFilter === "meta" ? "Meta" : "website"} leads were received in this date range.`
+                  ? `No ${sourceFilter === "all" ? "" : SOURCE_BADGE[sourceFilter].label} leads were received in this date range.`
                   : "No leads match this filter."}
           </div>
         ) : (
@@ -1913,12 +1941,12 @@ export default function LeadsDashboard({
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2 font-medium text-sand-900">
                         <span className="truncate">{lead.name || "Unnamed"}</span>
-                        <span
+                        {lead.source === "outreach" ? <span className="rounded bg-violet-100 px-1.5 py-0.5 text-[10px] text-violet-700">Outreach</span> : <span
                           role="img"
                           aria-label={`${SOURCE_BADGE[lead.source].label} lead`}
                           title={`${SOURCE_BADGE[lead.source].label}${lead.source_detail ? `: ${lead.source_detail}` : ""}`}
                           className={`h-2.5 w-2.5 shrink-0 rounded-sm ${lead.source === "website" ? "bg-blue-600" : "bg-pink-600"}`}
-                        />
+                        />}
                       </div>
                       <div className="text-[11px] text-sand-400 truncate max-w-[220px]">
                         {[lead.email, lead.phone].filter(Boolean).join(" · ")}
@@ -2066,11 +2094,11 @@ function SummaryMetric({
         <p className="text-lg font-semibold leading-5 text-sand-900">{value}</p>
         {subtitle && <p className="mt-0.5 truncate text-[10px] leading-4 text-sand-400" title={subtitle}>{subtitle}</p>}
       </div>
-      <div className="mt-2 grid grid-cols-2 gap-2 border-t border-sand-100 pt-1.5">
-        {(["website", "meta"] as const).map((source) => (
+      <div className="mt-2 grid grid-cols-3 gap-2 border-t border-sand-100 pt-1.5">
+        {(["website", "meta", "outreach"] as const).map((source) => (
           <div key={source} className="min-w-0">
             <div className="flex items-center gap-1.5 text-[10px] text-sand-500">
-              <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : "bg-pink-600"}`} />
+              <span className={`h-2 w-2 shrink-0 rounded-sm ${source === "website" ? "bg-blue-600" : source === "outreach" ? "bg-violet-600" : "bg-pink-600"}`} />
               <span className="truncate capitalize">{source}</span>
             </div>
             <p className="truncate text-xs font-semibold leading-4 text-sand-800" title={String(sourceDetails[source].value)}>
@@ -2175,19 +2203,20 @@ function FunnelComparison({
       <table className="w-full table-fixed text-left">
         <thead>
           <tr className="border-b border-sand-100">
-            <th className="w-[42%] px-4 py-2 text-[10px] font-medium text-sand-400 uppercase tracking-wider">Metric</th>
-            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
+            <th className="w-[34%] px-4 py-2 text-[10px] font-medium text-sand-400 uppercase tracking-wider">Metric</th>
+            <th className="w-[22%] px-3 py-2 text-[11px] font-medium text-sand-600">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-sm bg-blue-600" />
                 Website
               </span>
             </th>
-            <th className="w-[29%] px-3 py-2 text-[11px] font-medium text-sand-600">
+            <th className="w-[22%] px-3 py-2 text-[11px] font-medium text-sand-600">
               <span className="inline-flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-sm bg-pink-600" />
                 Meta
               </span>
             </th>
+            <th className="w-[22%] px-2 py-2 text-[11px] font-medium text-violet-700">Outreach</th>
           </tr>
         </thead>
         <tbody>
@@ -2203,7 +2232,7 @@ function FunnelComparison({
                   onClick={() => onSelectMetric(row.rate)}
                 />
               </th>
-              {(["website", "meta"] as const).map((source) => (
+              {(["website", "meta", "outreach"] as const).map((source) => (
                 <td key={source} className="px-3 py-1.5">
                   <span className="text-sm font-semibold text-sand-900">{metrics[source][row.rate]}%</span>
                   <span className="ml-2 whitespace-nowrap text-[10px] text-sand-400">
@@ -2225,7 +2254,7 @@ function FunnelComparison({
                   onClick={() => onSelectMetric(row.value)}
                 />
               </th>
-              {(["website", "meta"] as const).map((source) => (
+              {(["website", "meta", "outreach"] as const).map((source) => (
                 <td key={source} className="px-3 py-1.5">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                     <span className="whitespace-nowrap text-sm font-semibold text-sand-900">
@@ -2324,9 +2353,9 @@ function PerformanceTrendDialog({
   const rateMetric = metric === "callRate" || metric === "quoteRate" || metric === "conversionRate";
   const rollingWindow = performanceRateWindow(trendRange, customFrom, customTo);
   const responseStarts = !rateMetric
-    ? (["website", "meta"] as const).flatMap((source) => {
+    ? (["website", "meta", "outreach"] as const).flatMap((source) => {
         const first = data.find((point) => point[source][metric] != null);
-        return first ? [`${source === "website" ? "Website" : "Meta"} ${formatTrendStart(first.rangeStart)}`] : [];
+        return first ? [`${SOURCE_BADGE[source].label} ${formatTrendStart(first.rangeStart)}`] : [];
       })
     : [];
 
@@ -2439,7 +2468,7 @@ function PerformanceTrendDialog({
                 <input
                   type="checkbox"
                   checked={chartSources.website}
-                  disabled={chartSources.website && !chartSources.meta}
+                  disabled={chartSources.website && !chartSources.meta && !chartSources.outreach}
                   onChange={() => onToggleSource("website")}
                   className="h-3.5 w-3.5 accent-blue-600"
                 />
@@ -2450,12 +2479,23 @@ function PerformanceTrendDialog({
                 <input
                   type="checkbox"
                   checked={chartSources.meta}
-                  disabled={chartSources.meta && !chartSources.website}
+                  disabled={chartSources.meta && !chartSources.website && !chartSources.outreach}
                   onChange={() => onToggleSource("meta")}
                   className="h-3.5 w-3.5 accent-pink-600"
                 />
                 <span className="h-0.5 w-5 bg-pink-600" />
                 Meta
+                </label>
+              <label className="inline-flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={chartSources.outreach}
+                  disabled={chartSources.outreach && !chartSources.website && !chartSources.meta}
+                  onChange={() => onToggleSource("outreach")}
+                  className="h-3.5 w-3.5 accent-violet-600"
+                />
+                <span className="h-0.5 w-5 bg-violet-600" />
+                Outreach
                 </label>
               </div>
               <span className="rounded-full bg-sand-100 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wider text-sand-500">
@@ -2481,6 +2521,7 @@ function PerformanceTrendDialog({
                   metric={metric}
                   showWebsite={chartSources.website}
                   showMeta={chartSources.meta}
+                showOutreach={chartSources.outreach}
                   rollingWindowSize={rollingWindow.size}
                 />
               )}

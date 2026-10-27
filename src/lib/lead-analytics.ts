@@ -13,13 +13,14 @@ export interface LeadTrendPoint {
   rangeEnd: string;
   website: number;
   meta: number;
+  outreach: number;
   total: number;
 }
 
 export interface LeadTrendSummary {
   points: LeadTrendPoint[];
-  current: { total: number; website: number; meta: number };
-  previous: { total: number; website: number; meta: number };
+  current: { total: number; website: number; meta: number; outreach: number };
+  previous: { total: number; website: number; meta: number; outreach: number };
   changePct: number | null;
 }
 
@@ -147,6 +148,7 @@ export function calculateLeadFunnelBySource(
   return {
     website: calculateLeadFunnel(leads.filter((lead) => lead.source === "website")),
     meta: calculateLeadFunnel(leads.filter((lead) => lead.source === "meta")),
+    outreach: calculateLeadFunnel(leads.filter((lead) => lead.source === "outreach")),
   };
 }
 
@@ -250,6 +252,7 @@ function buildDayWindow(
       rangeEnd: dateKeyFromDay(end),
       website: 0,
       meta: 0,
+      outreach: 0,
       total: 0,
     });
   }
@@ -303,6 +306,7 @@ function buildCustomMonthlyTrend(
       rangeEnd: dateKeyFromDay(Math.min(monthEnd, currentEndDay)),
       website: 0,
       meta: 0,
+      outreach: 0,
       total: 0,
     });
   }
@@ -350,6 +354,7 @@ function buildMonthlyTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary
       rangeEnd: dateKeyFromDay(monthEnd),
       website: 0,
       meta: 0,
+      outreach: 0,
       total: 0,
     });
   }
@@ -376,7 +381,7 @@ function buildMonthlyTrend(leads: LeadDateSource[], now: Date): LeadTrendSummary
 }
 
 function emptyCounts() {
-  return { total: 0, website: 0, meta: 0 };
+  return { total: 0, website: 0, meta: 0, outreach: 0 };
 }
 
 function emptySummary(): LeadTrendSummary {
@@ -388,7 +393,7 @@ function emptySummary(): LeadTrendSummary {
   };
 }
 
-function addSource(target: { total: number; website: number; meta: number }, source: LeadSource) {
+function addSource(target: { total: number; website: number; meta: number; outreach: number }, source: LeadSource) {
   target[source] += 1;
   target.total += 1;
 }

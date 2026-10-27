@@ -229,8 +229,8 @@ describe("buildLeadTrend", () => {
       rangeEnd: "2026-08-03",
       website: 1,
     });
-    expect(result.current).toEqual({ total: 2, website: 1, meta: 1 });
-    expect(result.previous).toEqual({ total: 2, website: 1, meta: 1 });
+    expect(result.current).toEqual({ total: 2, website: 1, meta: 1, outreach: 0 });
+    expect(result.previous).toEqual({ total: 2, website: 1, meta: 1, outreach: 0 });
     expect(result.changePct).toBe(0);
   });
 
@@ -245,7 +245,7 @@ describe("buildLeadTrend", () => {
       NOW,
     );
 
-    expect(result.current).toEqual({ total: 3, website: 1, meta: 2 });
+    expect(result.current).toEqual({ total: 3, website: 1, meta: 2, outreach: 0 });
     expect(result.points.at(-1)).toMatchObject({
       label: "Aug 3",
       rangeStart: "2026-08-03",
@@ -308,7 +308,7 @@ describe("buildLeadTrend", () => {
       NOW,
     );
 
-    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
+    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0, outreach: 0 });
   });
 
   it("groups the full lead history into monthly buckets", () => {
@@ -334,7 +334,7 @@ describe("buildLeadTrend", () => {
       website: 1,
       meta: 0,
     });
-    expect(result.current).toEqual({ total: 3, website: 2, meta: 1 });
+    expect(result.current).toEqual({ total: 3, website: 2, meta: 1, outreach: 0 });
     expect(result.previous.total).toBe(0);
     expect(result.changePct).toBeNull();
   });
@@ -350,8 +350,8 @@ describe("buildLeadTrend", () => {
       "2026-08-03",
     );
 
-    expect(result.current).toEqual({ total: 2, website: 1, meta: 1 });
-    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
+    expect(result.current).toEqual({ total: 2, website: 1, meta: 1, outreach: 0 });
+    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0, outreach: 0 });
     expect(result.points).toHaveLength(3);
     expect(result.points[0]).toMatchObject({
       rangeStart: "2026-08-01",
@@ -371,7 +371,7 @@ describe("buildLeadTrend", () => {
       NOW,
     );
 
-    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0 });
+    expect(result.previous).toEqual({ total: 1, website: 1, meta: 0, outreach: 0 });
   });
 
   it("uses monthly buckets for long custom ranges", () => {
@@ -433,4 +433,13 @@ describe("isLeadInCustomDateRange", () => {
       "2026-08-03",
     )).toBe(false);
   });
+});
+
+
+it("includes outreach in volume totals and source-specific performance", () => {
+  const lead = { source: "outreach" as const, submitted_at: NOW.toISOString(), call_status: "called" as const, quote_number: "Q1", outcome: "quoted" as const };
+  const trend = buildLeadTrend([lead], "7d", NOW);
+  expect(trend.current).toEqual({ total: 1, website: 0, meta: 0, outreach: 1 });
+  expect(trend.points.reduce((sum, point) => sum + point.outreach, 0)).toBe(1);
+  expect(calculateLeadFunnelBySource([lead]).outreach).toMatchObject({ total: 1, attempted: 1, quoted: 1 });
 });

@@ -52,7 +52,7 @@ function listRequests(): string[] {
     .filter((url) => url.startsWith("/api/customer-service/leads?store="));
 }
 
-async function render(leads: Lead[]) {
+async function render(leads: Lead[], store: Lead["store_id"] = "bc_transparent") {
   // The API serves the same list the server rendered, so a repeat download
   // would not change what the table shows.
   vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ leads }))));
@@ -63,7 +63,7 @@ async function render(leads: Lead[]) {
           initialLeads={leads}
           initialNow={NOW}
           initialBounds={BOUNDS}
-          store="bc_transparent"
+          store={store}
         />
       </SWRConfig>,
     );
@@ -105,4 +105,18 @@ it("does not download the server-rendered list again on load", async () => {
   await render(makeLeads(5));
   await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
   expect(listRequests()).toEqual([]);
+});
+
+
+it("labels outreach leads and filters them without hiding website leads from All sources", async () => {
+  const leads = makeLeads(2);
+  leads[1].source = "outreach";
+  await render(leads, "rf_transparent");
+  expect(leadRows()).toHaveLength(2);
+  expect(leadRows()[1].textContent).toContain("Outreach");
+  const source = container.querySelector<HTMLSelectElement>('select[aria-label="Filter leads by source"]')!;
+  expect(source.textContent).toContain("Outreach (1)");
+  await act(async () => { source.value = "outreach"; source.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(leadRows()).toHaveLength(1);
+  expect(leadRows()[0].textContent).toContain("Customer 1");
 });

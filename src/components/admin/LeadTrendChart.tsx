@@ -54,11 +54,13 @@ export default function LeadTrendChart({
   data,
   showWebsite,
   showMeta,
+  showOutreach = false,
   onSelectRange,
 }: {
   data: LeadTrendPoint[];
   showWebsite: boolean;
   showMeta: boolean;
+  showOutreach?: boolean;
   onSelectRange?: (from: string, to: string) => void;
 }) {
   const selectBarRange = (bar: { payload?: LeadTrendPoint }) => {
@@ -100,7 +102,7 @@ export default function LeadTrendChart({
             name="Website"
             stackId="leads"
             fill="#2563eb"
-            radius={showMeta ? [0, 0, 2, 2] : [2, 2, 2, 2]}
+            radius={showMeta || showOutreach ? [0, 0, 2, 2] : [2, 2, 2, 2]}
             onClick={onSelectRange ? selectBarRange : undefined}
             className={onSelectRange ? "cursor-pointer" : undefined}
           />
@@ -111,6 +113,17 @@ export default function LeadTrendChart({
             name="Meta"
             stackId="leads"
             fill="#db2777"
+            radius={showOutreach ? [0, 0, 0, 0] : [2, 2, 0, 0]}
+            onClick={onSelectRange ? selectBarRange : undefined}
+            className={onSelectRange ? "cursor-pointer" : undefined}
+          />
+        )}
+        {showOutreach && (
+          <Bar
+            dataKey="outreach"
+            name="Outreach"
+            stackId="leads"
+            fill="#7c3aed"
             radius={showWebsite ? [2, 2, 0, 0] : [2, 2, 2, 2]}
             onClick={onSelectRange ? selectBarRange : undefined}
             className={onSelectRange ? "cursor-pointer" : undefined}
