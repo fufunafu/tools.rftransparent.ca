@@ -405,8 +405,10 @@ export default function LeadAnalysisDashboard({
   initialBounds,
   store,
   embedded = false,
+  sidePanel = false,
 }: {
   embedded?: boolean;
+  sidePanel?: boolean;
   initialLeads?: Lead[] | null;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
@@ -679,7 +681,7 @@ export default function LeadAnalysisDashboard({
                 Spam, forwarded, and unquotable leads are excluded from rates
               </p>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
+            <div className={sidePanel ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"}>
               <SnapshotCard
                 label="Lead volume"
                 value={trend.current.total.toLocaleString()}
@@ -762,7 +764,7 @@ export default function LeadAnalysisDashboard({
             </div>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2" aria-label="Performance trends">
+          <section className={sidePanel ? "grid gap-4" : "grid gap-4 xl:grid-cols-2"} aria-label="Performance trends">
             {PERFORMANCE_CHARTS.map((chart) => (
               <MetricChartCard
                 key={chart.metric}

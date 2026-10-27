@@ -1127,6 +1127,15 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
 }) {
   const setStore = useStoreNavigation();
   const [filters, setFilters] = useState({ status: "open", source: "all", owner: "all", search: "", sort: "priority", history: "30d" });
+  const [classicView, setClassicView] = useState(false);
+  const [viewRestored, setViewRestored] = useState(false);
+  useEffect(() => {
+    try { setClassicView(localStorage.getItem("lead-layout") === "classic"); } catch { /* Optional preference. */ }
+    setViewRestored(true);
+  }, []);
+  useEffect(() => {
+    if (viewRestored) try { localStorage.setItem("lead-layout", classicView ? "classic" : "compact"); } catch { /* Optional preference. */ }
+  }, [classicView, viewRestored]);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [restored, setRestored] = useState(false);
   const [now, setNow] = useState(initialNow);
@@ -1202,18 +1211,22 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div><h1 className="text-2xl font-bold text-sand-900">Leads</h1><p className="mt-1 text-sm text-sand-500">Call, reply, and follow up. Open leads stay visible until closed.</p></div>
-      <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); void refreshHealth(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
+      <div className="flex flex-wrap gap-2"><StoreSelect value={store} onChange={setStore} /><button type="button" aria-pressed={classicView} onClick={() => setClassicView((value) => !value)} className="rounded-md border border-sand-300 bg-white px-3 py-2 text-sm text-sand-700">{classicView ? "Switch to compact view" : "Switch to old view"}</button><Link href={leadsPath(store, "analysis")} className="rounded-md border border-indigo-200 px-3 py-2 text-sm text-indigo-700">Analysis</Link><button onClick={() => { void reload(); void refreshHealth(); }} disabled={isValidating} className="rounded-md border border-sand-300 px-3 py-2 text-sm">{isValidating ? "Refreshing..." : "Refresh"}</button></div>
     </div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
       {[{ label: "Open leads", value: open.length, status: "open" }, { label: "Follow-ups due", value: open.filter((lead) => isFollowUpDue(lead, now)).length, status: "overdue" }, { label: "Need a call", value: open.filter((lead) => lead.call_status === "not_called" && isCallablePhone(lead.phone)).length, status: "uncalled" }, { label: "Unassigned", value: open.filter((lead) => !lead.assigned_to?.trim()).length, status: "open", owner: "unassigned" }].map((card) => <button key={card.label} onClick={() => setQuickView(card.status, card.owner)} className="rounded-lg border border-sand-200 bg-white p-3 text-left hover:border-indigo-300"><span className="text-xs text-sand-500">{card.label}</span><span className="mt-1 block text-2xl font-semibold tabular-nums text-sand-900">{card.value}</span></button>)}
     </div>
-    <section className="rounded-lg border border-sand-200 bg-white">
+    <div data-lead-layout={classicView ? "classic" : "compact"} className={classicView ? "grid items-start gap-4 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.65fr)]" : "space-y-4"}>
+    <section className={classicView ? "min-w-0 rounded-lg border border-sand-200 bg-white xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto" : "rounded-lg border border-sand-200 bg-white"}>
+      {classicView ? <div className="border-b border-sand-100 px-4 py-3"><h2 className="text-sm font-semibold text-sand-900">Analytics</h2><p className="text-xs text-sand-500">Date filters apply to analytics only.</p></div> : <>
       <button type="button" aria-expanded={showAnalytics} aria-controls="lead-analytics" onClick={() => setShowAnalytics((value) => !value)} className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
         <span><span className="block text-sm font-semibold text-sand-900">Analytics</span><span className="text-xs text-sand-500">Lead volume, source performance, conversion, and response times</span></span>
         <span className="shrink-0 text-xs font-medium text-blue-700">{showAnalytics ? "Hide analytics" : "Show analytics"}</span>
       </button>
-      {showAnalytics && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
+      </>}
+      {(classicView || showAnalytics) && <div id="lead-analytics" className="border-t border-sand-100 p-3 sm:p-4"><LeadAnalysisDashboard embedded sidePanel={classicView} initialNow={initialNow} initialBounds={initialBounds} store={store} /></div>}
     </section>
+    <div className="min-w-0 space-y-4">
     <details className="rounded-lg border border-sand-200 bg-white px-3 py-2 text-xs">
       <summary className="cursor-pointer text-sand-600">Sync status {healthError ? "· unavailable" : health?.sources?.some((source) => source.needsAttention) ? "· needs attention" : "· automatic updates"}</summary>
       {healthError && <p className="mt-2 text-amber-700">Sync history is unavailable. Lead records remain available.</p>}
@@ -1246,6 +1259,8 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
           </tr>)}</tbody></table>{count < visible.length && <LoadMoreRows shown={count} total={visible.length} onLoadMore={showMore} />}
       </div>}
     </section>
+    </div>
+    </div>
     {copyMessage && <p role="status" className="text-xs text-sand-600">{copyMessage}</p>}
     {selected && <LeadDetailPanel key={selected.id} lead={selected} store={store} currentUserEmail={currentUserEmail} onClose={() => setSelectedLeadId(null)} onChanged={refresh} />}
   </div>;
