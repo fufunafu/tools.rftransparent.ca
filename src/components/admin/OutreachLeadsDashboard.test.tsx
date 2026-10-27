@@ -24,3 +24,7 @@ it('preserves a failed activity submission and reuses its idempotency key on ret
 });
 it('shows suppressed leads without editable actions',async()=>{vi.stubGlobal('fetch',responses({...lead,stage:'suppressed'}));await render();await open();expect(container.textContent).toContain('Do not contact');expect(container.querySelector('form')).toBeNull();});
 it('shows an unavailable queue instead of falsely claiming no leads',async()=>{vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify({error:'Leads unavailable'}),{status:503})));await render();expect(container.querySelector('[role="alert"]')?.textContent).toBe('Leads unavailable');expect(container.textContent).not.toContain('No interested leads yet');expect(container.textContent).not.toContain('No leads match');});
+it('marks unavailable automatic activity instead of showing false no-call or no-quote statuses',async()=>{
+ vi.stubGlobal('fetch',vi.fn(async()=>Response.json({leads:[{...lead,activity_error:true}],total:1,page:0,activityError:true,summary:{open:1,needsCall:null,quoted:null,due:1}})));
+ await render();expect(container.querySelector('table')?.textContent).toContain('Activity unavailable');expect(container.querySelector('table')?.textContent).not.toContain('No quote recorded');
+});
