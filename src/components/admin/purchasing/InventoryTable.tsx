@@ -238,7 +238,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
 
   return (
     <div className="space-y-4">
-      <PurchasingPageHeader title="Stock overview" description="See what is available, what is arriving, and which products need attention. Choose View graph to inspect a product's inventory forecast." actions={<>
+      <PurchasingPageHeader title="Stock overview" description="See what is available, what is arriving, and which products need attention. Click a product size or name to see its details and graph." actions={<>
           <button type="button" onClick={() => setShowAddDialog(true)}
             className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm font-medium hover:bg-sand-50">Add product</button>
           <Link href="/warehouse/purchasing/reorder" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90">Plan an order</Link>
@@ -376,11 +376,6 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                     <span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span>
                     <span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>
                     {(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm ETA: {p.planning!.unconfirmed_inbound} inbound units</span>}
-                  </button>
-                  <button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View graph for ${p.sku}`}
-                    className="mt-2 flex min-h-8 items-center gap-1.5 rounded-md border border-sand-200 bg-sand-50 px-2 py-1 text-xs font-medium text-accent hover:border-accent hover:bg-white">
-                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4"><path d="M3 3v14h14M5 12l4-4 3 2 5-6" /></svg>
-                    View graph
                   </button>
                   <span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span>
                 </td>

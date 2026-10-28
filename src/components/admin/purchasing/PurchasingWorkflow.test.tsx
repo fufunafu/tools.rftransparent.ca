@@ -96,24 +96,24 @@ it("defaults inventory to glass while keeping all products and hardware accessib
   expect(container.textContent).toContain("G40-36"); expect(container.textContent).not.toContain("SP-BL");
   expect(button("Glass").getAttribute("aria-pressed")).toBe("true");
   expect(container.querySelector("button button")).toBeNull();
-  expect(container.querySelector('[aria-label="View graph for G40-36"]')?.textContent).toContain("View graph");
+  expect(container.querySelector('[aria-label="View forecast for G40-36"]')?.textContent).toContain("40 inch glass panel");
   await click(button("All products")); expect(container.textContent).toContain("SP-BL"); expect(container.textContent).toContain("G40-36");
   await click(button("Hardware")); expect(container.textContent).toContain("SP-BL");
   expect(container.textContent).not.toContain("G40-36");
 });
 
-it("opens and closes the selected product's graph from its visible button without changing inventory", async () => {
+it("opens and closes the selected product's graph by clicking its size or name without changing inventory", async () => {
   const forecasts: Record<string, InventoryForecast> = {
     panel: { product_id: "panel", days_until_stockout: 10, projected_stockout_date: "2026-11-06", timeline: [] },
     spigot: { product_id: "spigot", days_until_stockout: 20, projected_stockout_date: "2026-11-16", timeline: [] },
   };
   await render(<InventoryTable initialProducts={products} initialForecasts={forecasts} settings={settings} />);
-  await click(container.querySelector<HTMLButtonElement>('[aria-label="View graph for G40-36"]')!);
+  await click(container.querySelector<HTMLButtonElement>('[aria-label="View forecast for G40-36"]')!);
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain("panel: 2026-11-06");
   await click(button("Close graph"));
   expect(container.querySelector('[role="dialog"]')).toBeNull();
   await click(button("Hardware"));
-  await click(container.querySelector<HTMLButtonElement>('[aria-label="View graph for SP-BL"]')!);
+  await click(container.querySelector<HTMLButtonElement>('[aria-label="View forecast for SP-BL"]')!);
   expect(container.querySelector('[role="dialog"]')?.textContent).toContain("spigot: 2026-11-16");
   expect(fetchMock).not.toHaveBeenCalled();
 });
