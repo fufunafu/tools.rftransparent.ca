@@ -247,7 +247,43 @@ it("can exclude Outreach directly from All sources and closes on outside click",
   expect([...group.querySelectorAll<HTMLInputElement>("input")].every(input => input.checked)).toBe(true);
   await act(async () => group.querySelector<HTMLInputElement>('input[value="outreach"]')!.click());
   expect(leadRows()).toHaveLength(2);
-  expect(trigger.textContent).toContain("Website, Meta");
+  expect(trigger.textContent).toContain("Source");
+  expect(trigger.getAttribute("title")).toBe("Website, Meta");
+  expect(container.textContent).toContain("Source: Website, Meta");
   await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
+});
+
+it("distinguishes phone evidence, employee markings, and legacy unattributed statuses", async () => {
+  const rows = makeLeads(3).map(row => ({ ...row, phone: "4165550123" }));
+  rows[0] = { ...rows[0], last_call_at: "2026-10-26T14:00:00Z", last_called_by: "Daniel" };
+  rows[1] = { ...rows[1], call_status_source: "manual", call_status_changed_by: "employee@example.com", call_status_changed_at: "2026-10-26T15:00:00Z" };
+  await render(rows);
+  const rendered = leadRows();
+  expect(rendered[0].textContent).toContain("Phone record: Daniel");
+  expect(rendered[0].textContent).not.toContain("unverified");
+  expect(rendered[1].textContent).toContain("Called · manual");
+  expect(rendered[1].textContent).toContain("Manually marked called by employee@example.com");
+  expect(rendered[1].textContent).toContain("No linked phone record");
+  expect(rendered[2].textContent).toContain("Called · unverified");
+  expect(rendered[2].textContent).toContain("Who marked this: not recorded");
+  expect(rendered[2].textContent).not.toContain("Manually marked");
+});
+
+
+it("keeps field labels visible and removes a selected filter without changing other fields", async () => {
+  const leads = makeLeads(3); leads[1].source = "meta"; leads[2].source = "outreach";
+  await render(leads, "rf_transparent");
+  await chooseFilters("source", ["outreach"]);
+  const toolbar = container.querySelector('[role="group"][aria-label="Lead filters"]')!;
+  expect(toolbar.textContent).toContain("Owner");
+  expect(toolbar.textContent).toContain("Source");
+  expect(toolbar.textContent).toContain("Received date");
+  expect(toolbar.textContent).toContain("Lead status");
+  expect(leadRows()).toHaveLength(1);
+  const remove = container.querySelector<HTMLButtonElement>('button[aria-label="Remove Source: Outreach filter"]')!;
+  await act(async () => remove.click());
+  expect(leadRows()).toHaveLength(3);
+  const saved = JSON.parse(sessionStorage.getItem("rf-lead-queue:v2:rf_transparent")!);
+  expect(saved).toMatchObject({ source: "all", status: "open", history: "30d" });
 });

@@ -292,10 +292,14 @@ async function updateLeadIds(
   outcome?: "new",
 ): Promise<void> {
   const supabase = getSupabase();
+  const attributedUpdate = "call_status" in update ? {
+    ...update, call_status_source: "phone_sync", call_status_changed_by: null,
+    call_status_changed_at: new Date().toISOString(),
+  } : update;
   for (let offset = 0; offset < ids.length; offset += WRITE_CHUNK_SIZE) {
     let query = supabase
       .from("leads")
-      .update(update)
+      .update(attributedUpdate)
       .in("id", ids.slice(offset, offset + WRITE_CHUNK_SIZE));
     if (outcome) query = query.eq("outcome", outcome);
     const { error } = await query;

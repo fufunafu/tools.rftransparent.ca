@@ -67,6 +67,36 @@ function formatDateTime(iso: string): string {
   });
 }
 
+function callStatusLabel(lead: Lead): string {
+  if (lead.call_status !== "called") return CALL_STATUS_LABELS[lead.call_status];
+  if (lead.call_status_source === "manual") return "Called · manual";
+  return lead.last_call_at ? "Called" : "Called · unverified";
+}
+
+function LeadCallAttribution({ lead }: { lead: Lead }) {
+  return <div className="mt-1 space-y-1 text-xs text-sand-600">
+    {lead.last_call_at && <div>
+      <div className="break-words">Phone record: {lead.last_called_by || "Caller not recorded"}</div>
+      <div className="text-sand-400">{formatDateTime(lead.last_call_at)}</div>
+    </div>}
+    {lead.call_status_source === "manual" ? <div>
+      <div className="break-words">Manually marked {CALL_STATUS_LABELS[lead.call_status].toLowerCase()} by {lead.call_status_changed_by || "employee not recorded"}</div>
+      {lead.call_status_changed_at && <div className="text-sand-400">{formatDateTime(lead.call_status_changed_at)}</div>}
+    </div> : !lead.last_call_at && lead.call_status !== "not_called" && <div>
+      <div>{lead.call_status_source ? "Status updated automatically" : "Who marked this: not recorded"}</div>
+      {lead.call_status_changed_at && <div className="text-sand-400">{formatDateTime(lead.call_status_changed_at)}</div>}
+    </div>}
+    {!lead.last_call_at && lead.call_status !== "not_called" && <div className="text-amber-700">No linked phone record</div>}
+  </div>;
+}
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return <span className="inline-flex max-w-full items-center gap-1 rounded-md bg-blue-50 py-1 pl-2 text-blue-800">
+    <span className="truncate" title={label}>{label}</span>
+    <button type="button" aria-label={`Remove ${label} filter`} onClick={onRemove} className="shrink-0 rounded px-1.5 text-sm leading-4 hover:bg-blue-100">×</button>
+  </span>;
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -592,7 +622,7 @@ function LeadDetailPanel({
                   </span>
                 ) : lead.outcome !== "not_applicable" && (
                   <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
-                    {CALL_STATUS_LABELS[lead.call_status]}
+                    {callStatusLabel(lead)}
                   </span>
                 )}
                 {(lead.duplicate_count ?? 1) > 1 && (
@@ -606,6 +636,7 @@ function LeadDetailPanel({
                   </span>
                 )}
               </div>
+              <LeadCallAttribution lead={lead} />
             </div>
             <button
               type="button"
@@ -1203,15 +1234,32 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     <div className="min-w-0 space-y-4">
     <section className="rounded-lg border border-sand-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-sand-100 px-4 py-3"><div><h2 className="font-semibold text-sand-900">Work queue</h2><p className="text-xs text-sand-500">{visible.length} {visible.length === 1 ? "lead" : "leads"} matching filters · {filters.history === "all" ? "Received at any time" : `Received in the last ${filters.history === "90d" ? "90" : "30"} days${filters.olderOpen === "true" ? " + older open leads" : ""}`}</p></div></div>
-      <div className="flex flex-wrap items-center gap-2 border-b border-sand-100 p-3">
-        <input value={filters.search} onChange={(event) => change("search", event.target.value)} placeholder="Search name, email, phone, staff, or quote" aria-label="Search leads" className="h-10 min-w-[240px] flex-1 rounded-md border border-sand-200 px-3 text-sm" />
-        <LeadFilterDropdown label="Filter leads by status" allLabel="All except spam" value={filters.status} onChange={value => change("status", value)} options={FILTER_TABS.filter(item => item.value !== "all")} allValues={FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value)} />
-        <LeadFilterDropdown label="Filter leads by source" allLabel="All sources" value={filters.source} onChange={value => change("source", value)} options={(["website", "meta", "outreach"] as const).filter(source => store === "rf_transparent" || source === "website").map(source => ({ value: source, label: SOURCE_BADGE[source].label, count: queue.filter(lead => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length }))} />
-        <LeadFilterDropdown label="Filter leads by owner" allLabel="Everyone" value={filters.owner} onChange={value => change("owner", value)} options={[{ value: "mine", label: "My leads", disabled: !currentUserEmail }, { value: "unassigned", label: "Unassigned" }, { value: "others", label: "Other assigned leads" }]} />
-        <select aria-label="Sort leads" value={filters.sort} onChange={(event) => change("sort", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2 text-xs"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
-        <label className="text-xs text-sand-500">Received <select aria-label="Lead received date range" value={filters.history} onChange={(event) => change("history", event.target.value)} className="h-10 rounded-md border border-sand-200 px-2"><option value="30d">30 days</option><option value="90d">90 days</option><option value="all">All time</option></select></label>
-        {filters.history !== "all" && <label className="flex items-center gap-2 text-xs text-sand-600"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={(event) => change("olderOpen", String(event.target.checked))} />Include older open leads</label>}
-        <button className="px-2 text-xs text-blue-700" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "newest", history: "30d", olderOpen: "false" })}>Reset</button>
+      <div className="border-b border-sand-200 px-4 pb-3 pt-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="relative min-w-[220px] flex-1 sm:max-w-md">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-sand-400"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
+            <input value={filters.search} onChange={event => change("search", event.target.value)} placeholder="Search leads" aria-label="Search leads" className="h-10 w-full rounded-full border border-sand-300 bg-white pl-10 pr-4 text-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500" />
+          </label>
+          <label className="inline-flex h-10 items-center gap-2 rounded-full border border-sand-300 pl-4 pr-3 text-xs text-sand-600">
+            <span>Sort by</span><select aria-label="Sort leads" value={filters.sort} onChange={event => change("sort", event.target.value)} className="min-w-0 bg-transparent py-1 text-xs font-medium text-sand-800 focus:outline-none"><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+          </label>
+        </div>
+        <div role="group" aria-label="Lead filters" className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+          <LeadFilterDropdown fieldLabel="Owner" label="Filter leads by owner" allLabel="Everyone" value={filters.owner} onChange={value => change("owner", value)} options={[{ value: "mine", label: "My leads", disabled: !currentUserEmail }, { value: "unassigned", label: "Unassigned" }, { value: "others", label: "Other assigned leads" }]} />
+          <LeadFilterDropdown fieldLabel="Source" label="Filter leads by source" allLabel="All sources" value={filters.source} onChange={value => change("source", value)} options={(["website", "meta", "outreach"] as const).filter(source => store === "rf_transparent" || source === "website").map(source => ({ value: source, label: SOURCE_BADGE[source].label, count: queue.filter(lead => lead.source === source && !isLeadSpamReason(lead.not_applicable_reason)).length }))} />
+          <label className="relative inline-flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm font-semibold text-sand-800 hover:bg-sand-50 focus-within:outline focus-within:outline-2 focus-within:outline-blue-500">
+            Received date {filters.history !== "all" && <span className="h-1.5 w-1.5 rounded-full bg-blue-600" aria-hidden="true" />}<span aria-hidden="true" className="text-sand-400">▾</span>
+            <select aria-label="Lead received date range" value={filters.history} onChange={event => change("history", event.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0"><option value="30d">Last 30 days</option><option value="90d">Last 90 days</option><option value="all">All time</option></select>
+          </label>
+          <LeadFilterDropdown fieldLabel="Lead status" label="Filter leads by status" allLabel="All except spam" value={filters.status} onChange={value => change("status", value)} options={FILTER_TABS.filter(item => item.value !== "all")} allValues={FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value)} />
+          <button className="ml-auto px-2 py-2 text-xs text-blue-700 hover:underline" onClick={() => setFilters({ status: "open", source: "all", owner: "all", search: "", sort: "newest", history: "30d", olderOpen: "false" })}>Reset</button>
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
+          {filters.source !== "all" && <FilterChip label={`Source: ${filterSelections(filters.source, []).map(source => SOURCE_BADGE[source as LeadSource]?.label).filter(Boolean).join(", ") || "None"}`} onRemove={() => change("source", "all")} />}
+          {filters.owner !== "all" && <FilterChip label={`Owner: ${filterSelections(filters.owner, []).map(owner => ({ mine: "My leads", unassigned: "Unassigned", others: "Other assigned leads" })[owner as "mine" | "unassigned" | "others"]).filter(Boolean).join(", ") || "None"}`} onRemove={() => change("owner", "all")} />}
+          {filters.status !== "all" && <FilterChip label={`Lead status: ${filterSelections(filters.status, []).map(status => FILTER_TABS.find(tab => tab.value === status)?.label).filter(Boolean).join(", ") || "None"}`} onRemove={() => change("status", "all")} />}
+          {filters.history !== "all" && <><FilterChip label={`Received: Last ${filters.history === "90d" ? "90" : "30"} days`} onRemove={() => change("history", "all")} /><label className="ml-1 flex cursor-pointer items-center gap-1.5 text-sand-500"><input type="checkbox" checked={filters.olderOpen === "true"} onChange={event => change("olderOpen", String(event.target.checked))} />Include older open leads</label></>}
+        </div>
       </div>
       {error && <div role="alert" className="flex items-center justify-between gap-3 bg-amber-50 px-4 py-3 text-sm text-amber-800"><span>{data ? "The latest refresh failed. Showing the last loaded records." : "Lead data could not be loaded."}</span><button className="shrink-0 underline" onClick={() => void reload()}>Try again</button></div>}
       {isLoading && !data ? <p className="p-8 text-center text-sm text-sand-500">Loading leads...</p> : visible.length === 0 ? <p className="p-8 text-center text-sm text-sand-500">No leads match these filters.</p> : <div className="overflow-x-auto">
@@ -1222,7 +1270,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
               {lead.phone && <div className="mt-1 flex items-center gap-2 text-xs"><a href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`} className="text-blue-700">{lead.phone}</a><button aria-label={`Copy phone for ${lead.name || lead.phone}`} onClick={() => void copy(lead.phone!, "Phone")} className="text-[10px] text-sand-500">Copy</button></div>}
             </td>
             <td className="px-3 py-3"><div className="break-words text-xs text-sand-700">{isOpenLead(lead) ? lead.next_action || (hasUnansweredReply(lead) ? "Reply to prospect" : lead.call_status === "not_called" ? "Make first contact" : "Set the next action") : "Closed"}</div><div className={`mt-1 text-xs ${isFollowUpDue(lead, now) ? "font-medium text-amber-700" : "text-sand-500"}`}>{isOpenLead(lead) ? lead.next_follow_up_at ? `${isFollowUpDue(lead, now) ? "Due: " : "Follow up: "}${formatDateTime(lead.next_follow_up_at)}` : "No follow-up scheduled" : ""}</div><div className="mt-1 break-words text-xs text-sand-500">{lead.assigned_to || "Unassigned"}</div><button onClick={() => setSelectedLeadId(lead.id)} className="mt-1 text-xs text-blue-700">Assign / schedule</button></td>
-            <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : CALL_STATUS_LABELS[lead.call_status]}</span>{lead.last_call_at && <div className="mt-1 text-xs text-sand-600">{formatDateTime(lead.last_call_at)}<div className="break-words text-sand-400">{lead.last_called_by || "Staff not recorded"}</div></div>}<details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
+            <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : callStatusLabel(lead)}</span><LeadCallAttribution lead={lead} /><details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
             <td className="px-3 py-3">{lead.quote_number ? <><span className="font-medium">{lead.quote_number}</span>{lead.quote_amount != null && <div className="text-xs text-sand-600">{formatCADWhole(Number(lead.quote_amount))}</div>}<div className="mt-1 text-[11px] text-sand-500">{lead.quote_sent_at ? `Sent ${formatDateTime(lead.quote_sent_at)}` : "Send date not recorded"}</div></> : <span className="text-xs text-sand-400">No quote recorded</span>}</td>
             <td className="px-3 py-3"><span className={`inline-block rounded-full px-2 py-0.5 text-xs ${OUTCOME_BADGE[lead.outcome]}`}>{OUTCOME_LABELS[lead.outcome] || "New"}</span></td>
           </tr>)}</tbody></table>{count < visible.length && <LoadMoreRows shown={count} total={visible.length} onLoadMore={showMore} />}

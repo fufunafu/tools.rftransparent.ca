@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
-import {
-  getPurchasingSettings,
-  listProductsWithMetrics,
-} from "@/lib/purchasing/queries";
-import { getInventoryForecasts } from "@/lib/purchasing/forecast";
+import { getPurchasingPlanning } from "@/lib/purchasing/queries";
 import ReorderTable from "@/components/admin/purchasing/ReorderTable";
 
 export const metadata: Metadata = {
@@ -12,11 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function PurchasingReorderPage() {
-  const [products, forecasts, settings] = await Promise.all([
-    listProductsWithMetrics(),
-    getInventoryForecasts().catch(() => ({})),
-    getPurchasingSettings(),
-  ]);
+  const { products, forecasts, settings } = await getPurchasingPlanning();
   return (
     <ReorderTable
       initialProducts={products}

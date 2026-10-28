@@ -25,13 +25,7 @@ it("labels source totals separately from rolling lines and omits the follow-up b
     await act(async () => root.render(<SWRConfig value={{ provider: () => new Map() }}><LeadAnalysisDashboard initialNow={now} initialBounds={leadTrendQueryBounds("30d", new Date(now))} initialLeads={leads} store="rf_transparent" /></SWRConfig>));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     const cards = [...container.querySelectorAll("article")];
-    const order = cards.find(card => card.querySelector("h2")?.textContent === "Lead-to-order rate")!;
-    expect(order.textContent).toContain("Website: 50%");
-    expect(order.textContent).toContain("Meta: No data");
-    expect(order.textContent).toContain("Outreach: 0%");
-    expect(order.textContent).toContain("1/2 won");
-    expect(order.textContent).toContain("Selected-period totals");
-    expect(order.textContent).toContain("Lines: 7-day rolling rates");
+    expect(cards.some(card => card.querySelector("h2")?.textContent === "Lead-to-order rate")).toBe(false);
     const conversion = cards.find(card => card.querySelector("h2")?.textContent === "Quote-to-order conversion")!;
     expect(conversion.textContent).toContain("Website: 100%");
     expect(conversion.textContent).toContain("1/1 quoted leads became orders");

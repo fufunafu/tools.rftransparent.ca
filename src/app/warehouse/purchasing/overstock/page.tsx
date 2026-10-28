@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { listProductsWithMetrics, getPurchasingSettings } from "@/lib/purchasing/queries";
+import { getPurchasingPlanning } from "@/lib/purchasing/queries";
 import OverstockTable from "@/components/admin/purchasing/OverstockTable";
 
 export const metadata: Metadata = {
@@ -8,6 +8,6 @@ export const metadata: Metadata = {
 };
 
 export default async function PurchasingOverstockPage() {
-  const [products, settings] = await Promise.all([listProductsWithMetrics(), getPurchasingSettings()]);
+  const { products, settings } = await getPurchasingPlanning();
   return <OverstockTable initialProducts={products} settings={settings} />;
 }

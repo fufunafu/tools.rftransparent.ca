@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { getAuthenticatedUser, isManagementUser } from "@/lib/admin-auth";
 import { getSupabase } from "@/lib/supabase";
-import { listProductsWithMetrics } from "@/lib/purchasing/queries";
+import { getPurchasingPlanning } from "@/lib/purchasing/queries";
 import { buildFieldDiffs, logActivity } from "@/lib/purchasing/activity";
 import type { Category } from "@/lib/purchasing/types";
 
@@ -30,8 +30,9 @@ export async function GET(req: NextRequest) {
   }
   const category = req.nextUrl.searchParams.get("category") as Category | null;
   try {
-    const products = await listProductsWithMetrics(category);
-    return NextResponse.json({ products });
+    const planning = await getPurchasingPlanning();
+    const products = category ? planning.products.filter(p => p.category === category) : planning.products;
+    return NextResponse.json({ ...planning, products });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to load products" },

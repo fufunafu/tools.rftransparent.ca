@@ -77,11 +77,6 @@ const PERFORMANCE_CHARTS: Array<{
     description: "Share of included leads that received a quote. Higher is better.",
   },
   {
-    metric: "conversionRate",
-    title: "Lead-to-order rate",
-    description: "Share of included leads that became an order. Higher is better.",
-  },
-  {
     metric: "quoteConversionRate",
     title: "Quote-to-order conversion",
     description: "Quoted leads that became orders, grouped by when the lead arrived. Each lead counts once, including revised quotes. Recent cohorts can still convert.",
@@ -260,7 +255,7 @@ function SourceToggle({
 }) {
   const website = source === "website";
   return (
-    <label className="inline-flex cursor-pointer items-center gap-2 text-sm font-medium text-sand-700">
+    <label className="inline-flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-xs font-medium text-sand-700">
       <input
         type="checkbox"
         checked={checked}
@@ -268,7 +263,6 @@ function SourceToggle({
         onChange={onChange}
         className={`h-4 w-4 ${website ? "accent-blue-600" : source === "outreach" ? "accent-violet-600" : "accent-pink-600"}`}
       />
-      <span className={`h-2.5 w-2.5 rounded-sm ${website ? "bg-blue-600" : source === "outreach" ? "bg-violet-600" : "bg-pink-600"}`} />
       {source === "outreach" ? "Outreach" : website ? "Website" : "Meta"}
     </label>
   );
@@ -597,9 +591,14 @@ export default function LeadAnalysisDashboard({
         </div>
       </header>}
 
-      <section className="rounded-xl border border-sand-200 bg-white p-3 shadow-sm shadow-slate-200/30 sm:p-4">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-          <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-lg border border-sand-200 bg-sand-50 p-1 text-xs font-medium">
+      <section className={sidePanel ? "border-b border-sand-100 pb-3" : "rounded-xl border border-sand-200 bg-white p-3 shadow-sm shadow-slate-200/30 sm:p-4"}>
+        <div className={sidePanel ? "flex flex-col gap-3" : "flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"}>
+          {sidePanel ? <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <select aria-label="Analytics date range" value={trendRange} onChange={event => selectRange(event.target.value as TrendSelection)} className="h-8 rounded-md border border-sand-200 bg-white px-2 text-xs font-medium text-sand-800">
+              {TREND_RANGES.map(range => <option key={range.value} value={range.value}>{range.label}</option>)}
+            </select>
+            <span className="text-[11px] text-sand-500">{formatSelectedPeriod(trend.points)}</span>
+          </div> : <div className="inline-flex max-w-full flex-nowrap self-start overflow-x-auto rounded-lg border border-sand-200 bg-sand-50 p-1 text-xs font-medium">
             {TREND_RANGES.map((range) => (
               <button
                 key={range.value}
@@ -615,8 +614,8 @@ export default function LeadAnalysisDashboard({
                 {range.label}
               </button>
             ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-5">
+          </div>}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <SourceToggle
               source="website"
               checked={sources.website}
@@ -639,7 +638,7 @@ export default function LeadAnalysisDashboard({
               />
               </>
             )}
-            <span className="text-xs text-sand-400">{formatSelectedPeriod(trend.points)}</span>
+            {!sidePanel && <span className="text-xs text-sand-400">{formatSelectedPeriod(trend.points)}</span>}
           </div>
         </div>
         {trendRange === "custom" && (
@@ -686,15 +685,12 @@ export default function LeadAnalysisDashboard({
           <section aria-labelledby="snapshot-heading">
             <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
               <div>
-                <h2 id="snapshot-heading" className="text-base font-semibold text-sand-900">Selected-period snapshot</h2>
+                <h2 id="snapshot-heading" className="text-base font-semibold text-sand-900">Period summary</h2>
                 <p className="mt-0.5 text-xs text-sand-500">
-                  {funnel.total} of {analysisLeads.length} leads are included in performance metrics
-                  {excluded > 0 ? `; ${excluded} excluded` : ""}.
+                  {funnel.total} of {analysisLeads.length} leads included
+                  {excluded > 0 && <span title="Spam, forwarded, and unquotable leads are excluded from performance rates."> · {excluded} excluded</span>}
                 </p>
               </div>
-              <p className="text-[10px] uppercase tracking-wider text-sand-400">
-                Spam, forwarded, and unquotable leads are excluded from rates
-              </p>
             </div>
             <div className={sidePanel ? "grid grid-cols-1 gap-3 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6"}>
               <SnapshotCard
