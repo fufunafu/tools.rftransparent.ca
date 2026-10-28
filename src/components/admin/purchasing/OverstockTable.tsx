@@ -5,6 +5,9 @@ import { seasonalMonthlySales } from "@/lib/purchasing/seasonality";
 import { useMemo, useState } from "react";
 import type { Category, ProductWithMetrics, PurchasingSettings } from "@/lib/purchasing/types";
 import ColumnHint from "./ColumnHint";
+import PurchasingPageHeader from "./PurchasingPageHeader";
+import ProductFilters from "./ProductFilters";
+import Link from "next/link";
 
 interface Props { initialProducts: ProductWithMetrics[]; settings: PurchasingSettings }
 
@@ -23,7 +26,7 @@ function daysUntilCapacity(p: ProductWithMetrics): number | null {
 }
 
 export default function OverstockTable({ initialProducts, settings }: Props) {
-  const [category, setCategory] = useState<Category>("glass");
+  const [category, setCategory] = useState<Category | "all">("all");
   const [search, setSearch] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [sortKey, setSortKey] = useState<SortKey>("overstock");
@@ -40,7 +43,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = enriched.filter((p) => {
-      if (p.category !== category) return false;
+      if (category !== "all" && p.category !== category) return false;
       if (!showAll && p.overstock <= 0) return false;
       if (q && !p.sku.toLowerCase().includes(q) && !p.name.toLowerCase().includes(q)) return false;
       return true;
@@ -73,37 +76,20 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-sand-200 overflow-hidden">
-          {(["glass", "hardware"] as const).map((c) => (
-            <button key={c} onClick={() => setCategory(c)}
-              className={"px-3 py-1.5 text-sm capitalize " + (category === c ? "bg-accent text-white" : "bg-white text-sand-700 hover:bg-sand-50")}>{c}</button>
-          ))}
-        </div>
-        <label className="inline-flex items-center gap-2 text-sm text-sand-700 px-2">
-          <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-          Show all products (not just overstocked)
-        </label>
-        <input type="text" placeholder="Search SKU or name" value={search} onChange={(e) => setSearch(e.target.value)}
-          className="px-3 py-1.5 text-sm rounded-lg border border-sand-300 flex-1 min-w-[200px]" />
-        <div className="text-xs text-sand-500 ml-auto">{visible.length} of {enriched.length} products</div>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="bg-white rounded-xl border border-sand-200/60 p-4">
-          <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Overstocked SKUs</div>
-          <div className="text-2xl font-semibold text-sand-900 mt-1 tabular-nums">{enriched.filter((p) => p.overstock > 0).length}</div>
-        </div>
-        <div className="bg-white rounded-xl border border-sand-200/60 p-4">
-          <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Excess units (visible)</div>
-          <div className="text-2xl font-semibold text-sand-900 mt-1 tabular-nums">{fmtNum(totals.units, 0)}</div>
+      <PurchasingPageHeader title="Excess stock" description="Find products above their stock target and estimate how long the excess will take to sell." />
+      <div className="space-y-3 rounded-xl border border-sand-200 bg-white p-3 sm:p-4">
+        <ProductFilters category={category} onCategory={setCategory} search={search} onSearch={setSearch} />
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-sand-100 pt-3 text-xs text-sand-600">
+          <label className="inline-flex items-center gap-2"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> Include products within their stock target</label>
+          <span><strong className="text-sand-900">{visible.filter(p => p.overstock > 0).length}</strong> overstocked products · <strong className="text-sand-900">{fmtNum(totals.units)}</strong> excess units in this view</span>
         </div>
       </div>
-      <div className="bg-white rounded-xl border border-sand-200/60 overflow-auto max-h-[calc(100vh-260px)]">
-        <table className="w-full text-sm tabular-nums">
+      <div className="max-h-[65vh] overflow-auto rounded-xl border border-sand-200 bg-white">
+        <table className="w-full min-w-[700px] text-sm tabular-nums">
+          <caption className="sr-only">Excess stock by product, with seasonal demand and estimated clearance time.</caption>
           <thead className="sticky top-0 z-20 bg-sand-50 text-sand-500 text-[11px] uppercase tracking-wider">
             <tr>
-              <Th sortKey="sku" current={sortKey} dir={sortDir} onToggle={toggleSort}>SKU</Th>
-              <th className="text-left px-3 py-2 font-medium">Name</th>
+              <Th sortKey="sku" current={sortKey} dir={sortDir} onToggle={toggleSort}>Product</Th>
               <Th sortKey="current_inventory" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
                 <span className="inline-flex items-center">On hand<ColumnHint>Units currently in the warehouse - what you have right now, not counting what&apos;s on its way.</ColumnHint></span>
               </Th>
@@ -117,7 +103,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
                 <span className="inline-flex items-center justify-end w-full">Monthly<ColumnHint>Annual net units from RF + GRS divided by 12, multiplied by this month&apos;s seasonality. Growth is applied separately to stock projections.</ColumnHint></span>
               </th>
               <Th sortKey="days_until_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Days to clear<ColumnHint>How long the excess takes to burn off at the current sales rate: <span className="font-mono">overstock / (monthly / 30)</span>. &ldquo;No sales&rdquo; means it&apos;ll never clear on its own.</ColumnHint></span>
+                <span className="inline-flex items-center">Days to clear<ColumnHint>Estimated time to sell the excess, including seasonality and the configured growth assumption: <span className="font-mono">overstock / (monthly / 30)</span>. &ldquo;No sales&rdquo; means it&apos;ll never clear on its own.</ColumnHint></span>
               </Th>
             </tr>
           </thead>
@@ -126,8 +112,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
               const isOver = p.overstock > 0;
               return (
                 <tr key={p.id}>
-                  <td className="px-3 py-2 font-mono text-xs">{p.sku}</td>
-                  <td className="px-3 py-2 text-sand-700">{p.name}</td>
+                  <td className="sticky left-0 z-10 min-w-48 bg-white px-3 py-3"><Link href={`/warehouse/purchasing/sales?sku=${encodeURIComponent(p.sku)}`} className="block font-mono text-xs font-semibold text-accent hover:underline">{p.sku}</Link><span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span></td>
                   <td className="px-3 py-2 text-right">{fmtNum(p.current_inventory, 0)}</td>
                   <td className="px-3 py-2 text-right text-sand-500">{fmtNum(p.storage_capacity, 0)}</td>
                   <td className={"px-3 py-2 text-right " + (isOver ? "text-red-700 font-medium" : "text-sand-500")}>
@@ -141,7 +126,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
               );
             })}
             {visible.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-10 text-center text-sand-500">
+              <tr><td colSpan={6} className="px-3 py-10 text-center text-sand-500">
                 {showAll ? "No products match these filters." : "Nothing is overstocked right now."}
               </td></tr>
             )}
@@ -149,7 +134,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
           {visible.length > 0 && (
             <tfoot className="bg-sand-50 text-sand-700 font-medium">
               <tr>
-                <td colSpan={4} className="px-3 py-2 text-right">Total ({visible.filter((p) => p.overstock > 0).length} over)</td>
+                <td colSpan={3} className="px-3 py-2 text-right">Total ({visible.filter((p) => p.overstock > 0).length} over)</td>
                 <td className="px-3 py-2 text-right">+{fmtNum(totals.units, 0)}</td>
                 <td colSpan={2}></td>
               </tr>
@@ -170,7 +155,7 @@ function Th({ children, sortKey, current, dir, onToggle, align = "left" }: {
 }) {
   const active = current === sortKey;
   return (
-    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-2 font-medium"}>
+    <th className={(align === "right" ? "text-right" : "text-left") + " px-3 py-3 font-medium" + (sortKey === "sku" ? " sticky left-0 z-30 min-w-48 bg-sand-50" : "")}>
       <button type="button" onClick={() => onToggle(sortKey)}
         className={"inline-flex items-center gap-1 hover:text-sand-700 " + (active ? "text-sand-700" : "")}>
         {children}

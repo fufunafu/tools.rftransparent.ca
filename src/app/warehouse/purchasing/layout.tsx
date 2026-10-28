@@ -26,10 +26,11 @@ export default async function PurchasingLayout({
 
   return (
     <SWRProvider>
-      <div className="max-w-[1600px] mx-auto space-y-4">
+      <div className="mx-auto min-w-0 max-w-[1600px] space-y-5">
         <div className="space-y-4">
-          <div className="flex items-baseline justify-between">
+          <div>
             <h1 className="text-2xl font-semibold text-sand-900">Purchasing</h1>
+            <p className="mt-1 hidden text-sm text-sand-500 sm:block">Keep stock healthy, plan replenishment, and track incoming orders.</p>
           </div>
           <PurchasingSummaryStrip summary={summary} />
           <PurchasingTabs />
