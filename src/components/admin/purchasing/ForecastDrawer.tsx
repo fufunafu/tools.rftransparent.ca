@@ -65,7 +65,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
     () =>
       points.map((p) => ({
         ...p,
-        t: parseISO(p.date),
+        t: p.timestamp ?? parseISO(p.date),
       })),
     [points],
   );
@@ -76,7 +76,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
   const reasons = reorderReasons(product, settings);
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex justify-end" onClick={onClose}>
-      <div className="bg-white w-full max-w-2xl h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+      <div role="dialog" aria-modal="true" aria-label={`Inventory graph for ${product.sku}`} className="bg-white w-full max-w-2xl h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="sticky top-0 bg-white border-b border-sand-200/60 px-5 py-3 flex items-baseline justify-between">
           <div>
             <div className="text-xs text-sand-500 font-mono">{product.sku}</div>
@@ -92,7 +92,12 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
             <Stat label="Capacity" value={product.storage_capacity.toLocaleString("en-CA")} />
           </div>
           <div className="bg-sand-50 rounded-xl border border-sand-200/60 p-4 text-sm">
-            {forecast?.projected_stockout_date ? (
+            {!forecast ? (
+              <div>
+                <div className="font-medium text-amber-700">Forecast unavailable</div>
+                <p className="mt-1 text-xs text-sand-600">Refresh inventory to load this product&apos;s graph and stockout estimate.</p>
+              </div>
+            ) : forecast.projected_stockout_date ? (
               <div>
                 <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
                 <div className={"text-2xl font-semibold tabular-nums " + ((forecast.days_until_stockout ?? 365) < settings.lead_time_days ? "text-red-700" : "text-sand-900")}>
@@ -182,13 +187,13 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                     <ReferenceLine y={product.storage_capacity} stroke="#94a3b8" strokeDasharray="4 4" ifOverflow="extendDomain"
                       label={{ value: product.category === "hardware" ? "Stock target" : "Capacity", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }} />
                     <ReferenceLine y={0} stroke="#dc2626" />
-                    <Line type="linear" dataKey="inventory" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                    <Line type="linear" dataKey="inventory" stroke="#3b82f6" strokeWidth={2} dot={false} isAnimationActive={false} />
                     {arrivals.map((a) => (
                       <ReferenceDot key={a.date + (a.po_number ?? "")} x={parseISO(a.date)} y={a.inventory}
                         r={5} fill="#10b981" stroke="white" strokeWidth={2} />
                     ))}
                     {stockoutPoint && (
-                      <ReferenceDot x={parseISO(stockoutPoint.date)} y={0} r={5} fill="#dc2626" stroke="white" strokeWidth={2} />
+                      <ReferenceDot x={stockoutPoint.timestamp ?? parseISO(stockoutPoint.date)} y={0} r={5} fill="#dc2626" stroke="white" strokeWidth={2} />
                     )}
                   </LineChart>
                 </ResponsiveContainer>

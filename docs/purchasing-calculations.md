@@ -56,6 +56,8 @@ Hardware and transfer quantities round up to whole units.
 Projected stockout uses the same daily demand and ETA schedule as recommendations.
 The chart assumes unmet demand after stockout is lost, not accumulated as an
 unrecorded backlog. A later shipment therefore adds its full remaining quantity.
+The graph places each depletion at its calculated time within the day and keeps
+zero-stock intervals flat, including repeated stockouts after partial deliveries.
 No stockout within the one-year chart horizon is shown as unknown beyond that
 horizon, not infinite stock coverage.
 
