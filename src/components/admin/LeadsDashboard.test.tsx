@@ -251,3 +251,19 @@ it("can exclude Outreach directly from All sources and closes on outside click",
   await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
   expect(trigger.getAttribute("aria-expanded")).toBe("false");
 });
+
+it("distinguishes phone evidence, employee markings, and legacy unattributed statuses", async () => {
+  const rows = makeLeads(3).map(row => ({ ...row, phone: "4165550123" }));
+  rows[0] = { ...rows[0], last_call_at: "2026-10-26T14:00:00Z", last_called_by: "Daniel" };
+  rows[1] = { ...rows[1], call_status_source: "manual", call_status_changed_by: "employee@example.com", call_status_changed_at: "2026-10-26T15:00:00Z" };
+  await render(rows);
+  const rendered = leadRows();
+  expect(rendered[0].textContent).toContain("Phone record: Daniel");
+  expect(rendered[0].textContent).not.toContain("unverified");
+  expect(rendered[1].textContent).toContain("Called · manual");
+  expect(rendered[1].textContent).toContain("Manually marked called by employee@example.com");
+  expect(rendered[1].textContent).toContain("No linked phone record");
+  expect(rendered[2].textContent).toContain("Called · unverified");
+  expect(rendered[2].textContent).toContain("Who marked this: not recorded");
+  expect(rendered[2].textContent).not.toContain("Manually marked");
+});

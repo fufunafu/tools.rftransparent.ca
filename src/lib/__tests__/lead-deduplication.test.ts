@@ -466,3 +466,11 @@ it("shows the newest quote across combined submissions while retaining the first
   ]);
   expect(merged).toMatchObject({ quote_number: "Q2", quote_amount: 2000, first_quote_at: "2026-08-04T12:00Z", outcome: "won" });
 });
+
+it("keeps status attribution with the duplicate that supplied the merged call status", () => {
+  const result = consolidateDuplicateLeads([
+    lead("manual", { call_status: "called", call_status_source: "manual", call_status_changed_by: "caller@example.com", call_status_changed_at: "2026-08-03T15:00:00Z" }),
+    lead("canonical", { outcome: "won", quote_number: "D1", call_status: "not_called", call_status_source: "manual", call_status_changed_by: "other@example.com", call_status_changed_at: "2026-08-03T16:00:00Z" }),
+  ]);
+  expect(result[0]).toMatchObject({ call_status: "called", call_status_source: "manual", call_status_changed_by: "caller@example.com" });
+});

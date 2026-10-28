@@ -251,7 +251,12 @@ export async function PATCH(req: NextRequest) {
     update.outcome = rest.outcome;
   }
   if (typeof rest.call_status === "string" && ALLOWED_CALL_STATUSES.includes(rest.call_status as CallStatus)) {
+    const actor = await getAuthenticatedUser();
+    if (!actor?.email) return NextResponse.json({ error: "Sign in again to change call status" }, { status: 401 });
     update.call_status = rest.call_status;
+    update.call_status_source = "manual";
+    update.call_status_changed_by = actor.email;
+    update.call_status_changed_at = new Date().toISOString();
   }
   if (rest.quote_number === null || typeof rest.quote_number === "string") update.quote_number = rest.quote_number;
   if (rest.quote_amount === null) {

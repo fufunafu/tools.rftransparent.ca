@@ -12,7 +12,7 @@ const PAGE_SIZE = 1000;
 const REVALIDATE_SECONDS = 60;
 const LEADS_CACHE_TAG = "customer-service:leads";
 const LEAD_LIST_COLUMNS =
-  "id,store_id,source,name,email,phone,installation_requested,submitted_at,call_status,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to,next_follow_up_at,next_action,last_reply_at,last_staff_reply_at,first_quote_at,quote_draft_id";
+  "id,store_id,source,name,email,phone,installation_requested,submitted_at,call_status,call_status_source,call_status_changed_by,call_status_changed_at,outcome,quote_number,quote_amount,quote_sent_at,lost_reason,not_applicable_reason,notes,assigned_to,next_follow_up_at,next_action,last_reply_at,last_staff_reply_at,first_quote_at,quote_draft_id";
 const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 
 type LeadRow = { id: string; [key: string]: unknown };

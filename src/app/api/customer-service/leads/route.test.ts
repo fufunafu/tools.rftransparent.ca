@@ -37,6 +37,9 @@ vi.mock("@/lib/customer-service/meta-leads", () => ({
   syncRecentMetaLeads: vi.fn(),
 }));
 
+import { getAuthenticatedUser } from "@/lib/admin-auth";
+vi.mock("next/cache", async (original) => ({ ...await original<typeof import("next/cache")>(), revalidateTag: vi.fn() }));
+
 import { GET, PATCH, POST } from "@/app/api/customer-service/leads/route";
 
 function queryBuilder(range: ReturnType<typeof vi.fn>) {
@@ -336,4 +339,20 @@ it("includes open leads outside reporting dates without truncating their call hi
   expect(response.status).toBe(200);
   expect(orMock).toHaveBeenCalledWith(expect.stringContaining("outcome.in.(new,contacted,quoted),and(submitted_at.gte."));
   expect(gteMock).not.toHaveBeenCalledWith("called_at", expect.anything());
+});
+
+
+it("attributes manual call status to the signed-in user, ignoring client-supplied authors", async () => {
+  vi.mocked(getAuthenticatedUser).mockResolvedValue({ email: "real@example.com" } as NonNullable<Awaited<ReturnType<typeof getAuthenticatedUser>>>);
+  const update = vi.fn(() => ({ in: vi.fn(async () => ({ error: null })) }));
+  getSupabaseMock.mockReturnValue({ from: vi.fn(() => ({ update })) });
+  const response = await PATCH(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads", { method: "PATCH", body: JSON.stringify({ id: "lead-1", call_status: "called", call_status_source: "phone_sync", call_status_changed_by: "forged@example.com" }) }));
+  expect(response.status).toBe(200);
+  expect(update).toHaveBeenCalledWith(expect.objectContaining({ call_status: "called", call_status_source: "manual", call_status_changed_by: "real@example.com", call_status_changed_at: expect.any(String) }));
+});
+it("rejects a call-status edit when the authenticated employee cannot be identified", async () => {
+  vi.mocked(getAuthenticatedUser).mockResolvedValue(null);
+  const response = await PATCH(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads", { method: "PATCH", body: JSON.stringify({ id: "lead-1", call_status: "called" }) }));
+  expect(response.status).toBe(401);
+  expect(getSupabaseMock).not.toHaveBeenCalled();
 });
