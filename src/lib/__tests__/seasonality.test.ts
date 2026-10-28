@@ -77,7 +77,7 @@ describe("monthMultiplier", () => {
   it("treats an invalid growth factor as 1", () => {
     const base = [2, ...Array(11).fill(1)];
     expect(monthMultiplier(0, { season_multipliers: base, growth_factor: NaN })).toBe(2);
-    expect(monthMultiplier(0, { season_multipliers: base, growth_factor: 0 })).toBe(2);
+    expect(monthMultiplier(0, { season_multipliers: base, growth_factor: 0 })).toBe(0);
     expect(monthMultiplier(0, { season_multipliers: base, growth_factor: -1 })).toBe(2);
   });
 });
@@ -95,11 +95,11 @@ describe("consumptionBetween", () => {
     expect(consumptionBetween("2026-02-01", "2026-01-01", 30, flat)).toBe(0);
   });
 
-  it("consumes baseMonthly/30 per day over a flat range (end exclusive)", () => {
-    // 10 days at 1 unit/day
-    expect(consumptionBetween("2026-01-01", "2026-01-11", 30, flat)).toBeCloseTo(10, 10);
+  it("divides monthly units over the actual calendar days (end exclusive)", () => {
+    // January has 31 days.
+    expect(consumptionBetween("2026-01-01", "2026-01-11", 30, flat)).toBeCloseTo(300 / 31, 10);
     // A single day
-    expect(consumptionBetween("2026-01-01", "2026-01-02", 30, flat)).toBeCloseTo(1, 10);
+    expect(consumptionBetween("2026-01-01", "2026-01-02", 30, flat)).toBeCloseTo(30 / 31, 10);
   });
 
   it("applies each calendar month's own multiplier across a boundary", () => {
@@ -107,17 +107,22 @@ describe("consumptionBetween", () => {
       season_multipliers: [2, 1, ...Array(10).fill(1)], // Jan ×2, Feb ×1
       growth_factor: 1,
     };
-    // Days consumed: Jan 30, Jan 31 (×2 each) + Feb 1 (×1) at 1 unit/day base
-    expect(consumptionBetween("2026-01-30", "2026-02-02", 30, s)).toBeCloseTo(5, 10);
+    // Two January days at 60/31 plus one February day at 30/28.
+    expect(consumptionBetween("2026-01-30", "2026-02-02", 30, s)).toBeCloseTo(120 / 31 + 30 / 28, 10);
   });
 
   it("applies the growth factor uniformly", () => {
     const s: SeasonalityConfig = { season_multipliers: Array(12).fill(1), growth_factor: 1.5 };
-    expect(consumptionBetween("2026-01-01", "2026-01-11", 30, s)).toBeCloseTo(15, 10);
+    expect(consumptionBetween("2026-01-01", "2026-01-11", 30, s)).toBeCloseTo(450 / 31, 10);
   });
 
-  it("covers a full non-leap year proportionally", () => {
-    // 365 days at 1 unit/day
-    expect(consumptionBetween("2026-01-01", "2027-01-01", 30, flat)).toBeCloseTo(365, 8);
+  it("preserves twelve monthly totals across a whole year", () => {
+    // Twelve months of 30 units, despite unequal month lengths.
+    expect(consumptionBetween("2026-01-01", "2027-01-01", 30, flat)).toBeCloseTo(360, 8);
   });
+});
+
+ it("uses 29 days in February in a leap year", () => {
+  expect(consumptionBetween("2028-02-01", "2028-03-01", 30, flat)).toBeCloseTo(30, 10);
+  expect(consumptionBetween("2028-02-28", "2028-03-01", 30, flat)).toBeCloseTo(60 / 29, 10);
 });

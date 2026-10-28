@@ -7,58 +7,17 @@ import {
   LineChart, Line, XAxis, YAxis, ReferenceLine, ReferenceDot,
   Tooltip, ResponsiveContainer, CartesianGrid,
 } from "recharts";
-import {
-  consumptionBetween,
-  pickSeasonality,
-} from "@/lib/purchasing/seasonality";
 import type {
-  ForecastPoint,
   InventoryForecast,
   ProductWithMetrics,
   PurchasingSettings,
 } from "@/lib/purchasing/types";
-
-const DAY_MS = 86_400_000;
-// Granularity of the projected-inventory chart: emit a data point every N
-// days between events so the line shows real time-proportional slope and
-// month-to-month seasonality changes.
-const CHART_STEP_DAYS = 3;
 
 function parseISO(d: string): number {
   return new Date(d + "T00:00:00Z").getTime();
 }
 function isoFromMs(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
-}
-
-function densifyTimeline(
-  points: ForecastPoint[],
-  baseMonthly: number,
-  settings: PurchasingSettings,
-): ForecastPoint[] {
-  if (points.length < 2) return points;
-  const seasonality = pickSeasonality(settings);
-  const out: ForecastPoint[] = [];
-  for (let i = 0; i < points.length; i++) {
-    const cur = points[i];
-    if (i === 0) { out.push(cur); continue; }
-    const prev = points[i - 1];
-    const startMs = parseISO(prev.date);
-    const endMs = parseISO(cur.date);
-    const stepMs = CHART_STEP_DAYS * DAY_MS;
-    for (let t = startMs + stepMs; t < endMs; t += stepMs) {
-      const consumed = consumptionBetween(
-        prev.date,
-        isoFromMs(t),
-        baseMonthly,
-        seasonality,
-      );
-      const inv = Math.max(0, prev.inventory - consumed);
-      out.push({ date: isoFromMs(t), inventory: inv });
-    }
-    out.push(cur);
-  }
-  return out;
 }
 
 interface Props {
@@ -70,71 +29,18 @@ interface Props {
 
 const fmtN = (n: number) => Math.round(n).toLocaleString("en-CA");
 
-// Mirrors the sop_label decision in purchasing_reorder_view (migration 048)
-// so the drawer can say in plain words *why* a SKU is flagged.
-function reorderReasons(
-  product: ProductWithMetrics,
-  settings: PurchasingSettings,
-): string[] {
-  const label = product.sop_label;
-  if (label === "ok" || label === "no_sales_data") return [];
-
-  const monthly = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
-  const total = product.total_inventory;
-  const lead = settings.lead_time_days;
-  const capacity = product.storage_capacity;
-  const target = product.restock_target;
-  // reorder_point is target + lead-time demand, so the demand piece is
-  // recoverable exactly without re-doing the seasonality math.
-  const leadDemand = product.reorder_point - product.restock_target;
+function reorderReasons(product: ProductWithMetrics, settings: PurchasingSettings): string[] {
   const reasons: string[] = [];
-
-  if (monthly === 0) {
-    reasons.push(
-      `No sales history yet - hardware SKUs are kept at a minimum of 50 units, and on hand + inbound is only ${fmtN(total)}.`,
-    );
-    return reasons;
-  }
-
-  if (label === "montreal_transfer" || label === "reorder_plus_montreal") {
-    const waitDays = product.days_until_next_arrival ?? lead;
-    const waitLabel =
-      product.days_until_next_arrival !== null
-        ? `the next inbound PO arrives in ~${fmtN(waitDays)} days`
-        : `new stock can arrive (lead time is ${lead} days)`;
-    reasons.push(
-      `On hand alone covers about ${fmtN(product.days_of_stock_left ?? 0)} days - not enough to last until ${waitLabel}, so a Montreal transfer is needed to bridge the gap.`,
-    );
-  }
-
-  if (label === "reorder" || label === "reorder_plus_montreal") {
-    reasons.push(
-      `On hand + inbound (${fmtN(total)}) is below the order point of ${fmtN(product.reorder_point)} units: customers will buy ~${fmtN(leadDemand)} while a new order ships (${lead} days), and we want ${fmtN(target)} still on the shelf when it lands.`,
-    );
-    // Explain where the target number comes from.
-    if (product.category === "hardware") {
-      reasons.push(
-        `The ${fmtN(target)}-unit target is ~3 months of sales at the current rate (minimum 50 units).`,
-      );
-    } else {
-      const fillFloor = settings.expected_fill * capacity;
-      const covered = leadDemand * (settings.restock_cover_pct / 100);
-      if (covered >= capacity) {
-        reasons.push(
-          `The target would be ${fmtN(covered)} (${fmtN(settings.restock_cover_pct)}% of a lead time of sales) but is capped at the storage capacity of ${fmtN(capacity)}.`,
-        );
-      } else if (fillFloor > covered) {
-        reasons.push(
-          `The ${fmtN(target)}-unit target comes from the minimum-fill setting: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(capacity)}.`,
-        );
-      } else {
-        reasons.push(
-          `The ${fmtN(target)}-unit target is ${fmtN(settings.restock_cover_pct)}% of one lead time of sales (~${fmtN(leadDemand)}) - the cover set in Settings.`,
-        );
-      }
-    }
-  }
-
+  const eta = product.planning?.order_arrival_date;
+  if (product.transfer_requirement > 0) reasons.push(
+    `A bridge of ${fmtN(product.transfer_requirement)} units is needed before a new supplier order can arrive${eta ? ` on ${fmtDate(eta)}` : ` in ${settings.lead_time_days} days`}. The calculation includes confirmed arrivals on their actual dates.`,
+  );
+  if (product.suggested_qty > 0) reasons.push(
+    `Order ${fmtN(product.suggested_qty)} units from the supplier to cover later demand and the stock target. The calculated need is ${fmtN(product.perfect_qty)} units${product.category === "glass" ? ", rounded up to an allowed crate quantity" : ""}. Any bridge transfer is counted separately so its units are not ordered twice.`,
+  );
+  if (product.avg_monthly_sales_grs + product.avg_monthly_sales_rf === 0) reasons.push(
+    "The annual sales baseline is zero. Any suggested purchase fills the configured minimum stock target; it is not evidence of current demand.",
+  );
   return reasons;
 }
 
@@ -155,33 +61,19 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
   const arrivals = points.filter((p) => p.event === "arrival");
   const stockoutPoint = points.find((p) => p.event === "stockout");
 
-  const baseMonthly = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
   const chartData = useMemo(
     () =>
-      densifyTimeline(points, baseMonthly, settings).map((p) => ({
+      points.map((p) => ({
         ...p,
         t: parseISO(p.date),
       })),
-    [points, baseMonthly, settings],
+    [points],
   );
   const xDomain: [number, number] = chartData.length >= 2
     ? [chartData[0].t, chartData[chartData.length - 1].t]
     : [0, 1];
 
   const reasons = reorderReasons(product, settings);
-  // For hardware the fill floor *is* the capacity line, so only glass gets
-  // a separate min-stock line.
-  const fillFloor =
-    product.category === "hardware"
-      ? null
-      : settings.expected_fill * product.storage_capacity;
-  const fillPct = Math.round(settings.expected_fill * 100);
-  // Skip the target line when it coincides with capacity (always true for
-  // hardware, and for fast movers whose buffered demand hits the cap).
-  const showTarget =
-    Math.abs(product.restock_target - product.storage_capacity) >
-    product.storage_capacity * 0.02;
-
   return (
     <div className="fixed inset-0 z-50 bg-black/30 flex justify-end" onClick={onClose}>
       <div className="bg-white w-full max-w-2xl h-full overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
@@ -248,7 +140,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               return (
                 <div>
                   <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
-                  <div className="text-xl font-semibold text-green-700">Safe - no stockout within the next year</div>
+                  <div className="text-xl font-semibold text-green-700">No projected stockout within the next year</div>
                   {arrivals.length > 0 && (
                     <div className="text-sand-600 text-xs mt-0.5">
                       {arrivals.length} incoming PO{arrivals.length === 1 ? "" : "s"} included
@@ -258,10 +150,13 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               );
             })()}
           </div>
+          {(product.planning?.unconfirmed_inbound ?? 0) > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
+            {product.planning!.unconfirmed_inbound} inbound units have an overdue or missing ETA ({product.planning!.unconfirmed_orders.join(", ")}). They are excluded from the forecast and recommendations until the delivery dates are confirmed. Check these orders before creating another order.
+          </div>}
           {reasons.length > 0 && (
             <div className="bg-amber-50 rounded-xl border border-amber-200/60 p-4 text-sm">
               <div className="text-[11px] text-amber-600 uppercase tracking-wider font-medium mb-1.5">
-                Why a reorder is suggested
+                Planning recommendation
               </div>
               <ul className="space-y-1.5 text-amber-900 text-xs leading-relaxed list-disc pl-4">
                 {reasons.map((r) => (
@@ -285,19 +180,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                     <Tooltip labelFormatter={(ms) => fmtDate(isoFromMs(ms as number))}
                       formatter={(v) => [Number(v).toLocaleString("en-CA", { maximumFractionDigits: 0 }), "units"]} />
                     <ReferenceLine y={product.storage_capacity} stroke="#94a3b8" strokeDasharray="4 4" ifOverflow="extendDomain"
-                      label={{ value: "Capacity", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }} />
-                    {fillFloor !== null && fillFloor > 0 && (
-                      <ReferenceLine y={fillFloor} stroke="#8b5cf6" strokeDasharray="4 4" ifOverflow="extendDomain"
-                        label={{ value: `Min stock (${fillPct}%)`, position: "insideBottomRight", fontSize: 10, fill: "#8b5cf6" }} />
-                    )}
-                    {showTarget && product.restock_target > 0 && (
-                      <ReferenceLine y={product.restock_target} stroke="#10b981" strokeDasharray="4 4" ifOverflow="extendDomain"
-                        label={{ value: "Target at arrival", position: "insideBottomLeft", fontSize: 10, fill: "#10b981" }} />
-                    )}
-                    {product.reorder_point > 0 && (
-                      <ReferenceLine y={product.reorder_point} stroke="#d97706" strokeDasharray="4 4" ifOverflow="extendDomain"
-                        label={{ value: "Order point", position: "insideTopLeft", fontSize: 10, fill: "#d97706" }} />
-                    )}
+                      label={{ value: product.category === "hardware" ? "Stock target" : "Capacity", position: "insideTopRight", fontSize: 10, fill: "#94a3b8" }} />
                     <ReferenceLine y={0} stroke="#dc2626" />
                     <Line type="linear" dataKey="inventory" stroke="#3b82f6" strokeWidth={2} dot={false} />
                     {arrivals.map((a) => (
@@ -313,16 +196,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
               <div className="flex flex-wrap items-center gap-3 mt-3 text-xs text-sand-500">
                 <span><span className="inline-block w-2 h-2 rounded-full bg-green-500 mr-1.5" />PO arrival</span>
                 <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1.5" />Stockout</span>
-                <span><span className="inline-block w-3 border-t border-dashed border-sand-400 mr-1.5 align-middle" />Capacity</span>
-                {product.reorder_point > 0 && (
-                  <span><span className="inline-block w-3 border-t border-dashed border-amber-600 mr-1.5 align-middle" />Order point</span>
-                )}
-                {showTarget && product.restock_target > 0 && (
-                  <span><span className="inline-block w-3 border-t border-dashed border-emerald-500 mr-1.5 align-middle" />Target at arrival</span>
-                )}
-                {fillFloor !== null && fillFloor > 0 && (
-                  <span><span className="inline-block w-3 border-t border-dashed border-violet-500 mr-1.5 align-middle" />Min stock ({fillPct}%)</span>
-                )}
+                <span><span className="inline-block w-3 border-t border-dashed border-sand-400 mr-1.5 align-middle" />{product.category === "hardware" ? "Stock target" : "Capacity"}</span>
               </div>
               <CalcNote product={product} settings={settings} />
             </div>
@@ -351,89 +225,27 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
   );
 }
 
-// Step-by-step breakdown of how the Order point and Target-at-arrival
-// lines were computed for this SKU, shown under the chart for every
-// product (not just flagged ones).
-function CalcNote({
-  product,
-  settings,
-}: {
-  product: ProductWithMetrics;
-  settings: PurchasingSettings;
-}) {
-  const baseMonthly = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
-  const lead = settings.lead_time_days;
-  // reorder_point = restock_target + lead-time demand in the view, so the
-  // demand piece is recoverable exactly without redoing seasonality math.
-  const leadDemand = product.reorder_point - product.restock_target;
-  const monthName = new Date().toLocaleDateString("en-CA", { month: "long" });
-
-  const rows: Array<[string, string]> = [];
-  if (baseMonthly === 0) {
-    rows.push([
-      "Target at arrival",
-      product.category === "hardware"
-        ? "no sales history - kept at the 50-unit minimum"
-        : `no sales history - min stock floor: ${Math.round(settings.expected_fill * 100)}% of capacity ${fmtN(product.storage_capacity)} = ${fmtN(product.restock_target)}`,
-    ]);
-    rows.push([
-      "Order point",
-      `${fmtN(product.reorder_point)} - same as the target, since nothing sells during the lead time`,
-    ]);
-  } else {
-    const scaledMonthly = product.daily_sales * 30;
-    const factor = scaledMonthly / baseMonthly;
-    rows.push([
-      `Selling rate (${monthName})`,
-      `${baseMonthly.toFixed(1)}/mo average × ${factor.toFixed(2)} seasonality & growth ≈ ${scaledMonthly.toFixed(1)}/mo`,
-    ]);
-    rows.push([
-      `Sold during ${lead}-day lead time`,
-      `${scaledMonthly.toFixed(1)}/mo × ${lead}/30 ≈ ${fmtN(leadDemand)} units`,
-    ]);
-    if (product.category === "hardware") {
-      rows.push([
-        "Target at arrival",
-        `3 months of sales ≈ ${fmtN(product.restock_target)} (50-unit minimum)`,
-      ]);
-    } else {
-      const covered = leadDemand * (settings.restock_cover_pct / 100);
-      let detail = `${fmtN(settings.restock_cover_pct)}% of lead-time sales = ${fmtN(covered)}`;
-      if (product.restock_target > covered + 0.5) {
-        detail += ` → raised to the ${Math.round(settings.expected_fill * 100)}% min-stock floor of ${fmtN(product.restock_target)}`;
-      } else if (product.restock_target < covered - 0.5) {
-        detail += ` → capped at capacity ${fmtN(product.storage_capacity)}`;
-      }
-      rows.push(["Target at arrival", detail]);
-    }
-    rows.push([
-      "Order point",
-      `${fmtN(leadDemand)} sold in transit + ${fmtN(product.restock_target)} target ≈ ${fmtN(product.reorder_point)}`,
-    ]);
-  }
-
-  return (
-    <div className="mt-3 pt-3 border-t border-sand-100">
-      <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium mb-1.5">
-        How the lines are calculated
-      </div>
-      <div className="space-y-1">
-        {rows.map(([label, value]) => (
-          <div key={label} className="flex gap-2 text-xs">
-            <span className="text-sand-500 w-48 shrink-0">{label}</span>
-            <span className="text-sand-700 tabular-nums">{value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+function CalcNote({ product, settings }: { product: ProductWithMetrics; settings: PurchasingSettings }) {
+  const plan = product.planning;
+  if (!plan) return null;
+  const base = product.avg_monthly_sales_grs + product.avg_monthly_sales_rf;
+  const rows: Array<[string, string]> = [
+    ["Sales baseline", `${fmtN(base * 12)} annual net units ÷ 12 = ${base.toFixed(1)} per month before seasonality`],
+    ["Daily forecast", `Each month's seasonal demand ÷ that month's actual number of days, with ${settings.annual_growth_pct}% forecast growth`],
+    ["Supplier lead time", `${fmtDate(plan.as_of)} to ${fmtDate(plan.order_arrival_date)}: ${fmtN(plan.lead_demand)} units of forecast demand`],
+    ["Coverage target", product.category === "hardware"
+      ? `${fmtN(plan.target_demand)} units: the next three months of forecast demand after supplier arrival, with a 50-unit minimum`
+      : `${fmtN(plan.target_demand)} units: the higher of ${fmtN(plan.cover_demand)} future cover-period demand or the ${fmtN(settings.expected_fill * product.storage_capacity)} stock floor, capped at capacity`],
+    ["Dated inbound counted", `${fmtN(plan.counted_inbound)} units within the protected coverage period. Later, overdue and undated shipments cannot hide earlier shortages.`],
+    ["Montreal bridge", `${fmtN(product.transfer_requirement)} units before supplier replenishment can arrive`],
+    ["Supplier order", `${fmtN(product.perfect_qty)} additional units needed; ${fmtN(product.suggested_qty)} suggested after rounding`],
+  ];
+  return <div className="mt-3 border-t border-sand-100 pt-3">
+    <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-sand-400">How the recommendation is calculated</div>
+    <div className="space-y-2">{rows.map(([label, value]) => <div key={label} className="text-xs sm:flex sm:gap-2"><span className="block shrink-0 font-medium text-sand-500 sm:w-40">{label}</span><span className="text-sand-700 tabular-nums">{value}</span></div>)}</div>
+  </div>;
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-white rounded-xl border border-sand-200/60 p-3">
-      <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">{label}</div>
-      <div className="text-lg font-semibold text-sand-900 tabular-nums mt-0.5">{value}</div>
-    </div>
-  );
+  return <div><div className="text-[11px] font-medium uppercase tracking-wider text-sand-400">{label}</div><div className="mt-1 font-semibold tabular-nums text-sand-900">{value}</div></div>;
 }

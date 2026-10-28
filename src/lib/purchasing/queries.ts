@@ -1,7 +1,11 @@
+import { cache } from "react";
+import { planProduct, type PlannedArrival, type StockProduct } from "./planning";
+import { purchasingToday } from "./seasonality";
 import { unstable_cache } from "next/cache";
 import { getSupabase } from "@/lib/supabase";
 import type {
   Category,
+  InventoryForecast,
   OrderItemWithProduct,
   ProductWithMetrics,
   PurchaseOrder,
@@ -26,48 +30,60 @@ const numOrNull = (x: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-// Not server-cached: edits to current_inventory etc. need to surface on
-// the very next SWR refetch. The underlying view query is cheap.
-export async function listProductsWithMetrics(
-  category?: Category | null,
-): Promise<ProductWithMetrics[]> {
-  let q = getSupabase()
-    .from("purchasing_reorder_view")
-    .select("*")
-    .order("sort_order", { ascending: true });
-  if (category) q = q.eq("category", category);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  return (data ?? []).map((r: Record<string, unknown>) => ({
-    id: String(r.id),
-    category: r.category as Category,
-    sku: String(r.sku),
-    name: String(r.name),
-    height: numOrNull(r.height),
-    width: numOrNull(r.width),
-    weight: numOrNull(r.weight),
-    storage_capacity: num(r.storage_capacity),
-    unit_cost_landed: num(r.unit_cost_landed),
-    current_inventory: num(r.current_inventory),
-    avg_monthly_sales_grs: num(r.avg_monthly_sales_grs),
-    avg_monthly_sales_rf: num(r.avg_monthly_sales_rf),
-    active: Boolean(r.active),
-    sort_order: num(r.sort_order),
-    inbound: num(r.inbound),
-    total_inventory: num(r.total_inventory),
-    daily_sales: num(r.daily_sales),
-    days_of_stock_left: numOrNull(r.days_of_stock_left),
-    days_of_stock_with_inbound: numOrNull(r.days_of_stock_with_inbound),
-    reorder_point: num(r.reorder_point),
-    restock_target: num(r.restock_target),
-    days_until_next_arrival: numOrNull(r.days_until_next_arrival),
-    perfect_qty: num(r.perfect_qty),
-    suggested_qty: num(r.suggested_qty),
-    transfer_requirement: num(r.transfer_requirement),
-    inventory_value: num(r.inventory_value),
-    overstock: num(r.overstock),
-    sop_label: (r.sop_label as ProductWithMetrics["sop_label"]) ?? "ok",
-  }));
+// React cache shares one request snapshot between the table and the forecast.
+// It is not a cross-request cache, so inventory edits use fresh source rows.
+export const getPurchasingPlanning = cache(async () => {
+  const db = getSupabase();
+  async function readProducts() {
+    const rows: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      const page = await db.from("purchasing_products").select("*").order("sort_order").order("id").range(from, from + 999);
+      if (page.error) throw new Error(page.error.message);
+      rows.push(...(page.data ?? []));
+      if ((page.data?.length ?? 0) < 1000) return rows;
+    }
+  }
+  async function readArrivals() {
+    const rows: Record<string, unknown>[] = [];
+    for (let from = 0; ; from += 1000) {
+      const page = await db.from("purchasing_order_items")
+        .select("id,product_id,qty_ordered,qty_received,purchasing_orders!inner(po_number,status,eta_date)")
+        .in("purchasing_orders.status", ["ordered", "in_transit"]).order("id").range(from, from + 999);
+      if (page.error) throw new Error(page.error.message);
+      rows.push(...(page.data ?? []));
+      if ((page.data?.length ?? 0) < 1000) return rows;
+    }
+  }
+  const [rawProducts, rawArrivals, settings] = await Promise.all([readProducts(), readArrivals(), getPurchasingSettings()]);
+  const arrivals = new Map<string, PlannedArrival[]>();
+  for (const row of rawArrivals) {
+    const value = row.purchasing_orders as { po_number: string; eta_date: string | null } | { po_number: string; eta_date: string | null }[];
+    const order = Array.isArray(value) ? value[0] : value;
+    const qty = num(row.qty_ordered) - num(row.qty_received);
+    if (!row.product_id || !order || qty <= 0) continue;
+    const id = String(row.product_id);
+    arrivals.set(id, [...(arrivals.get(id) ?? []), { product_id: id, date: order.eta_date, qty, po_number: order.po_number }]);
+  }
+  const products: ProductWithMetrics[] = [];
+  const forecasts: Record<string, InventoryForecast> = {};
+  const start = purchasingToday();
+  for (const row of rawProducts) {
+    const product: StockProduct = {
+      id: String(row.id), category: row.category as Category, sku: String(row.sku), name: String(row.name),
+      height: numOrNull(row.height), width: numOrNull(row.width), weight: numOrNull(row.weight),
+      storage_capacity: num(row.storage_capacity), unit_cost_landed: num(row.unit_cost_landed), current_inventory: num(row.current_inventory),
+      avg_monthly_sales_grs: num(row.avg_monthly_sales_grs), avg_monthly_sales_rf: num(row.avg_monthly_sales_rf),
+      active: Boolean(row.active), sort_order: num(row.sort_order),
+    };
+    const plan = planProduct(product, settings, arrivals.get(product.id) ?? [], start);
+    products.push(plan.product); forecasts[product.id] = plan.forecast;
+  }
+  return { products, forecasts, settings };
+});
+
+export async function listProductsWithMetrics(category?: Category | null): Promise<ProductWithMetrics[]> {
+  const { products } = await getPurchasingPlanning();
+  return category ? products.filter(product => product.category === category) : products;
 }
 
 export function getPurchasingSummary(): Promise<PurchasingSummary> {
@@ -76,15 +92,15 @@ export function getPurchasingSummary(): Promise<PurchasingSummary> {
       const supabase = getSupabase();
 
       const { data: prodRows, error: prodErr } = await supabase
-        .from("purchasing_reorder_view")
-        .select("current_inventory, inventory_value");
+        .from("purchasing_products")
+        .select("current_inventory, unit_cost_landed");
       if (prodErr) throw new Error(prodErr.message);
 
       let units_on_hand = 0;
       let total_inventory_value = 0;
       for (const r of (prodRows ?? []) as Array<Record<string, unknown>>) {
         units_on_hand += num(r.current_inventory);
-        total_inventory_value += num(r.inventory_value);
+        total_inventory_value += num(r.current_inventory) * num(r.unit_cost_landed);
       }
 
       const { data: openItems, error: openErr } = await supabase
@@ -100,9 +116,7 @@ export function getPurchasingSummary(): Promise<PurchasingSummary> {
         open_po_value += num(r.qty_ordered) * num(r.unit_cost_snapshot);
       }
 
-      const monthStart = new Date();
-      monthStart.setDate(1);
-      monthStart.setHours(0, 0, 0, 0);
+      const monthStart = `${purchasingToday().slice(0, 7)}-01`;
       const { data: monthItems, error: monthErr } = await supabase
         .from("purchasing_order_items")
         .select(
@@ -110,7 +124,7 @@ export function getPurchasingSummary(): Promise<PurchasingSummary> {
         )
         .gte(
           "purchasing_orders.order_date",
-          monthStart.toISOString().slice(0, 10),
+          monthStart,
         )
         .in("purchasing_orders.status", ["ordered", "in_transit", "received"]);
       if (monthErr) throw new Error(monthErr.message);

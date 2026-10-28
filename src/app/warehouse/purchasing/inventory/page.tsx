@@ -1,9 +1,5 @@
 import type { Metadata } from "next";
-import {
-  getPurchasingSettings,
-  listProductsWithMetrics,
-} from "@/lib/purchasing/queries";
-import { getInventoryForecasts } from "@/lib/purchasing/forecast";
+import { getPurchasingPlanning } from "@/lib/purchasing/queries";
 import InventoryTable from "@/components/admin/purchasing/InventoryTable";
 
 export const metadata: Metadata = {
@@ -12,11 +8,7 @@ export const metadata: Metadata = {
 };
 
 export default async function PurchasingInventoryPage() {
-  const [products, forecasts, settings] = await Promise.all([
-    listProductsWithMetrics(),
-    getInventoryForecasts().catch(() => ({})),
-    getPurchasingSettings(),
-  ]);
+  const { products, forecasts, settings } = await getPurchasingPlanning();
   return (
     <InventoryTable
       initialProducts={products}
