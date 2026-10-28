@@ -98,3 +98,25 @@ it("explains an incomplete email address instead of blaming the title or dates",
   expect((await response.json()).error).toMatch(/email address/);
   expect(mocks.rpc).not.toHaveBeenCalled();
 });
+describe("creating records with an owner, details and extra associations", () => {
+  const base = { requestId: "11111111-1111-4111-8111-111111111111", occurredAt: "2026-10-27T10:00:00Z", relatedId: "hubspot:1:contacts:2" };
+  it("keeps the original create path when nothing extra is chosen, including assigning to yourself", async () => {
+    await POST(request({ ...base, type: "notes", title: "Site visit", dueAt: null, ownerEmail: "rep@example.com", details: {} }));
+    expect(mocks.rpc).toHaveBeenCalledWith("crm_create_record", expect.objectContaining({ p_related_id: "hubspot:1:contacts:2" }));
+  });
+  it("assigns tasks, saves details for the record type only, and links several records", async () => {
+    const response = await POST(request({ ...base, type: "tasks", title: "Call back", dueAt: "2026-11-01T10:00:00Z", ownerEmail: "Other@Example.com", details: { priority: "high", call_outcome: "busy" }, extraRelatedIds: ["hubspot:1:companies:3", "hubspot:1:contacts:2"] }));
+    expect(response.status).toBe(201);
+    expect(mocks.rpc).toHaveBeenCalledWith("crm_create_record_ex", expect.objectContaining({ p_actor: "rep@example.com", p_owner: "other@example.com", p_details: { priority: "high" }, p_related_ids: ["hubspot:1:contacts:2", "hubspot:1:companies:3"] }));
+  });
+  it("rejects unknown detail values and unassigned tasks", async () => {
+    expect((await POST(request({ ...base, type: "calls", title: "Call", dueAt: null, details: { call_outcome: "teleported" } }))).status).toBe(400);
+    expect((await POST(request({ ...base, type: "tasks", title: "Call", dueAt: "2026-11-01T10:00:00Z", ownerEmail: "" }))).status).toBe(400);
+    expect(mocks.rpc).not.toHaveBeenCalled();
+  });
+  it("says when the database update is still missing", async () => {
+    mocks.rpc.mockResolvedValue({ data: null, error: { code: "PGRST202", message: "Could not find the function public.crm_create_record_ex" } });
+    const response = await POST(request({ ...base, type: "calls", title: "Call", dueAt: null, details: { call_outcome: "connected" } }));
+    expect(response.status).toBe(503); expect((await response.json()).error).toContain("database update");
+  });
+});

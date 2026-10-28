@@ -36,6 +36,20 @@ Import, projection, follow-up, and file workers share a durable database cooldow
 
 For a busy database, create the new indexes on `crm_audit` and `crm_records` concurrently before applying the remaining schema transaction, then verify they are valid and ready and record the original migration source. Back up the target first and rehearse on a recent local copy. The migration preserves source records, histories, local edits, and links. For recovery, pause the affected worker or remove the affected new control in a forward fix; keep saved views, audit records, and local changes. Do not restore an old application over unrelated production updates.
 
+## Everyday tools: editing, deleting, tasks, associations, search, reports and export
+
+Apply `20261028050000_crm_productivity.sql` after `20261028040000_crm_bugfixes.sql`. Until it is applied, the page and the original create path keep working; the new controls answer with a "needs a database update" message instead of failing.
+
+- **Edit and delete activity.** Calls, meetings, emails and notes logged in Tools can be edited by their author or management. Imported HubSpot activity stays read-only, because a later import would replace it. Every edit records the previous text in change history.
+- **Delete and restore.** Deleting archives the record and stores `deleted_at` and `deleted_by` in `local_fields`. Tools records can be deleted by their creator or management; imported records by management only. Restore reverses only a Tools deletion. `crm_import_page` now keeps a Tools-deleted record archived and keeps a Tools owner assignment, so a re-import cannot undo either. Deleted activity is listed under "Show deleted" on the record.
+- **Tasks.** One-click complete on Home, the Tasks list and record pages. Tasks can be reassigned to any active sales, customer-service or management employee, and carry a type (to-do, call, email) and priority. The task owner, its creator or management can change the details; status, due date and reminders still follow the existing owner-or-management rule. The Tasks list shows the linked contact or company.
+- **Activity details.** Calls record direction, outcome and minutes; meetings record outcome and minutes; emails record sent or received. These are Tools labels in `local_fields`; imported HubSpot values are not mapped.
+- **Associations and pins.** Staff can link a contact to a company, and an activity or task to a contact or company. Only links added in Tools can be removed. One linked activity can be pinned above a record's timeline.
+- **New records.** Contact and company forms warn about an existing record with the same email, phone or name, and set the owner, lifecycle stage and an existing company link. Activities can be linked to a contact and a company at once.
+- **Search.** The search box (or the `/` key) finds contacts, companies and open tasks. Ctrl+K and Cmd+K remain the site-wide page search.
+- **Reports.** Per-person counts of calls, emails, meetings and notes dated in the period, contacts added, tasks completed with a due date in the period, and open tasks overdue now, plus active contacts by lifecycle stage. Weeks start on Monday in the viewer's time zone.
+- **CSV export.** Management only. Exports the current Contacts or Companies list with its filters, refuses lists over 10,000 rows instead of truncating them, and records the actor, filters and row count in `crm_exports` before any data is returned.
+
 ## Connection
 
 Configure `HUBSPOT_ACCESS_TOKEN` with a read-only HubSpot service key and set `HUBSPOT_PORTAL_ID` to the intended account. Keep the token in private server environment variables, never in source control or a public environment variable. A live account-info check prevents importing from a different account.

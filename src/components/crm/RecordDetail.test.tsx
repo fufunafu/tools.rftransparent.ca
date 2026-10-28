@@ -15,6 +15,7 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 it("fetches and renders source fields and history only when their disclosures are opened", async () => {
   const fetcher = vi.fn(async (url: string) => {
     const params = new URL(url, "http://localhost").searchParams;
+    if (url.startsWith("/api/crm/associations")) return Response.json({ records: [], summary: null, pinned: null });
     if (params.has("related")) return Response.json({ records: [], total: 0, page: 0 });
     if (params.get("view") === "fields") return Response.json({ ...record, properties: { phone: "416-555-0199" } });
     if (params.get("view") === "history") return Response.json({ ...record, property_history: { project: [{ value: "Previous railing plan" }] } });

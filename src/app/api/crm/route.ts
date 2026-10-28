@@ -7,6 +7,7 @@ import { canAccessCrm } from "@/lib/crm/access";
 import { CRM_RECORD_VIEWS, type CrmRecordView } from "@/lib/crm/types";
 import { getCrmDirectoryOptions } from "@/lib/crm/directory-data";
 import { directoryEdit } from "@/lib/crm/directory-workflows";
+import { activityDetails, databaseError, detailsFor, taskDetails } from "@/lib/crm/productivity";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -54,13 +55,24 @@ export async function POST(request: Request) {
     if (!parsed.success) return json({ error: parsed.error.issues.some(issue => issue.path[0] === "email") ? "Enter a complete email address, for example name@example.com." : "Enter a title, valid activity date, and a due date for tasks." }, 400);
     const v = parsed.data;
     if (v.relatedId) await getCrmRecord(v.relatedId, "summary");
-    const result = await getSupabase().rpc("crm_create_record", {
+    const actor = user.email.toLowerCase();
+    const base = {
       p_id: v.requestId, p_type: v.type, p_title: v.title, p_body: v.body,
-      p_properties: { email: v.email, phone: v.phone, company: v.company, ...(v.type === "tasks" ? { reminder_enabled: v.reminderEnabled, reminder_minutes: v.reminderMinutes } : {}) },
-      p_occurred_at: v.occurredAt, p_due_at: v.type === "tasks" ? v.dueAt : null,
-      p_related_id: v.relatedId, p_actor: user.email.toLowerCase(),
-    });
-    if (result.error) throw new CrmInputError("Could not save. Check the related record and try again.", 409);
+      p_properties: { email: v.email, phone: v.phone, company: v.company, ...(v.type === "tasks" ? { reminder_enabled: v.reminderEnabled, reminder_minutes: v.reminderMinutes } : {}) } as Record<string, unknown>,
+      p_occurred_at: v.occurredAt, p_due_at: v.type === "tasks" ? v.dueAt : null, p_actor: actor,
+    };
+    const { stage, ...details } = detailsFor(v.type, v.details);
+    // A new contact's stage is an ordinary source field, so it needs no update.
+    if (stage) base.p_properties = { ...base.p_properties, lifecyclestage: stage };
+    const checked = (v.type === "tasks" ? taskDetails : activityDetails).safeParse(details);
+    if (!checked.success) return json({ error: "Choose valid activity details." }, 400);
+    const related = [...new Set([v.relatedId, ...v.extraRelatedIds].filter((id): id is string => Boolean(id)))];
+    const owner = v.ownerEmail !== undefined && v.ownerEmail !== actor ? v.ownerEmail : undefined;
+    // Owner, details and extra associations need the productivity update.
+    const result = owner === undefined && !Object.keys(details).length && related.length <= 1
+      ? await getSupabase().rpc("crm_create_record", { ...base, p_related_id: related[0] ?? null })
+      : await getSupabase().rpc("crm_create_record_ex", { ...base, p_related_ids: related, p_owner: owner ?? null, p_details: details });
+    if (result.error) { const failure = databaseError(result.error, "Could not save. Check the related record and try again."); throw new CrmInputError(failure.message, failure.status); }
     return json({ id: result.data }, 201);
   } catch (error) { return fail(error); }
 }

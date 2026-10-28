@@ -1,86 +1,114 @@
 "use client";
 
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import useSWR from "swr";
 import dynamic from "next/dynamic";
 import RecordAvatar from "./RecordAvatar";
 import DirectoryEditor from "./DirectoryEditor";
 import RecordChangeHistory from "./RecordChangeHistory";
+import AssociationsPanel from "./AssociationsPanel";
+import ContactPoint from "./ContactPoints";
+import DeleteRecord from "./DeleteRecord";
+import FollowupSummary from "./FollowupSummary";
+import QuickComplete from "./QuickComplete";
+import TaskPanel from "./TaskPanel";
 import { CRM_LABELS, type CrmPage, type CrmRecord, type CrmType } from "@/lib/crm/types";
-import { ACTIVITIES, BUTTON, PRIMARY, INPUT, SINGLE, SourceBadge, ErrorMessage, Pager, useDateLabel, fetchJson, localInput, cleanSummary, ownerLabel, stageLabel, recordTitle } from "./shared";
+import { recordLocation } from "@/lib/crm/directory";
+import { activityChips, canEditActivity, deletedInfo, EDITABLE_ACTIVITIES } from "@/lib/crm/productivity";
+import { crmAction } from "./actions";
+import { ACTIVITIES, BUTTON, INPUT, PRIMARY, SINGLE, SourceBadge, ErrorMessage, Pager, useDateLabel, fetchJson, cleanSummary, ownerLabel, stageLabel, recordTitle, useNow } from "./shared";
 
 const FilesPanel = dynamic(() => import("./WorkflowPanel").then(module => module.FilesPanel));
-
-function TaskEditor({ record, email, canManage, onSaved }: { record: CrmRecord; email: string; canManage: boolean; onSaved: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<Error | null>(null);
-  if (!canManage && record.owner_email !== email) return <p className="mt-3 text-xs text-slate-500">Assigned to {record.owner_email || "an unmapped HubSpot owner"}. The task owner or management can update it.</p>;
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(null);
-    const form = new FormData(event.currentTarget);
-    try {
-      await fetchJson("/api/crm", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: record.id, version: record.version, status: form.get("status"), dueAt: new Date(String(form.get("due"))).toISOString(), reminderEnabled: form.get("reminderEnabled") === "on", reminderMinutes: Number(form.get("reminderMinutes") || 60) }) });
-      onSaved();
-    } catch (cause) { setError(cause instanceof Error ? cause : new Error("Could not update task")); }
-    finally { setBusy(false); }
-  }
-  return <form onSubmit={submit} className="mt-5 space-y-3 rounded-xl bg-slate-50 p-4">
-    <h3 className="font-semibold text-slate-800">Follow-up task</h3><ErrorMessage error={error} />
-    <label className="block text-sm">Status<select name="status" defaultValue={record.effective_task_status || "open"} className={INPUT}><option value="open">Open</option><option value="completed">Completed</option></select></label>
-    <label className="block text-sm">Due date and time<input type="datetime-local" name="due" required defaultValue={record.effective_due_at ? localInput(new Date(record.effective_due_at)) : ""} className={INPUT} /></label>
-    <label className="flex items-center gap-2 text-sm"><input type="checkbox" name="reminderEnabled" defaultChecked={record.reminder_enabled ?? false} />Email reminders to the task owner</label>
-    <label className="block text-xs text-slate-600">Remind before due<select name="reminderMinutes" defaultValue={record.reminder_minutes ?? 60} className={INPUT}><option value="15">15 minutes</option><option value="60">1 hour</option><option value="1440">1 day</option></select></label>
-    <p className="text-xs text-slate-500">One reminder before due and one when overdue. Imported tasks start with reminders off.</p>
-    <button className={PRIMARY} disabled={busy}>{busy ? "Saving..." : "Update task"}</button>
-  </form>;
-}
+const ActivityEditor = dynamic(() => import("./ActivityEditor"));
 
 export default function RecordDetail({ id, email, canManage, onSelect, onAdd, onClose, onChanged, preview }: {
   id: string; email: string; canManage: boolean; preview?: CrmRecord; onSelect: (id: string) => void; onAdd: (type: CrmType, related: CrmRecord) => void; onClose: () => void; onChanged: () => void;
 }) {
   const dateLabel = useDateLabel();
+  const now = useNow();
   const [relatedPage, setRelatedPage] = useState(0);
   const [relatedType, setRelatedType] = useState("activities");
+  const [showDeleted, setShowDeleted] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [editingActivity, setEditingActivity] = useState<CrmRecord | null>(null);
+  const [actionError, setActionError] = useState<Error | null>(null);
   const { data: record, error, mutate } = useSWR<CrmRecord>(`/api/crm?id=${encodeURIComponent(id)}&view=detail`, fetchJson, { fallbackData: preview });
-  const { data: related, error: relatedError, mutate: refreshRelated } = useSWR<CrmPage>(`/api/crm?related=${encodeURIComponent(id)}&type=${relatedType}&page=${relatedPage}&status=all`, fetchJson);
+  const { data: related, error: relatedError, mutate: refreshRelated } = useSWR<CrmPage>(`/api/crm?related=${encodeURIComponent(id)}&type=${relatedType}&page=${relatedPage}&status=all${showDeleted ? "&archived=true" : ""}`, fetchJson);
+  const directory = record?.object_type === "contacts" || record?.object_type === "companies";
+  const { data: upcoming, mutate: refreshUpcoming } = useSWR<CrmPage>(directory ? `/api/crm?related=${encodeURIComponent(id)}&type=tasks&page=0&status=open` : null, fetchJson);
+  const { data: pin, mutate: refreshPin } = useSWR<{ pinned: CrmRecord | null }>(directory ? `/api/crm/associations?pin=${encodeURIComponent(id)}` : null, fetchJson);
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const objectIds: Record<CrmType, string> = { contacts: "0-1", companies: "0-2", deals: "0-3", tickets: "0-5", calls: "0-48", meetings: "0-47", emails: "0-49", notes: "0-46", tasks: "0-27" };
+  function refreshAll() { void mutate(); void refreshRelated(); void refreshUpcoming(); void refreshPin(); onChanged(); }
+  async function setPin(activityId: string | null) {
+    setActionError(null);
+    try { await crmAction({ action: "pin", recordId: id, activityId }); void refreshPin(); }
+    catch (cause) { setActionError(cause instanceof Error ? cause : new Error("Could not update the pinned activity")); }
+  }
+  const upcomingTasks = useMemo(() => [...(upcoming?.records ?? [])].sort((a, b) => Date.parse(a.effective_due_at ?? "9999") - Date.parse(b.effective_due_at ?? "9999")).slice(0, 5), [upcoming]);
+  const pinned = pin?.pinned ?? null;
   return <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="Record details">
-    <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-3"><button onClick={onClose} className="min-h-10 text-sm font-semibold text-cyan-800 hover:underline">← Back to records</button><div className="flex items-center gap-3 text-xs text-slate-500">{record && <><span>{SINGLE[record.object_type]}</span><SourceBadge source={record.source} /></>}</div></div>
+    <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-3"><button onClick={onClose} className="min-h-10 text-sm font-semibold text-cyan-800 hover:underline">← Back to records</button><div className="flex items-center gap-3 text-xs text-slate-500">{record && <><span>{SINGLE[record.object_type]}</span><SourceBadge source={record.source} />{!record.archived && <DeleteRecord record={record} email={email} canManage={canManage} onChanged={refreshAll} />}</>}</div></div>
     <ErrorMessage error={error} />{!record && !error && <p role="status" className="p-8 text-sm text-slate-500">Loading record...</p>}
-    {record && <div className="grid items-start lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_15rem]">
+    {record && <div className="grid items-start lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_16rem]">
       <aside className="min-w-0 space-y-5 p-5 lg:border-r lg:border-slate-200" aria-label="About this record">
-        <div><div className="mb-3"><RecordAvatar record={record} size="large" /></div><h2 className="break-words text-2xl font-bold tracking-tight text-slate-900">{recordTitle(record)}</h2>{record.archived && <p className="mt-2 text-xs font-semibold text-red-700">Archived record</p>}<p className="mt-2 break-words text-sm text-slate-500">{record.view_fields?.company || cleanSummary(record.summary)}</p></div>
-        <div className="flex items-center justify-between border-t border-slate-200 pt-4"><h3 className="text-sm font-bold text-slate-800">About this {SINGLE[record.object_type].toLowerCase()}</h3>{["contacts", "companies"].includes(record.object_type) && !record.archived && <button className="min-h-9 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => setEditing(true)}>Edit</button>}</div>
-        <dl className="space-y-4 text-sm">{[["Email", record.view_fields?.email], ["Phone", record.view_fields?.phone], ["Company", record.view_fields?.company], ["Lifecycle stage", stageLabel(record.view_fields?.stage)], ["Record owner", ownerLabel(record.owner_email)], ["Created", dateLabel(record.occurred_at)]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-words text-slate-800">{value || "Not set"}</dd></div>)}</dl>
+        <div><div className="mb-3"><RecordAvatar record={record} size="large" /></div><h2 className="break-words text-2xl font-bold tracking-tight text-slate-900">{recordTitle(record)}</h2>{record.archived && !deletedInfo(record) && <p className="mt-2 text-xs font-semibold text-red-700">Archived record</p>}<p className="mt-2 break-words text-sm text-slate-500">{record.object_type === "contacts" ? record.view_fields?.company || cleanSummary(record.summary) : record.object_type === "companies" ? record.view_fields?.domain : ""}</p>
+          {activityChips(record).length > 0 && <div className="mt-2 flex flex-wrap gap-1">{activityChips(record).map(chip => <span key={chip} className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{chip}</span>)}</div>}</div>
+        {record.archived && <DeleteRecord record={record} email={email} canManage={canManage} onChanged={refreshAll} />}
+        {directory && !record.archived && <FollowupSummary key={`${id}:${record.version}`} id={id} onSelect={onSelect} />}
+        <div className="flex items-center justify-between border-t border-slate-200 pt-4"><h3 className="text-sm font-bold text-slate-800">About this {SINGLE[record.object_type].toLowerCase()}</h3>{directory && !record.archived && <button className="min-h-9 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => setEditing(true)}>Edit</button>}{canEditActivity(record, email, canManage) && <button className="min-h-9 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => setEditingActivity(record)}>Edit</button>}</div>
+        <AboutFields record={record} />
         <details onToggle={event => setFieldsOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">All saved fields</summary>{fieldsOpen && <SavedFields id={id} />}</details>
         {record.source === "hubspot" && <><details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm font-semibold text-slate-700">Original property history</summary>{historyOpen && <SavedHistory id={id} />}</details><a className="inline-block text-xs font-semibold text-cyan-800 underline" href={`https://app.hubspot.com/contacts/${record.portal_id}/record/${objectIds[record.object_type]}/${record.hubspot_id}`} target="_blank" rel="noreferrer">Open original in HubSpot</a></>}
       </aside>
       <section className="min-w-0 bg-slate-50 p-4 sm:p-5" aria-label="Customer activity">
         {!record.archived && <div className="mb-5 flex flex-wrap gap-2">{ACTIVITIES.map(type => <button key={type} onClick={() => onAdd(type, record)} className={type === "tasks" ? PRIMARY : BUTTON}>{type === "tasks" ? "+ Task" : type === "notes" ? "+ Note" : `Log ${SINGLE[type].toLowerCase()}`}</button>)}</div>}
-        {record.body && <article className="mb-5 rounded-xl border border-slate-200 bg-white p-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{SINGLE[record.object_type]} details</h3><span className="text-xs text-slate-500">{dateLabel(record.occurred_at)}</span></div><div className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{record.body}</div></article>}
-        {record.object_type === "tasks" && !record.archived && <TaskEditor key={`${record.id}:${record.version}`} record={record} email={email} canManage={canManage} onSaved={() => { void mutate(); onChanged(); }} />}
-        <details onToggle={event => setChangesOpen(event.currentTarget.open)} className="my-4 rounded-lg border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Change history</summary>{changesOpen && <RecordChangeHistory id={id} />}</details>
-        <div className="mt-4 flex items-center justify-between gap-3"><h3 className="text-lg font-bold text-slate-900">Activity</h3><button className="min-h-9 text-xs font-semibold text-cyan-800 underline" onClick={() => { void refreshRelated(); }}>Refresh activity</button></div>
+        <ErrorMessage error={actionError} />
+        {record.body && !(record.object_type === "tasks" && record.source === "tools" && !record.archived) && <article className="mb-5 rounded-xl border border-slate-200 bg-white p-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{SINGLE[record.object_type]} details</h3><span className="text-xs text-slate-500">{dateLabel(record.occurred_at)}</span></div><div className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{record.body}</div></article>}
+        {record.object_type === "tasks" && !record.archived && <TaskPanel key={`${record.id}:${record.version}`} record={record} email={email} canManage={canManage} onSaved={refreshAll} />}
+        {directory && upcomingTasks.length > 0 && <section aria-label="Upcoming tasks" className="mb-5 rounded-xl border border-orange-200 bg-white"><h3 className="border-b border-orange-100 px-4 py-3 text-sm font-bold text-slate-800">Upcoming tasks <span className="ml-1 text-xs font-normal text-slate-500">{upcoming?.total ?? 0} open</span></h3><div className="divide-y divide-slate-100">{upcomingTasks.map(task => { const late = now > 0 && task.effective_due_at && Date.parse(task.effective_due_at) < now; return <div key={task.id} className="flex items-center gap-3 px-4 py-3"><QuickComplete record={task} email={email} canManage={canManage} onChanged={refreshAll} onError={setActionError} /><button onClick={() => onSelect(task.id)} className="min-w-0 flex-1 text-left"><span className="block truncate text-sm font-semibold text-cyan-800 hover:underline">{recordTitle(task)}</span><span className="mt-0.5 block text-xs text-slate-500"><span className="capitalize">{ownerLabel(task.owner_email)}</span>{activityChips(task).length ? ` · ${activityChips(task).join(" · ")}` : ""}</span></button><span className={`shrink-0 text-xs ${late ? "font-semibold text-red-700" : "text-slate-500"}`}>{late ? "Overdue · " : ""}{dateLabel(task.effective_due_at)}</span></div>; })}</div></section>}
+        {pinned && <section aria-label="Pinned activity" className="mb-5"><p className="mb-2 text-xs font-semibold uppercase tracking-wide text-orange-800">Pinned</p><TimelineItem record={pinned} email={email} canManage={canManage} pinned onPin={() => void setPin(null)} onSelect={onSelect} onEdit={setEditingActivity} onChanged={refreshAll} onError={setActionError} /></section>}
+        <details onToggle={event => setChangesOpen(event.currentTarget.open)} className="my-4 rounded-lg border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Change history</summary>{changesOpen && <RecordChangeHistory key={record.version} id={id} />}</details>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3"><h3 className="text-lg font-bold text-slate-900">{showDeleted ? "Deleted activity" : "Activity"}</h3><div className="flex items-center gap-3"><button className="min-h-9 text-xs font-semibold text-slate-500 underline" aria-pressed={showDeleted} onClick={() => { setShowDeleted(!showDeleted); setRelatedPage(0); }}>{showDeleted ? "Back to activity" : "Show deleted"}</button><button className="min-h-9 text-xs font-semibold text-cyan-800 underline" onClick={() => { void refreshRelated(); }}>Refresh activity</button></div></div>
         <div role="tablist" aria-label="Activity types" className="mt-2 flex gap-1 overflow-x-auto border-b border-slate-200">{["activities", ...ACTIVITIES].map(type => <button role="tab" aria-selected={relatedType === type} key={type} onClick={() => { setRelatedType(type); setRelatedPage(0); }} className={`min-h-11 whitespace-nowrap border-b-2 px-3 text-xs font-semibold ${relatedType === type ? "border-cyan-700 text-cyan-800" : "border-transparent text-slate-500"}`}>{type === "activities" ? "All activity" : CRM_LABELS[type as CrmType]}</button>)}</div>
         <ErrorMessage error={relatedError} />
         {!related && !relatedError && <p role="status" className="py-6 text-sm text-slate-500">Loading activity...</p>}
-        <div className="mt-4 space-y-3">{related?.records.map(item => <TimelineItem key={item.id} record={item} onSelect={onSelect} />)}{related?.total === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center"><p className="text-sm font-semibold text-slate-700">No {relatedType === "activities" ? "activity" : relatedType} yet</p><p className="mt-2 text-xs text-slate-500">Log a conversation, add a note, or schedule the next follow-up.</p></div>}</div>
+        <div className="mt-4 space-y-3">{related?.records.map(item => <TimelineItem key={`${item.id}:${item.version}`} record={item} email={email} canManage={canManage} pinned={item.id === pinned?.id} onPin={directory && !record.archived && EDITABLE_ACTIVITIES.includes(item.object_type) && !item.archived ? () => void setPin(item.id === pinned?.id ? null : item.id) : undefined} onSelect={onSelect} onEdit={setEditingActivity} onChanged={refreshAll} onError={setActionError} />)}{related?.total === 0 && <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center"><p className="text-sm font-semibold text-slate-700">{showDeleted ? "No deleted activity" : `No ${relatedType === "activities" ? "activity" : relatedType} yet`}</p>{!showDeleted && <p className="mt-2 text-xs text-slate-500">Log a conversation, add a note, or schedule the next follow-up.</p>}</div>}</div>
         {related && related.total > 50 && <Pager page={relatedPage} total={related.total} onPage={setRelatedPage} />}
       </section>
       <aside className="min-w-0 space-y-5 border-t border-slate-200 p-5 lg:col-span-2 xl:col-span-1 xl:border-l xl:border-t-0" aria-label="Associated records">
-        <RelatedCards id={id} onSelect={onSelect} />
+        <AssociationsPanel record={record} onSelect={onSelect} onCreate={type => onAdd(type, record)} onChanged={refreshAll} />
         <details onToggle={event => setFilesOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Attachments & recordings</summary>{filesOpen && <FilesPanel recordId={id} />}</details>
       </aside>
-      {editing && <DirectoryEditor record={record} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void mutate(); onChanged(); }} />}
+      {editing && <DirectoryEditor record={record} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); refreshAll(); }} />}
+      {editingActivity && <ActivityEditor record={editingActivity} onClose={() => setEditingActivity(null)} onSaved={() => { setEditingActivity(null); refreshAll(); }} />}
     </div>}
   </section>;
 }
 
+/** The fields that matter for each kind of record, with one-tap contact actions. */
+function AboutFields({ record }: { record: CrmRecord }) {
+  const dateLabel = useDateLabel();
+  const fields = record.view_fields ?? {};
+  const rows: [string, ReactNode][] = record.object_type === "contacts" ? [
+    ["Email", <ContactPoint key="email" kind="email" value={fields.email} />], ["Phone", <ContactPoint key="phone" kind="phone" value={fields.phone} />],
+    ["Company", fields.company], ["Lifecycle stage", fields.stage_label || stageLabel(fields.stage)], ["Record owner", <span key="owner" className="capitalize">{ownerLabel(record.owner_email)}</span>],
+    ["Location", recordLocation(fields)], ["Created", dateLabel(record.occurred_at)],
+  ] : record.object_type === "companies" ? [
+    ["Website", <ContactPoint key="website" kind="website" value={fields.website || fields.domain} />], ["Phone", <ContactPoint key="phone" kind="phone" value={fields.phone} />],
+    ["Domain", fields.domain], ["Lifecycle stage", fields.stage_label || stageLabel(fields.stage)], ["Record owner", <span key="owner" className="capitalize">{ownerLabel(record.owner_email)}</span>],
+    ["Address", [fields.address, recordLocation(fields), fields.postal_code].filter(Boolean).join(", ")], ["Created", dateLabel(record.occurred_at)],
+  ] : record.object_type === "tasks" ? [
+    ["Assigned to", <span key="owner" className="capitalize">{ownerLabel(record.owner_email)}</span>], ["Due", dateLabel(record.effective_due_at)],
+    ["Status", record.effective_task_status === "completed" ? "Completed" : "Open"], ["Created by", record.created_by_email ? <span key="creator" className="capitalize">{ownerLabel(record.created_by_email)}</span> : "HubSpot import"],
+  ] : [
+    ["Logged by", <span key="owner" className="capitalize">{ownerLabel(record.owner_email)}</span>], ["Date", dateLabel(record.occurred_at)],
+  ];
+  return <dl className="space-y-4 text-sm">{rows.map(([label, value]) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-words text-slate-800">{value || "Not set"}</dd></div>)}</dl>;
+}
 
 // Keep source blobs out of the normal detail request and render tree. They are
 // fetched only when the corresponding disclosure is open, and SWR reuses a
@@ -107,13 +135,27 @@ function SavedHistory({ id }: { id: string }) {
   </>;
 }
 
-function TimelineItem({ record, onSelect }: { record: CrmRecord; onSelect: (id: string) => void }) {
+function TimelineItem({ record, email, canManage, pinned = false, onPin, onSelect, onEdit, onChanged, onError }: {
+  record: CrmRecord; email: string; canManage: boolean; pinned?: boolean; onPin?: () => void; onSelect: (id: string) => void; onEdit: (record: CrmRecord) => void; onChanged: () => void; onError: (error: Error) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const dateLabel = useDateLabel();
+  const now = useNow();
   const { data, error } = useSWR<CrmRecord>(expanded ? `/api/crm?id=${encodeURIComponent(record.id)}&view=detail` : null, fetchJson, SOURCE_OPTIONS);
-  return <article className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3"><div className="flex items-center gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">{SINGLE[record.object_type]}</span><span className="text-xs text-slate-500">{ownerLabel(record.owner_email)}</span></div><span className="text-xs text-slate-500">{dateLabel(record.object_type === "tasks" ? record.effective_due_at : record.occurred_at)}</span></div><div className="p-4"><button className="text-left text-sm font-semibold text-cyan-800 hover:underline" onClick={() => onSelect(record.id)}>{recordTitle(record)}</button>{record.object_type === "tasks" && <span className="ml-2 rounded-full bg-slate-100 px-2 py-1 text-[10px] font-semibold text-slate-600">{record.effective_task_status === "completed" ? "Completed" : "Open"}</span>}<p className={`${expanded ? "max-h-96 overflow-auto whitespace-pre-wrap" : "line-clamp-3"} mt-2 break-words text-sm leading-relaxed text-slate-600`}>{expanded ? data?.body || (data ? "No additional details." : "Loading details...") : record.view_fields?.preview || cleanSummary(record.summary)}</p><ErrorMessage error={error} /><button onClick={() => setExpanded(!expanded)} className="mt-3 min-h-8 text-xs font-semibold text-cyan-800 hover:underline">{expanded ? "Collapse" : "View details"}</button></div></article>;
-}
-function RelatedCards({ id, onSelect }: { id: string; onSelect: (id: string) => void }) {
-  const { data, error } = useSWR<CrmPage>(`/api/crm?related=${encodeURIComponent(id)}&type=relationships&page=0`, fetchJson);
-  return <><ErrorMessage error={error} />{(["contacts", "companies"] as const).map(type => { const records = data?.records.filter(record => record.object_type === type) ?? []; return <section key={type}><h3 className="mb-3 text-sm font-bold text-slate-800">{CRM_LABELS[type]} <span className="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{data ? records.length : "..."}</span></h3>{records.map(record => <button key={record.id} onClick={() => onSelect(record.id)} className="mb-2 block w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50"><span className="flex items-center gap-2">{["contacts", "companies"].includes(record.object_type) && <RecordAvatar record={record} />}<span className="min-w-0 truncate text-sm font-semibold text-cyan-800">{recordTitle(record)}</span></span><p className="mt-1 truncate text-xs text-slate-500">{cleanSummary(record.summary)}</p></button>)}{data && !records.length && <p className="text-xs text-slate-400">No associated {type}</p>}</section>; })}{data && data.total > 50 && <p className="text-xs text-slate-500">Showing the 50 most recent associated records.</p>}</>;
+  const chips = activityChips(record);
+  const task = record.object_type === "tasks";
+  const late = task && record.effective_task_status === "open" && now > 0 && record.effective_due_at && Date.parse(record.effective_due_at) < now;
+  return <article className={`overflow-hidden rounded-lg border bg-white shadow-sm ${pinned ? "border-orange-300" : "border-slate-200"}`}>
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-3"><div className="flex flex-wrap items-center gap-2"><span className="rounded bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">{SINGLE[record.object_type]}</span>{chips.map(chip => <span key={chip} className="rounded-full bg-cyan-50 px-2 py-0.5 text-[11px] font-semibold text-cyan-800">{chip}</span>)}<span className="text-xs capitalize text-slate-500">{ownerLabel(record.owner_email)}</span></div><span className={`text-xs ${late ? "font-semibold text-red-700" : "text-slate-500"}`}>{late ? "Overdue · " : ""}{dateLabel(task ? record.effective_due_at : record.occurred_at)}</span></div>
+    <div className="p-4"><div className="flex items-start gap-3">{task && !record.archived && <QuickComplete record={record} email={email} canManage={canManage} onChanged={onChanged} onError={onError} />}<div className="min-w-0 flex-1"><button className={`text-left text-sm font-semibold hover:underline ${task && record.effective_task_status === "completed" ? "text-slate-500 line-through" : "text-cyan-800"}`} onClick={() => onSelect(record.id)}>{recordTitle(record)}</button>
+      <p className={`${expanded ? "max-h-96 overflow-auto whitespace-pre-wrap" : "line-clamp-3"} mt-2 break-words text-sm leading-relaxed text-slate-600`}>{expanded ? data?.body || (data ? "No additional details." : "Loading details...") : record.view_fields?.preview || cleanSummary(record.summary)}</p></div></div>
+      <ErrorMessage error={error} />
+      {record.archived ? <div className="mt-3"><DeleteRecord record={record} email={email} canManage={canManage} onChanged={onChanged} /></div>
+        : <div className="mt-3 flex flex-wrap items-center gap-1"><button onClick={() => setExpanded(!expanded)} className="min-h-8 rounded px-2 text-xs font-semibold text-cyan-800 hover:bg-cyan-50">{expanded ? "Collapse" : "View details"}</button>
+          {canEditActivity(record, email, canManage) && <button onClick={() => onEdit(record)} className="min-h-8 rounded px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Edit</button>}
+          {onPin && <button onClick={onPin} aria-pressed={pinned} className="min-h-8 rounded px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">{pinned ? "Unpin" : "Pin to top"}</button>}
+          <DeleteRecord record={record} email={email} canManage={canManage} onChanged={onChanged} compact />
+        </div>}
+    </div>
+  </article>;
 }

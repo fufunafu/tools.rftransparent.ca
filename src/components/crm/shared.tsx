@@ -34,6 +34,17 @@ export function useDateLabel() {
   // text first, then display local dates without discarding the rendered list.
   return useSyncExternalStore(subscribeToNothing, clientSnapshot, serverSnapshot) ? dateLabel : serverDateLabel;
 }
+// One shared clock for "overdue" labels. It ticks once a minute and is 0 on
+// the server, so nothing is marked overdue until the page is in the browser.
+let nowSnapshot = Date.now();
+function subscribeNow(onChange: () => void) {
+  nowSnapshot = Date.now(); onChange();
+  const timer = setInterval(() => { nowSnapshot = Date.now(); onChange(); }, 60_000);
+  return () => clearInterval(timer);
+}
+export function useNow() {
+  return useSyncExternalStore(subscribeNow, () => nowSnapshot, () => 0);
+}
 export function SourceBadge({ source }: { source: CrmRecord["source"] }) {
   return <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${source === "tools" ? "bg-emerald-50 text-emerald-800" : "bg-orange-50 text-orange-800"}`}>{source === "tools" ? "Tools" : "HubSpot"}</span>;
 }
@@ -57,7 +68,7 @@ export function stageLabel(value: string | undefined) {
 }
 export function ownerLabel(value: string | null | undefined) { return value ? value.split("@")[0].replace(/[._]/g, " ") : "Unassigned"; }
 
-export function recordTitle(record: CrmRecord) {
+export function recordTitle(record: Pick<CrmRecord, "source" | "object_type" | "title">) {
   if (record.source === "hubspot" && new RegExp(`^${record.object_type} \\d+$`).test(record.title)) return `Untitled ${SINGLE[record.object_type].toLowerCase()}`;
   return record.title;
 }
