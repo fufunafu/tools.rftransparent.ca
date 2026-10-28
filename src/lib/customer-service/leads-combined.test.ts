@@ -180,3 +180,13 @@ describe("buildCombinedRows", () => {
     expect(summary.newLeads30d.total).toBe(2);
   });
 });
+
+it("edits only the current inquiry's records while showing every combined submission", () => {
+  const [row] = buildCombinedRows([lead({
+    duplicate_count: 2,
+    duplicate_ids: ["lead-1", "imported-2025"],
+    workflow_ids: ["lead-1"],
+  })], [], OPTS);
+  expect(row.lead?.ids).toEqual(["lead-1", "imported-2025"]);
+  expect(row.lead?.editIds).toEqual(["lead-1"]);
+});

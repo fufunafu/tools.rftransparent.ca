@@ -106,7 +106,9 @@ export function recoverLeadPhonesFromLinkedQuotes(
   });
 }
 
-function callStatus(call: PhoneCallForLeadSync): Exclude<LeadCallStatus, "not_called"> | null {
+type CallOutcomeFields = Pick<PhoneCallForLeadSync, "direction" | "endpoint" | "duration_min">;
+
+function callStatus(call: CallOutcomeFields): Exclude<LeadCallStatus, "not_called"> | null {
   const endpoint = call.endpoint?.toLowerCase() ?? "";
   const voicemail = endpoint.includes("vm");
 
@@ -117,6 +119,15 @@ function callStatus(call: PhoneCallForLeadSync): Exclude<LeadCallStatus, "not_ca
     return "called";
   }
   return null;
+}
+
+/**
+ * An inbound call nobody answered (voicemail, abandoned, or zero length).
+ * It never counts as a staff call, but staff should see that the customer
+ * tried to reach them.
+ */
+export function isMissedInboundCall(call: CallOutcomeFields): boolean {
+  return call.direction === "inbound" && callStatus(call) === null;
 }
 
 function customerPhone(call: PhoneCallForLeadSync): string | null {

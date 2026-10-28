@@ -15,7 +15,8 @@ import {
   loadLeads,
   markLeadsCacheStale,
 } from "@/lib/customer-service/lead-queries";
-import { isCallablePhone } from "@/lib/call-metrics";
+import { deduplicateRecords, isCallablePhone, sanitizePhone } from "@/lib/call-metrics";
+import { isMissedInboundCall } from "@/lib/lead-call-sync";
 import { isLeadStoreId } from "@/lib/customer-service/lead-store";
 import {
   getMetaConnectionStatus,
@@ -87,6 +88,51 @@ export async function GET(req: NextRequest) {
     const { data, error } = await query.order("called_at", { ascending: false });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ attempts: data ?? [] });
+  }
+
+  if (view === "missed_calls") {
+    const leadIds = (req.nextUrl.searchParams.get("lead_ids") ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+      .slice(0, 50);
+    if (leadIds.length === 0) {
+      return NextResponse.json({ error: "lead_ids required" }, { status: 400 });
+    }
+    const since = req.nextUrl.searchParams.get("since");
+    if (since && Number.isNaN(new Date(since).getTime())) {
+      return NextResponse.json({ error: "Invalid call activity boundary" }, { status: 400 });
+    }
+    const supabase = getSupabase();
+    const { data: leadRows, error: leadError } = await supabase
+      .from("leads")
+      .select("phone")
+      .in("id", leadIds);
+    if (leadError) return NextResponse.json({ error: leadError.message }, { status: 500 });
+    const phones = [...new Set((leadRows ?? [])
+      .map((row) => sanitizePhone(row.phone))
+      .filter((phone): phone is string => Boolean(phone && phone.length >= 10)))].slice(0, 5);
+    if (phones.length === 0) return NextResponse.json({ calls: [] });
+
+    // Stored numbers may carry a country code, so match on the last ten
+    // digits and confirm the exact number below.
+    let query = supabase
+      .from("call_records")
+      .select("id,store_id,call_start,from_number,direction,duration_min,endpoint,source")
+      .eq("direction", "inbound")
+      .or(phones.map((phone) => `from_number.ilike.%${phone}`).join(","));
+    if (since) query = query.gte("call_start", since);
+    const { data, error } = await query.order("call_start", { ascending: false }).limit(100);
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const calls = deduplicateRecords(data ?? [])
+      .filter((call) => isMissedInboundCall(call) && phones.includes(sanitizePhone(call.from_number) ?? ""))
+      .map((call) => ({
+        id: call.id,
+        called_at: call.call_start,
+        store_id: call.store_id,
+        voicemail: (call.endpoint ?? "").toLowerCase().includes("vm"),
+      }));
+    return NextResponse.json({ calls });
   }
 
   if (view === "details") {

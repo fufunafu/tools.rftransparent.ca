@@ -10,6 +10,8 @@ const CONSOLIDATION_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 export interface ConsolidatedLead extends Lead {
   duplicate_count: number;
   duplicate_ids: string[];
+  workflow_ids: string[];
+  last_submitted_at: string;
 }
 
 function normalizedEmail(value: string | null): string | null {
@@ -209,6 +211,10 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     last_called_by: latestCallLead?.last_called_by ?? canonical.last_called_by,
     duplicate_count: group.length,
     duplicate_ids: group.map((lead) => lead.id),
+    // Imported historical records only support the current inquiry, so
+    // workflow edits must not rewrite them.
+    workflow_ids: workflowGroup.map((lead) => lead.id),
+    last_submitted_at: workflowChronological[workflowChronological.length - 1].submitted_at,
     ...(group.length > 1 ? { submissions: chronological.map(toSubmission) } : {}),
   };
 }

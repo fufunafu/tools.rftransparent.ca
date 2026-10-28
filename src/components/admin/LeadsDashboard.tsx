@@ -125,6 +125,10 @@ const CALL_BADGE: Record<CallStatus, string> = {
   called: "bg-green-50 text-green-700 border border-green-200",
 };
 
+function latestSubmission(lead: Lead): number {
+  return Date.parse(lead.last_submitted_at ?? lead.submitted_at);
+}
+
 function isClosedOutcome(outcome: Outcome): boolean {
   return outcome === "won" || outcome === "lost" || outcome === "not_applicable";
 }
@@ -252,6 +256,46 @@ function StoreSelect({
 }
 
 // ─── Lead detail panel ───────────────────────────────────────────────────────
+
+// Saves on blur. While the field is not being edited it shows the latest
+// saved value, including a coworker's change picked up by a refresh.
+function SavedTextField({
+  saved,
+  onSave,
+  multiline = false,
+  placeholder,
+  className,
+}: {
+  saved: string;
+  onSave: (value: string | null) => void;
+  multiline?: boolean;
+  placeholder: string;
+  className: string;
+}) {
+  const [draft, setDraft] = useState(saved);
+  const [shown, setShown] = useState(saved);
+  const [editing, setEditing] = useState(false);
+  if (!editing && saved !== shown) {
+    setShown(saved);
+    setDraft(saved);
+  }
+  const field = {
+    value: draft,
+    placeholder,
+    className,
+    onFocus: () => setEditing(true),
+    onBlur: () => {
+      setEditing(false);
+      const value = draft.trim();
+      if (value !== saved) onSave(value || null);
+    },
+  };
+  return multiline
+    ? <textarea {...field} rows={3} onChange={(event) => setDraft(event.target.value)} />
+    : <input type="text" {...field} onChange={(event) => setDraft(event.target.value)} />;
+}
+
+type MissedCall = { id: string; called_at: string; store_id: string; voicemail: boolean };
 
 function SubmissionCard({
   submission,
@@ -397,10 +441,12 @@ function LeadDetailPanel({
   onClose: () => void;
   onChanged: () => void | Promise<unknown>;
 }) {
-  // Every edit below applies to the submissions this row combines. Using the
-  // list's own group keeps edits off older submissions and other-store leads
-  // that share the contact but are not part of this row.
+  // The panel shows every submission this row combines. Edits apply to the
+  // current inquiry's records only: imported historical records in the group,
+  // older submissions outside the list, and other-store leads keep their own
+  // status.
   const groupIds = lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id];
+  const editIds = lead.workflow_ids?.length ? lead.workflow_ids : groupIds;
   const detailUrl = `/api/customer-service/leads?view=details&lead_ids=${encodeURIComponent(groupIds.join(","))}`;
   const {
     data: detailData,
@@ -412,6 +458,13 @@ function LeadDetailPanel({
     fetcher
   );
   const attempts = attemptsData?.attempts ?? [];
+  const { data: missedData } = useSWR<{ calls: MissedCall[] }>(
+    isCallablePhone(lead.phone)
+      ? `/api/customer-service/leads?view=missed_calls&lead_ids=${encodeURIComponent(groupIds.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`
+      : null,
+    fetcher,
+  );
+  const missedCalls = missedData?.calls ?? [];
 
   const [owner, setOwner] = useState(lead.assigned_to ?? "");
   const [nextAction, setNextAction] = useState(lead.next_action ?? "");
@@ -434,7 +487,7 @@ function LeadDetailPanel({
   const [phoneNumber, setPhoneNumber] = useState(lead.phone ?? "");
   const [savingOutcome, setSavingOutcome] = useState<Outcome | null>(null);
   const [savingSpam, setSavingSpam] = useState(false);
-  const [savingQuickAction, setSavingQuickAction] = useState<"called" | "no_call" | "transfer" | null>(null);
+  const [savingQuickAction, setSavingQuickAction] = useState<"called" | "undo_called" | "no_call" | "transfer" | null>(null);
   const [savingInstallation, setSavingInstallation] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const phoneIsCallable = isCallablePhone(lead.phone);
@@ -495,7 +548,7 @@ function LeadDetailPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(allSubmissions
-            ? { ids: groupIds }
+            ? { ids: editIds }
             : { id: lead.id }),
           ...update,
         }),
@@ -545,6 +598,15 @@ function LeadDetailPanel({
     setSavingQuickAction(null);
   };
 
+  // Fix a mistaken "Mark as called". A lead with a real phone record keeps
+  // its status, because the phone sync would mark it called again.
+  const handleUndoCalled = async () => {
+    if (savingQuickAction) return;
+    setSavingQuickAction("undo_called");
+    await patchLead({ call_status: "not_called" }, true);
+    setSavingQuickAction(null);
+  };
+
   const handleNoCallToggle = async () => {
     if (savingQuickAction) return;
     setSavingQuickAction("no_call");
@@ -578,7 +640,12 @@ function LeadDetailPanel({
       quote_number: savedQuoteNumber || null,
       quote_amount: savedQuoteAmount,
       quote_sent_at: savedQuoteNumber && quoteDate ? new Date(quoteDate).toISOString() : null,
-      outcome: savedQuoteNumber && !isClosedOutcome(lead.outcome) ? "quoted" : lead.outcome,
+      // Removing the quote also moves a Quoted lead back to its earlier stage.
+      outcome: savedQuoteNumber && !isClosedOutcome(lead.outcome)
+        ? "quoted"
+        : !savedQuoteNumber && lead.outcome === "quoted"
+          ? reopenedOutcome({ ...lead, quote_number: null })
+          : lead.outcome,
     }, true);
     if (saved) setEditingQuote(false);
   };
@@ -919,6 +986,19 @@ function LeadDetailPanel({
 
         </section>
 
+        {missedCalls.length > 0 && (
+          <section className="px-5 sm:px-6 py-4 border-b border-sand-200 space-y-2" aria-label="Missed calls from this customer">
+            <h3 className="text-xs text-amber-700 uppercase tracking-wider font-semibold">Customer called, nobody answered</h3>
+            <p className="text-xs text-sand-500">Calls from this phone number that reached nobody. They do not count as staff calls.</p>
+            {missedCalls.map((call) => (
+              <div key={call.id} className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <span>{call.voicemail ? "Went to voicemail" : "Missed call"} · {call.store_id === "bc_transparent" ? "BC Transparent" : call.store_id === "rf_transparent" ? "RF Transparent" : call.store_id}</span>
+                <span className="whitespace-nowrap">{formatDateTime(call.called_at)}</span>
+              </div>
+            ))}
+          </section>
+        )}
+
         {/* Quote */}
         <section className="px-5 sm:px-6 py-6 border-b border-sand-200 space-y-3">
           <div className="flex items-center justify-between">
@@ -1003,15 +1083,27 @@ function LeadDetailPanel({
             </button>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={handleMarkCalled}
-              disabled={savingQuickAction !== null || lead.call_status === "called"}
-              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-              title="Record that this lead was called when the phone sync did not catch it"
-            >
-              {savingQuickAction === "called" ? "Saving..." : lead.call_status === "called" ? "Marked as called" : "Mark as called"}
-            </button>
+            {lead.call_status === "called" && !lead.last_call_at ? (
+              <button
+                type="button"
+                onClick={handleUndoCalled}
+                disabled={savingQuickAction !== null}
+                className="rounded-lg border border-sand-300 bg-white px-3 py-1.5 text-xs font-semibold text-sand-700 hover:bg-sand-50 disabled:cursor-wait disabled:opacity-60"
+                title="Set this lead back to not called. Use this when it was marked called by mistake."
+              >
+                {savingQuickAction === "undo_called" ? "Saving..." : "Undo called mark"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleMarkCalled}
+                disabled={savingQuickAction !== null || lead.call_status === "called"}
+                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                title={lead.call_status === "called" ? "A phone record shows this lead was called" : "Record that this lead was called when the phone sync did not catch it"}
+              >
+                {savingQuickAction === "called" ? "Saving..." : lead.call_status === "called" ? "Called (phone record)" : "Mark as called"}
+              </button>
+            )}
             <button
               type="button"
               onClick={handleNoCallToggle}
@@ -1059,34 +1151,21 @@ function LeadDetailPanel({
             </p>
           )}
           {(lead.outcome === "lost" || lead.outcome === "not_applicable") && (
-            <input
+            <SavedTextField
               key={lead.outcome}
-              type="text"
-              defaultValue={lead.outcome === "lost"
-                ? lead.lost_reason ?? ""
-                : lead.not_applicable_reason ?? ""}
-              onBlur={(e) => {
-                const val = e.target.value.trim();
-                const savedValue = lead.outcome === "lost"
-                  ? lead.lost_reason ?? ""
-                  : lead.not_applicable_reason ?? "";
-                if (val === savedValue) return;
-                patchLead(lead.outcome === "lost"
-                  ? { lost_reason: val || null }
-                  : { not_applicable_reason: val || null }, true);
-              }}
+              saved={lead.outcome === "lost" ? lead.lost_reason ?? "" : lead.not_applicable_reason ?? ""}
+              onSave={(value) => void patchLead(lead.outcome === "lost"
+                ? { lost_reason: value }
+                : { not_applicable_reason: value }, true)}
               placeholder={lead.outcome === "lost" ? "Lost reason" : "Reason, such as spam, forwarded, or unquotable"}
               className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           )}
-          <textarea
-            defaultValue={lead.notes ?? ""}
-            onBlur={(e) => {
-              const val = e.target.value.trim();
-              if (val !== (lead.notes ?? "")) patchLead({ notes: val || null }, true);
-            }}
+          <SavedTextField
+            multiline
+            saved={lead.notes ?? ""}
+            onSave={(value) => void patchLead({ notes: value }, true)}
             placeholder="Internal notes"
-            rows={3}
             className="w-full px-3 py-1.5 text-sm border border-sand-200 rounded bg-white text-sand-700 focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
           />
         </section>
@@ -1197,8 +1276,11 @@ export default function LeadsDashboard({ initialLeads, initialStale = false, ini
   // to the selected received dates here.
   const receivedFrom = useMemo(() => filters.history === "all" ? null
     : leadReceivedSince(filters.history === "90d" ? 90 : 30, new Date(now)), [filters.history, now]);
+  // A repeat request inside the window keeps the customer in the queue even
+  // when their first message is older.
   const queue = useMemo(() => leads.filter((lead) =>
     !bounds || !receivedFrom || isLeadInCustomDateRange(lead, receivedFrom, bounds.to)
+      || Boolean(lead.last_submitted_at && isLeadInCustomDateRange({ submitted_at: lead.last_submitted_at }, receivedFrom, bounds.to))
       || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, receivedFrom, filters.olderOpen]);
   const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
   const sources = filterSelections(filters.source, ["website", "meta", "outreach"]);
@@ -1219,7 +1301,7 @@ export default function LeadsDashboard({ initialLeads, initialStale = false, ini
     const text = [lead.name, lead.email, lead.phone, lead.assigned_to, lead.next_action, lead.quote_number].filter(Boolean).join(" ").toLowerCase();
     const phoneQuery = q.replace(/\D/g, "");
     return text.includes(q) || (phoneQuery.length >= 4 && (lead.phone ?? "").replace(/\D/g, "").includes(phoneQuery));
-  }).sort((a, b) => (Date.parse(b.submitted_at) - Date.parse(a.submitted_at)) * (filters.sort === "oldest" ? -1 : 1));
+  }).sort((a, b) => (latestSubmission(b) - latestSubmission(a)) * (filters.sort === "oldest" ? -1 : 1));
   const pagingKey = JSON.stringify(filters);
   const [paging, setPaging] = useState({ key: pagingKey, count: LEAD_ROWS_PER_PAGE });
   const count = paging.key === pagingKey ? paging.count : LEAD_ROWS_PER_PAGE;
@@ -1284,7 +1366,7 @@ export default function LeadsDashboard({ initialLeads, initialStale = false, ini
       {isLoading && !data ? <p className="p-8 text-center text-sm text-sand-500">Loading leads...</p> : visible.length === 0 ? <p className="p-8 text-center text-sm text-sand-500">No leads match these filters.</p> : <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] table-fixed text-sm"><thead className="bg-sand-50 text-left text-[11px] uppercase tracking-wider text-sand-500"><tr><th className="w-[29%] px-4 py-3">Lead / contact</th><th className="w-[26%] px-3 py-3">Next action / owner</th><th className="w-[17%] px-3 py-3">Last call</th><th className="w-[17%] px-3 py-3">Latest quote</th><th className="w-[11%] px-3 py-3">Stage</th></tr></thead>
           <tbody>{visible.slice(0, count).map((lead) => <tr key={lead.id} onClick={(event) => { if (!(event.target as HTMLElement).closest("a, button, input, select, textarea, summary, details")) setSelectedLeadId(lead.id); }} className="cursor-pointer border-t border-sand-100 align-top hover:bg-sand-50/50">
-            <td className="px-4 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-left font-semibold text-sand-900 hover:text-blue-700"><span className="line-clamp-2 break-words">{lead.name || "Unnamed"}</span></button><div className="my-1 flex flex-wrap items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE[lead.source].className}`}>{SOURCE_BADGE[lead.source].label}</span><span className="text-[10px] text-sand-400" title={formatDateTime(lead.submitted_at)}>Received {formatDate(lead.submitted_at)}</span></div>
+            <td className="px-4 py-3"><button onClick={() => setSelectedLeadId(lead.id)} className="text-left font-semibold text-sand-900 hover:text-blue-700"><span className="line-clamp-2 break-words">{lead.name || "Unnamed"}</span></button><div className="my-1 flex flex-wrap items-center gap-2"><span className={`rounded px-1.5 py-0.5 text-[10px] ${SOURCE_BADGE[lead.source].className}`}>{SOURCE_BADGE[lead.source].label}</span><span className="text-[10px] text-sand-400" title={formatDateTime(lead.submitted_at)}>Received {formatDate(lead.submitted_at)}</span>{lead.last_submitted_at && formatDate(lead.last_submitted_at) !== formatDate(lead.submitted_at) && <span className="text-[10px] font-medium text-violet-700" title={formatDateTime(lead.last_submitted_at)}>Repeat request {formatDate(lead.last_submitted_at)}</span>}</div>
               {lead.email && <div className="flex items-start gap-2 text-xs"><a href={`mailto:${lead.email}`} className="break-all text-blue-700">{lead.email}</a><button aria-label={`Copy email for ${lead.name || lead.email}`} onClick={() => void copy(lead.email!, "Email")} className="shrink-0 text-[10px] text-sand-500">Copy</button></div>}
               {lead.phone && <div className="mt-1 flex items-center gap-2 text-xs"><a href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`} className="text-blue-700">{lead.phone}</a><button aria-label={`Copy phone for ${lead.name || lead.phone}`} onClick={() => void copy(lead.phone!, "Phone")} className="text-[10px] text-sand-500">Copy</button></div>}
             </td>

@@ -16,7 +16,7 @@ const LEAD_LIST_COLUMNS =
 const LEAD_GROUP_COLUMNS = "id,email,phone,submitted_at,not_applicable_reason";
 
 type LeadRow = { id: string; [key: string]: unknown };
-type AttemptRow = { lead_id: string; staff: string; called_at: string };
+type AttemptRow = { id?: string; lead_id: string; staff: string; called_at: string };
 
 interface LoadLeadsOptions {
   store?: LeadStoreId;
@@ -116,22 +116,45 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     }
     return query.range(from, to);
   });
+  const windowStart = options.from ? startOfQueryWindow(options.from) : null;
   const attemptsPromise = fetchAllPages<AttemptRow>((from, to) => {
     let query = supabase
       .from("lead_call_attempts")
-      .select("lead_id, staff, called_at")
+      .select("id, lead_id, staff, called_at")
       .order("called_at", { ascending: false })
       .order("id");
-    if (options.from && !options.includeOpen) query = query.gte("called_at", startOfQueryWindow(options.from));
+    // Calls are only linked after a lead's submission, so leads in the window
+    // only need calls from the window onward.
+    if (windowStart) query = query.gte("called_at", windowStart);
     return query.range(from, to);
   });
 
   // These tables are independent. Keeping their pagination concurrent makes
   // a cold cache cost one scan duration instead of the sum of both.
-  const [leads, attempts] = await Promise.all([
+  const [leads, windowAttempts] = await Promise.all([
     leadsPromise,
     attemptsPromise,
   ]);
+
+  // Older open leads need their full call history. Load it by lead instead of
+  // scanning every call ever recorded.
+  const olderLeadIds = windowStart
+    ? leads.filter((lead) => Date.parse(String(lead.submitted_at)) < Date.parse(windowStart)).map((lead) => lead.id)
+    : [];
+  const olderAttempts: AttemptRow[] = [];
+  for (let offset = 0; offset < olderLeadIds.length; offset += 200) {
+    const chunk = olderLeadIds.slice(offset, offset + 200);
+    olderAttempts.push(...await fetchAllPages<AttemptRow>((from, to) => supabase
+      .from("lead_call_attempts")
+      .select("id, lead_id, staff, called_at")
+      .in("lead_id", chunk)
+      .order("called_at", { ascending: false })
+      .order("id")
+      .range(from, to)));
+  }
+  const attempts = olderAttempts.length === 0 ? windowAttempts : [
+    ...new Map([...windowAttempts, ...olderAttempts].map((attempt) => [attempt.id ?? `${attempt.lead_id}:${attempt.called_at}`, attempt])).values(),
+  ].sort((left, right) => Date.parse(right.called_at) - Date.parse(left.called_at));
 
   const enriched = enrichLeadRows(leads, attempts);
 
@@ -156,6 +179,8 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
       delete summary.duplicate_count;
       delete summary.duplicate_ids;
     }
+    if (summary.workflow_ids?.length === (summary.duplicate_ids?.length ?? 1)) delete summary.workflow_ids;
+    if (summary.last_submitted_at === summary.submitted_at) delete summary.last_submitted_at;
     return summary as Lead;
   });
   if (process.env.NODE_ENV === "development") {

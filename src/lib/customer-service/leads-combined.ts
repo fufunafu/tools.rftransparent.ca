@@ -42,9 +42,12 @@ export interface CombinedNext {
 
 export interface CombinedLeadInfo {
   id: string;
-  // Canonical id plus every merged duplicate submission — the Leads PATCH
-  // endpoint takes the whole group so all copies move together.
+  // Canonical id plus every merged duplicate submission, for showing calls
+  // and submissions.
   ids: string[];
+  // The current inquiry's records. Edits use these so imported historical
+  // records in the group keep their own status.
+  editIds: string[];
   source: LeadSource;
   source_detail: string | null;
   page_url: string | null;
@@ -341,10 +344,12 @@ function leadInfo(lead: Lead): CombinedLeadInfo {
   const isSpam = lead.outcome === "not_applicable" && isLeadSpamReason(lead.not_applicable_reason);
   const isHistorical = lead.outcome === "not_applicable" && lead.not_applicable_reason === HISTORICAL_UNKNOWN_REASON;
   const ids = Array.from(new Set([lead.id, ...(lead.duplicate_ids ?? [])]));
+  const editIds = lead.workflow_ids?.length ? lead.workflow_ids : ids;
   const quoteAmount = lead.quote_amount == null ? null : Number(lead.quote_amount);
   return {
     id: lead.id,
     ids,
+    editIds,
     source: lead.source,
     source_detail: lead.source_detail,
     page_url: lead.page_url,

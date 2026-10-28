@@ -1,7 +1,10 @@
 import { getResend } from "@/lib/resend";
 import { type LeadStoreId, leadStoreLabel, leadsPath } from "@/lib/customer-service/lead-store";
 
-const FROM = "RF Transparent <info@glass-railing.com>";
+// Resend only sends from verified domains. rftransparent.ca is verified;
+// glass-railing.com is not, and every alert from it was rejected.
+const FROM = "RF Transparent <noreply@rftransparent.ca>";
+const EMAIL_PATTERN = /^[^\s@<>,;"]+@[^\s@<>,;"]+\.[^\s@<>,;"]+$/;
 export const LEAD_NOTIFICATION_RECIPIENT = "info@glass-railing.com";
 export const BC_LEAD_NOTIFICATION_RECIPIENT = "anne@cloture-verre.com";
 const LEAD_NOTIFICATION_RECIPIENTS: Record<LeadStoreId, string> = {
@@ -40,9 +43,12 @@ export async function sendNewLeadNotification(
   const subject = `New ${sourceLabel} lead${subjectName ? `: ${subjectName}` : ""}`;
 
   try {
+    const replyTo = lead.email?.trim();
     const { error } = await getResend().emails.send({
       from: FROM,
       to: LEAD_NOTIFICATION_RECIPIENTS[storeId],
+      // Replying to the alert goes straight to the customer.
+      ...(replyTo && EMAIL_PATTERN.test(replyTo) ? { replyTo } : {}),
       subject,
       text: buildText(lead, sourceLabel),
       html: buildHtml(lead, sourceLabel),
