@@ -70,3 +70,14 @@ it("reuses an account check only for the same key and verifies a rotated key aga
   await downloadCrmAsset(asset, "key-two", fetcher);
   expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith("/account-info/v3/details"))).toHaveLength(2);
 });
+
+it("skips a refused recording and keeps copying the rest of the queue", async () => {
+  const recording = { id: "hubspot:1:recording:3", kind: "recording", portal_id: "1", remote_id: null, source_url: "https://api-na1.hubspot.com/recording/auth/provider/hublets/v1/external-url-retriever/getAuthRecording/portal/1/engagement/3" };
+  const base = fileFetcher();
+  const fetcher = vi.fn<typeof fetch>(async (url, init) => String(url) === recording.source_url ? new Response("Forbidden", { status: 403 }) : base(url, init));
+  await expect(downloadCrmAsset(recording, "token", fetcher)).rejects.toMatchObject({ code: "recording_access", blocked: true });
+  const stored = { upload: vi.fn(async () => ({ error: null })), download: vi.fn(async () => ({ data: new Blob(["PDF content"]), error: null })) };
+  const db = { from: () => ({ select: async () => ({ data: [] }) }), storage: { getBucket: vi.fn(async () => ({ data: { public: false } })), from: vi.fn(() => stored) },
+    rpc: vi.fn().mockResolvedValueOnce({ data: [recording] }).mockResolvedValueOnce({ data: true }).mockResolvedValueOnce({ data: [asset] }).mockResolvedValueOnce({ data: true }).mockResolvedValue({ data: [] }) };
+  expect(await migrateCrmAssets(db, "token", { limit: 5, fetcher })).toEqual({ copied: 1, blocked: 1, failed: 0 });
+});

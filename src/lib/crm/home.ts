@@ -14,15 +14,17 @@ export async function getCrmHome(email: string, params = new URLSearchParams(), 
   let window;
   try { window = homeWindow(now, timeZone); } catch { throw new CrmInputError("Invalid time zone"); }
   const db = getSupabase();
-  const base = (countOnly = false, withTotal = true) => {
-    let query = db.from("crm_records").select(countOnly ? "id" : SUMMARY_COLUMNS, countOnly ? { count: "exact", head: true } : withTotal ? { count: "exact" } : {}).eq("archived", false);
-    if (scope === "mine") query = query.eq("owner_email", email.toLowerCase());
+  const base = (countOnly = false, withTotal = true, directory = false) => {
+    let query = db.from(directory ? "crm_directory" : "crm_records").select(countOnly ? "id" : SUMMARY_COLUMNS, countOnly ? { count: "exact", head: true } : withTotal ? { count: "exact" } : {}).eq("archived", false);
+    // Contacts reassigned in Tools keep the original HubSpot owner in
+    // owner_email; the directory's filter_owner applies the Tools owner.
+    if (scope === "mine") query = query.eq(directory ? "filter_owner" : "owner_email", email.toLowerCase());
     return query;
   };
   const tasks = (status: string) => base().eq("object_type", "tasks").eq("effective_task_status", status)
     .gte("effective_due_at", window.dayStart).lt("effective_due_at", window.dayEnd)
     .order("effective_due_at", { ascending: true, nullsFirst: false }).order("id").limit(8);
-  const weekly = (type: string) => base(true).eq("object_type", type).gte("occurred_at", window.weekStart).lte("occurred_at", now.toISOString());
+  const weekly = (type: string) => base(true, true, type === "contacts").eq("object_type", type).gte("occurred_at", window.weekStart).lte("occurred_at", now.toISOString());
   // Only compact indexed summaries reach Home. Original bodies, fields, and
   // history stay deferred until a record is opened.
   const results = await Promise.all([
@@ -32,7 +34,7 @@ export async function getCrmHome(email: string, params = new URLSearchParams(), 
       .order("occurred_at", { ascending: true, nullsFirst: false }).order("id").limit(8),
     base(false, false).in("object_type", activity === "all" ? ["emails", "calls", "meetings", "notes", "tasks"] : [activity])
       .lte("occurred_at", now.toISOString()).order("occurred_at", { ascending: false, nullsFirst: false }).order("id").limit(15),
-    base(false, false).eq("object_type", "contacts").order("occurred_at", { ascending: false, nullsFirst: false }).order("id").limit(6),
+    base(false, false, true).eq("object_type", "contacts").order("occurred_at", { ascending: false, nullsFirst: false }).order("id").limit(6),
     weekly("contacts"), weekly("calls"), weekly("emails"),
   ]);
   if (results.some(result => result.error)) throw new Error("Home could not load. Please try again.");

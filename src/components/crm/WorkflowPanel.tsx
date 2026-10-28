@@ -81,6 +81,8 @@ function ActivityCard({ event, onSelect, onSaved }: { event: CaptureReview; onSe
   const [error, setError] = useState<Error | null>(null);
   const { data, error: searchError } = useSWR<CrmPage>(search.trim().length >= 2 ? `/api/crm?type=contacts&q=${encodeURIComponent(search.trim())}` : null, fetchJson);
   const contacts = [...new Map([...event.candidates, ...(data?.records ?? [])].map(record => [record.id, record])).values()];
+  // A choice hidden by a new search is cleared rather than linked unseen.
+  const chosen = contacts.some(contact => contact.id === selected) ? selected : "";
   async function save(contactId: string | null) {
     setBusy(true); setError(null);
     try { await post({ action: "review_activity", id: event.id, version: event.revision, contactId }); onSaved(); }
@@ -92,9 +94,9 @@ function ActivityCard({ event, onSelect, onSaved }: { event: CaptureReview; onSe
     <p className="break-all text-xs text-slate-600">{String(p.from_email || p.from_number || "Unknown sender")} → {String(p.to_email || p.to_number || "Unknown recipient")}</p>
     {event.kind === "emails" && <p className="whitespace-pre-wrap break-words text-sm text-slate-600">{String(p.snippet || "No email preview available.")}</p>}
     <label className="block text-xs font-medium text-slate-600">Find a contact<input className={INPUT} value={search} onChange={e => setSearch(e.target.value)} placeholder="Search name or email" /></label>
-    <label className="block text-xs font-medium text-slate-600">Link to<select className={INPUT} value={selected} onChange={e => setSelected(e.target.value)}><option value="">Choose a customer</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.title} · {contact.summary}</option>)}</select></label>
-    {selected && <button onClick={() => onSelect(selected)} className="text-xs text-orange-800 underline">Review this customer</button>}
-    <ErrorMessage error={error || searchError} /><div className="flex flex-wrap gap-2"><button className={PRIMARY} disabled={busy || !selected} onClick={() => void save(selected)}>Link activity</button><button className={BUTTON} disabled={busy} onClick={() => void save(null)}>Leave out of CRM</button></div>
+    <label className="block text-xs font-medium text-slate-600">Link to<select className={INPUT} value={chosen} onChange={e => setSelected(e.target.value)}><option value="">Choose a customer</option>{contacts.map(contact => <option key={contact.id} value={contact.id}>{contact.title} · {contact.summary}</option>)}</select></label>
+    {chosen && <button onClick={() => onSelect(chosen)} className="text-xs text-orange-800 underline">Review this customer</button>}
+    <ErrorMessage error={error || searchError} /><div className="flex flex-wrap gap-2"><button className={PRIMARY} disabled={busy || !chosen} onClick={() => void save(chosen)}>Link activity</button><button className={BUTTON} disabled={busy} onClick={() => void save(null)}>Leave out of CRM</button></div>
   </article>;
 }
 
@@ -114,7 +116,7 @@ function Reminders({ onSelect, configured }: { onSelect: (id: string) => void; c
   </div>;
 }
 
-const FILE_ERRORS: Record<string, string> = { hubspot_file_access: "Needs HubSpot file permission", source_missing: "Source file is unavailable", file_too_large: "Larger than the 50 MB copy limit", unsupported_source: "Source needs manual review", recording_access: "Recording requires additional access", size_mismatch: "Download was incomplete; retry queued", storage_verification: "Stored copy did not verify; retry queued" };
+const FILE_ERRORS: Record<string, string> = { hubspot_file_access: "Needs HubSpot file permission", source_missing: "Source file is unavailable", file_too_large: "Larger than the 50 MB copy limit", unsupported_source: "Source needs manual review", recording_access: "Recording requires additional access", size_mismatch: "Download was incomplete; retry queued", storage_verification: "Stored copy did not verify; retry queued", copy_interrupted: "Copy was interrupted; use Retry to queue it again" };
 export function FilesPanel({ recordId, canManage = false, configured, counts }: { recordId?: string; canManage?: boolean; configured?: boolean; counts?: WorkflowStatus["assets"] }) {
   const [page, setPage] = useState(0);
   const [status, setStatus] = useState("");

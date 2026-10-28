@@ -30,8 +30,10 @@ it("scopes every query to the authenticated owner, excludes archives and limits 
   const home = await getCrmHome("Rep@Example.com", new URLSearchParams(), now);
   expect(home.tasks.openTotal).toBe(18); expect(home.tasks.open[0].title).toBe("Edited locally");
   expect(home.tasks.overdue).toBe(40); expect(home.metrics.contacts).toBe(76);
-  for (const query of queries) {
-    expect(query.eq).toHaveBeenCalledWith("owner_email", "rep@example.com");
+  // Contacts honour owners reassigned in Tools through the directory view.
+  expect(mock.from.mock.calls.map(([table]) => table)).toEqual(["crm_records", "crm_records", "crm_records", "crm_records", "crm_records", "crm_directory", "crm_directory", "crm_records", "crm_records"]);
+  for (const [index, query] of queries.entries()) {
+    expect(query.eq).toHaveBeenCalledWith([5, 6].includes(index) ? "filter_owner" : "owner_email", "rep@example.com");
     expect(query.eq).toHaveBeenCalledWith("archived", false);
     expect(query.select.mock.calls[0][0]).not.toMatch(/\b(body|properties|property_history)\b/);
   }
@@ -47,7 +49,7 @@ it("scopes every query to the authenticated owner, excludes archives and limits 
 });
 it("reads Team without an owner filter and filters activity at the database", async () => {
   await getCrmHome("rep@example.com", new URLSearchParams("scope=team&activity=calls&timeZone=America/Vancouver"), now);
-  for (const query of queries) expect(query.eq.mock.calls.some(([key]) => key === "owner_email")).toBe(false);
+  for (const query of queries) expect(query.eq.mock.calls.some(([key]) => key === "owner_email" || key === "filter_owner")).toBe(false);
   expect(queries[4].in).toHaveBeenCalledWith("object_type", ["calls"]);
 });
 it("rejects invalid views and never reports failed queries as zero metrics", async () => {

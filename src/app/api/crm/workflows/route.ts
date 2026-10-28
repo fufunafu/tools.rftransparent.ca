@@ -94,7 +94,9 @@ export async function POST(request: Request) {
     } else {
       if (!(await isManagementUser())) throw new CrmInputError("Management access required", 403);
       if (!process.env.HUBSPOT_ACCESS_TOKEN) throw new CrmInputError("Configure HubSpot file access before retrying.", 409);
-      const result = await db.from("crm_assets").update({ status: "pending", attempts: 0, error_code: null, retry_at: null }).in("status", ["blocked", "failed"]);
+      // Include copies whose worker stopped mid-transfer and never released the lease.
+      const result = await db.from("crm_assets").update({ status: "pending", attempts: 0, error_code: null, retry_at: null, lease_token: null, lease_until: null })
+        .or(`status.in.(blocked,failed),and(status.eq.copying,lease_until.lt.${new Date().toISOString()})`);
       if (result.error) throw new Error("Unavailable");
     }
     return json({ saved: true });

@@ -22,3 +22,9 @@ it("continues independent work after a failed queue without disclosing provider 
   expect(response.status).toBe(503); expect(mocks.reminders).toHaveBeenCalledOnce(); expect(mocks.capture).toHaveBeenCalledOnce(); expect(mocks.assets).not.toHaveBeenCalled();
   expect(JSON.stringify(await response.json())).not.toContain("private source detail");
 });
+it("records a failed run when the index worker reports a database error", async () => {
+  mocks.projections.mockResolvedValue({ processed: 0, complete: false, paused: true, failed: true });
+  expect((await GET(new NextRequest("https://tools.rftransparent.ca/api/cron/crm-workflows"))).status).toBe(503);
+  mocks.projections.mockResolvedValue({ processed: 0, complete: false, paused: true });
+  expect((await GET(new NextRequest("https://tools.rftransparent.ca/api/cron/crm-workflows"))).status).toBe(200);
+});

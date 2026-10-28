@@ -78,7 +78,7 @@ it("loads original company address fields before editing and submits an optimist
   await setValue(container.querySelector('input[name="owner_email"]')!, "next@example.com");
   await setValue(container.querySelector('input[name="address"]')!, "456 Updated St");
   await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
-  expect(writes).toEqual([expect.objectContaining({ action: "editRecord", id: company.id, version: 1, fields: expect.objectContaining({ title: "Example Company", address: "456 Updated St", owner_email: "next@example.com", postal_code: "A1A 1A1" }) })]);
+  expect(writes).toEqual([expect.objectContaining({ action: "editRecord", id: company.id, version: 1, fields: { address: "456 Updated St", owner_email: "next@example.com" } })]);
   expect(saved).toHaveBeenCalledOnce();
 });
 it("opens a nonmodal preview alongside the table and shows recent activity", async () => {
@@ -89,4 +89,11 @@ it("opens a nonmodal preview alongside the table and shows recent activity", asy
   expect(container.textContent).toContain("Latest customer email");
   await act(async () => button("Open full record").click()); expect(open).toHaveBeenCalledWith(record.id);
   await act(async () => (container.querySelector('[aria-label="Close preview"]') as HTMLButtonElement).click()); expect(close).toHaveBeenCalledOnce();
+});
+it("saves nothing when the edit form is submitted unchanged", async () => {
+  const writes: unknown[] = [], close = vi.fn();
+  vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => { if (init?.method === "PATCH") writes.push(init.body); return Response.json(record); }));
+  await render(<DirectoryEditor record={record} onClose={close} onSaved={() => {}} />);
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
+  expect(writes).toHaveLength(0); expect(close).toHaveBeenCalledOnce();
 });

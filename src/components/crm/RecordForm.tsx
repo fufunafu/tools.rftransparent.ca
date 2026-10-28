@@ -11,6 +11,7 @@ export default function RecordForm({ type, related, onClose, onSaved }: { type: 
   const [requestId] = useState(() => crypto.randomUUID());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [dirty, setDirty] = useState(false), [keptDraft, setKeptDraft] = useState(false);
   useEffect(() => { dialog.current?.showModal(); }, []);
   const activity = ACTIVITIES.includes(type);
   const [contactSearch, setContactSearch] = useState("");
@@ -34,11 +35,12 @@ export default function RecordForm({ type, related, onClose, onSaved }: { type: 
     } catch (cause) { setError(cause instanceof Error ? cause : new Error("Could not save record")); }
     finally { setBusy(false); }
   }
-  return <dialog ref={dialog} onCancel={event => { if (busy) event.preventDefault(); else onClose(); }} className="w-[min(92vw,36rem)] rounded-2xl p-0 shadow-2xl backdrop:bg-slate-950/40" aria-labelledby="crm-form-title">
-    <form onSubmit={submit} className="space-y-4 p-5 sm:p-6">
+  // Escape closes an untouched form but keeps a typed draft; Close discards it.
+  return <dialog ref={dialog} onCancel={event => { event.preventDefault(); if (busy) return; if (dirty) setKeptDraft(true); else onClose(); }} className="w-[min(92vw,36rem)] rounded-2xl p-0 shadow-2xl backdrop:bg-slate-950/40" aria-labelledby="crm-form-title">
+    <form onSubmit={submit} onInput={() => setDirty(true)} className="space-y-4 p-5 sm:p-6">
       <div className="flex items-center justify-between gap-4"><h2 id="crm-form-title" className="text-xl font-bold text-slate-900">{type === "tasks" ? "Schedule a task" : activity ? `Log ${SINGLE[type].toLowerCase()}` : `New ${SINGLE[type].toLowerCase()}`}</h2><button type="button" aria-label="Close form" disabled={busy} onClick={onClose} className={BUTTON}>Close</button></div>
       <p className="text-sm text-slate-600">{related ? `Linked to ${related.title}. ` : ""}Saved in Tools.{type === "emails" ? " Record a conversation you have already sent or received." : ""}</p>
-      <ErrorMessage error={error} />
+      <ErrorMessage error={error} />{keptDraft && <p role="status" className="text-xs text-slate-500">Your entry is kept. Use Close to discard it.</p>}
       <label className="block text-sm font-medium">{type === "contacts" || type === "companies" ? "Name" : "Title"}<input autoFocus name="title" required maxLength={300} className={INPUT} placeholder={type === "tasks" ? "Follow up on the railing quote" : undefined} /></label>
       {!related && activity && <div className="rounded-lg border border-slate-200 p-3"><label className="block text-sm font-medium">Associated contact<input value={contactSearch} onChange={event => { setContactSearch(event.target.value); setChosenContact(null); }} placeholder="Search a customer name or email" className={INPUT} /></label><ErrorMessage error={contactError} />{chosenContact ? <p className="mt-2 text-sm text-emerald-800">Linked to {chosenContact.title}</p> : contactQuery.length > 1 && contacts && <div className="mt-2 max-h-40 overflow-auto">{contacts.records.slice(0, 8).map(contact => <button type="button" key={contact.id} onClick={() => { setChosenContact(contact); setContactSearch(contact.title); }} className="flex w-full items-center gap-3 rounded px-2 py-2 text-left text-sm hover:bg-slate-50"><RecordAvatar record={contact} /><span className="min-w-0"><span className="block truncate font-semibold text-cyan-800">{contact.title}</span><span className="block truncate text-xs text-slate-500">{contact.view_fields?.email}</span></span></button>)}{!contacts.records.length && <p className="text-xs text-slate-500">No matching contacts.</p>}</div>}</div>}
       {!activity && (type === "contacts" || type === "companies") && <div className="grid gap-3 sm:grid-cols-2"><label className="block text-sm font-medium">Email<input name="email" type="email" maxLength={320} className={INPUT} /></label><label className="block text-sm font-medium">Phone<input name="phone" type="tel" maxLength={60} className={INPUT} /></label><label className="block text-sm font-medium sm:col-span-2">Company<input name="company" maxLength={300} className={INPUT} /></label></div>}

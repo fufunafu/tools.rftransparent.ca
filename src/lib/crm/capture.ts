@@ -56,7 +56,7 @@ export async function captureCrmActivity() {
   const staff = new Set([OWNER_EMAIL, ...(employees.data ?? []).flatMap(row => [row.email, row.email_alt]).filter(Boolean).map(value => String(value).toLowerCase())]);
   const claimed = await db.rpc("crm_claim_capture", { p_token: token, p_limit: 50 });
   if (claimed.error) throw new Error("Activity capture queue unavailable");
-  const counts = { captured: 0, review: 0, ignored: 0 };
+  const counts = { captured: 0, review: 0, ignored: 0, deferred: 0 };
   for (const event of (claimed.data ?? []) as CaptureEvent[]) {
     const identity = captureIdentity(event);
     let status: "captured" | "review" | "ignored" = "review";
@@ -80,7 +80,9 @@ export async function captureCrmActivity() {
       p_id: event.id, p_token: token, p_revision: event.revision,
       p_result: { status, reason, matched_ids: matchedIds, contact_id: contactId, ...captureContent(event) },
     });
-    if (result.error) throw new Error("Activity capture could not be saved");
+    // An event edited by its source sync mid-run keeps its lease and is matched
+    // again on a later run; the rest of the batch still saves.
+    if (result.error) { counts.deferred += 1; continue; }
     counts[status] += 1;
   }
   return counts;

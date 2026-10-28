@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import useSWR from "swr";
 import type { CrmPage, CrmRecord } from "@/lib/crm/types";
 import { directoryEdit } from "@/lib/crm/directory-workflows";
+import { projectCrmLocation } from "@/lib/crm/location.mjs";
 import { BUTTON, INPUT, PRIMARY, ErrorMessage, fetchJson, recordTitle, stageLabel } from "./shared";
 
 const FIELD_LABELS = { title: "Name", email: "Email", phone: "Phone", company: "Company name", owner_email: "Owner email", website: "Website", domain: "Domain", address: "Street address", city: "City", region: "State / province", postal_code: "Postal / ZIP code", country: "Country" } as const;
@@ -27,8 +28,14 @@ function EditForm({ record, onClose, onSaved }: { record: CrmRecord; onClose: ()
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setError(null);
     const form = new FormData(event.currentTarget);
-    const values = Object.fromEntries([...Object.keys(FIELD_LABELS), "stage"].map(key => [key, String(form.get(key) ?? fields[key] ?? "").trim()]));
-    const parsed = directoryEdit.safeParse({ action: "editRecord", id: record.id, version: record.version, fields: values, companyId: company?.id ?? null });
+    const values: Record<string, string> = Object.fromEntries([...Object.keys(FIELD_LABELS), "stage"].map(key => [key, String(form.get(key) ?? fields[key] ?? "").trim()]));
+    // Save only what changed so untouched fields keep following HubSpot.
+    // Linking a company alone still saves its name.
+    const changed = Object.keys(values).filter(key => values[key] !== String(fields[key] ?? "").trim());
+    if (!changed.length && !company) { onClose(); return; }
+    const location: Record<string, string> = projectCrmLocation({ country: values.country, state: values.region, city: values.city });
+    const edits = Object.fromEntries((changed.length ? changed : ["company"]).map(key => [key, location[key] ?? values[key]]));
+    const parsed = directoryEdit.safeParse({ action: "editRecord", id: record.id, version: record.version, fields: edits, companyId: company?.id ?? null });
     if (!parsed.success) { setError(new Error(parsed.error.issues[0]?.message ?? "Check the entered fields.")); return; }
     setBusy(true);
     try { await fetchJson("/api/crm", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(parsed.data) }); onSaved(); }

@@ -55,6 +55,42 @@ it("keeps reminder delivery history within Tasks instead of a separate navigatio
   expect(container.textContent).toContain("Task reminders and delivery history");
 });
 
+it("keeps Assigned to me while switching task views and highlights the chosen view", async () => {
+  const fetcher = vi.fn<(url: string) => Promise<Response>>(async () => Response.json({ records: [], total: 0, page: 0 }));
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<CrmWorkspace initialTab="tasks" email="rep@example.com" canManage={false} initialPage={{ records: [], total: 0, page: 0 }} initialStatus={initialStatus} />));
+  const mine = [...container.querySelectorAll("label")].find(label => label.textContent === "Assigned to me")!.querySelector("input") as HTMLInputElement;
+  await act(async () => mine.click());
+  const overdue = [...container.querySelectorAll('[role="tab"]')].find(tab => tab.textContent === "Overdue") as HTMLButtonElement;
+  await act(async () => overdue.click());
+  const request = new URL(String(fetcher.mock.calls.at(-1)![0]), "https://tools.example");
+  expect(request.searchParams.get("mine")).toBe("true");
+  expect(request.searchParams.get("filter")).toBe("overdue");
+  expect(mine.checked).toBe(true);
+  expect(overdue.getAttribute("aria-selected")).toBe("true");
+  await act(async () => ([...container.querySelectorAll("button")].find(button => button.textContent === "Reset filters") as HTMLButtonElement).click());
+  expect(mine.checked).toBe(false);
+});
+
+it("keeps the section and open record in the address bar so Back stays in the CRM", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(url.startsWith("/api/crm/directory?") ? { views: [] } : { records: [], total: 0, page: 0 })));
+  window.history.replaceState(null, "", "/hubspot-dupe?section=tasks");
+  await act(async () => root.render(<CrmWorkspace initialTab="tasks" email="rep@example.com" canManage={false} initialPage={{ records: [], total: 0, page: 0 }} initialStatus={initialStatus} />));
+  const current = () => container.querySelector('nav [aria-current="page"]')?.textContent;
+  await act(async () => ([...container.querySelectorAll("nav button")].find(button => button.textContent === "Companies") as HTMLButtonElement).click());
+  expect(window.location.search).toBe("?section=companies");
+  window.history.replaceState(null, "", "/hubspot-dupe?section=tasks&record=hubspot%3A1%3Acontacts%3A2");
+  await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  expect(current()).toBe("Tasks");
+  expect(container.querySelector('[aria-label="CRM records"]')).toBeNull();
+  window.history.replaceState(null, "", "/hubspot-dupe?section=tasks");
+  await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  expect(container.querySelector('[aria-label="CRM records"]')).not.toBeNull();
+  window.history.replaceState(null, "", "/hubspot-dupe?section=companies");
+  await act(async () => { window.dispatchEvent(new PopStateEvent("popstate")); });
+  expect(current()).toBe("Companies");
+});
+
 it("combines owner and location filters on the server, resets pagination, and clears individual filters", async () => {
   const options = { owner: [{ value: "rep@example.com", label: "rep@example.com", count: 75 }, { value: "", label: "", count: 12 }], stage: [{ value: "customer", label: "customer", count: 20 }], country: [], region: [], city: [{ value: "ottawa", label: "Ottawa", count: 18 }] };
   const fetcher = vi.fn(async (url: string) => {

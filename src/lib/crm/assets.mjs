@@ -86,6 +86,9 @@ export async function downloadCrmAsset(asset, token, fetcher = fetch) {
     break;
   }
   if (!response || !response.ok) {
+    // A recording refused with 403 is specific to that recording, so it must
+    // not stop the run; 401 still means the key itself was rejected.
+    if (asset.kind === "recording" && response?.status === 403) throw new CrmAssetError("recording_access", true);
     if (response?.status === 401 || response?.status === 403) throw new CrmAssetError("hubspot_file_access", true);
     if (response?.status === 404) throw new CrmAssetError("source_missing", true);
     throw new CrmAssetError("source_unavailable");
@@ -145,7 +148,6 @@ export async function migrateCrmAssets(db, token, { budgetMs = 35000, limit = 3,
     if (claim.error) throw new CrmAssetError("asset_queue_unavailable");
     const asset = claim.data?.[0];
     if (!asset) break;
-    if (pacer.paused) break;
     let result;
     try {
       const file = await downloadCrmAsset(asset, token, fetcher);
