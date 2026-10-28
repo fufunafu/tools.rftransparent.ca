@@ -22,8 +22,11 @@ async function handler(request: NextRequest) {
     ["activity", () => captureCrmActivity()],
     ["followups", () => processCrmFollowups(getSupabase(), { budgetMs: 20000 })],
   ] as const) {
-    try { results[name] = await run(); }
-    catch { results[name] = { error: "Worker paused; saved progress is retained." }; failed = true; }
+    try {
+      results[name] = await run();
+      // Index and follow-up workers report database errors without throwing.
+      if ((results[name] as { failed?: boolean } | undefined)?.failed) failed = true;
+    } catch { results[name] = { error: "Worker paused; saved progress is retained." }; failed = true; }
   }
   return NextResponse.json({ results }, { status: failed ? 503 : 200 });
 }

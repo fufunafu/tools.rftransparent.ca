@@ -32,3 +32,24 @@ it("offers downloads only for verified copies and explains blocked file access",
   expect(container.textContent).toContain("Needs HubSpot file permission");
   expect(container.textContent).toContain("Background file copying needs the HubSpot connection");
 });
+it("does not link activity to a contact hidden by a newer search", async () => {
+  const event = { id: "11111111-1111-4111-8111-111111111111", revision: 1, kind: "calls", occurred_at: "2026-10-27T10:00:00Z", reason: "no_customer_match", payload: { direction: "inbound", from_number: "+15550000000" }, matched_ids: [], candidates: [] };
+  const fetcher = vi.fn(async (url: string, options?: RequestInit) => {
+    if (options?.method === "POST") return Response.json({ saved: true });
+    if (url.includes("view=activity")) return Response.json({ events: [event], total: 1 });
+    if (url.startsWith("/api/crm?type=contacts")) return Response.json({ records: url.includes("smi") ? [{ id: "tools:11111111-1111-4111-8111-111111111111", title: "John Smith", summary: "" }] : [], total: 0, page: 0 });
+    return Response.json(status);
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<SWRConfig value={{ provider: () => new Map() }}><WorkflowPanel view="capture" canManage={false} onSelect={vi.fn()} /></SWRConfig>));
+  const search = container.querySelector('input[placeholder="Search name or email"]') as HTMLInputElement;
+  const type = async (value: string) => act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, value); search.dispatchEvent(new Event("input", { bubbles: true })); });
+  await type("smi");
+  const select = container.querySelector("select") as HTMLSelectElement;
+  await act(async () => { select.value = "tools:11111111-1111-4111-8111-111111111111"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  const link = [...container.querySelectorAll("button")].find(button => button.textContent === "Link activity") as HTMLButtonElement;
+  expect(link.disabled).toBe(false);
+  await type("jane");
+  expect(link.disabled).toBe(true);
+  expect(container.textContent).not.toContain("Review this customer");
+});

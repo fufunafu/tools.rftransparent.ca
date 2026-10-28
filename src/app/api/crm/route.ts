@@ -51,7 +51,7 @@ export async function POST(request: Request) {
   if (!(await canAccessCrm())) return json({ error: "CRM is available to management, sales, and customer service." }, 403);
   try {
     const parsed = createCrmRecord.safeParse(await readCrmJson(request));
-    if (!parsed.success) return json({ error: "Enter a title, valid activity date, and a due date for tasks." }, 400);
+    if (!parsed.success) return json({ error: parsed.error.issues.some(issue => issue.path[0] === "email") ? "Enter a complete email address, for example name@example.com." : "Enter a title, valid activity date, and a due date for tasks." }, 400);
     const v = parsed.data;
     if (v.relatedId) await getCrmRecord(v.relatedId, "summary");
     const result = await getSupabase().rpc("crm_create_record", {

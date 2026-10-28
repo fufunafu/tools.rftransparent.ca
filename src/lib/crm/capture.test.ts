@@ -19,13 +19,13 @@ beforeEach(() => {
 });
 describe("automatic CRM activity", () => {
   it("captures an exact customer match once without inventing a staff author or full email body", async () => {
-    expect(await captureCrmActivity()).toEqual({ captured: 1, ignored: 0, review: 0 });
+    expect(await captureCrmActivity()).toEqual({ captured: 1, ignored: 0, review: 0, deferred: 0 });
     expect(mocks.rpc).toHaveBeenLastCalledWith("crm_finish_capture", expect.objectContaining({ p_result: expect.objectContaining({ contact_id: "tools:customer-1", status: "captured", body: expect.stringContaining("This is a preview") }) }));
     expect(captureContent(call).body).toContain("does not identify a verified staff member");
   });
   it("holds ambiguous and unmatched identities for staff review", async () => {
     matches = ["tools:a", "tools:b"];
-    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 0, review: 1 });
+    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 0, review: 1, deferred: 0 });
     expect(mocks.rpc).toHaveBeenLastCalledWith("crm_finish_capture", expect.objectContaining({ p_result: expect.objectContaining({ reason: "ambiguous_identity", contact_id: null }) }));
     matches = [];
     await captureCrmActivity();
@@ -33,19 +33,19 @@ describe("automatic CRM activity", () => {
   });
   it("excludes employee mail, even when the address is also an imported contact", async () => {
     employees = [{ email: "client@example.com", email_alt: null }];
-    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 1, review: 0 });
+    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 1, review: 0, deferred: 0 });
     expect(mocks.from).not.toHaveBeenCalledWith("crm_identities");
   });
   it("recognizes forwarded CIK legs across number formatting and keeps independent stores separate", async () => {
     mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "crm_claim_capture" ? [call] : null }));
     otherCalls = [{ record_id: null, payload: { ...call.payload, source: "grasshopper", from_number: "+1 (416) 555-0199" } }];
-    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 1, review: 0 });
+    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 1, review: 0, deferred: 0 });
     otherCalls = [{ record_id: null, payload: { ...call.payload, source: "grasshopper", store_id: "bc_transparent" } }];
-    expect(await captureCrmActivity()).toEqual({ captured: 1, ignored: 0, review: 0 });
+    expect(await captureCrmActivity()).toEqual({ captured: 1, ignored: 0, review: 0, deferred: 0 });
   });
   it("does not silently move an existing activity to a different customer", async () => {
     mocks.rpc.mockImplementation(async (name: string) => ({ data: name === "crm_claim_capture" ? [{ ...email, contact_id: "tools:previous" }] : null }));
-    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 0, review: 1 });
+    expect(await captureCrmActivity()).toEqual({ captured: 0, ignored: 0, review: 1, deferred: 0 });
   });
   it("uses the external party for inbound and outbound email/calls", () => {
     expect(captureIdentity(email)).toEqual({ kind: "email", value: "client@example.com" });
@@ -53,4 +53,10 @@ describe("automatic CRM activity", () => {
     expect(captureIdentity(call)).toEqual({ kind: "phone", value: "+14165550199" });
     expect(captureIdentity({ ...call, payload: { ...call.payload, direction: "outbound" } })).toEqual({ kind: "phone", value: "+19055550199" });
   });
+});
+it("saves the rest of the batch when one activity changed during the run", async () => {
+  const changed = { ...email, id: "event-2" };
+  mocks.rpc.mockImplementation(async (name: string, args: { p_id?: string }) => name === "crm_claim_capture" ? { data: [changed, email], error: null }
+    : args.p_id === "event-2" ? { data: null, error: { message: "Activity changed. Refresh before saving." } } : { data: "tools:activity", error: null });
+  expect(await captureCrmActivity()).toEqual({ captured: 1, ignored: 0, review: 0, deferred: 1 });
 });

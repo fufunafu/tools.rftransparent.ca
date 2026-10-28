@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 import dynamic from "next/dynamic";
 import useSWR, { SWRConfig, useSWRConfig } from "swr";
 import CrmHome from "./CrmHome";
@@ -12,11 +12,13 @@ import { defaultColumns, FOLLOWUP_FILTERS, type DirectoryColumn, type DirectoryT
 import { appendDirectoryFilters, directoryFilterCount, emptyDirectoryFilters, type DirectoryFilters as DirectorySelection, type DirectorySort } from "@/lib/crm/directory";
 import { homeUrl, type CrmHomeData } from "@/lib/crm/home-window";
 import { CRM_INITIAL_LIST_URL, CRM_LABELS, CRM_TYPES, type CrmPage, type CrmRecord, type CrmStatus, type CrmType } from "@/lib/crm/types";
+import { crmId } from "@/lib/crm/input";
 import { BUTTON, PRIMARY, INPUT, SINGLE, SourceBadge, ErrorMessage, Pager, useDateLabel, fetchJson, cleanSummary, ownerLabel, recordTitle } from "./shared";
 
 const RecordForm = dynamic(() => import("./RecordForm"), { loading: () => <p role="status" className="rounded-xl bg-white p-4">Opening form...</p> });
 const RecordDetail = dynamic(() => import("./RecordDetail"), { loading: () => <aside role="status" className="rounded-xl border border-slate-200 bg-white p-5">Opening record...</aside> });
 const WorkflowPanel = dynamic(() => import("./WorkflowPanel"), { loading: () => <p role="status" className="rounded-xl bg-white p-5">Opening CRM tools...</p> });
+const SECTIONS = ["contacts", "companies", "tasks"];
 const MAINTENANCE_LABELS: Record<string, string> = { files: "Imported attachments & call recordings", duplicates: "Review duplicate contacts", capture: "Match unlinked activity" };
 interface WorkspaceProps { email: string; displayName?: string; canManage: boolean; initialPage?: CrmPage; initialStatus?: CrmStatus; initialHome?: CrmHomeData; initialRecordId?: string; initialTab?: string }
 
@@ -71,7 +73,29 @@ function WorkspaceContent({ email, displayName, canManage, initialPage, initialS
     setMine(config.mine); setArchived(config.archived); setView(config.recent ? "recent" : "all"); setFollowup(config.followup); setPage(0);
     setColumnsByType(current => ({ ...current, [directoryType]: config.columns }));
   }
-  function openRecord(id: string) { setPreview(null); setSelected(id); }
+  // Keep the section and open record in the address bar so Back and Forward
+  // move within the CRM instead of leaving it.
+  function pushLocation(nextTab: string, record: string | null) {
+    const url = new URL(window.location.href);
+    if (nextTab === "home") url.searchParams.delete("section"); else url.searchParams.set("section", nextTab);
+    if (record) url.searchParams.set("record", record); else url.searchParams.delete("record");
+    if (url.href !== window.location.href) window.history.pushState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }
+  function selectRecord(id: string | null) { setSelected(id); pushLocation(tab, id); }
+  const restoreLocation = useEffectEvent(() => {
+    const params = new URLSearchParams(window.location.search);
+    const section = params.get("section") ?? "";
+    const nextTab = SECTIONS.includes(section) ? section : "home";
+    if (nextTab !== tab) resetTab(nextTab);
+    const record = crmId.safeParse(params.get("record"));
+    setSelected(record.success ? record.data : null);
+  });
+  useEffect(() => {
+    const onPopState = () => restoreLocation();
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
+  function openRecord(id: string) { setPreview(null); selectRecord(id); }
   function refreshDirectory() { void mutate(); void refreshStatus(); void refreshHome(); void mutateCache(key => typeof key === "string" && key.startsWith("/api/crm?filtersOnly=")); }
 
   function changeDirectoryFilters(next: DirectorySelection) {
@@ -98,19 +122,21 @@ function WorkspaceContent({ email, displayName, canManage, initialPage, initialS
     } catch (cause) { setActionError(cause instanceof Error ? cause : new Error("Import paused")); }
     finally { setSyncing(false); }
   }
-  function changeTab(value: string) { setUseHomePreload(false); setTab(value); setPage(0); setSelected(null); setSearch(""); setQuery(""); setMine(false); setOverdue(false); setArchived(false); setTaskStatus("open"); setView(value === "tasks" ? "upcoming" : "all"); setDirectoryFilters(emptyDirectoryFilters()); setDirectorySource(""); setDirectorySort("newest"); setFollowup("all"); setPreview(null); }
+  function changeTab(value: string) { resetTab(value); pushLocation(value, null); }
+  function resetTab(value: string) { setUseHomePreload(false); setTab(value); setPage(0); setSelected(null); setSearch(""); setQuery(""); setMine(false); setOverdue(false); setArchived(false); setTaskStatus("open"); setView(value === "tasks" ? "upcoming" : "all"); setDirectoryFilters(emptyDirectoryFilters()); setDirectorySource(""); setDirectorySort("newest"); setFollowup("all"); setPreview(null); }
   const title = tab === "home" ? "Home" : CRM_LABELS[tab as CrmType];
   const views = tab === "tasks" ? [["upcoming", "Next 7 days"], ["today", "Due today"], ["overdue", "Overdue"], ["all", "All open"], ["completed", "Completed"]] : [["all", `All ${title.toLowerCase()}`], ["mine", "Assigned to me"], ["recent", "Recently added"]];
-  function chooseView(value: string) { setPage(0); setMine(value === "mine"); if (value === "mine") setDirectoryFilters(current => ({ ...current, owner: [] })); setOverdue(false); setTaskStatus(value === "completed" ? "completed" : "open"); setView(["mine", "completed"].includes(value) ? "all" : value); }
-  function resetFilters() { setSearch(""); setQuery(""); setArchived(false); setDirectoryFilters(emptyDirectoryFilters()); setDirectorySource(""); setDirectorySort("newest"); setFollowup("all"); chooseView(tab === "tasks" ? "upcoming" : "all"); }
-  const filtered = Boolean(query || mine || archived || view !== "all" || directorySource || followup !== "all" || directoryFilterCount(directoryFilters));
+  // Tasks has no "Assigned to me" view; keep that checkbox while switching task views.
+  function chooseView(value: string) { setPage(0); if (tab !== "tasks") setMine(value === "mine"); if (value === "mine") setDirectoryFilters(current => ({ ...current, owner: [] })); setOverdue(false); setTaskStatus(value === "completed" ? "completed" : "open"); setView(["mine", "completed"].includes(value) ? "all" : value); }
+  function resetFilters() { setSearch(""); setQuery(""); setMine(false); setArchived(false); setDirectoryFilters(emptyDirectoryFilters()); setDirectorySource(""); setDirectorySort("newest"); setFollowup("all"); chooseView(tab === "tasks" ? "upcoming" : "all"); }
+  const filtered = Boolean(query || mine || archived || view !== (tab === "tasks" ? "upcoming" : "all") || directorySource || followup !== "all" || directoryFilterCount(directoryFilters));
   return <div className="mx-auto max-w-[1600px] space-y-4 bg-slate-50 p-3 pb-24 sm:p-4 lg:p-5">
     <header className="flex items-center justify-between gap-3"><h1 className="text-lg font-bold tracking-tight text-slate-900">HubSpot Dupe</h1><span className="text-xs text-slate-500">{status ? `${counts.contacts.toLocaleString()} contacts` : "Loading workspace"}</span></header>
     <ErrorMessage error={actionError} />{notice && <p role="status" className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</p>}
     <nav aria-label="CRM sections" className="flex gap-1 overflow-x-auto border-b border-slate-200">{["home", "contacts", "companies", "tasks"].map(type => <button key={type} onClick={() => changeTab(type)} aria-current={tab === type ? "page" : undefined} className={`min-h-12 whitespace-nowrap border-b-2 px-4 text-sm font-semibold ${tab === type ? "border-orange-600 text-orange-800" : "border-transparent text-slate-500 hover:text-slate-900"}`}>{type === "home" ? "Home" : CRM_LABELS[type as CrmType]}</button>)}</nav>
-    {selected ? <RecordDetail key={`${selected}:${detailVersion}`} id={selected} preview={data?.records.find(record => record.id === selected)} email={email} canManage={canManage} onSelect={setSelected} onAdd={(type, related) => setForm({ type, related })} onClose={() => setSelected(null)} onChanged={() => { void mutate(); void refreshStatus(); void refreshHome(); }} /> : tab === "home" ? <CrmHome email={email} displayName={displayName} initialHome={useHomePreload ? initialHome : undefined} status={status} onSelect={id => { setUseHomePreload(false); setSelected(id); }} onAdd={type => setForm({ type, related: null })} onNavigate={(nextTab, nextView = "all", assigned = false, nextStatus = "open") => { changeTab(nextTab); setView(nextView); setMine(assigned); setTaskStatus(nextStatus); }} /> : <section className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="CRM records" aria-busy={isValidating}>
+    {selected ? <RecordDetail key={`${selected}:${detailVersion}`} id={selected} preview={data?.records.find(record => record.id === selected)} email={email} canManage={canManage} onSelect={selectRecord} onAdd={(type, related) => setForm({ type, related })} onClose={() => selectRecord(null)} onChanged={() => { void mutate(); void refreshStatus(); void refreshHome(); }} /> : tab === "home" ? <CrmHome email={email} displayName={displayName} initialHome={useHomePreload ? initialHome : undefined} status={status} onSelect={id => { setUseHomePreload(false); selectRecord(id); }} onAdd={type => setForm({ type, related: null })} onNavigate={(nextTab, nextView = "all", assigned = false, nextStatus = "open") => { changeTab(nextTab); setView(nextView); setMine(assigned); setTaskStatus(nextStatus); }} /> : <section className="min-w-0 rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="CRM records" aria-busy={isValidating}>
       <div className="flex items-center justify-between gap-3 px-5 py-5"><div><h2 className="text-2xl font-semibold text-slate-900">{title}</h2><p className="mt-1 text-xs text-slate-500">{data ? `${data.total.toLocaleString()} ${filtered ? "matches" : "records"}` : "Loading records"}{tab === "tasks" ? " · Plan your next customer follow-up" : " · Open a record to view details and activity"}</p></div><button className={PRIMARY} onClick={() => setForm({ type: tab as CrmType, related: null })}>+ {`New ${SINGLE[tab as CrmType].toLowerCase()}`}</button></div>
-      <div role="tablist" aria-label={`${title} views`} className="flex gap-1 overflow-x-auto border-y border-slate-200 bg-slate-50/70 px-4">{views.map(([key, label]) => { const active = key === "mine" ? mine : key === "completed" ? taskStatus === "completed" : !mine && taskStatus !== "completed" && view === key; return <button role="tab" aria-selected={active} key={key} onClick={() => chooseView(key)} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium ${active ? "border-orange-600 bg-white text-orange-800" : "border-transparent text-slate-600 hover:bg-white"}`}>{label}</button>; })}</div>
+      <div role="tablist" aria-label={`${title} views`} className="flex gap-1 overflow-x-auto border-y border-slate-200 bg-slate-50/70 px-4">{views.map(([key, label]) => { const active = key === "mine" ? mine : key === "completed" ? taskStatus === "completed" : (tab === "tasks" || !mine) && taskStatus !== "completed" && view === key; return <button role="tab" aria-selected={active} key={key} onClick={() => chooseView(key)} className={`min-h-11 whitespace-nowrap border-b-2 px-4 text-sm font-medium ${active ? "border-orange-600 bg-white text-orange-800" : "border-transparent text-slate-600 hover:bg-white"}`}>{label}</button>; })}</div>
       {directory && <DirectoryViews key={`views:${tab}`} type={directoryType} config={directoryConfig} onApply={applyDirectoryView} onColumns={columns => setColumnsByType(current => ({ ...current, [directoryType]: columns }))} />}
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-slate-200 px-5 py-3"><label className="w-full max-w-sm text-xs font-medium text-slate-600">Search {title.toLowerCase()}<input value={search} onChange={event => setSearch(event.target.value)} type="search" className={INPUT} placeholder="Name, email, phone, or keyword" /></label><div className="flex min-h-11 flex-wrap items-center gap-4 text-xs text-slate-600"><label className="flex items-center gap-2"><input type="checkbox" checked={mine} onChange={event => { setMine(event.target.checked); if (event.target.checked) setDirectoryFilters(current => ({ ...current, owner: [] })); setPage(0); }} />Assigned to me</label><label className="flex items-center gap-2"><input type="checkbox" checked={archived} onChange={event => { setArchived(event.target.checked); setPage(0); }} />Archived records</label><button className="font-semibold text-slate-600 underline" onClick={resetFilters}>Reset filters</button></div></div>
       {directory && <DirectoryFilters key={`filters:${tab}`} type={tab} email={email} archived={archived} filters={directoryFilters} source={directorySource} sort={directorySort} onChange={changeDirectoryFilters} onSource={value => { setDirectorySource(value as "" | "tools" | "hubspot"); setPage(0); }} onSort={value => { setDirectorySort(value); setPage(0); }} onClear={resetFilters} />}
@@ -124,7 +150,7 @@ function WorkspaceContent({ email, displayName, canManage, initialPage, initialS
       {data && <Pager page={data.page} total={data.total} onPage={setPage} busy={isValidating} />}
       {tab === "tasks" && <details open={showTaskReminders} onToggle={event => setShowTaskReminders(event.currentTarget.open)} className="border-t border-slate-200 px-5 py-3">
         <summary className="cursor-pointer py-1 text-sm font-semibold text-slate-700">Task reminders and delivery history</summary>
-        {showTaskReminders && <div className="mt-3"><WorkflowPanel view="reminders" canManage={canManage} onSelect={setSelected} /></div>}
+        {showTaskReminders && <div className="mt-3"><WorkflowPanel view="reminders" canManage={canManage} onSelect={selectRecord} /></div>}
       </details>}
     </section>}
     <details className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
@@ -136,10 +162,10 @@ function WorkspaceContent({ email, displayName, canManage, initialPage, initialS
         {canManage && <button disabled={syncing || !status?.configured} onClick={() => void sync()} className={BUTTON}>{syncing ? "Importing..." : status?.sync?.status === "complete" ? "Refresh from HubSpot" : "Resume import"}</button>}
         {!status?.configured && <p>Ongoing import is not configured. Saved records remain available.</p>}
         <div className="border-t border-slate-100 pt-3"><p className="mb-2 font-semibold text-slate-600">Data maintenance</p><div className="flex flex-wrap gap-2">{Object.entries(MAINTENANCE_LABELS).map(([key, label]) => <button key={key} onClick={() => setMaintenance(maintenance === key ? null : key)} aria-pressed={maintenance === key} className={BUTTON}>{label}</button>)}</div></div>
-        {maintenance && <WorkflowPanel key={maintenance} view={maintenance} canManage={canManage} onSelect={setSelected} />}
+        {maintenance && <WorkflowPanel key={maintenance} view={maintenance} canManage={canManage} onSelect={selectRecord} />}
       </div>
     </details>
     {preview && directory && !selected && <RecordPreview key={`${preview.id}:${detailVersion}`} record={preview} onClose={() => setPreview(null)} onOpen={openRecord} onAdd={(type, related) => setForm({ type, related })} onChanged={refreshDirectory} />}
-    {form && <RecordForm type={form.type} related={form.related} onClose={() => setForm(null)} onSaved={id => { setNotice(`${SINGLE[form.type]} saved in Tools.`); setForm(null); void mutate(); void refreshStatus(); void refreshHome(); if (!preview) setSelected(form.related?.id ?? id); setDetailVersion(value => value + 1); }} />}
+    {form && <RecordForm type={form.type} related={form.related} onClose={() => setForm(null)} onSaved={id => { setNotice(`${SINGLE[form.type]} saved in Tools.`); setForm(null); void mutate(); void refreshStatus(); void refreshHome(); if (!preview) selectRecord(form.related?.id ?? id); setDetailVersion(value => value + 1); }} />}
   </div>;
 }

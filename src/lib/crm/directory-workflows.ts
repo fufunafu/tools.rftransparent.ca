@@ -26,15 +26,17 @@ const webAddress = text(500).refine(value => {
 }, "Enter a website address.");
 export const directoryEdit = z.object({
   action: z.literal("editRecord"), id: crmId, version: z.number().int().positive(),
+  // Only changed fields are sent. Each saved field overrides HubSpot from then on.
   fields: z.object({
     title: text(300).min(1), email, phone: text(60), company: text(300), stage: text(120),
     owner_email: email, address: text(500), city: text(500), region: text(500), country: text(500), postal_code: text(40),
     website: webAddress, domain: webAddress,
-  }).strict(),
+  }).strict().partial().refine(fields => Object.keys(fields).length > 0, "Change at least one field."),
   companyId: crmId.nullable().default(null),
-}).strict().transform(input => ({ ...input, fields: { ...input.fields,
-  ...projectCrmLocation({ country: input.fields.country, state: input.fields.region, city: input.fields.city }),
-} }));
+}).strict().transform(input => {
+  const location = projectCrmLocation({ country: input.fields.country ?? "", state: input.fields.region ?? "", city: input.fields.city ?? "" });
+  return { ...input, fields: { ...input.fields, ...Object.fromEntries(Object.entries(location).filter(([key]) => key in input.fields)) } };
+});
 const filterValues = z.array(text(500)).max(20);
 export const savedViewConfig = z.object({
   search: text(200), filters: z.object({ owner: filterValues, stage: filterValues, country: filterValues, region: filterValues, city: filterValues }).strict(),

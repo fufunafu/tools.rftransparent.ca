@@ -21,17 +21,17 @@ export async function processCrmProjections(db, { budgetMs = 15000, batchSize = 
     requestStart = Date.now();
     const claim = await boundedCrmQuery(db.rpc("crm_claim_projections", { p_token: token, p_limit: pacer.batchSize }));
     pacer.observe(Date.now() - requestStart, claim.error);
-    if (claim.error) break;
+    if (claim.error) return { processed, complete: false, paused: true, failed: true };
     if (!claim.data?.length) return { processed, complete: true };
     if (pacer.paused) break;
     const rows = claim.data.map(row => ({ record_id: row.record_id, revision: row.revision, ...projectCrmRecord(row.record, stages) }));
     requestStart = Date.now();
     const saved = await boundedCrmQuery(db.rpc("crm_commit_projections", { p_token: token, p_rows: rows }));
     pacer.observe(Date.now() - requestStart, saved.error);
-    if (saved.error) break;
+    if (saved.error) return { processed, complete: false, paused: true, failed: true };
     processed += saved.data ?? 0;
     await pacer.wait(deadline);
   } return { processed, complete: false, ...(pacer.paused ? { paused: true } : {}) };
-  } catch { pacer.observe(0, true); return { processed, complete: false, paused: true }; }
+  } catch { pacer.observe(0, true); return { processed, complete: false, paused: true, failed: true }; }
   finally { await pacer.finish(); }
 }

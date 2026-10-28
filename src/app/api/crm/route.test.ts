@@ -92,3 +92,9 @@ describe("CRM routes", () => {
     expect(mocks.rpc).toHaveBeenCalledWith("crm_update_task", expect.objectContaining({ p_version: 1, p_can_manage: false }));
   });
 });
+it("explains an incomplete email address instead of blaming the title or dates", async () => {
+  const response = await POST(request({ requestId: "11111111-1111-4111-8111-111111111111", type: "contacts", title: "Jane", email: "jane@localhost", occurredAt: "2026-10-27T10:00:00Z", dueAt: null, relatedId: null }));
+  expect(response.status).toBe(400);
+  expect((await response.json()).error).toMatch(/email address/);
+  expect(mocks.rpc).not.toHaveBeenCalled();
+});

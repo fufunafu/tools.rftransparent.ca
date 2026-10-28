@@ -45,3 +45,13 @@ describe("CRM workflow access and mutations", () => {
     expect(mocks.rpc).toHaveBeenCalledWith("crm_duplicate_groups", { p_reviewed: false, p_offset: 0 });
   });
 });
+it("lets management requeue copies stuck in progress along with blocked and failed files", async () => {
+  vi.stubEnv("HUBSPOT_ACCESS_TOKEN", "token");
+  mocks.manage.mockResolvedValue(true);
+  const query = { update: vi.fn(() => query), or: vi.fn<(filter: string) => Promise<{ error: null }>>(async () => ({ error: null })) };
+  mocks.from.mockReturnValue(query);
+  expect((await POST(request({ action: "retry_files" }))).status).toBe(200);
+  expect(query.update).toHaveBeenCalledWith(expect.objectContaining({ status: "pending", attempts: 0, lease_token: null, lease_until: null }));
+  expect(query.or.mock.calls[0][0]).toMatch(/^status\.in\.\(blocked,failed\),and\(status\.eq\.copying,lease_until\.lt\.\d{4}-/);
+  vi.unstubAllEnvs();
+});
