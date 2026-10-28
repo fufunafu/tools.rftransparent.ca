@@ -388,3 +388,91 @@ it("restores a quoted lead from spam to Quoted instead of New", async () => {
   await act(async () => panelButton("Restore from spam").click());
   expect(patchBodies()).toEqual([expect.objectContaining({ outcome: "quoted", not_applicable_reason: null })]);
 });
+
+function panelResponder(getLead: () => Lead, extra: Respond = () => undefined): Respond {
+  return (url, init) => extra(url, init) ?? (url.includes("view=details") ? { lead_ids: [getLead().id], details: [] }
+    : url.includes("view=call_attempts") ? { attempts: [] }
+      : url.includes("view=missed_calls") ? { calls: [] } : { leads: [getLead()] });
+}
+
+it("edits only the current inquiry when imported records are combined into the row", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { phone: "4165550123", call_status: "not_called", duplicate_count: 3, duplicate_ids: ["lead-0", "lead-0-repeat", "imported-2025"], workflow_ids: ["lead-0", "lead-0-repeat"] });
+  await render([lead], "rf_transparent", { respond: panelResponder(() => lead) });
+  await openLead("Customer 0");
+  const requested = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+  expect(requested.some((url) => url.includes("lead_ids=lead-0%2Clead-0-repeat%2Cimported-2025"))).toBe(true);
+  await act(async () => panelButton("Mark as called").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ ids: ["lead-0", "lead-0-repeat"] })]);
+});
+
+it("can undo a mistaken called mark, but not a call backed by a phone record", async () => {
+  const [marked] = makeLeads(1);
+  Object.assign(marked, { phone: "4165550123", call_status: "called", call_status_source: "manual", call_status_changed_by: "employee@example.com" });
+  await render([marked], "rf_transparent", { respond: panelResponder(() => marked) });
+  await openLead("Customer 0");
+  await act(async () => panelButton("Undo called mark").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ ids: ["lead-0"], call_status: "not_called" })]);
+
+  await act(async () => root.unmount());
+  root = createRoot(container);
+  const [recorded] = makeLeads(1);
+  Object.assign(recorded, { phone: "4165550123", call_status: "called", last_call_at: "2026-10-26T14:00:00Z", last_called_by: "Extension 212" });
+  await render([recorded], "rf_transparent", { respond: panelResponder(() => recorded) });
+  await openLead("Customer 0");
+  expect(panelButton("Undo called mark")).toBeUndefined();
+  expect(panelButton("Called (phone record)").disabled).toBe(true);
+});
+
+it("keeps a customer with a recent repeat request in the 30-day queue", async () => {
+  const leads = makeLeads(2);
+  leads[0].submitted_at = new Date(NOW - 40 * DAY_MS).toISOString();
+  leads[0].last_submitted_at = new Date(NOW - 5 * DAY_MS).toISOString();
+  leads[1].submitted_at = new Date(NOW - 10 * DAY_MS).toISOString();
+  await render(leads, "rf_transparent");
+  const rows = leadRows();
+  expect(rows.map((row) => row.textContent?.match(/Customer \d/)?.[0])).toEqual(["Customer 0", "Customer 1"]);
+  expect(rows[0].textContent).toContain("Repeat request");
+});
+
+it("moves a Quoted lead back to Contacted when its quote is removed", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { phone: "4165550123", call_status: "called", outcome: "quoted", quote_number: "D-1042" });
+  await render([lead], "rf_transparent", { respond: panelResponder(() => lead) });
+  await openLead("Customer 0");
+  await act(async () => panelButton("Edit").click());
+  const quoteInput = container.querySelector<HTMLInputElement>('[role="dialog"] input[placeholder^="Quote / draft order"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(quoteInput, "");
+    quoteInput.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () => panelButton("Save").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ quote_number: null, outcome: "contacted" })]);
+});
+
+it("shows a coworker's saved note after a refresh while the box is not being edited", async () => {
+  let lead = { ...makeLeads(1)[0], notes: "Left a voicemail" } as Lead;
+  await render([lead], "rf_transparent", { respond: panelResponder(() => lead) });
+  await openLead("Customer 0");
+  const notes = () => container.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea[placeholder="Internal notes"]')!;
+  expect(notes().value).toBe("Left a voicemail");
+  lead = { ...lead, notes: "Customer asked for a call Friday" };
+  const refresh = [...container.querySelectorAll("button")].find((button) => button.textContent === "Refresh")!;
+  await act(async () => refresh.click());
+  await settle();
+  expect(notes().value).toBe("Customer asked for a call Friday");
+});
+
+it("lists missed calls from the customer separately from staff calls", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { phone: "4165550123", call_status: "not_called" });
+  await render([lead], "rf_transparent", {
+    respond: panelResponder(() => lead, (url) => url.includes("view=missed_calls")
+      ? { calls: [{ id: "vm-1", called_at: "2026-10-26T15:00:00Z", store_id: "rf_transparent", voicemail: true }] }
+      : undefined),
+  });
+  await openLead("Customer 0");
+  const section = container.querySelector('[aria-label="Missed calls from this customer"]')!;
+  expect(section.textContent).toContain("Went to voicemail");
+  expect(container.textContent).toContain("0 calls");
+});

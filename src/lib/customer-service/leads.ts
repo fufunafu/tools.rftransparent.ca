@@ -85,6 +85,11 @@ export interface Lead {
   last_called_by?: string | null;
   duplicate_count?: number;
   duplicate_ids?: string[];
+  // Members of the current inquiry, when the group also holds imported
+  // historical records. Edits apply to these ids only.
+  workflow_ids?: string[];
+  // Latest submission in the current inquiry, for repeat requests.
+  last_submitted_at?: string;
   submissions?: LeadSubmission[];
   attachments?: LeadAttachment[];
 }

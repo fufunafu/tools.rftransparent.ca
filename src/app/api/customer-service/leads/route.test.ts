@@ -335,11 +335,24 @@ describe("POST /api/customer-service/leads", () => {
 });
 
 
-it("includes open leads outside reporting dates without truncating their call history", async () => {
-  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?store=rf_transparent&from=2026-08-01&to=2026-08-03&include_open=true"));
+it("includes open leads outside reporting dates and loads their full call history by lead", async () => {
+  // lead-1 was submitted 2026-08-05, before this window, and is still open.
+  leadRangeMock.mockReset();
+  leadRangeMock
+    .mockResolvedValueOnce({ data: [{ id: "lead-1", source: "website", email: "jane@example.com", phone: null, submitted_at: "2026-08-05T12:00:00.000Z", call_status: "called", outcome: "contacted", quote_number: null, not_applicable_reason: null }], error: null })
+    .mockResolvedValue({ data: [], error: null });
+  attemptRangeMock.mockReset();
+  attemptRangeMock
+    .mockResolvedValueOnce({ data: [], error: null })
+    .mockResolvedValueOnce({ data: [{ id: "old-call", lead_id: "lead-1", staff: "Extension 212", called_at: "2026-08-05T12:30:00.000Z" }], error: null })
+    .mockResolvedValue({ data: [], error: null });
+  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?store=rf_transparent&from=2026-09-01&to=2026-09-03&include_open=true"));
+  const body = await response.json();
   expect(response.status).toBe(200);
   expect(orMock).toHaveBeenCalledWith(expect.stringContaining("outcome.in.(new,contacted,quoted),and(submitted_at.gte."));
-  expect(gteMock).not.toHaveBeenCalledWith("called_at", expect.anything());
+  expect(gteMock).toHaveBeenCalledWith("called_at", "2026-09-01T00:00:00.000Z");
+  expect(attemptInMock).toHaveBeenCalledWith("lead_id", ["lead-1"]);
+  expect(body.leads[0]).toMatchObject({ first_call_at: "2026-08-05T12:30:00.000Z", last_called_by: "Extension 212" });
 });
 
 
@@ -414,4 +427,50 @@ it("expires the cached lead list immediately after an edit", async () => {
   const response = await PATCH(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads", { method: "PATCH", body: JSON.stringify({ id: "lead-1", outcome: "won" }) }));
   expect(response.status).toBe(200);
   expect(revalidateTag).toHaveBeenCalledWith("customer-service:leads", { expire: 0 });
+});
+
+it("marks which combined records belong to the current inquiry", async () => {
+  const base = { source: "website", name: "Jane", email: "jane@example.com", phone: null, call_status: "not_called", quote_number: null };
+  leadRangeMock.mockReset();
+  leadRangeMock.mockResolvedValueOnce({
+    data: [
+      { ...base, id: "new-request", outcome: "new", not_applicable_reason: null, submitted_at: "2026-09-02T12:00:00.000Z" },
+      { ...base, id: "repeat", outcome: "new", not_applicable_reason: null, submitted_at: "2026-09-05T12:00:00.000Z" },
+      { ...base, id: "imported", outcome: "not_applicable", not_applicable_reason: "Historical Powerful Form Builder record; workflow status unknown", submitted_at: "2025-03-01T12:00:00.000Z" },
+    ],
+    error: null,
+  }).mockResolvedValue({ data: [], error: null });
+  const body = await (await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?store=rf_transparent"))).json();
+  expect(body.leads).toHaveLength(1);
+  expect([...body.leads[0].duplicate_ids].sort()).toEqual(["imported", "new-request", "repeat"]);
+  expect([...body.leads[0].workflow_ids].sort()).toEqual(["new-request", "repeat"]);
+  expect(body.leads[0]).toMatchObject({ submitted_at: "2026-09-02T12:00:00.000Z", last_submitted_at: "2026-09-05T12:00:00.000Z" });
+});
+
+it("lists only unanswered calls from the lead's number after the lead arrived", async () => {
+  const leads: Record<string, ReturnType<typeof vi.fn>> = {};
+  Object.assign(leads, { select: vi.fn(() => leads), in: vi.fn(async () => ({ data: [{ phone: "(416) 555-0123" }], error: null })) });
+  const calls: Record<string, ReturnType<typeof vi.fn>> = {};
+  Object.assign(calls, {
+    select: vi.fn(() => calls), eq: vi.fn(() => calls), or: vi.fn(() => calls), gte: vi.fn(() => calls), order: vi.fn(() => calls),
+    limit: vi.fn(async () => ({
+      data: [
+        { id: "voicemail", store_id: "rf_transparent", call_start: "2026-10-20T15:00:00Z", from_number: "4165550123", direction: "inbound", duration_min: 1, endpoint: "VM 201", source: "cik" },
+        { id: "abandoned", store_id: "rf_transparent", call_start: "2026-10-20T14:00:00Z", from_number: "14165550123", direction: "inbound", duration_min: 0, endpoint: null, source: "cik" },
+        { id: "answered", store_id: "rf_transparent", call_start: "2026-10-20T13:00:00Z", from_number: "4165550123", direction: "inbound", duration_min: 3, endpoint: "212", source: "cik" },
+        { id: "other-number", store_id: "rf_transparent", call_start: "2026-10-20T12:00:00Z", from_number: "9054165550123", direction: "inbound", duration_min: 0, endpoint: null, source: "cik" },
+      ],
+      error: null,
+    })),
+  });
+  getSupabaseMock.mockReturnValue({ from: vi.fn((table: string) => table === "leads" ? leads : calls) });
+  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?view=missed_calls&lead_ids=lead-1&since=2026-10-19T12%3A00%3A00.000Z"));
+  const body = await response.json();
+  expect(response.status).toBe(200);
+  expect(calls.or).toHaveBeenCalledWith("from_number.ilike.%4165550123");
+  expect(calls.gte).toHaveBeenCalledWith("call_start", "2026-10-19T12:00:00.000Z");
+  expect(body.calls).toEqual([
+    { id: "voicemail", called_at: "2026-10-20T15:00:00Z", store_id: "rf_transparent", voicemail: true },
+    { id: "abandoned", called_at: "2026-10-20T14:00:00Z", store_id: "rf_transparent", voicemail: false },
+  ]);
 });

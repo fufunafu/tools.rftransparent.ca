@@ -40,8 +40,9 @@ describe("sendNewLeadNotification", () => {
     expect(LEAD_NOTIFICATION_RECIPIENT).toBe("info@glass-railing.com");
     expect(sendEmailMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        from: "RF Transparent <info@glass-railing.com>",
+        from: "RF Transparent <noreply@rftransparent.ca>",
         to: "info@glass-railing.com",
+        replyTo: "jane@example.com",
         subject: "New Meta lead: Jane Doe",
         text: expect.stringContaining("Email: jane@example.com"),
         html: expect.stringContaining("Installation</td><td style=\"padding:5px 0\">Requested"),
@@ -92,4 +93,19 @@ describe("sendNewLeadNotification", () => {
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
   });
+});
+
+it("leaves out a reply-to address that is not a usable email", async () => {
+  await sendNewLeadNotification({
+    leadId: "lead-124",
+    source: "website",
+    sourceDetail: null,
+    pageUrl: null,
+    name: "Sam",
+    email: "sam at example dot com",
+    phone: null,
+    message: null,
+    installationRequested: null,
+  });
+  expect(sendEmailMock.mock.calls[0][0]).not.toHaveProperty("replyTo");
 });

@@ -303,7 +303,7 @@ function RowDrawer({ row, storeId, shops, nowMs, onClose, onMutated, onLogFollow
   const attemptsUrl = lead
     ? `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(lead.ids.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`
     : null;
-  const detailsUrl = lead ? `/api/customer-service/leads?view=details&lead_id=${encodeURIComponent(lead.id)}` : null;
+  const detailsUrl = lead ? `/api/customer-service/leads?view=details&lead_ids=${encodeURIComponent(lead.ids.join(","))}` : null;
   const logsUrl = primary
     ? `/api/customer-service/follow-up?view=logs&store=${encodeURIComponent(primary.store_id)}&lead_id=${encodeURIComponent(primary.id)}`
     : null;
@@ -329,7 +329,7 @@ function RowDrawer({ row, storeId, shops, nowMs, onClose, onMutated, onLogFollow
         await fetch("/api/customer-service/leads", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: lead.ids, ...fields }),
+          body: JSON.stringify({ ids: lead.editIds, ...fields }),
         }),
       );
       if (!response.ok) {
