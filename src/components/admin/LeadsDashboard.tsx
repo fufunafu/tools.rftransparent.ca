@@ -18,7 +18,7 @@ import {
   CALL_STATUS_LABELS,
   extractSubmissionDetails,
 } from "@/lib/customer-service/leads";
-import { isLeadInCustomDateRange, leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
+import { isLeadInCustomDateRange, leadReceivedSince, leadTrendQueryBounds, type LeadTrendQueryBounds } from "@/lib/lead-analytics";
 import { hasUnansweredReply, isFollowUpDue, isOpenLead, leadMatchesOwner } from "@/lib/customer-service/lead-queue";
 import { formatCADWhole } from "@/lib/format";
 import { isCallablePhone } from "@/lib/call-metrics";
@@ -135,6 +135,13 @@ function needsPhone(lead: Lead): boolean {
     && !isCallablePhone(lead.phone);
 }
 
+// Leaving spam or the no-call queue restores the stage the lead's activity
+// supports instead of always starting over at New.
+function reopenedOutcome(lead: Lead): Outcome {
+  if (lead.quote_number) return "quoted";
+  return lead.call_status === "not_called" ? "new" : "contacted";
+}
+
 // Historical imports were worked outside the tool; still show whatever the
 // phone and quote syncs recovered for them instead of "Not required".
 function isHistoricalImport(lead: Lead): boolean {
@@ -197,8 +204,11 @@ async function fetcher<T>(url: string): Promise<T> {
 
 function leadListUrl(bounds: LeadTrendQueryBounds | null, store: LeadStoreId, includeOlderOpen = false): string | null {
   if (!bounds) return null;
-  const params = new URLSearchParams({ store, to: bounds.to, include_open: String(includeOlderOpen) });
+  const params = new URLSearchParams({ store, to: bounds.to });
   if (bounds.from) params.set("from", bounds.from);
+  // Without older open leads this matches the analytics panel's URL, so both
+  // share one download.
+  if (includeOlderOpen) params.set("include_open", "true");
   return `/api/customer-service/leads?${params.toString()}`;
 }
 
@@ -252,15 +262,17 @@ function SubmissionCard({
   position: number;
   total: number;
 }) {
-  const details = extractSubmissionDetails(submission.raw_payload).filter((detail) => (
+  // The list omits form payloads, so a submission built from a list row has none.
+  const payload = submission.raw_payload ?? {};
+  const details = extractSubmissionDetails(payload).filter((detail) => (
     detail.value !== submission.message
     && detail.value !== submission.email
     && detail.value !== submission.phone
     && detail.value !== submission.name
     && !submission.attachments?.some((attachment) => attachment.filename === detail.value)
   ));
-  const uploadErrors = Array.isArray(submission.raw_payload.upload_errors)
-    ? submission.raw_payload.upload_errors.filter(
+  const uploadErrors = Array.isArray(payload.upload_errors)
+    ? payload.upload_errors.filter(
         (value): value is string => typeof value === "string" && Boolean(value.trim()),
       )
     : [];
@@ -365,7 +377,7 @@ function SubmissionCard({
 
         <details className="text-xs">
           <summary className="cursor-pointer text-sand-400 hover:text-sand-600">View raw submission</summary>
-          <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(submission.raw_payload, null, 2)}</pre>
+          <pre className="mt-2 p-3 rounded-lg bg-sand-50 border border-sand-200 overflow-x-auto text-[11px] text-sand-600">{JSON.stringify(payload, null, 2)}</pre>
         </details>
       </div>
     </article>
@@ -385,19 +397,18 @@ function LeadDetailPanel({
   onClose: () => void;
   onChanged: () => void | Promise<unknown>;
 }) {
-  const detailUrl = `/api/customer-service/leads?view=details&lead_id=${encodeURIComponent(lead.id)}`;
+  // Every edit below applies to the submissions this row combines. Using the
+  // list's own group keeps edits off older submissions and other-store leads
+  // that share the contact but are not part of this row.
+  const groupIds = lead.duplicate_ids?.length ? lead.duplicate_ids : [lead.id];
+  const detailUrl = `/api/customer-service/leads?view=details&lead_ids=${encodeURIComponent(groupIds.join(","))}`;
   const {
     data: detailData,
     error: detailError,
     isLoading: detailsLoading,
   } = useSWR<{ details: LeadSubmission[]; lead_ids: string[] }>(detailUrl, fetcher);
-  const callAttemptLeadIds = detailData?.lead_ids?.length ? detailData.lead_ids : [lead.id];
-  // Every edit below applies to the whole duplicate group, but the group's id
-  // list only arrives with the details response — until then a save would
-  // update just the primary row and leave the merged submissions behind.
-  const groupPending = detailsLoading && (lead.duplicate_count ?? 1) > 1;
   const { data: attemptsData } = useSWR<{ attempts: LeadCallAttempt[] }>(
-    `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(callAttemptLeadIds.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`,
+    `/api/customer-service/leads?view=call_attempts&lead_ids=${encodeURIComponent(groupIds.join(","))}&since=${encodeURIComponent(lead.submitted_at)}`,
     fetcher
   );
   const attempts = attemptsData?.attempts ?? [];
@@ -477,10 +488,6 @@ function LeadDetailPanel({
     update: Record<string, unknown>,
     allSubmissions = false,
   ): Promise<boolean> => {
-    if (allSubmissions && groupPending) {
-      setSaveError("Still loading this lead's combined submissions — try again in a moment.");
-      return false;
-    }
     setSaveError(null);
     try {
       const response = redirectOnUnauthorized(await fetch("/api/customer-service/leads", {
@@ -488,7 +495,7 @@ function LeadDetailPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...(allSubmissions
-            ? { ids: callAttemptLeadIds }
+            ? { ids: groupIds }
             : { id: lead.id }),
           ...update,
         }),
@@ -508,7 +515,11 @@ function LeadDetailPanel({
   const handleOutcomeChange = async (outcome: Outcome) => {
     if (outcome === lead.outcome || savingOutcome) return;
     setSavingOutcome(outcome);
-    await patchLead({ outcome }, true);
+    // A spam or no-call reason keeps a lead out of the queue at any stage.
+    await patchLead({
+      outcome,
+      ...((spamMarked || noCallMarked) && outcome !== "not_applicable" ? { not_applicable_reason: null } : {}),
+    }, true);
     setSavingOutcome(null);
   };
 
@@ -516,7 +527,7 @@ function LeadDetailPanel({
     if (savingSpam) return;
     setSavingSpam(true);
     await patchLead(spamMarked
-      ? { outcome: "new", not_applicable_reason: null }
+      ? { outcome: reopenedOutcome(lead), not_applicable_reason: null }
       : { outcome: "not_applicable", not_applicable_reason: LEAD_SPAM_REASON }, true);
     setSavingSpam(false);
   };
@@ -538,7 +549,7 @@ function LeadDetailPanel({
     if (savingQuickAction) return;
     setSavingQuickAction("no_call");
     await patchLead(noCallMarked
-      ? { outcome: "new", not_applicable_reason: null }
+      ? { outcome: reopenedOutcome(lead), not_applicable_reason: null }
       : {
           outcome: "not_applicable",
           not_applicable_reason: LEAD_NO_CALL_INSTALLATION_REASON,
@@ -677,7 +688,7 @@ function LeadDetailPanel({
                 <button
                   type="button"
                   onClick={handleSavePhone}
-                  disabled={!isCallablePhone(phoneNumber) || groupPending}
+                  disabled={!isCallablePhone(phoneNumber)}
                   className="rounded bg-blue-600 px-2.5 py-1 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Save phone
@@ -741,7 +752,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleInstallationToggle}
-              disabled={savingInstallation || groupPending}
+              disabled={savingInstallation}
               className={`shrink-0 rounded-lg px-3 py-2 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
                 lead.installation_requested === true
                   ? "border border-teal-300 bg-white text-teal-800 hover:bg-teal-100"
@@ -770,7 +781,7 @@ function LeadDetailPanel({
             {currentUserEmail && <button type="button" onClick={() => setOwner(currentUserEmail)} className="text-xs text-blue-700">Assign to me</button>}
             <label className="block text-xs text-sand-600">Next action<input value={nextAction} onChange={(event) => setNextAction(event.target.value)} maxLength={1000} placeholder="Call to confirm measurements" className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
             <label className="block text-xs text-sand-600">Follow-up date and time (your local time)<input type="datetime-local" value={followUp} onChange={(event) => setFollowUp(event.target.value)} className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
-            <div className="flex items-center gap-3"><button disabled={savingPlan || groupPending} className="rounded bg-indigo-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50">{savingPlan ? "Saving..." : "Save next step"}</button>{planSaved && <span role="status" className="text-xs text-green-700">Saved</span>}</div>
+            <div className="flex items-center gap-3"><button disabled={savingPlan} className="rounded bg-indigo-600 px-3 py-2 text-xs font-medium text-white disabled:opacity-50">{savingPlan ? "Saving..." : "Save next step"}</button>{planSaved && <span role="status" className="text-xs text-green-700">Saved</span>}</div>
           </form>
         </section>
 
@@ -939,7 +950,7 @@ function LeadDetailPanel({
               <label className="block text-xs text-sand-500">Actual send date (optional, local time)<input type="datetime-local" value={quoteDate} onChange={(event) => setQuoteDate(event.target.value)} className="mt-1 block w-full rounded border border-sand-200 px-3 py-2 text-sm" /></label>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setEditingQuote(false)} className="px-3 py-1.5 text-xs text-sand-600">Cancel</button>
-                <button onClick={handleSaveQuote} disabled={groupPending} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded disabled:cursor-wait disabled:opacity-60">Save</button>
+                <button onClick={handleSaveQuote} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded">Save</button>
               </div>
             </div>
           ) : lead.quote_number ? (
@@ -981,7 +992,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleSpamToggle}
-              disabled={savingSpam || savingOutcome !== null || groupPending}
+              disabled={savingSpam || savingOutcome !== null}
               className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors disabled:cursor-wait disabled:opacity-60 ${
                 spamMarked
                   ? "border-sand-300 bg-white text-sand-600 hover:bg-sand-50"
@@ -995,7 +1006,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleMarkCalled}
-              disabled={savingQuickAction !== null || groupPending || lead.call_status === "called"}
+              disabled={savingQuickAction !== null || lead.call_status === "called"}
               className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
               title="Record that this lead was called when the phone sync did not catch it"
             >
@@ -1004,7 +1015,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleNoCallToggle}
-              disabled={savingQuickAction !== null || groupPending}
+              disabled={savingQuickAction !== null}
               className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:cursor-wait disabled:opacity-60 ${
                 noCallMarked
                   ? "border-teal-500 bg-teal-50 text-teal-800"
@@ -1017,7 +1028,7 @@ function LeadDetailPanel({
             <button
               type="button"
               onClick={handleTransfer}
-              disabled={savingQuickAction !== null || groupPending}
+              disabled={savingQuickAction !== null}
               className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60"
               title={`Move this lead to the ${leadStoreLabel(otherStore)} leads page`}
             >
@@ -1030,7 +1041,7 @@ function LeadDetailPanel({
                 key={o}
                 type="button"
                 onClick={() => handleOutcomeChange(o)}
-                disabled={savingOutcome !== null || groupPending}
+                disabled={savingOutcome !== null}
                 aria-pressed={(savingOutcome ?? lead.outcome) === o}
                 className={`text-sm font-medium px-3 py-2 rounded-lg border transition-colors ${
                   (savingOutcome ?? lead.outcome) === o
@@ -1049,6 +1060,7 @@ function LeadDetailPanel({
           )}
           {(lead.outcome === "lost" || lead.outcome === "not_applicable") && (
             <input
+              key={lead.outcome}
               type="text"
               defaultValue={lead.outcome === "lost"
                 ? lead.lost_reason ?? ""
@@ -1123,8 +1135,9 @@ function LoadMoreRows({
 
 // ─── Main dashboard ──────────────────────────────────────────────────────────
 
-export default function LeadsDashboard({ initialLeads, initialNow, initialBounds, store, currentUserEmail = "" }: {
+export default function LeadsDashboard({ initialLeads, initialStale = false, initialNow, initialBounds, store, currentUserEmail = "" }: {
   initialLeads?: Lead[] | null;
+  initialStale?: boolean;
   initialNow: number;
   initialBounds: LeadTrendQueryBounds | null;
   store: LeadStoreId;
@@ -1176,12 +1189,17 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const { data, error, isLoading, mutate: reload, isValidating } = useSWR<{ leads: Lead[] }>(url, fetcher, {
     refreshInterval: 60_000, revalidateOnFocus: true,
     fallbackData: initialLeads && url === initialUrl ? { leads: initialLeads } : undefined,
-    revalidateOnMount: initialLeads && url === initialUrl ? false : undefined,
+    // Skip the repeat download only when the server list is fresh.
+    revalidateOnMount: initialLeads && url === initialUrl ? initialStale : undefined,
   });
   const leads = useMemo(() => data?.leads ?? [], [data?.leads]);
+  // The list also holds the comparison period used by analytics, so filter
+  // to the selected received dates here.
+  const receivedFrom = useMemo(() => filters.history === "all" ? null
+    : leadReceivedSince(filters.history === "90d" ? 90 : 30, new Date(now)), [filters.history, now]);
   const queue = useMemo(() => leads.filter((lead) =>
-    !bounds?.from || isLeadInCustomDateRange(lead, bounds.from, bounds.to)
-      || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, filters.olderOpen]);
+    !bounds || !receivedFrom || isLeadInCustomDateRange(lead, receivedFrom, bounds.to)
+      || (filters.olderOpen === "true" && isOpenLead(lead))), [leads, bounds, receivedFrom, filters.olderOpen]);
   const open = queue.filter((lead) => isOpenLead(lead) && !isLeadSpamReason(lead.not_applicable_reason));
   const sources = filterSelections(filters.source, ["website", "meta", "outreach"]);
   const statuses = filterSelections(filters.status, FILTER_TABS.filter(item => item.value !== "all" && item.value !== "spam").map(item => item.value));
@@ -1206,7 +1224,8 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
   const [paging, setPaging] = useState({ key: pagingKey, count: LEAD_ROWS_PER_PAGE });
   const count = paging.key === pagingKey ? paging.count : LEAD_ROWS_PER_PAGE;
   const showMore = useCallback(() => setPaging((old) => ({ key: pagingKey, count: (old.key === pagingKey ? old.count : LEAD_ROWS_PER_PAGE) + LEAD_ROWS_PER_PAGE })), [pagingKey]);
-  const selected = leads.find((lead) => lead.id === selectedLeadId);
+  // A refresh can promote another submission in the group to the row's id.
+  const selected = selectedLeadId ? leads.find((lead) => lead.id === selectedLeadId || lead.duplicate_ids?.includes(selectedLeadId)) : undefined;
   const refresh = () => mutate((key) => typeof key === "string" && key.startsWith("/api/customer-service/leads"));
   const copy = async (value: string, label: string) => {
     try { await navigator.clipboard.writeText(value); setCopyMessage(`${label} copied.`); }
@@ -1279,6 +1298,6 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
     </div>
     </div>
     {copyMessage && <p role="status" className="text-xs text-sand-600">{copyMessage}</p>}
-    {selected && <LeadDetailPanel key={selected.id} lead={selected} store={store} currentUserEmail={currentUserEmail} onClose={() => setSelectedLeadId(null)} onChanged={refresh} />}
+    {selected && <LeadDetailPanel key={selectedLeadId} lead={selected} store={store} currentUserEmail={currentUserEmail} onClose={() => setSelectedLeadId(null)} onChanged={refresh} />}
   </div>;
 }

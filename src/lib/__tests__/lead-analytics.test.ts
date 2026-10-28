@@ -5,6 +5,7 @@ import {
   calculateLeadFunnel,
   calculateLeadFunnelBySource,
   isLeadInCustomDateRange,
+  leadReceivedSince,
   leadTrendQueryBounds,
 } from "@/lib/lead-analytics";
 
@@ -391,6 +392,16 @@ describe("buildLeadTrend", () => {
       rangeStart: "2026-08-01",
       rangeEnd: "2026-08-03",
     });
+  });
+});
+
+describe("leadReceivedSince", () => {
+  it("starts the received window on the right Toronto day, not the comparison period", () => {
+    // 11 p.m. on October 26 in Toronto is already October 27 in UTC.
+    const now = new Date("2026-10-27T03:00:00.000Z");
+    expect(leadReceivedSince(30, now)).toBe("2026-09-27");
+    expect(leadReceivedSince(90, now)).toBe("2026-07-29");
+    expect(leadTrendQueryBounds("30d", now)?.from).not.toBe(leadReceivedSince(30, now));
   });
 });
 

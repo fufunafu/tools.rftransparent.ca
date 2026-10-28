@@ -64,15 +64,18 @@ function listRequests(): string[] {
     .filter((url) => url.startsWith("/api/customer-service/leads?store="));
 }
 
-async function render(leads: Lead[], store: Lead["store_id"] = "bc_transparent") {
+type Respond = (url: string, init?: RequestInit) => unknown;
+
+async function render(leads: Lead[], store: Lead["store_id"] = "bc_transparent", options: { respond?: Respond; initialStale?: boolean } = {}) {
   // The API serves the same list the server rendered, so a repeat download
   // would not change what the table shows.
-  vi.stubGlobal("fetch", vi.fn(async (url) => new Response(JSON.stringify(String(url).includes("sync-status") ? { sources: [], canSync: false } : { leads }))));
+  vi.stubGlobal("fetch", vi.fn(async (url, init) => new Response(JSON.stringify(options.respond?.(String(url), init) ?? (String(url).includes("sync-status") ? { sources: [], canSync: false } : { leads })))));
   await act(async () => {
     root.render(
       <SWRConfig value={{ provider: () => new Map() }}>
         <LeadsDashboard
           initialLeads={leads}
+          initialStale={options.initialStale}
           initialNow={NOW}
           initialBounds={BOUNDS}
           store={store}
@@ -286,4 +289,102 @@ it("keeps field labels visible and removes a selected filter without changing ot
   expect(leadRows()).toHaveLength(3);
   const saved = JSON.parse(sessionStorage.getItem("rf-lead-queue:v2:rf_transparent")!);
   expect(saved).toMatchObject({ source: "all", status: "open", history: "30d" });
+});
+
+const DAY_MS = 86_400_000;
+
+function patchBodies(): Record<string, unknown>[] {
+  return vi.mocked(fetch).mock.calls
+    .filter(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+}
+
+async function settle() {
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+}
+
+async function openLead(name: string) {
+  const button = [...container.querySelectorAll("button")].find((item) => item.textContent === name)!;
+  await act(async () => button.click());
+  await settle();
+}
+
+function panelButton(label: string): HTMLButtonElement {
+  return [...container.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((item) => item.textContent === label)!;
+}
+
+it("limits the received-date filter to the chosen number of days", async () => {
+  const leads = makeLeads(3);
+  leads[0].submitted_at = new Date(NOW - 10 * DAY_MS).toISOString();
+  leads[1].submitted_at = new Date(NOW - 45 * DAY_MS).toISOString();
+  leads[2].submitted_at = new Date(NOW - 100 * DAY_MS).toISOString();
+  await render(leads, "rf_transparent");
+  expect(leadRows().map((row) => row.textContent?.match(/Customer \d/)?.[0])).toEqual(["Customer 0"]);
+  const dates = container.querySelector<HTMLSelectElement>('select[aria-label="Lead received date range"]')!;
+  await act(async () => { dates.value = "90d"; dates.dispatchEvent(new Event("change", { bubbles: true })); });
+  await settle();
+  expect(leadRows().map((row) => row.textContent?.match(/Customer \d/)?.[0])).toEqual(["Customer 0", "Customer 1"]);
+});
+
+it("refreshes on load when the server list is older than the cache window", async () => {
+  await render(makeLeads(2), "bc_transparent", { initialStale: true });
+  await settle();
+  expect(listRequests()).toHaveLength(1);
+});
+
+it("shows and edits only the submissions combined in the selected row", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { phone: "4165550123", call_status: "not_called", duplicate_count: 2, duplicate_ids: ["lead-0", "lead-0-repeat"] });
+  await render([lead], "rf_transparent", {
+    respond: (url) => url.includes("view=details")
+      // The server's all-time group can be wider than this row.
+      ? { lead_ids: ["lead-0", "lead-0-repeat", "older-or-other-store"], details: [] }
+      : url.includes("view=call_attempts") ? { attempts: [] } : { leads: [lead] },
+  });
+  await openLead("Customer 0");
+  const requested = vi.mocked(fetch).mock.calls.map(([url]) => String(url));
+  expect(requested.some((url) => url.includes("view=details&lead_ids=lead-0%2Clead-0-repeat"))).toBe(true);
+  await act(async () => panelButton("Mark as called").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ ids: ["lead-0", "lead-0-repeat"], call_status: "called", outcome: "contacted" })]);
+});
+
+it("shows the reason for the current stage after switching between Lost and Not Applicable", async () => {
+  let lead = { ...makeLeads(1)[0], outcome: "lost", lost_reason: "Chose a competitor" } as Lead;
+  await render([lead], "rf_transparent", {
+    respond: (url, init) => {
+      if (init?.method === "PATCH") {
+        lead = { ...lead, ...JSON.parse(String(init.body)) };
+        return { ok: true };
+      }
+      return url.includes("view=details") ? { lead_ids: [lead.id], details: [] }
+        : url.includes("view=call_attempts") ? { attempts: [] } : { leads: [lead] };
+    },
+  });
+  await chooseFilters("status", ["lost"]);
+  await openLead("Customer 0");
+  expect(container.querySelector<HTMLInputElement>('input[placeholder="Lost reason"]')!.value).toBe("Chose a competitor");
+  await act(async () => panelButton("Not Applicable").click());
+  await settle();
+  const reason = container.querySelector<HTMLInputElement>('input[placeholder^="Reason, such as spam"]')!;
+  expect(reason.value).toBe("");
+});
+
+it("takes a spam lead out of spam when staff choose a working stage", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { outcome: "not_applicable", not_applicable_reason: "Spam: marketing solicitation" });
+  await render([lead], "rf_transparent", { respond: (url) => url.includes("view=details") ? { lead_ids: [lead.id], details: [] } : url.includes("view=call_attempts") ? { attempts: [] } : { leads: [lead] } });
+  await chooseFilters("status", ["spam"]);
+  await openLead("Customer 0");
+  await act(async () => panelButton("Contacted").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ outcome: "contacted", not_applicable_reason: null })]);
+});
+
+it("restores a quoted lead from spam to Quoted instead of New", async () => {
+  const [lead] = makeLeads(1);
+  Object.assign(lead, { outcome: "not_applicable", not_applicable_reason: "Spam: marketing solicitation", quote_number: "D-1042" });
+  await render([lead], "rf_transparent", { respond: (url) => url.includes("view=details") ? { lead_ids: [lead.id], details: [] } : url.includes("view=call_attempts") ? { attempts: [] } : { leads: [lead] } });
+  await chooseFilters("status", ["spam"]);
+  await openLead("Customer 0");
+  await act(async () => panelButton("Restore from spam").click());
+  expect(patchBodies()).toEqual([expect.objectContaining({ outcome: "quoted", not_applicable_reason: null })]);
 });

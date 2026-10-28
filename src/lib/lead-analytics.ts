@@ -105,6 +105,15 @@ export function leadTrendQueryBounds(
   };
 }
 
+/**
+ * First Toronto calendar day of the last `days` days, ending today. Query
+ * bounds also cover the comparison period and a deduplication buffer, so a
+ * received-date filter must use this start date instead of `bounds.from`.
+ */
+export function leadReceivedSince(days: number, now = new Date()): string {
+  return dateKeyFromDay(torontoDayNumber(now) - days + 1);
+}
+
 export function isLeadIncludedInPerformance(lead: Pick<
   LeadFunnelRow,
   "outcome" | "not_applicable_reason" | "raw_payload"

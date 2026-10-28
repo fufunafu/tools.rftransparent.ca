@@ -102,7 +102,8 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     let query = supabase
       .from("leads")
       .select(LEAD_LIST_COLUMNS)
-      .order("submitted_at", { ascending: false });
+      .order("submitted_at", { ascending: false })
+      .order("id");
     if (options.store) query = query.eq("store_id", options.store);
     if (options.source) query = query.eq("source", options.source);
     if (options.includeOpen && (options.from || options.to)) {
@@ -119,7 +120,8 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     let query = supabase
       .from("lead_call_attempts")
       .select("lead_id, staff, called_at")
-      .order("called_at", { ascending: false });
+      .order("called_at", { ascending: false })
+      .order("id");
     if (options.from && !options.includeOpen) query = query.gte("called_at", startOfQueryWindow(options.from));
     return query.range(from, to);
   });
@@ -148,9 +150,11 @@ export async function loadLeads(options: LoadLeadsOptions = {}): Promise<Lead[]>
     }
     delete summary.source_detail;
     delete summary.call_attempts_count;
-    delete summary.duplicate_ids;
+    // Combined rows keep their member ids so the detail panel shows and edits
+    // exactly the submissions this row combines.
     if ((summary.duplicate_count ?? 1) <= 1) {
       delete summary.duplicate_count;
+      delete summary.duplicate_ids;
     }
     return summary as Lead;
   });
@@ -199,7 +203,8 @@ export async function loadLeadResponsePerformance(
       .from("leads")
       .select(LEAD_LIST_COLUMNS)
       .gte("submitted_at", effectiveStart)
-      .order("submitted_at", { ascending: false });
+      .order("submitted_at", { ascending: false })
+      .order("id");
     if (options.store) query = query.eq("store_id", options.store);
     if (options.to) query = query.lt("submitted_at", endOfQueryWindow(options.to));
     return query.range(from, to);
@@ -210,6 +215,7 @@ export async function loadLeadResponsePerformance(
       .select("lead_id, staff, called_at")
       .gte("called_at", effectiveStart)
       .order("called_at", { ascending: false })
+      .order("id")
       .range(from, to)
   ));
   const [leads, attempts] = await Promise.all([leadsPromise, attemptsPromise]);
@@ -226,11 +232,22 @@ export async function loadLeadResponsePerformance(
 
 export async function loadLeadGroupIds(leadId: string): Promise<string[]> {
   const supabase = getSupabase();
+  // Duplicates are only combined within one store's list, so a matching
+  // contact in the other store must not join this lead's group.
+  const { data: target, error } = await supabase
+    .from("leads")
+    .select("store_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!target) return [leadId];
   const rows = await fetchAllPages<LeadRow>((from, to) => (
     supabase
       .from("leads")
       .select(LEAD_GROUP_COLUMNS)
+      .eq("store_id", target.store_id)
       .order("submitted_at", { ascending: false })
+      .order("id")
       .range(from, to)
   ));
   const leads = rows.map((row) => ({
@@ -275,6 +292,23 @@ export const getCachedLeads = unstable_cache(
   { tags: [LEADS_CACHE_TAG], revalidate: REVALIDATE_SECONDS },
 );
 
+// An expired cache entry is still served once while it refreshes in the
+// background, so the load time lets the page tell when to fetch again.
+export const getCachedLeadSnapshot = unstable_cache(
+  async (from?: string | null, to?: string | null, store?: LeadStoreId) => ({
+    leads: await loadLeads({ from, to, store }),
+    loadedAt: Date.now(),
+  }),
+  ["customer-service:leads:snapshot"],
+  { tags: [LEADS_CACHE_TAG], revalidate: REVALIDATE_SECONDS },
+);
+
+export function isLeadSnapshotStale(loadedAt: number, now: number): boolean {
+  return now - loadedAt > REVALIDATE_SECONDS * 1000;
+}
+
+// Expire immediately. With the "max" profile the next page load would still
+// receive the list from before the edit or the new lead.
 export function markLeadsCacheStale(): void {
-  revalidateTag(LEADS_CACHE_TAG, "max");
+  revalidateTag(LEADS_CACHE_TAG, { expire: 0 });
 }

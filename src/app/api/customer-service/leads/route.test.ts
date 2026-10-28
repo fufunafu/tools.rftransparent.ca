@@ -38,6 +38,7 @@ vi.mock("@/lib/customer-service/meta-leads", () => ({
 }));
 
 import { getAuthenticatedUser } from "@/lib/admin-auth";
+import { revalidateTag } from "next/cache";
 vi.mock("next/cache", async (original) => ({ ...await original<typeof import("next/cache")>(), revalidateTag: vi.fn() }));
 
 import { GET, PATCH, POST } from "@/app/api/customer-service/leads/route";
@@ -355,4 +356,62 @@ it("rejects a call-status edit when the authenticated employee cannot be identif
   const response = await PATCH(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads", { method: "PATCH", body: JSON.stringify({ id: "lead-1", call_status: "called" }) }));
   expect(response.status).toBe(401);
   expect(getSupabaseMock).not.toHaveBeenCalled();
+});
+
+it("keeps member ids on combined rows and pages leads and calls in a stable order", async () => {
+  const base = { source: "website", name: "Jane", email: "jane@example.com", phone: null, call_status: "not_called", outcome: "new", quote_number: null, not_applicable_reason: null };
+  leadRangeMock.mockReset();
+  leadRangeMock.mockResolvedValueOnce({
+    data: [
+      { ...base, id: "lead-2", submitted_at: "2026-08-06T12:00:00.000Z" },
+      { ...base, id: "lead-1", submitted_at: "2026-08-05T12:00:00.000Z" },
+      { ...base, id: "solo", email: "solo@example.com", submitted_at: "2026-08-04T12:00:00.000Z" },
+    ],
+    error: null,
+  }).mockResolvedValue({ data: [], error: null });
+  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?store=rf_transparent"));
+  const body = await response.json();
+  const combined = body.leads.find((lead: { duplicate_count?: number }) => lead.duplicate_count === 2);
+  expect([...combined.duplicate_ids].sort()).toEqual(["lead-1", "lead-2"]);
+  expect(body.leads.find((lead: { email: string }) => lead.email === "solo@example.com").duplicate_ids).toBeUndefined();
+  const client = getSupabaseMock.mock.results[0].value;
+  expect(client.from("leads").order).toHaveBeenCalledWith("id");
+  expect(client.from("lead_call_attempts").order).toHaveBeenCalledWith("id");
+});
+
+it("groups lead details only within the lead's own store", async () => {
+  const rows = [
+    { id: "rf-new", email: "jane@example.com", phone: null, submitted_at: "2026-10-20T12:00:00.000Z", not_applicable_reason: null },
+    { id: "rf-repeat", email: "jane@example.com", phone: null, submitted_at: "2026-10-21T12:00:00.000Z", not_applicable_reason: null },
+  ];
+  const leads: Record<string, ReturnType<typeof vi.fn>> = {};
+  Object.assign(leads, {
+    select: vi.fn(() => leads),
+    eq: vi.fn(() => leads),
+    order: vi.fn(() => leads),
+    maybeSingle: vi.fn(async () => ({ data: { store_id: "rf_transparent" }, error: null })),
+    range: vi.fn(async (from: number) => ({ data: from === 0 ? rows : [], error: null })),
+    in: vi.fn(async () => ({ data: [], error: null })),
+  });
+  const attachments: Record<string, ReturnType<typeof vi.fn>> = {};
+  Object.assign(attachments, {
+    select: vi.fn(() => attachments),
+    in: vi.fn(() => attachments),
+    order: vi.fn(async () => ({ data: [], error: null })),
+  });
+  getSupabaseMock.mockReturnValue({ from: vi.fn((table: string) => table === "leads" ? leads : attachments) });
+  const response = await GET(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads?view=details&lead_id=rf-new"));
+  const body = await response.json();
+  expect(response.status).toBe(200);
+  expect(leads.eq).toHaveBeenCalledWith("id", "rf-new");
+  expect(leads.eq).toHaveBeenCalledWith("store_id", "rf_transparent");
+  expect([...body.lead_ids].sort()).toEqual(["rf-new", "rf-repeat"]);
+});
+
+it("expires the cached lead list immediately after an edit", async () => {
+  const update = vi.fn(() => ({ in: vi.fn(async () => ({ error: null })) }));
+  getSupabaseMock.mockReturnValue({ from: vi.fn(() => ({ update })) });
+  const response = await PATCH(new NextRequest("https://tools.rftransparent.ca/api/customer-service/leads", { method: "PATCH", body: JSON.stringify({ id: "lead-1", outcome: "won" }) }));
+  expect(response.status).toBe(200);
+  expect(revalidateTag).toHaveBeenCalledWith("customer-service:leads", { expire: 0 });
 });
