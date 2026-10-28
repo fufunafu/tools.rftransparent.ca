@@ -3,21 +3,22 @@
 import { createClient } from "@supabase/supabase-js";
 import { processCrmProjections } from "../../src/lib/crm/projection.mjs";
 import { migrateCrmAssets } from "../../src/lib/crm/assets.mjs";
+import { processCrmFollowups } from "../../src/lib/crm/followups.mjs";
 
 const mode = process.argv[2];
-if (!["index", "files"].includes(mode)) throw new Error("Usage: node workflows.mjs index|files");
+if (!["index", "files", "followups"].includes(mode)) throw new Error("Usage: node workflows.mjs index|files|followups");
 if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error("Database configuration is required");
 if (mode === "files" && !process.env.HUBSPOT_ACCESS_TOKEN) throw new Error("HubSpot file access is required");
 const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const workers = Number(process.argv.find(value => value.startsWith("--workers="))?.split("=")[1] ?? 1);
-if (!Number.isInteger(workers) || workers < 1 || workers > 12) throw new Error("Use 1 to 12 workers");
+if (workers !== 1) throw new Error("Use one worker so imports respect database throttling");
 let paused = false;
 await Promise.all(Array.from({ length: workers }, async (_, worker) => {
   while (!paused) {
     const result = mode === "index"
-      ? await processCrmProjections(db, { budgetMs: 30000, batchSize: 50 })
-      : await migrateCrmAssets(db, process.env.HUBSPOT_ACCESS_TOKEN, { budgetMs: 30000, limit: 10 });
+      ? await processCrmProjections(db, { budgetMs: 30000, batchSize: 30 })
+      : mode === "followups" ? await processCrmFollowups(db, { budgetMs: 30000 }) : await migrateCrmAssets(db, process.env.HUBSPOT_ACCESS_TOKEN, { budgetMs: 30000, limit: 10 });
     console.log(JSON.stringify({ worker, ...result }));
-    if (mode === "index" ? result.complete : result.paused || !(result.copied + result.blocked + result.failed)) { paused ||= Boolean(result.paused); break; }
+    if (result.paused || (mode !== "files" ? result.complete : !(result.copied + result.blocked + result.failed))) { paused ||= Boolean(result.paused); break; }
   }
 }));

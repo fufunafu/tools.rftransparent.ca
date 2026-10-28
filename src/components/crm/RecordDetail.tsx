@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import useSWR from "swr";
 import dynamic from "next/dynamic";
 import RecordAvatar from "./RecordAvatar";
+import DirectoryEditor from "./DirectoryEditor";
+import RecordChangeHistory from "./RecordChangeHistory";
 import { CRM_LABELS, type CrmPage, type CrmRecord, type CrmType } from "@/lib/crm/types";
 import { ACTIVITIES, BUTTON, PRIMARY, INPUT, SINGLE, SourceBadge, ErrorMessage, Pager, useDateLabel, fetchJson, localInput, cleanSummary, ownerLabel, stageLabel, recordTitle } from "./shared";
 
@@ -44,6 +46,7 @@ export default function RecordDetail({ id, email, canManage, onSelect, onAdd, on
   const { data: related, error: relatedError, mutate: refreshRelated } = useSWR<CrmPage>(`/api/crm?related=${encodeURIComponent(id)}&type=${relatedType}&page=${relatedPage}&status=all`, fetchJson);
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [changesOpen, setChangesOpen] = useState(false);
   const [filesOpen, setFilesOpen] = useState(false);
   const objectIds: Record<CrmType, string> = { contacts: "0-1", companies: "0-2", deals: "0-3", tickets: "0-5", calls: "0-48", meetings: "0-47", emails: "0-49", notes: "0-46", tasks: "0-27" };
   return <section className="min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" aria-label="Record details">
@@ -52,7 +55,7 @@ export default function RecordDetail({ id, email, canManage, onSelect, onAdd, on
     {record && <div className="grid items-start lg:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[15rem_minmax(0,1fr)_15rem]">
       <aside className="min-w-0 space-y-5 p-5 lg:border-r lg:border-slate-200" aria-label="About this record">
         <div><div className="mb-3"><RecordAvatar record={record} size="large" /></div><h2 className="break-words text-2xl font-bold tracking-tight text-slate-900">{recordTitle(record)}</h2>{record.archived && <p className="mt-2 text-xs font-semibold text-red-700">Archived record</p>}<p className="mt-2 break-words text-sm text-slate-500">{record.view_fields?.company || cleanSummary(record.summary)}</p></div>
-        <div className="flex items-center justify-between border-t border-slate-200 pt-4"><h3 className="text-sm font-bold text-slate-800">About this {SINGLE[record.object_type].toLowerCase()}</h3>{record.object_type === "contacts" && !record.archived && <button className="min-h-9 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => setEditing(true)}>Edit</button>}</div>
+        <div className="flex items-center justify-between border-t border-slate-200 pt-4"><h3 className="text-sm font-bold text-slate-800">About this {SINGLE[record.object_type].toLowerCase()}</h3>{["contacts", "companies"].includes(record.object_type) && !record.archived && <button className="min-h-9 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => setEditing(true)}>Edit</button>}</div>
         <dl className="space-y-4 text-sm">{[["Email", record.view_fields?.email], ["Phone", record.view_fields?.phone], ["Company", record.view_fields?.company], ["Lifecycle stage", stageLabel(record.view_fields?.stage)], ["Record owner", ownerLabel(record.owner_email)], ["Created", dateLabel(record.occurred_at)]].map(([label, value]) => <div key={label}><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 break-words text-slate-800">{value || "Not set"}</dd></div>)}</dl>
         <details onToggle={event => setFieldsOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">All saved fields</summary>{fieldsOpen && <SavedFields id={id} />}</details>
         {record.source === "hubspot" && <><details onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm font-semibold text-slate-700">Original property history</summary>{historyOpen && <SavedHistory id={id} />}</details><a className="inline-block text-xs font-semibold text-cyan-800 underline" href={`https://app.hubspot.com/contacts/${record.portal_id}/record/${objectIds[record.object_type]}/${record.hubspot_id}`} target="_blank" rel="noreferrer">Open original in HubSpot</a></>}
@@ -61,6 +64,7 @@ export default function RecordDetail({ id, email, canManage, onSelect, onAdd, on
         {!record.archived && <div className="mb-5 flex flex-wrap gap-2">{ACTIVITIES.map(type => <button key={type} onClick={() => onAdd(type, record)} className={type === "tasks" ? PRIMARY : BUTTON}>{type === "tasks" ? "+ Task" : type === "notes" ? "+ Note" : `Log ${SINGLE[type].toLowerCase()}`}</button>)}</div>}
         {record.body && <article className="mb-5 rounded-xl border border-slate-200 bg-white p-5"><div className="mb-3 flex items-center justify-between gap-3"><h3 className="text-sm font-semibold text-slate-800">{SINGLE[record.object_type]} details</h3><span className="text-xs text-slate-500">{dateLabel(record.occurred_at)}</span></div><div className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-700">{record.body}</div></article>}
         {record.object_type === "tasks" && !record.archived && <TaskEditor key={`${record.id}:${record.version}`} record={record} email={email} canManage={canManage} onSaved={() => { void mutate(); onChanged(); }} />}
+        <details onToggle={event => setChangesOpen(event.currentTarget.open)} className="my-4 rounded-lg border border-slate-200 bg-white p-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Change history</summary>{changesOpen && <RecordChangeHistory id={id} />}</details>
         <div className="mt-4 flex items-center justify-between gap-3"><h3 className="text-lg font-bold text-slate-900">Activity</h3><button className="min-h-9 text-xs font-semibold text-cyan-800 underline" onClick={() => { void refreshRelated(); }}>Refresh activity</button></div>
         <div role="tablist" aria-label="Activity types" className="mt-2 flex gap-1 overflow-x-auto border-b border-slate-200">{["activities", ...ACTIVITIES].map(type => <button role="tab" aria-selected={relatedType === type} key={type} onClick={() => { setRelatedType(type); setRelatedPage(0); }} className={`min-h-11 whitespace-nowrap border-b-2 px-3 text-xs font-semibold ${relatedType === type ? "border-cyan-700 text-cyan-800" : "border-transparent text-slate-500"}`}>{type === "activities" ? "All activity" : CRM_LABELS[type as CrmType]}</button>)}</div>
         <ErrorMessage error={relatedError} />
@@ -72,7 +76,7 @@ export default function RecordDetail({ id, email, canManage, onSelect, onAdd, on
         <RelatedCards id={id} onSelect={onSelect} />
         <details onToggle={event => setFilesOpen(event.currentTarget.open)} className="border-t border-slate-200 pt-4"><summary className="cursor-pointer text-sm font-semibold text-slate-700">Attachments & recordings</summary>{filesOpen && <FilesPanel recordId={id} />}</details>
       </aside>
-      {editing && <ContactEditor record={record} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void mutate(); onChanged(); }} />}
+      {editing && <DirectoryEditor record={record} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); void mutate(); onChanged(); }} />}
     </div>}
   </section>;
 }
@@ -112,18 +116,4 @@ function TimelineItem({ record, onSelect }: { record: CrmRecord; onSelect: (id: 
 function RelatedCards({ id, onSelect }: { id: string; onSelect: (id: string) => void }) {
   const { data, error } = useSWR<CrmPage>(`/api/crm?related=${encodeURIComponent(id)}&type=relationships&page=0`, fetchJson);
   return <><ErrorMessage error={error} />{(["contacts", "companies"] as const).map(type => { const records = data?.records.filter(record => record.object_type === type) ?? []; return <section key={type}><h3 className="mb-3 text-sm font-bold text-slate-800">{CRM_LABELS[type]} <span className="ml-1 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{data ? records.length : "..."}</span></h3>{records.map(record => <button key={record.id} onClick={() => onSelect(record.id)} className="mb-2 block w-full rounded-lg border border-slate-200 p-3 text-left hover:bg-slate-50"><span className="flex items-center gap-2">{["contacts", "companies"].includes(record.object_type) && <RecordAvatar record={record} />}<span className="min-w-0 truncate text-sm font-semibold text-cyan-800">{recordTitle(record)}</span></span><p className="mt-1 truncate text-xs text-slate-500">{cleanSummary(record.summary)}</p></button>)}{data && !records.length && <p className="text-xs text-slate-400">No associated {type}</p>}</section>; })}{data && data.total > 50 && <p className="text-xs text-slate-500">Showing the 50 most recent associated records.</p>}</>;
-}
-function ContactEditor({ record, onClose, onSaved }: { record: CrmRecord; onClose: () => void; onSaved: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [busy, setBusy] = useState(false), [error, setError] = useState<Error | null>(null);
-  useEffect(() => { dialog.current?.showModal(); }, []);
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(null);
-    const form = new FormData(event.currentTarget);
-    const fields = Object.fromEntries(["title", "email", "phone", "company", "stage"].map(key => [key, String(form.get(key) ?? "")]));
-    try { await fetchJson("/api/crm", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "editContact", id: record.id, version: record.version, fields }) }); onSaved(); }
-    catch (cause) { setError(cause instanceof Error ? cause : new Error("Contact could not be saved")); }
-    finally { setBusy(false); }
-  }
-  return <dialog ref={dialog} onCancel={event => { if (busy) event.preventDefault(); else onClose(); }} aria-labelledby="edit-contact-title" className="w-[min(92vw,32rem)] rounded-xl p-0 shadow-2xl backdrop:bg-slate-950/40"><form onSubmit={submit} className="space-y-4 p-6"><h2 id="edit-contact-title" className="text-xl font-bold">Edit contact</h2><p className="text-xs text-slate-500">Your changes are saved in Tools. Original HubSpot fields remain in the record history.</p><ErrorMessage error={error} />{[["title", "Name"], ["email", "Email"], ["phone", "Phone"], ["company", "Company"]].map(([key, label]) => <label key={key} className="block text-sm font-medium">{label}<input name={key} type={key === "email" ? "email" : key === "phone" ? "tel" : "text"} required={key === "title"} maxLength={key === "phone" ? 60 : key === "email" ? 320 : 300} defaultValue={key === "title" ? record.title : record.view_fields?.[key] ?? ""} className={INPUT} /></label>)}<label className="block text-sm font-medium">Lifecycle stage<select name="stage" defaultValue={record.view_fields?.stage ?? ""} className={INPUT}><option value="">Not set</option>{[...new Set(["subscriber", "lead", "marketingqualifiedlead", "salesqualifiedlead", "opportunity", "customer", "evangelist", "other", ...(record.view_fields?.stage ? [record.view_fields.stage] : [])])].map(value => <option key={value} value={value}>{stageLabel(value)}</option>)}</select></label><div className="flex justify-end gap-2"><button type="button" disabled={busy} onClick={onClose} className={BUTTON}>Cancel</button><button disabled={busy} className={PRIMARY}>{busy ? "Saving..." : "Save changes"}</button></div></form></dialog>;
 }

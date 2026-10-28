@@ -6,8 +6,10 @@ import { CrmInputError, crmId } from "./input";
 import { unpackProperties } from "./storage.mjs";
 import { DIRECTORY_FIELDS } from "./directory";
 import { readDirectoryFilters } from "./directory-data";
+import { FOLLOWUP_FILTERS } from "./directory-workflows";
 
 export const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email,reminder_enabled,reminder_minutes,view_fields,local_fields";
+export const FOLLOWUP_COLUMNS = "last_contacted_at,next_task_id,next_task_title,next_task_due_at,open_task_count,followup_checked_at";
 
 export async function listCrmRecords(params: URLSearchParams, email: string): Promise<CrmPage> {
   const page = Number(params.get("page") ?? 0);
@@ -17,14 +19,16 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
   const view = params.get("filter") ?? "all";
   const directory = (type === "contacts" || type === "companies") && !related;
   const directoryQuery = directory ? readDirectoryFilters(params) : null;
-  if (!directory && [...DIRECTORY_FIELDS, "sort", "source"].some(field => params.has(field))) throw new CrmInputError("Directory filters apply to Contacts and Companies");
+  if (!directory && [...DIRECTORY_FIELDS, "sort", "source", "followup"].some(field => params.has(field))) throw new CrmInputError("Directory filters apply to Contacts and Companies");
+  const followup = params.get("followup") ?? "all";
+  if (!Object.hasOwn(FOLLOWUP_FILTERS, followup)) throw new CrmInputError("Invalid follow-up filter");
   if (!["all", "recent", "upcoming", "overdue", "today"].includes(view)) throw new CrmInputError("Invalid view");
   if (!Number.isSafeInteger(page) || page < 0 || page > 100000 || search.length > 200 || (type !== "relationships" && type !== "activities" && type !== "all" && !CRM_TYPES.includes(type as never))) throw new CrmInputError("Invalid search");
   if (related && !crmId.safeParse(related).success) throw new CrmInputError("Invalid record");
   const db = getSupabase();
   let query = related
     ? db.rpc("crm_related_summaries", { p_id: related, p_search: search }, { count: "exact" }).select(SUMMARY_COLUMNS)
-    : db.from(directory ? "crm_directory" : "crm_records").select(SUMMARY_COLUMNS, { count: "exact" });
+    : db.from(directory ? "crm_directory" : "crm_records").select(directory ? `${SUMMARY_COLUMNS},${FOLLOWUP_COLUMNS}` : SUMMARY_COLUMNS, { count: "exact" });
   if (type === "relationships") query = query.in("object_type", ["contacts", "companies", "deals", "tickets"]);
   else if (type === "activities") query = query.in("object_type", ["calls", "meetings", "emails", "notes", "tasks"]);
   else if (type !== "all") query = query.eq("object_type", type);
@@ -45,6 +49,14 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
       else if (values.length) query = query.filter(`filter_${field}`, "in", `(${values.map(quotePostgrestValue).join(",")})`);
     }
     if (directoryQuery.source) query = query.eq("source", directoryQuery.source);
+    if (followup !== "all") query = query.not("followup_checked_at", "is", null);
+    if (followup === "overdue") query = query.lt("next_task_due_at", new Date().toISOString());
+    if (followup === "no_task") query = query.eq("open_task_count", 0);
+    if (followup === "never") query = query.is("last_contacted_at", null);
+    if (followup === "neglected") {
+      const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+      query = query.or(`last_contacted_at.lt.${cutoff},and(last_contacted_at.is.null,occurred_at.lt.${cutoff})`);
+    }
   }
   if (view === "recent") query = query.gte("occurred_at", new Date(Date.now() - 30 * 86400000).toISOString());
   if (type === "tasks") {
@@ -96,5 +108,6 @@ export function effectiveRecord(record: CrmRecord): CrmRecord {
   if (!record.local_fields || !Object.keys(record.local_fields).length) return record;
   const fields = { ...record.view_fields, ...record.local_fields };
   if (Object.hasOwn(record.local_fields, "stage") && record.local_fields.stage !== record.view_fields?.stage) delete fields.stage_label;
-  return { ...record, title: record.local_fields.title || record.title, view_fields: fields };
+  return { ...record, title: record.local_fields.title || record.title, view_fields: fields,
+    owner_email: Object.hasOwn(record.local_fields, "owner_email") ? record.local_fields.owner_email || null : record.owner_email };
 }

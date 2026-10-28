@@ -31,6 +31,7 @@ export function projectCrmRecord(record, stages = {}) {
     email: field("email"), phone: field("phone", "mobilephone"), company: field("company", "name", "domain"),
     stage: field("lifecyclestage", "hs_lead_status", "dealstage", "hs_pipeline_stage"),
     amount: field("amount"), close_date: field("closedate"), domain: field("domain"),
+    ...(["contacts", "companies"].includes(record.object_type) ? { address: field("address"), website: field("website"), postal_code: field("zip") } : {}),
     preview: String(record.body_preview ?? "").slice(0, 500),
     ...(["contacts", "companies"].includes(record.object_type) ? projectCrmImages(source, record.portal_id) : {}),
     ...(["contacts", "companies"].includes(record.object_type) ? projectCrmLocation(source) : {}),

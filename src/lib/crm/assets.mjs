@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { boundedCrmQuery, createCrmPacer } from "./worker-pacing.mjs";
 
 export const CRM_ASSET_BUCKET = "crm-attachments";
 export const MAX_CRM_ASSET_BYTES = 50 * 1024 * 1024;
@@ -117,37 +118,42 @@ export async function downloadCrmAsset(asset, token, fetcher = fetch) {
 }
 
 export async function ensureCrmAssetBucket(db) {
-  const current = await db.storage.getBucket(CRM_ASSET_BUCKET);
+  const current = await boundedCrmQuery(db.storage.getBucket(CRM_ASSET_BUCKET));
   if (!current.error && current.data) {
     if (current.data.public) throw new CrmAssetError("storage_not_private", true);
     return;
   }
-  const created = await db.storage.createBucket(CRM_ASSET_BUCKET, { public: false, fileSizeLimit: MAX_CRM_ASSET_BYTES });
+  const created = await boundedCrmQuery(db.storage.createBucket(CRM_ASSET_BUCKET, { public: false, fileSizeLimit: MAX_CRM_ASSET_BYTES }));
   if (created.error) {
-    const check = await db.storage.getBucket(CRM_ASSET_BUCKET);
+    const check = await boundedCrmQuery(db.storage.getBucket(CRM_ASSET_BUCKET));
     if (check.error || !check.data || check.data.public) throw new CrmAssetError("storage_unavailable");
   }
 }
 
 export async function migrateCrmAssets(db, token, { budgetMs = 35000, limit = 3, fetcher = fetch } = {}) {
   if (!token) return { copied: 0, blocked: 0, skipped: "HubSpot file access is not configured." };
+  const pacer = await createCrmPacer(db, "files", 1);
+  if (pacer.paused) return { copied: 0, blocked: 0, failed: 0, paused: true };
   await ensureCrmAssetBucket(db);
   const deadline = Date.now() + budgetMs;
   let copied = 0; let blocked = 0; let failed = 0; let paused = false;
-  while (Date.now() < deadline && copied + blocked + failed < limit) {
+  try { while (!pacer.paused && Date.now() < deadline && copied + blocked + failed < limit) {
     const lease = crypto.randomUUID();
-    const claim = await db.rpc("crm_claim_assets", { p_token: lease, p_limit: 1 });
+    let requestStart = Date.now();
+    const claim = await boundedCrmQuery(db.rpc("crm_claim_assets", { p_token: lease, p_limit: 1 }));
+    pacer.observe(Date.now() - requestStart, claim.error);
     if (claim.error) throw new CrmAssetError("asset_queue_unavailable");
     const asset = claim.data?.[0];
     if (!asset) break;
+    if (pacer.paused) break;
     let result;
     try {
       const file = await downloadCrmAsset(asset, token, fetcher);
       const storagePath = `${asset.portal_id}/${createHash("sha256").update(asset.id).digest("hex")}/${file.sha256}`;
-      const upload = await db.storage.from(CRM_ASSET_BUCKET).upload(storagePath, file.data, { contentType: "application/octet-stream", upsert: true });
+      const upload = await boundedCrmQuery(db.storage.from(CRM_ASSET_BUCKET).upload(storagePath, file.data, { contentType: "application/octet-stream", upsert: true }));
       if (upload.error) throw new CrmAssetError("storage_unavailable");
       // Verify the bytes actually retained in private storage before marking a file complete.
-      const stored = await db.storage.from(CRM_ASSET_BUCKET).download(storagePath);
+      const stored = await boundedCrmQuery(db.storage.from(CRM_ASSET_BUCKET).download(storagePath));
       if (stored.error || !stored.data) throw new CrmAssetError("storage_verification");
       const digest = createHash("sha256").update(Buffer.from(await stored.data.arrayBuffer())).digest("hex");
       if (digest !== file.sha256 || stored.data.size !== file.byte_size) throw new CrmAssetError("storage_verification");
@@ -158,9 +164,13 @@ export async function migrateCrmAssets(db, token, { budgetMs = 35000, limit = 3,
       result = { status: isBlocked ? "blocked" : "failed", error_code: error instanceof CrmAssetError ? error.code : "copy_unavailable" };
       if (isBlocked) blocked++; else failed++;
     }
-    const save = await db.rpc("crm_finish_asset", { p_id: asset.id, p_token: lease, p_result: result });
+    requestStart = Date.now();
+    const save = await boundedCrmQuery(db.rpc("crm_finish_asset", { p_id: asset.id, p_token: lease, p_result: result }));
+    pacer.observe(Date.now() - requestStart, save.error || !save.data);
     if (save.error || !save.data) throw new CrmAssetError("asset_receipt_unavailable");
     if (result.error_code === "hubspot_file_access") { paused = true; break; }
+    await pacer.wait(deadline);
   }
-  return { copied, blocked, failed, ...(paused ? { paused: true } : {}) };
+  return { copied, blocked, failed, ...(paused || pacer.paused ? { paused: true } : {}) };
+  } finally { await pacer.finish(); }
 }

@@ -14,13 +14,14 @@ export async function runCrmFileWorker() {
   if (claimed.error?.code === "23505") return { skipped: "A CRM file copy is already running." };
   if (claimed.error) throw new Error("CRM file worker lease unavailable");
   try {
-    const results = await Promise.allSettled(Array.from({ length: 4 }, () => migrateCrmAssets(db, process.env.HUBSPOT_ACCESS_TOKEN, { budgetMs: 180000, limit: 300 })));
+    const results = await Promise.allSettled([migrateCrmAssets(db, process.env.HUBSPOT_ACCESS_TOKEN, { budgetMs: 180000, limit: 100 })]);
     const totals = { copied: 0, blocked: 0, failed: 0, workerErrors: 0 };
     for (const result of results) {
       if (result.status === "rejected") totals.workerErrors++;
       else { totals.copied += result.value.copied; totals.blocked += result.value.blocked; totals.failed += "failed" in result.value ? result.value.failed : 0; }
     }
-    return totals;
+    const paused = results.some(result => result.status === "fulfilled" && "paused" in result.value && result.value.paused);
+    return { ...totals, ...(paused ? { paused: true } : {}) };
   } finally {
     await db.from("api_cache").delete().eq("cache_key", LEASE_KEY).eq("result->>owner", owner);
   }

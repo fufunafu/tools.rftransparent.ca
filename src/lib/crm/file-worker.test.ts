@@ -10,10 +10,16 @@ it("skips another active server copy and never calls the file provider", async (
   mocks.insert.mockResolvedValue({ error: { code: "23505" } });
   expect(await runCrmFileWorker()).toHaveProperty("skipped"); expect(mocks.copy).not.toHaveBeenCalled();
 });
-it("retains successful worker totals and releases only its own lease after a partial failure", async () => {
+it("stops after a file worker failure and releases only its own lease", async () => {
   mocks.copy.mockRejectedValueOnce(new Error("upstream detail"));
-  expect(await runCrmFileWorker()).toEqual({ copied: 6, blocked: 0, failed: 0, workerErrors: 1 });
+  expect(await runCrmFileWorker()).toEqual({ copied: 0, blocked: 0, failed: 0, workerErrors: 1 });
   const owner = mocks.insert.mock.calls[0][0].result.owner;
   expect(mocks.eq).toHaveBeenCalledWith("result->>owner", owner);
-  expect(mocks.copy).toHaveBeenCalledTimes(4);
+  expect(mocks.copy).toHaveBeenCalledTimes(1);
+});
+
+it("copies files sequentially and reports cooldown without starting parallel workers", async () => {
+  mocks.copy.mockResolvedValue({ copied: 2, blocked: 0, failed: 0, paused: true });
+  expect(await runCrmFileWorker()).toEqual({ copied: 2, blocked: 0, failed: 0, workerErrors: 0, paused: true });
+  expect(mocks.copy).toHaveBeenCalledTimes(1);
 });

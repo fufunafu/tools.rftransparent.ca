@@ -31,6 +31,12 @@ export interface CrmRecord {
   source_created_at?: string | null;
   source_updated_at?: string | null;
   imported_at?: string | null;
+  last_contacted_at?: string | null;
+  next_task_id?: string | null;
+  next_task_title?: string | null;
+  next_task_due_at?: string | null;
+  open_task_count?: number | null;
+  followup_checked_at?: string | null;
 }
 export interface CrmPage { records: CrmRecord[]; total: number; page: number }
 export interface CrmStatus {

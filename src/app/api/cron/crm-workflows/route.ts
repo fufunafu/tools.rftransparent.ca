@@ -5,6 +5,7 @@ import { getSupabase } from "@/lib/supabase";
 import { processCrmProjections } from "@/lib/crm/projection.mjs";
 import { sendCrmReminders } from "@/lib/crm/reminders";
 import { captureCrmActivity } from "@/lib/crm/capture";
+import { processCrmFollowups } from "@/lib/crm/followups.mjs";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -19,6 +20,7 @@ async function handler(request: NextRequest) {
     ["reminders", () => sendCrmReminders()],
     ["index", () => processCrmProjections(getSupabase(), { budgetMs: 20000 })],
     ["activity", () => captureCrmActivity()],
+    ["followups", () => processCrmFollowups(getSupabase(), { budgetMs: 20000 })],
   ] as const) {
     try { results[name] = await run(); }
     catch { results[name] = { error: "Worker paused; saved progress is retained." }; failed = true; }

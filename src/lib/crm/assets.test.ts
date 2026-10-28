@@ -53,14 +53,14 @@ describe("private CRM file migration", () => {
   });
   it("marks a file complete only after the retained copy has the same bytes and checksum", async () => {
     const uploaded = { upload: vi.fn<(path: string, data: unknown, options: object) => Promise<{ error: null }>>(async () => ({ error: null })), download: vi.fn(async () => ({ data: new Blob(["PDF content"]), error: null })) };
-    const db = { storage: { getBucket: vi.fn(async () => ({ data: { public: false } })), from: vi.fn(() => uploaded) }, rpc: vi.fn().mockResolvedValueOnce({ data: [asset] }).mockResolvedValueOnce({ data: true }) };
+    const db = { from: () => ({ select: async () => ({ data: [] }) }), storage: { getBucket: vi.fn(async () => ({ data: { public: false } })), from: vi.fn(() => uploaded) }, rpc: vi.fn().mockResolvedValueOnce({ data: [asset] }).mockResolvedValueOnce({ data: true }) };
     expect(await migrateCrmAssets(db, "token", { limit: 1, fetcher: fileFetcher() })).toEqual({ copied: 1, blocked: 0, failed: 0 });
     expect(db.rpc.mock.calls[1][1].p_result).toMatchObject({ status: "ready", byte_size: 11, filename: "drawing.pdf" });
     expect(uploaded.upload.mock.calls[0][2]).toMatchObject({ contentType: "application/octet-stream", upsert: true });
     uploaded.download.mockResolvedValueOnce({ data: new Blob(["corrupted"]), error: null });
     db.rpc.mockResolvedValueOnce({ data: [asset] }).mockResolvedValueOnce({ data: true });
     expect(await migrateCrmAssets(db, "token", { limit: 1, fetcher: fileFetcher() })).toEqual({ copied: 0, blocked: 0, failed: 1 });
-    expect(db.rpc.mock.calls[3][1].p_result).toMatchObject({ status: "failed", error_code: "storage_verification" });
+    expect(db.rpc.mock.calls.filter(call => call[0] === "crm_finish_asset").at(-1)![1].p_result).toMatchObject({ status: "failed", error_code: "storage_verification" });
   });
 });
 it("reuses an account check only for the same key and verifies a rotated key again", async () => {

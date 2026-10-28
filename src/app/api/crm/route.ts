@@ -6,6 +6,7 @@ import { CrmInputError, createCrmRecord, readCrmJson, updateCrmTask, editCrmCont
 import { canAccessCrm } from "@/lib/crm/access";
 import { CRM_RECORD_VIEWS, type CrmRecordView } from "@/lib/crm/types";
 import { getCrmDirectoryOptions } from "@/lib/crm/directory-data";
+import { directoryEdit } from "@/lib/crm/directory-workflows";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -70,6 +71,16 @@ export async function PATCH(request: Request) {
   if (!(await canAccessCrm())) return json({ error: "CRM is available to management, sales, and customer service." }, 403);
   try {
     const input = await readCrmJson(request);
+    if (typeof input === "object" && input && "action" in input && input.action === "editRecord") {
+      const edit = directoryEdit.safeParse(input);
+      if (!edit.success) return json({ error: "Enter a name, valid email addresses, and valid website details." }, 400);
+      const result = await getSupabase().rpc("crm_edit_directory_record", {
+        p_id: edit.data.id, p_version: edit.data.version, p_fields: edit.data.fields,
+        p_company_id: edit.data.companyId, p_actor: user.email.toLowerCase(),
+      });
+      if (result.error) return json({ error: "Record or company changed or is unavailable. Refresh before saving." }, 409);
+      return json({ saved: true, version: result.data });
+    }
     if (typeof input === "object" && input && "action" in input && input.action === "editContact") {
       const edit = editCrmContact.safeParse(input);
       if (!edit.success) return json({ error: "Enter a name and valid contact details." }, 400);

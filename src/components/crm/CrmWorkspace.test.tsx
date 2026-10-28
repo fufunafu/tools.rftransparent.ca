@@ -13,11 +13,11 @@ const initialStatus: CrmStatus = { configured: false, counts: [{ object_type: "c
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); container = document.createElement("div"); document.body.append(container); root = createRoot(container); });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllGlobals(); });
 it("uses the server records immediately without duplicate initial requests, then fetches changed tabs", async () => {
-  const fetcher = vi.fn(async () => Response.json({ records: [{ ...initialPage.records[0], object_type: "companies", title: "Loaded company" }], total: 1, page: 0 }));
+  const fetcher = vi.fn(async (url: string) => Response.json(url.startsWith("/api/crm/directory?") ? { views: [] } : { records: [{ ...initialPage.records[0], object_type: "companies", title: "Loaded company" }], total: 1, page: 0 }));
   vi.stubGlobal("fetch", fetcher);
   await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} initialPage={initialPage} initialStatus={initialStatus} />));
   expect(container.textContent).toContain("Server loaded customer");
-  expect(fetcher).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls.filter(([url]) => !String(url).startsWith("/api/crm/directory?"))).toHaveLength(0);
   const companies = [...container.querySelectorAll("nav button")].find(button => button.textContent === "Companies") as HTMLButtonElement;
   await act(async () => companies.click());
   expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("type=companies"), expect.any(Object));
@@ -27,15 +27,15 @@ it("uses the server records immediately without duplicate initial requests, then
   expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("type=contacts"), expect.any(Object));
 });
 it("retries through the API when server preload data is unavailable", async () => {
-  const fetcher = vi.fn(async (url: string) => Response.json(url.includes("statusOnly") ? initialStatus : initialPage));
+  const fetcher = vi.fn(async (url: string) => Response.json(url.startsWith("/api/crm/directory?") ? { views: [] } : url.includes("statusOnly") ? initialStatus : initialPage));
   vi.stubGlobal("fetch", fetcher);
   await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} />));
   expect(container.textContent).toContain("Server loaded customer");
-  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls.filter(([url]) => !String(url).startsWith("/api/crm/directory?"))).toHaveLength(2);
 });
 it("hydrates preloaded dates consistently before formatting them in the viewer's time zone", async () => {
-  const fetcher = vi.fn(); vi.stubGlobal("fetch", fetcher);
-  const records = { ...initialPage, records: [{ ...initialPage.records[0], occurred_at: "2026-10-27T12:34:00Z" }] };
+  const fetcher = vi.fn(async (url: string) => Response.json(url.startsWith("/api/crm/directory?") ? { views: [] } : {})); vi.stubGlobal("fetch", fetcher);
+  const records = { ...initialPage, records: [{ ...initialPage.records[0], occurred_at: "2026-10-27T12:34:00Z", last_contacted_at: "2026-10-27T12:34:00Z", followup_checked_at: "2026-10-27T12:34:00Z" }] };
   const page = <CrmWorkspace initialTab="contacts" email="rep@example.com" canManage={false} initialPage={records} initialStatus={initialStatus} />;
   await act(async () => root.unmount());
   container.innerHTML = renderToString(page);
@@ -44,7 +44,7 @@ it("hydrates preloaded dates consistently before formatting them in the viewer's
   await act(async () => { root = hydrateRoot(container, page, { onRecoverableError: recoverableError }); });
   expect(recoverableError).not.toHaveBeenCalled();
   expect(container.textContent).not.toContain("UTC");
-  expect(fetcher).not.toHaveBeenCalled();
+  expect(fetcher.mock.calls.filter(([url]) => !String(url).startsWith("/api/crm/directory?"))).toHaveLength(0);
 });
 
 it("keeps reminder delivery history within Tasks instead of a separate navigation section", async () => {
@@ -59,7 +59,7 @@ it("combines owner and location filters on the server, resets pagination, and cl
   const options = { owner: [{ value: "rep@example.com", label: "rep@example.com", count: 75 }, { value: "", label: "", count: 12 }], stage: [{ value: "customer", label: "customer", count: 20 }], country: [], region: [], city: [{ value: "ottawa", label: "Ottawa", count: 18 }] };
   const fetcher = vi.fn(async (url: string) => {
     const params = new URL(url, "https://tools.example").searchParams;
-    return Response.json(params.has("filtersOnly") ? options : { records: [{ ...initialPage.records[0], title: params.has("city") ? "Ottawa result" : "Owner result" }], total: params.has("city") ? 3 : 75, page: Number(params.get("page")) || 0 });
+    return Response.json(url.startsWith("/api/crm/directory?") ? { views: [] } : params.has("filtersOnly") ? options : { records: [{ ...initialPage.records[0], title: params.has("city") ? "Ottawa result" : "Owner result" }], total: params.has("city") ? 3 : 75, page: Number(params.get("page")) || 0 });
   });
   vi.stubGlobal("fetch", fetcher);
   await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="viewer@example.com" canManage={false} initialPage={{ ...initialPage, total: 75 }} initialStatus={initialStatus} />));
