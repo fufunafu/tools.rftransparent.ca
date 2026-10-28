@@ -1,3 +1,4 @@
+import { glassPolicy, glassDemandBand } from "./policy";
 import { addDays, addMonths, consumptionBetween, dailyDemand, pickSeasonality, purchasingToday, type SeasonalityConfig } from "./seasonality";
 import type { ForecastPoint, InventoryForecast, ProductWithMetrics, PurchasingSettings } from "./types";
 
@@ -63,12 +64,16 @@ export function planProduct(product: StockProduct, settings: PurchasingSettings,
   const unconfirmed = arrivals.filter(a => a.qty > 0 && (!a.date || a.date < start));
   const demand = (from: string, to: string) => consumptionBetween(from, to, base, config);
   const leadDemand = demand(start, eta);
-  const coverDays = lead * Math.max(0, settings.restock_cover_pct) / 100;
+  const policy = glassPolicy(settings.glass_policy);
+  const band = glassDemandBand(base * 12);
+  const safetyDays = policy[`${band}_safety_days`];
+  const coverDays = product.category === "glass" ? policy.order_interval_days + safetyDays : lead * Math.max(0, settings.restock_cover_pct) / 100;
   const wholeCoverDays = Math.floor(coverDays);
   const coverDate = addDays(eta, wholeCoverDays);
   const coverDemand = demand(eta, coverDate) + (coverDays - wholeCoverDays) * dailyDemand(coverDate, base, config);
   const capacity = product.category === "hardware" ? Math.max(50, demand(eta, addMonths(eta, 3))) : Math.max(0, product.storage_capacity);
-  const target = product.category === "hardware" ? capacity : Math.min(capacity, Math.max(settings.expected_fill * capacity, coverDemand));
+  const minimum = product.category === "glass" && band === "slow" && base > 0 && config.growth_factor > 0 ? policy.slow_min_units : 0;
+  const target = product.category === "hardware" ? capacity : Math.max(minimum, coverDemand);
   // The target is an order-up-to inventory position: stock plus dated supply
   // must cover lead-time demand and the target demand after that date.
   // Later supply cannot hide an earlier shortage, even if total inbound is large.
@@ -89,12 +94,39 @@ export function planProduct(product: StockProduct, settings: PurchasingSettings,
     const afterArrivalDemand = demand(eta, a.date!);
     // A supply arriving after the protected coverage window cannot offset it.
     if (positiveDemand ? afterArrivalDemand >= target - EPSILON && a.date! > eta : a.date! > eta) continue;
-    china = Math.max(china, leadDemand + afterArrivalDemand - product.current_inventory - transfer - futureArrived);
+    if (a.date! > eta) china = Math.max(china, leadDemand + afterArrivalDemand - product.current_inventory - (product.category === "hardware" ? transfer : 0) - futureArrived);
     futureArrived += a.qty;
   }
-  china = Math.max(0, china, leadDemand + target - product.current_inventory - transfer - futureArrived);
+  china = Math.max(0, china, leadDemand + target - product.current_inventory - (product.category === "hardware" ? transfer : 0) - futureArrived);
   if (china < EPSILON) china = 0;
   const suggested = product.category === "hardware" ? Math.ceil(china - EPSILON) : roundRequiredQuantity(china, settings.crate_size);
+  const delayedEta = addDays(eta, policy.delay_days);
+  const shortageBefore = (end: string) => {
+    let supply = 0;
+    let shortage = 0;
+    for (const a of scheduled) {
+      if (a.date! >= end) break;
+      shortage = Math.max(shortage, demand(start, a.date!) - product.current_inventory - supply);
+      supply += a.qty;
+    }
+    return Math.ceil(Math.max(0, shortage, demand(start, end) - product.current_inventory - supply) - EPSILON);
+  };
+  // Check actual projected storage after placing the rounded order. Never
+  // truncate demand to capacity: split deliveries or review the quantity.
+  let projected = Math.max(0, product.current_inventory);
+  let capacityExcess = 0;
+  if (product.category === "glass" && suggested > 0) {
+    const end = Math.max(lead + Math.ceil(coverDays), lead + 1);
+    const datedSupply = new Map<string, number>();
+    for (const a of scheduled) datedSupply.set(a.date!, (datedSupply.get(a.date!) ?? 0) + a.qty);
+    for (let day = 0; day < end; day++) {
+      const date = addDays(start, day);
+      projected += datedSupply.get(date) ?? 0;
+      if (date === eta) projected += suggested;
+      if (date >= eta) capacityExcess = Math.max(capacityExcess, projected - capacity);
+      projected = Math.max(0, projected - dailyDemand(date, base, config));
+    }
+  }
   const forecast = buildForecast(product.id, product.current_inventory, base, scheduled, config, start);
   const onHand = buildForecast(product.id, product.current_inventory, base, [], config, start);
   const excess = product.category === "hardware" ? 0 : Math.max(0, product.current_inventory - capacity);
@@ -109,7 +141,11 @@ export function planProduct(product: StockProduct, settings: PurchasingSettings,
     reorder_point: leadDemand + target, restock_target: target, perfect_qty: china, suggested_qty: Math.max(0, suggested), transfer_requirement: transfer,
     inventory_value: product.current_inventory * product.unit_cost_landed, overstock: excess,
     sop_label: hasReorder && hasTransfer ? "reorder_plus_montreal" : hasTransfer ? "montreal_transfer" : hasReorder ? "reorder" : base <= 0 ? "no_sales_data" : "ok",
-    planning: { as_of: start, order_arrival_date: eta, lead_demand: leadDemand, target_demand: target, cover_demand: coverDemand, counted_inbound: futureArrived,
+    planning: { ...(product.category === "glass" ? { policy: {
+      band, order_interval_days: policy.order_interval_days, safety_days: safetyDays, minimum_units: minimum,
+      coverage_end: coverDate, delayed_arrival_date: delayedEta, delayed_shortage: Math.max(0, shortageBefore(delayedEta)),
+      capacity_excess: Math.max(0, capacityExcess), requires_review: suggested > 0 && (band === "slow" || capacityExcess > EPSILON || transfer > 0 || unconfirmed.length > 0),
+    } } : {}), as_of: start, order_arrival_date: eta, lead_demand: leadDemand, target_demand: target, cover_demand: coverDemand, counted_inbound: futureArrived,
       unconfirmed_inbound: unconfirmed.reduce((sum, a) => sum + a.qty, 0), unconfirmed_orders: [...new Set(unconfirmed.map(a => a.po_number))],
       projected_stockout_date: forecast.projected_stockout_date, on_hand_stockout_date: onHand.projected_stockout_date,
       days_until_capacity: excess <= 0 ? 0 : excessForecast?.days_until_stockout ?? null },

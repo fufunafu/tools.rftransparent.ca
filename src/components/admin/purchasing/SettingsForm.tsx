@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_GLASS_POLICY, GLASS_POLICY_FIELDS, glassPolicy, validateGlassPolicy, type GlassPolicy } from "@/lib/purchasing/policy";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PurchasingSettings } from "@/lib/purchasing/types";
@@ -42,9 +43,7 @@ function multColor(m: number): string {
 export default function SettingsForm({ initialSettings }: Props) {
   const router = useRouter();
   const [leadDays, setLeadDays] = useState(String(initialSettings.lead_time_days));
-  const [expectedFillPct, setExpectedFillPct] = useState(
-    String(Math.round(initialSettings.expected_fill * 100)),
-  );
+  const [policy, setPolicy] = useState<GlassPolicy>(glassPolicy(initialSettings.glass_policy));
   const [crateSize, setCrateSize] = useState(String(initialSettings.crate_size));
   const [multipliers, setMultipliers] = useState<string[]>(
     initialSettings.season_multipliers.map((n) => String(n)),
@@ -52,9 +51,7 @@ export default function SettingsForm({ initialSettings }: Props) {
   const [annualGrowth, setAnnualGrowth] = useState(
     String(initialSettings.annual_growth_pct),
   );
-  const [coverPct, setCoverPct] = useState(
-    String(initialSettings.restock_cover_pct),
-  );
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<number | null>(null);
@@ -67,11 +64,10 @@ export default function SettingsForm({ initialSettings }: Props) {
 
   const dirty =
     leadDays !== String(initialSettings.lead_time_days) ||
-    expectedFillPct !== String(Math.round(initialSettings.expected_fill * 100)) ||
+    JSON.stringify(policy) !== JSON.stringify(glassPolicy(initialSettings.glass_policy)) ||
     crateSize !== String(initialSettings.crate_size) ||
     multipliers.some((m, i) => m !== String(initialSettings.season_multipliers[i])) ||
-    annualGrowth !== String(initialSettings.annual_growth_pct) ||
-    coverPct !== String(initialSettings.restock_cover_pct);
+    annualGrowth !== String(initialSettings.annual_growth_pct);
 
   async function recompute() {
     setRecomputing(true);
@@ -97,18 +93,17 @@ export default function SettingsForm({ initialSettings }: Props) {
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    const lead = parseInt(leadDays, 10);
-    const fillPct = parseFloat(expectedFillPct);
-    const crate = parseFloat(crateSize);
-    if (!Number.isFinite(lead) || lead < 0) {
+    const lead = Number(leadDays);
+    const crate = Number(crateSize);
+    if (!Number.isInteger(lead) || lead < 1 || lead > 365) {
       setError("Lead time days must be a positive whole number.");
       return;
     }
-    if (!Number.isFinite(fillPct) || fillPct < 0 || fillPct > 200) {
-      setError("Expected fill % must be between 0 and 200.");
+    if (!validateGlassPolicy(policy)) {
+      setError("Enter valid whole numbers for the glass planning policy.");
       return;
     }
-    if (!Number.isFinite(crate) || crate <= 0) {
+    if (!Number.isInteger(crate) || crate < 1 || crate > 1000) {
       setError("Crate size must be a positive number.");
       return;
     }
@@ -122,11 +117,6 @@ export default function SettingsForm({ initialSettings }: Props) {
       setError("Annual growth must be a number between -100 and 1000.");
       return;
     }
-    const cover = parseFloat(coverPct);
-    if (!Number.isFinite(cover) || cover < 0 || cover > 500) {
-      setError("Target at arrival % must be between 0 and 500.");
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -135,11 +125,10 @@ export default function SettingsForm({ initialSettings }: Props) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           lead_time_days: lead,
-          expected_fill: fillPct / 100,
+          glass_policy: policy,
           crate_size: crate,
           season_multipliers: mults,
           annual_growth_pct: growthPct,
-          restock_cover_pct: cover,
         }),
       });
       if (!res.ok) {
@@ -175,8 +164,7 @@ export default function SettingsForm({ initialSettings }: Props) {
             Replenishment targets
           </h2>
           <p className="text-sm text-sand-500 mt-1">
-            These values drive the Reorder page&apos;s suggestions and the
-            status labels on the Inventory page.
+            Glass targets cover demand until the next replenishment plus a safety allowance. Fast sellers sell at least 365 panels/year, regular sellers 12 to 364, and slow sellers fewer than 12. Storage capacity is a constraint, not a purchasing minimum. Hardware keeps its existing three-month target.
           </p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -187,7 +175,8 @@ export default function SettingsForm({ initialSettings }: Props) {
             <div className="flex items-center gap-2">
               <input
                 type="number"
-                min="0"
+                min="1"
+                max="365"
                 step="1"
                 aria-label="Lead time days"
                 value={leadDays}
@@ -214,42 +203,9 @@ export default function SettingsForm({ initialSettings }: Props) {
               <span className="text-sm text-sand-500">units / crate</span>
             </div>
           </Field>
-          <Field
-            label="Target at arrival"
-            help="Demand to cover after a new order can arrive, as a percentage of the lead time. Each future month uses its own seasonal rate."
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="500"
-                step="1"
-                aria-label="Target at arrival percent"
-                value={coverPct}
-                onChange={(e) => setCoverPct(e.target.value)}
-                className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
-              />
-              <span className="text-sm text-sand-500">%</span>
-            </div>
-          </Field>
-          <Field
-            label="Expected fill"
-            help="Minimum stock target as a percentage of capacity. Helps keep slower-selling products available."
-          >
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min="0"
-                max="200"
-                step="1"
-                aria-label="Expected fill percent"
-                value={expectedFillPct}
-                onChange={(e) => setExpectedFillPct(e.target.value)}
-                className="w-28 px-3 py-2 rounded-lg border border-sand-300 tabular-nums"
-              />
-              <span className="text-sm text-sand-500">%</span>
-            </div>
-          </Field>
+          {(Object.keys(DEFAULT_GLASS_POLICY) as Array<keyof GlassPolicy>).map(key => <Field key={key} label={GLASS_POLICY_FIELDS[key].label} help={key === "order_interval_days" ? "Expected time between orders. Separate from supplier delivery time." : key === "slow_min_units" ? "Small deliberate minimum for sizes selling fewer than 12 panels a year. Crate purchases still require review." : key === "delay_days" ? "Extra delivery time used for the shortage scenario, not added to the baseline lead time." : "Initial safety allowance in days of seasonal demand. Editable operating policy, not a guaranteed service level."}>
+            <input type="number" min={key === "order_interval_days" ? 1 : 0} max={GLASS_POLICY_FIELDS[key].max} step="1" aria-label={GLASS_POLICY_FIELDS[key].label} value={Number.isNaN(policy[key]) ? "" : policy[key]} onChange={e => setPolicy(current => ({ ...current, [key]: e.target.value === "" ? NaN : Number(e.target.value) }))} className="w-28 rounded-lg border border-sand-300 px-3 py-2 tabular-nums" />
+          </Field>)}
         </div>
       </div>
 

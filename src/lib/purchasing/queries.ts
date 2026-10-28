@@ -1,3 +1,4 @@
+import { glassPolicy } from "./policy";
 import { cache } from "react";
 import { planProduct, type PlannedArrival, type StockProduct } from "./planning";
 import { purchasingToday } from "./seasonality";
@@ -271,7 +272,7 @@ export async function getPurchasingSettings(): Promise<PurchasingSettings> {
   const { data, error } = await getSupabase()
     .from("purchasing_settings")
     .select(
-      "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct, restock_cover_pct",
+      "expected_fill, lead_time_days, crate_size, season_multipliers, annual_growth_pct, restock_cover_pct, glass_policy",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -282,8 +283,9 @@ export async function getPurchasingSettings(): Promise<PurchasingSettings> {
       ? rawMults.map((n: unknown) => num(n, 1))
       : new Array(12).fill(1);
   return {
+    glass_policy: glassPolicy(data?.glass_policy),
     expected_fill: num(data?.expected_fill, 0.7),
-    lead_time_days: num(data?.lead_time_days, 90),
+    lead_time_days: num(data?.lead_time_days, 84),
     crate_size: num(data?.crate_size, 35),
     season_multipliers,
     annual_growth_pct: num(data?.annual_growth_pct, 0),

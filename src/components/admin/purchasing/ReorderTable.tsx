@@ -32,6 +32,8 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
     (showAll || recommendation(p, orderType) > 0) &&
     `${p.sku} ${p.name}`.toLowerCase().includes(search.trim().toLowerCase())
   ), [initialProducts, category, showAll, orderType, search]);
+  const bulkReady = visible.filter(p => recommendation(p, orderType) > 0 && !(orderType === "china" && p.planning?.policy?.requires_review));
+  const reviewCount = visible.filter(p => orderType === "china" && p.planning?.policy?.requires_review).length;
   const selected = useMemo(() => initialProducts.flatMap(product => {
     const qty = Number(quantities[product.id]);
     return Number.isFinite(qty) && qty > 0 ? [{ product, qty, lineValue: qty * product.unit_cost_landed }] : [];
@@ -49,7 +51,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
   function fillSuggested() {
     setDrafts(current => {
       const next = { ...current[orderType] };
-      for (const p of visible) if (recommendation(p, orderType) > 0) next[p.id] = String(recommendation(p, orderType));
+      for (const p of bulkReady) next[p.id] = String(recommendation(p, orderType));
       return { ...current, [orderType]: next };
     });
   }
@@ -84,9 +86,11 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
       <ProductFilters category={category} onCategory={setCategory} search={search} onSearch={setSearch} />
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-sand-100 pt-3 text-xs">
         <div className="flex flex-wrap items-center gap-4"><span className="font-medium text-sand-900">{visible.length} products shown</span><label className="inline-flex items-center gap-2 text-sand-600"><input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} /> Include products without a suggestion</label></div>
-        <button type="button" onClick={fillSuggested} disabled={creating || !visible.some(p => recommendation(p, orderType) > 0)} className="font-medium text-accent hover:underline disabled:opacity-40">Fill suggested quantities for shown products</button>
+        <button type="button" onClick={fillSuggested} disabled={creating || bulkReady.length === 0} className="font-medium text-accent hover:underline disabled:opacity-40">Fill suggested quantities for shown products</button>
       </div>
+      {reviewCount > 0 && <p className="text-xs text-amber-800">{bulkReady.length} ready for bulk fill. {reviewCount} require review and an individual quantity choice.</p>}
     </div>
+    <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">Uses recorded stock. Verify against SumTracker before ordering. Confirm Montreal quantity and ETA before treating a transfer as supply. China suggestions retain uncovered demand until a transfer is confirmed, so do not submit both lists unchanged. Bulk fill skips glass products requiring review; enter a quantity after resolving the warning.</p>
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
       <div className="min-w-0 space-y-2">
@@ -111,6 +115,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
               return <tr key={p.id} className={qty > 0 ? "bg-blue-50/30" : "hover:bg-sand-50/60"}>
                 <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3">
                   <button type="button" onClick={() => setForecastId(p.id)} aria-label={`View forecast for ${p.sku}`} className="block text-left"><span className="block font-mono text-xs font-semibold text-accent hover:underline">{p.sku}</span><span className="mt-1 block max-w-56 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>{(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm overdue or missing ETA before ordering</span>}</button>
+                  {orderType === "china" && p.planning?.policy?.requires_review && <span className="mt-1 block text-[10px] font-medium text-amber-800">Review required: {p.planning.policy.band === "slow" ? "slow seller; " : ""}{p.planning.policy.capacity_excess > 0 ? "storage capacity; " : ""}{p.transfer_requirement > 0 ? "confirm shortage plan; " : ""}{p.planning.unconfirmed_inbound > 0 ? "confirm inbound ETA" : ""}</span>}
                   {p.sop_label !== "ok" && <span className={"mt-1.5 inline-block text-[10px] font-medium " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span>}
                 </td>
                 <td className="hidden md:table-cell px-3 py-3 text-right">{fmt(p.current_inventory)}</td>
@@ -125,7 +130,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
           </table>
           {visible.length === 0 && <div className="px-4 py-12 text-center"><p className="text-sm font-medium text-sand-700">No products match this view.</p><p className="mt-1 text-xs text-sand-500">Change the filters or include products without a suggestion to plan a manual top-up.</p></div>}
         </div>
-        <p className="text-xs leading-relaxed text-sand-500">Suggested quantities account for current stock and inbound orders. Select a product to see the full calculation and arrival forecast.</p>
+        <p className="text-xs leading-relaxed text-sand-500">Suggested quantities count only dated, confirmed inbound supply. Review flags are excluded from bulk fill. Select a product to see the full calculation and arrival forecast.</p>
       </div>
       <aside aria-label="Draft order summary" className="order-first rounded-xl border border-sand-200 bg-white p-4 xl:sticky xl:top-4 xl:order-last">
         <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-semibold text-sand-900">Your draft</h3><span className="text-xs text-sand-500">{ORDER_TYPE_DISPLAY[orderType]}</span></div>

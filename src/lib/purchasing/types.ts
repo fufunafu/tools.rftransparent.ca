@@ -1,3 +1,5 @@
+import type { GlassPolicy, GlassDemandBand } from "./policy";
+
 // Shared types for the Purchasing module. Numeric values that arrive as
 // strings from PostgREST are coerced to `number` in the query layer.
 
@@ -45,21 +47,24 @@ export interface ProductWithMetrics {
   days_of_stock_left: number | null;
   days_of_stock_with_inbound: number | null;
   reorder_point: number;
-  // Stock we want left when a PO arrives: for glass the higher of the
-  // expected-fill floor or future demand during the cover period, capped at
-  // capacity. For hardware it equals the derived capacity/target.
+  // Demand-based coverage after arrival. Capacity is a warning, not a target.
   restock_target: number;
   // Days until the soonest open PO lands, null when nothing is inbound.
   days_until_next_arrival: number | null;
   perfect_qty: number;
   suggested_qty: number;
-  // Minimum units to pull from Montreal so we don't stock out before the
-  // next China shipment lands. 0 when no transfer is needed.
+  // Uncovered units before a new China order can arrive. A potential Montreal
+  // transfer must be confirmed with quantity and ETA before it counts as supply.
   transfer_requirement: number;
   inventory_value: number;
   overstock: number;
   sop_label: SopLabel;
   planning?: {
+    policy?: {
+      band: GlassDemandBand; order_interval_days: number; safety_days: number; minimum_units: number;
+      coverage_end: string; delayed_arrival_date: string; delayed_shortage: number;
+      capacity_excess: number; requires_review: boolean;
+    };
     as_of: string;
     order_arrival_date: string;
     lead_demand: number;
@@ -148,6 +153,8 @@ export interface PurchasingSummary {
 }
 
 export interface PurchasingSettings {
+  glass_policy?: GlassPolicy;
+  // Legacy field retained for compatibility; glass planning ignores it.
   expected_fill: number;
   lead_time_days: number;
   crate_size: number;
@@ -159,8 +166,7 @@ export interface PurchasingSettings {
   // than last year across every month. Compounds with seasonality:
   // effective = season_multipliers[m] × (1 + annual_growth_pct / 100).
   annual_growth_pct: number;
-  // Target cover at PO arrival, as a percent of one lead time of sales.
-  // 100 = land with a full lead time still on the shelf, 75 = 0.75.
+  // Legacy field retained for compatibility. Glass uses glass_policy instead.
   restock_cover_pct: number;
 }
 

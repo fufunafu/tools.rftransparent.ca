@@ -1,8 +1,9 @@
+import { DEFAULT_GLASS_POLICY, validateGlassPolicy } from "./policy";
 import { describe, expect, it } from "vitest";
 import { planProduct, roundRequiredQuantity, type PlannedArrival, type StockProduct } from "./planning";
 import { consumptionBetween, pickSeasonality } from "./seasonality";
 import type { PurchasingSettings } from "./types";
-const settings: PurchasingSettings = { expected_fill: 0.5, lead_time_days: 10, crate_size: 1, season_multipliers: Array(12).fill(1), annual_growth_pct: 0, restock_cover_pct: 0 };
+const settings: PurchasingSettings = { glass_policy: { ...DEFAULT_GLASS_POLICY, order_interval_days: 10, fast_safety_days: 0, regular_safety_days: 0, slow_safety_days: 0, slow_min_units: 0, delay_days: 5 }, expected_fill: 0.5, lead_time_days: 10, crate_size: 1, season_multipliers: Array(12).fill(1), annual_growth_pct: 0, restock_cover_pct: 0 };
 const product: StockProduct = { id: "p", sku: "PANEL-TEST", name: "Test panel", category: "glass", height: 40, width: 50, weight: null, storage_capacity: 20, current_inventory: 12, avg_monthly_sales_rf: 31, avg_monthly_sales_grs: 0, unit_cost_landed: 1, active: true, sort_order: 0 };
 const arrival = (date: string | null, qty: number): PlannedArrival => ({ product_id: "p", date, qty, po_number: "TEST-PO" });
 const start = "2026-01-01";
@@ -36,11 +37,14 @@ describe("calendar purchasing planning", () => {
     expect(plan.product.suggested_qty).toBe(2);
     expect(plan.product.transfer_requirement).toBe(0);
   });
-  it("does not order the emergency transfer units a second time from the supplier", () => {
+  it("retains unconfirmed shortage demand until an actual transfer is scheduled", () => {
     const plan = planProduct({ ...product, current_inventory: 0, storage_capacity: 40 }, settings, [], start);
     expect(plan.product.transfer_requirement).toBe(10);
     expect(plan.product.perfect_qty).toBeCloseTo(20);
     expect(plan.product.sop_label).toBe("reorder_plus_montreal");
+    const confirmed = planProduct({ ...product, current_inventory: 0 }, settings, [arrival(start, 10)], start);
+    expect(confirmed.product.perfect_qty).toBeCloseTo(10);
+    expect(confirmed.product.transfer_requirement).toBe(0);
   });
   it("uses supply on its ETA before that day's demand", () => {
     const plan = planProduct({ ...product, current_inventory: 10 }, settings, [arrival("2026-01-11", 10)], start);
@@ -56,7 +60,7 @@ describe("calendar purchasing planning", () => {
     expect(plan.forecast.timeline.some(point => point.event === "arrival")).toBe(false);
   });
   it("bases post-arrival coverage on the season after arrival, not the current season", () => {
-    const config = { ...settings, lead_time_days: 31, restock_cover_pct: 100, season_multipliers: [0.2,2,...Array(10).fill(1)] };
+    const config = { ...settings, lead_time_days: 31, glass_policy: { ...settings.glass_policy!, order_interval_days: 31 }, restock_cover_pct: 100, season_multipliers: [0.2,2,...Array(10).fill(1)] };
     const plan = planProduct({ ...product, storage_capacity: 1000, current_inventory: 1000 }, { ...config, expected_fill: 0 }, [], start);
     expect(plan.product.planning!.lead_demand).toBeCloseTo(6.2);
     expect(plan.product.restock_target).toBeCloseTo(consumptionBetween("2026-02-01", "2026-03-04", 31, pickSeasonality(config)));
@@ -82,4 +86,59 @@ it("never rounds a supplier recommendation below its calculated requirement", ()
   expect(roundRequiredQuantity(20, 35)).toBe(35);
   expect(roundRequiredQuantity(40, 35)).toBe(70);
   for (let units = 1; units < 300; units += 0.5) expect(roundRequiredQuantity(units, 35)).toBeGreaterThanOrEqual(units);
+});
+
+
+describe("demand-based glass policy", () => {
+  it("does not buy to fill unused rack capacity", () => {
+    const small = planProduct(product, settings, [], start).product;
+    const large = planProduct({ ...product, storage_capacity: 2000 }, { ...settings, expected_fill: 1 }, [], start).product;
+    expect(large.suggested_qty).toBe(small.suggested_qty);
+    expect(large.restock_target).toBe(small.restock_target);
+  });
+  it("does not cap required demand at storage capacity and requires a capacity review", () => {
+    const p = planProduct({ ...product, current_inventory: 0, storage_capacity: 5 }, settings, [], start).product;
+    expect(p.suggested_qty).toBe(20);
+    expect(p.planning!.policy!.capacity_excess).toBe(15);
+    expect(p.planning!.policy!.requires_review).toBe(true);
+  });
+  it("uses different safety allowances and a deliberate slow-seller minimum", () => {
+    const normal = { ...settings, glass_policy: DEFAULT_GLASS_POLICY };
+    const fast = planProduct(product, normal, [], start).product;
+    const regular = planProduct({ ...product, avg_monthly_sales_rf: 10 }, normal, [], start).product;
+    const slow = planProduct({ ...product, avg_monthly_sales_rf: 0.5, current_inventory: 0 }, { ...normal, crate_size: 35 }, [], start).product;
+    expect(fast.planning!.policy!.safety_days).toBe(21);
+    expect(regular.planning!.policy!.safety_days).toBe(14);
+    expect(slow.planning!.policy!.safety_days).toBe(7);
+    expect(slow.restock_target).toBe(2);
+    expect(slow.suggested_qty).toBe(18);
+    expect(slow.planning!.policy!.requires_review).toBe(true);
+  });
+  it("keeps order cadence independent of supplier lead time", () => {
+    const a = planProduct(product, settings, [], start).product;
+    const b = planProduct(product, { ...settings, lead_time_days: 15 }, [], start).product;
+    expect(a.restock_target).toBe(b.restock_target);
+    expect(b.planning!.policy!.order_interval_days).toBe(10);
+  });
+  it("reports a delayed arrival shortage without treating it as confirmed supply", () => {
+    const p = planProduct(product, settings, [], start).product;
+    expect(p.transfer_requirement).toBe(0);
+    expect(p.planning!.policy!.delayed_arrival_date).toBe("2026-01-16");
+    expect(p.planning!.policy!.delayed_shortage).toBe(3);
+  });
+  it("does not auto-stock glass with no sales history or disabled forecast demand", () => {
+    for (const overrides of [{ avg_monthly_sales_rf: 0 }, { avg_monthly_sales_rf: 0.5 }]) {
+      const p = planProduct({ ...product, ...overrides, current_inventory: 0 }, { ...settings, annual_growth_pct: -100 }, [], start).product;
+      expect(p.suggested_qty).toBe(0);
+    }
+  });
+  it("counts multiple deliveries on the supplier arrival day before assessing that day's demand", () => {
+    const p = planProduct({ ...product, current_inventory: 0 }, settings, [arrival("2026-01-11", 10), arrival("2026-01-11", 10)], start).product;
+    expect(p.suggested_qty).toBe(0);
+    expect(p.transfer_requirement).toBe(10);
+  });
+});
+it("rejects malformed or unbounded purchasing policy settings", () => {
+  expect(validateGlassPolicy(DEFAULT_GLASS_POLICY)).toBe(true);
+  for (const value of [null, {}, { ...DEFAULT_GLASS_POLICY, order_interval_days: 0 }, { ...DEFAULT_GLASS_POLICY, slow_safety_days: -1 }, { ...DEFAULT_GLASS_POLICY, fast_safety_days: 1.5 }, { ...DEFAULT_GLASS_POLICY, delay_days: "21" }, { ...DEFAULT_GLASS_POLICY, unexpected: true }]) expect(validateGlassPolicy(value)).toBe(false);
 });
