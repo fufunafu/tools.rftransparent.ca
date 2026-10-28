@@ -1,7 +1,4 @@
-// Seasonality helpers. The DB view scales `daily_sales` by the *current*
-// month's multiplier so Reorder/Inventory decisions are season-aware out of
-// the box. This module is for the forecast path, where we need to apply
-// each calendar month's own multiplier as the projection walks forward.
+// Calendar demand shared by purchasing recommendations and stock forecasts.
 
 import type { PurchasingSettings } from "./types";
 
@@ -27,7 +24,7 @@ export function monthMultiplier(
 ): number {
   const m = s.season_multipliers[monthIdx0];
   const season = typeof m === "number" && Number.isFinite(m) && m > 0 ? m : 1;
-  const growth = Number.isFinite(s.growth_factor) && s.growth_factor > 0 ? s.growth_factor : 1;
+  const growth = Number.isFinite(s.growth_factor) && s.growth_factor >= 0 ? s.growth_factor : 1;
   return season * growth;
 }
 
@@ -50,11 +47,9 @@ export function consumptionBetween(
     Number(endISO.slice(5, 7)) - 1,
     Number(endISO.slice(8, 10)),
   );
-  const dailyBase = baseMonthly / 30;
   let total = 0;
   while (cur < end) {
-    const m = new Date(cur).getUTCMonth();
-    total += dailyBase * monthMultiplier(m, s);
+    total += dailyDemand(new Date(cur).toISOString().slice(0, 10), baseMonthly, s);
     cur += DAY_MS;
   }
   return total;
@@ -69,4 +64,31 @@ export function currentSeasonMultiplier(settings: Pick<PurchasingSettings, "seas
 }
 export function seasonalMonthlySales(baseMonthly: number, settings: Pick<PurchasingSettings, "season_multipliers">, date = new Date()): number {
   return baseMonthly * currentSeasonMultiplier(settings, date);
+}
+
+export function purchasingToday(date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", year: "numeric", month: "2-digit", day: "2-digit" }).format(date);
+}
+
+export function addDays(date: string, days: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+export function addMonths(date: string, months: number): string {
+  const value = new Date(`${date}T00:00:00Z`);
+  const day = value.getUTCDate();
+  value.setUTCDate(1);
+  value.setUTCMonth(value.getUTCMonth() + months);
+  const last = new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth() + 1, 0)).getUTCDate();
+  value.setUTCDate(Math.min(day, last));
+  return value.toISOString().slice(0, 10);
+}
+
+export function dailyDemand(date: string, baseMonthly: number, config: SeasonalityConfig): number {
+  const value = new Date(`${date}T00:00:00Z`);
+  const month = value.getUTCMonth();
+  const days = new Date(Date.UTC(value.getUTCFullYear(), month + 1, 0)).getUTCDate();
+  return Math.max(0, baseMonthly) / days * monthMultiplier(month, config);
 }

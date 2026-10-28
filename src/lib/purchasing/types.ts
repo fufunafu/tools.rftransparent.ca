@@ -46,7 +46,7 @@ export interface ProductWithMetrics {
   days_of_stock_with_inbound: number | null;
   reorder_point: number;
   // Stock we want left when a PO arrives: for glass the higher of the
-  // expected-fill floor or lead-time demand × (1 + buffer), capped at
+  // expected-fill floor or future demand during the cover period, capped at
   // capacity. For hardware it equals the derived capacity/target.
   restock_target: number;
   // Days until the soonest open PO lands, null when nothing is inbound.
@@ -59,6 +59,19 @@ export interface ProductWithMetrics {
   inventory_value: number;
   overstock: number;
   sop_label: SopLabel;
+  planning?: {
+    as_of: string;
+    order_arrival_date: string;
+    lead_demand: number;
+    target_demand: number;
+    cover_demand: number;
+    counted_inbound: number;
+    unconfirmed_inbound: number;
+    unconfirmed_orders: string[];
+    projected_stockout_date: string | null;
+    on_hand_stockout_date: string | null;
+    days_until_capacity: number | null;
+  };
 }
 
 export interface ForecastPoint {

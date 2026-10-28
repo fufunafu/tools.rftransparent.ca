@@ -65,13 +65,14 @@ function heightBucket(h: number | null): string {
   return '46"';
 }
 
-export default function InventoryTable({ initialProducts, initialForecasts, settings }: Props) {
+export default function InventoryTable({ initialProducts, initialForecasts, settings: initialSettings }: Props) {
   const router = useRouter();
-  const { data, mutate } = useSWR<{ products: ProductWithMetrics[] }>(
+  const { data, mutate } = useSWR<{ products: ProductWithMetrics[]; forecasts?: Record<string, InventoryForecast>; settings?: PurchasingSettings }>(
     "/api/purchasing/products",
     { fallbackData: { products: initialProducts }, revalidateOnMount: false },
   );
   const products = data?.products ?? initialProducts;
+  const settings = data?.settings ?? initialSettings;
 
   const [category, setCategory] = useState<Category | "all">("all");
   const [height, setHeight] = useState<string>("all");
@@ -315,7 +316,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center">Inbound<ColumnHint>Units already ordered but not yet received. Computed live as <span className="font-mono">SUM(qty_ordered − qty_received)</span> across every PO whose status is <em>Ordered</em> or <em>In transit</em>.</ColumnHint></span>
               </Th>
               {showPlanningDetail && (<Th sortable sortKey="storage_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: auto-derived target = <span className="font-mono">max(50, 3 × monthly × growth)</span> - three months of cover at the current month&apos;s sales rate, with a 50-unit floor for SKUs with no sales data. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
+                <span className="inline-flex items-center">Capacity<ColumnHint>For glass: max units the warehouse can hold for this SKU (editable per SKU). For hardware: forecast demand for the three calendar months after a new order can arrive, with a 50-unit minimum. Hardware doesn&apos;t have a physical storage limit; this is the level we aim to maintain. Drives Perfect, Suggested, and Status.</ColumnHint></span>
               </Th>)}
               {showSalesDetail && (
                 <>
@@ -335,19 +336,19 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 </span>
               </Th>
               <Th sortable sortKey="days_of_stock_left" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Days of stock<ColumnHint>How many days you can keep selling using only what&apos;s in the warehouse: <span className="font-mono">on_hand / (monthly / 30)</span>. Doesn&apos;t account for inbound.</ColumnHint></span>
+                <span className="inline-flex items-center">Days of stock<ColumnHint>Projected days until on-hand stock is depleted, applying each calendar month&apos;s seasonality and the forecast-growth setting. Excludes incoming purchase orders. A dash means no depletion within one year.</ColumnHint></span>
               </Th>
               {showPlanningDetail && (<Th sortable sortKey="days_of_stock_with_inbound" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Days (w/ inbound)<ColumnHint>Days of coverage if every inbound PO landed today: <span className="font-mono">(on_hand + inbound) / (monthly / 30)</span>. Click 📈 for real per-ETA projection.</ColumnHint></span>
+                <span className="inline-flex items-center">Days with arrivals<ColumnHint>Projected days until stock runs out, counting each confirmed incoming purchase order on its ETA. Overdue or undated arrivals are excluded until their dates are confirmed.</ColumnHint></span>
               </Th>)}
               {showPlanningDetail && (<Th sortable sortKey="reorder_point" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Reorder pt<ColumnHint>The total-stock level (on hand + inbound) at which a new order should be placed: <span className="font-mono">target_at_arrival + lead_time_sales</span>. The target is the higher of the Expected-fill floor or the Target-at-arrival cover (% of a lead time of sales, see Settings), capped at capacity. Drops below this → status flips to Reorder.</ColumnHint></span>
+                <span className="inline-flex items-center">Reorder pt<ColumnHint>Demand until a new order can arrive plus the stock coverage target after that date. Suggestions check the timing of every confirmed arrival, so a late shipment cannot hide an earlier shortage.</ColumnHint></span>
               </Th>)}
               <th className="hidden text-left px-3 py-2 font-medium md:table-cell">
                 <span className="inline-flex items-center gap-1">Status<ColumnHint>
-                  <span className="block"><strong>Reorder + Montreal transfer</strong> - on hand runs out before the next PO arrives AND total stock (on hand + inbound) is below the reorder point. Pull stock from the Montreal warehouse AND place a new main-supplier order.</span>
-                  <span className="block mt-1"><strong>Montreal transfer</strong> - on hand runs out before the next PO arrives, but total stock is still above the reorder point. Pull stock from the Montreal warehouse to bridge the gap; no main-supplier reorder needed yet.</span>
-                  <span className="block mt-1"><strong>Reorder now</strong> - total stock (on hand + inbound) is below the reorder point, i.e. ordering today would no longer land you at the target stock when the PO arrives (see Settings for the target cover and fill floor).</span>
+                  <span className="block"><strong>Reorder + Montreal transfer</strong> - A shortage occurs before a new supplier order can arrive, and more stock is needed for the following coverage period.</span>
+                  <span className="block mt-1"><strong>Montreal transfer</strong> - A shortage occurs before a new supplier order can arrive. Confirmed incoming stock covers the later period, so only a bridge transfer is suggested.</span>
+                  <span className="block mt-1"><strong>Reorder now</strong> - Dated supply is insufficient for demand during the lead time and the following coverage target. The suggestion accounts for any bridge transfer separately.</span>
                   <span className="block mt-1"><strong>OK</strong> - sufficient cover and inbound timing is safe.</span>
                   <span className="block mt-1"><strong>No sales data</strong> - monthly sales is 0.</span>
                 </ColumnHint>
@@ -370,7 +371,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
           <tbody className="divide-y divide-sand-100">
             {visible.map((p) => (
               <tr key={p.id} className={savingId === p.id ? "bg-amber-50/40" : "hover:bg-sand-50/60"}>
-                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3"><button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View forecast for ${p.sku}`} className="text-left hover:text-accent"><span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span></button><span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span></td>
+                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3"><button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View forecast for ${p.sku}`} className="text-left hover:text-accent"><span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>{(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm ETA: {p.planning!.unconfirmed_inbound} inbound units</span>}</button><span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span></td>
                 <EditableCell sku={p.sku} value={p.current_inventory}
                   onSave={(v) => saveField(p.id, "current_inventory", v)} saving={savingId === p.id} />
                 <td className="hidden px-3 py-2 text-right text-sand-500 md:table-cell">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "-"}</td>
@@ -420,7 +421,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
         const p = products.find((x) => x.id === forecastSku);
         if (!p) return null;
         return (
-          <ForecastDrawer product={p} forecast={initialForecasts[forecastSku] ?? null}
+          <ForecastDrawer product={p} forecast={(data?.forecasts ?? initialForecasts)[forecastSku] ?? null}
             settings={settings}
             onClose={() => setForecastSku(null)} />
         );

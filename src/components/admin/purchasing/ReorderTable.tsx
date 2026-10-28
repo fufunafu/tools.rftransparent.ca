@@ -110,7 +110,7 @@ export default function ReorderTable({ initialProducts, initialForecasts, settin
               const valid = raw === "" || (Number.isFinite(qty) && qty >= 0);
               return <tr key={p.id} className={qty > 0 ? "bg-blue-50/30" : "hover:bg-sand-50/60"}>
                 <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3">
-                  <button type="button" onClick={() => setForecastId(p.id)} aria-label={`View forecast for ${p.sku}`} className="block text-left"><span className="block font-mono text-xs font-semibold text-accent hover:underline">{p.sku}</span><span className="mt-1 block max-w-56 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span></button>
+                  <button type="button" onClick={() => setForecastId(p.id)} aria-label={`View forecast for ${p.sku}`} className="block text-left"><span className="block font-mono text-xs font-semibold text-accent hover:underline">{p.sku}</span><span className="mt-1 block max-w-56 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>{(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm overdue or missing ETA before ordering</span>}</button>
                   {p.sop_label !== "ok" && <span className={"mt-1.5 inline-block text-[10px] font-medium " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span>}
                 </td>
                 <td className="hidden md:table-cell px-3 py-3 text-right">{fmt(p.current_inventory)}</td>

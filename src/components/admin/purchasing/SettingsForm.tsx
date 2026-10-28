@@ -199,7 +199,7 @@ export default function SettingsForm({ initialSettings }: Props) {
           </Field>
           <Field
             label="Crate size"
-            help="Glass units per crate. Suggested quantities round to crates, with half-crates for smaller needs."
+            help="Glass units per crate. Suggested quantities round up to whole crates, or one half-crate when that covers the entire need."
           >
             <div className="flex items-center gap-2">
               <input
@@ -216,7 +216,7 @@ export default function SettingsForm({ initialSettings }: Props) {
           </Field>
           <Field
             label="Target at arrival"
-            help="Stock cover to retain when an order arrives, as a percentage of lead-time demand. A higher target means ordering earlier or ordering more."
+            help="Demand to cover after a new order can arrive, as a percentage of the lead time. Each future month uses its own seasonal rate."
           >
             <div className="flex items-center gap-2">
               <input
@@ -261,9 +261,9 @@ export default function SettingsForm({ initialSettings }: Props) {
               Each month gets its own multiplier. <strong>1.0</strong> means
               &ldquo;sells at the yearly average,&rdquo; <strong>1.5</strong>
               {" "}means 50% above, <strong>0.5</strong> means half. The
-              current month&apos;s value scales days-of-stock, reorder point,
-              suggested qty, and SOP status; the forecast chart applies each
-              future month&apos;s own value.
+              current month&apos;s value determines displayed monthly demand.
+              Stock coverage, recommendations, and the chart all apply each
+              future month&apos;s own value over its actual calendar days.
             </p>
             <p className="text-xs text-sand-500 mt-2">
               Recalculating uses RF and GRS revenue history and immediately saves the new seasonality multipliers. Manual edits below are applied with Save changes.

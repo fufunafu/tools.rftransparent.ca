@@ -20,6 +20,7 @@ function fmtNum(n: number | null, digits = 0): string {
   return n.toLocaleString("en-CA", { maximumFractionDigits: digits });
 }
 function daysUntilCapacity(p: ProductWithMetrics): number | null {
+  if (p.planning) return p.planning.days_until_capacity;
   if (p.overstock <= 0) return 0;
   if (p.daily_sales <= 0) return null;
   return p.overstock / p.daily_sales;
@@ -103,7 +104,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
                 <span className="inline-flex items-center justify-end w-full">Monthly<ColumnHint>Annual net units from RF + GRS divided by 12, multiplied by this month&apos;s seasonality. Growth is applied separately to stock projections.</ColumnHint></span>
               </th>
               <Th sortKey="days_until_capacity" current={sortKey} dir={sortDir} onToggle={toggleSort} align="right">
-                <span className="inline-flex items-center">Days to clear<ColumnHint>Estimated time to sell the excess, including seasonality and the configured growth assumption: <span className="font-mono">overstock / (monthly / 30)</span>. &ldquo;No sales&rdquo; means it&apos;ll never clear on its own.</ColumnHint></span>
+                <span className="inline-flex items-center">Days to clear<ColumnHint>Projected time to sell the excess using each future month&apos;s demand and forecast growth. Beyond 1 yr means the excess does not clear within the projection horizon.</ColumnHint></span>
               </Th>
             </tr>
           </thead>
@@ -120,7 +121,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
                   </td>
                   <td className="px-3 py-2 text-right text-sand-500">{fmtNum(seasonalMonthlySales(p.avg_monthly_sales_grs + p.avg_monthly_sales_rf, settings), 1)}</td>
                   <td className="px-3 py-2 text-right">
-                    {!isOver ? "-" : p.days_until_capacity === null ? "no sales" : fmtNum(p.days_until_capacity, 0)}
+                    {!isOver ? "-" : p.days_until_capacity === null ? (p.daily_sales > 0 ? "Beyond 1 yr" : "No demand") : fmtNum(p.days_until_capacity, 0)}
                   </td>
                 </tr>
               );
@@ -143,7 +144,7 @@ export default function OverstockTable({ initialProducts, settings }: Props) {
         </table>
       </div>
       <p className="text-xs text-sand-500">
-        Overstock = on-hand − capacity. &ldquo;Days to clear&rdquo; is how long the excess takes to burn off at the current monthly sales rate.
+        Overstock = on-hand − capacity. &ldquo;Days to clear&rdquo; is how long the excess takes to burn off using each future month&apos;s demand and the forecast-growth setting.
       </p>
     </div>
   );
