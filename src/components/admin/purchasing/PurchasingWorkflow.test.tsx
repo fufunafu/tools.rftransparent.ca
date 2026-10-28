@@ -16,6 +16,9 @@ vi.mock("swr", () => ({ default: (_key: string, options?: { fallbackData?: unkno
 import ReorderTable from "./ReorderTable";
 import InventoryTable from "./InventoryTable";
 import OrdersList from "./OrdersList";
+import { planProduct } from "@/lib/purchasing/planning";
+import SettingsForm from "./SettingsForm";
+import { DEFAULT_GLASS_POLICY } from "@/lib/purchasing/policy";
 
 const settings: PurchasingSettings = { expected_fill: 0.5, lead_time_days: 70, crate_size: 35, season_multipliers: Array(12).fill(1.2), annual_growth_pct: 10, restock_cover_pct: 75 };
 const products = [
@@ -129,4 +132,28 @@ it("searches purchase orders and calculates filter counts from matching orders",
   expect(container.querySelector("tbody")!.textContent).not.toContain("PO-ONE");
   expect(button("Draft").textContent).toBe("Draft (0)");
   expect(button("In transit").textContent).toBe("In transit (1)");
+});
+
+
+it("skips slow glass and unresolved shortages during bulk fill while allowing deliberate review", async () => {
+  const slow = planProduct({ ...products[0], current_inventory: 0, avg_monthly_sales_rf: 0.5, avg_monthly_sales_grs: 0 }, { ...settings, glass_policy: DEFAULT_GLASS_POLICY }, [], "2026-10-27").product;
+  await render(<ReorderTable initialProducts={[slow, products[1]]} initialForecasts={{}} settings={settings} />);
+  await click(button("Fill suggested quantities"));
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Order quantity for G40-36"]')!.value).toBe("");
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Order quantity for SP-BL"]')!.value).toBe("25");
+  expect(container.textContent).toContain("Review required: slow seller");
+  await click(container.querySelector<HTMLButtonElement>('[aria-label="Use suggested quantity for G40-36"]')!);
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Order quantity for G40-36"]')!.value).toBe("18");
+});
+
+it("saves independent order cadence and safety allowances without restoring capacity fill settings", async () => {
+  await render(<SettingsForm initialSettings={{ ...settings, lead_time_days: 84, glass_policy: DEFAULT_GLASS_POLICY }} />);
+  expect(container.querySelector('[aria-label="Expected fill percent"]')).toBeNull();
+  await input(container.querySelector('[aria-label="Days between China orders"]')!, "45");
+  await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+  const payload = JSON.parse(fetchMock.mock.calls[0][1].body);
+  expect(payload.glass_policy).toEqual({ ...DEFAULT_GLASS_POLICY, order_interval_days: 45 });
+  expect(payload.lead_time_days).toBe(84);
+  expect(payload).not.toHaveProperty("expected_fill");
+  expect(payload).not.toHaveProperty("restock_cover_pct");
 });

@@ -30,22 +30,45 @@ Montreal bridge is the maximum cumulative shortage before that date, accounting
 for every confirmed shipment in that interval. A small early delivery cannot hide
 another shortage before supplier replenishment is possible.
 
-The stock coverage target after supplier arrival is:
+Glass uses an editable order interval independent of supplier lead time, initially
+30 days. The post-arrival target is seasonal demand over that interval plus a
+safety allowance: 21 days for fast sellers (at least 365 annual panels), 14 for
+regular sellers (12 to 364), and 7 for slow sellers (fewer than 12). Slow sellers
+with positive forecast demand have an editable 2-unit minimum. These are initial
+operating allowances, not calibrated service-level probabilities. Zero sales or
+a disabled demand forecast does not create an automatic glass minimum.
 
-- Glass: the higher of the configured capacity floor and demand during the
-  configured cover period, capped at physical capacity.
-- Hardware: demand during the next three calendar months, with a 50-unit minimum.
+Capacity is a storage constraint, never a purchasing floor or a cap on calculated
+demand. The rounded order is replayed with dated supply and any projected capacity
+excess requires review. Slow-selling glass crate purchases, unresolved shortages,
+and unconfirmed inbound dates also require review. Bulk fill skips these rows;
+users can deliberately choose a quantity after reviewing the warning.
 
-The supplier quantity protects lead-time demand plus this coverage target.
-Confirmed shipments are counted on their dates, only within that coverage window.
-An arrival outside the window cannot offset demand within it. The model checks
-intermediate shortages as well as the final total. Bridge units are accounted for
-separately, so they are not ordered again from the supplier.
+China lead time starts at 84 days. The delay scenario adds 21 days, giving 105 days
+with the initial settings. It reports uncovered demand if the new order is delayed;
+existing dated POs keep their ETAs. This is a scenario, not a delivery guarantee.
 
-This is an inventory-position target, including timely inbound supply. It is not
-a claim that physical stock must equal that target on every date. The chart plots
-physical stock and capacity; it does not draw the inventory-position threshold as
-though it were a physical-stock trigger.
+Hardware retains its existing target: three calendar months of demand after
+supplier arrival, with a 50-unit minimum.
+
+The glass supplier requirement retains all forecast demand through lead time and
+the coverage target until supply is confirmed. A suggested Montreal transfer is
+not supply. Only an ordered or in-transit shipment with a usable ETA reduces the
+requirement. Pre-arrival shortages cannot be fixed by a new China order; resolve
+those separately and recalculate after confirming a transfer. Do not submit both
+recommendation lists unchanged. This conservatively retains unresolved demand for
+purchasing, while the physical chart continues to clamp depleted stock at zero
+and does not invent a confirmed customer backlog.
+
+Later supply cannot hide an earlier shortage. All supply arriving on the new
+order's ETA is applied before that day's demand. The model checks intermediate
+gaps before subsequent arrivals and the final requirement. Neither total inbound
+nor an unconfirmed bridge can silently offset the required quantity.
+
+The inventory-position target is not a claim that physical stock must equal it
+on every date. The chart plots recorded physical stock and dated confirmed supply;
+it does not include suggested orders, hypothetical transfers, or safety allowances
+as actual stock.
 
 Supplier quantities round up to whole crates, or one half-crate when that covers
 the complete requirement. Rounding never drops below the required quantity.

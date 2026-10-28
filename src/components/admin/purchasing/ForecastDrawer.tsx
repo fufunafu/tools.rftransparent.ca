@@ -33,10 +33,10 @@ function reorderReasons(product: ProductWithMetrics, settings: PurchasingSetting
   const reasons: string[] = [];
   const eta = product.planning?.order_arrival_date;
   if (product.transfer_requirement > 0) reasons.push(
-    `A bridge of ${fmtN(product.transfer_requirement)} units is needed before a new supplier order can arrive${eta ? ` on ${fmtDate(eta)}` : ` in ${settings.lead_time_days} days`}. The calculation includes confirmed arrivals on their actual dates.`,
+    `A bridge of ${fmtN(product.transfer_requirement)} units is needed before a new supplier order can arrive${eta ? ` on ${fmtDate(eta)}` : ` in ${settings.lead_time_days} days`}. The calculation includes confirmed arrivals on their actual dates. This is a shortage to resolve, not confirmation that Montreal has stock or can deliver in time.`,
   );
   if (product.suggested_qty > 0) reasons.push(
-    `Order ${fmtN(product.suggested_qty)} units from the supplier to cover later demand and the stock target. The calculated need is ${fmtN(product.perfect_qty)} units${product.category === "glass" ? ", rounded up to an allowed crate quantity" : ""}. Any bridge transfer is counted separately so its units are not ordered twice.`,
+    `Order ${fmtN(product.suggested_qty)} units from the supplier to cover later demand and the stock target. The calculated need is ${fmtN(product.perfect_qty)} units${product.category === "glass" ? ", rounded up to an allowed crate quantity" : ""}. ${product.category === "glass" ? "Unconfirmed transfers do not reduce this quantity. Confirm the shortage plan and recalculate before ordering from both sources." : "Bridge units are counted separately."}`,
   );
   if (product.avg_monthly_sales_grs + product.avg_monthly_sales_rf === 0) reasons.push(
     "The annual sales baseline is zero. Any suggested purchase fills the configured minimum stock target; it is not evidence of current demand.",
@@ -240,11 +240,17 @@ function CalcNote({ product, settings }: { product: ProductWithMetrics; settings
     ["Supplier lead time", `${fmtDate(plan.as_of)} to ${fmtDate(plan.order_arrival_date)}: ${fmtN(plan.lead_demand)} units of forecast demand`],
     ["Coverage target", product.category === "hardware"
       ? `${fmtN(plan.target_demand)} units: the next three months of forecast demand after supplier arrival, with a 50-unit minimum`
-      : `${fmtN(plan.target_demand)} units: the higher of ${fmtN(plan.cover_demand)} future cover-period demand or the ${fmtN(settings.expected_fill * product.storage_capacity)} stock floor, capped at capacity`],
+      : `${fmtN(plan.target_demand)} units: ${plan.policy?.order_interval_days ?? 0} days between orders plus ${plan.policy?.safety_days ?? 0} safety days after arrival; ${plan.policy?.band ?? "regular"} seller. Minimum ${plan.policy?.minimum_units ?? 0} units. Capacity does not set this target.`],
     ["Dated inbound counted", `${fmtN(plan.counted_inbound)} units within the protected coverage period. Later, overdue and undated shipments cannot hide earlier shortages.`],
-    ["Montreal bridge", `${fmtN(product.transfer_requirement)} units before supplier replenishment can arrive`],
+    ["Uncovered demand", `${fmtN(product.transfer_requirement)} units before supplier arrival. Confirm a transfer quantity and ETA before counting it as supply.`],
     ["Supplier order", `${fmtN(product.perfect_qty)} additional units needed; ${fmtN(product.suggested_qty)} suggested after rounding`],
   ];
+  if (plan.policy) {
+    rows.push(["Delivery delay scenario", `${fmtDate(plan.policy.delayed_arrival_date)}: ${fmtN(plan.policy.delayed_shortage)} units of uncovered demand before a delayed new order arrives. Existing POs retain their confirmed dates.`]);
+    if (plan.policy.capacity_excess > 0) rows.push(["Capacity review", `The rounded order and scheduled supply could exceed capacity by ${fmtN(plan.policy.capacity_excess)} units. Review split deliveries or storage before ordering.`]);
+    if (plan.policy.requires_review) rows.push(["Manual review", "Excluded from bulk fill. Review the slow-selling crate quantity, stock capacity, shortage plan, or unconfirmed inbound dates before choosing a quantity."]);
+    rows.push(["Stock source", "Recorded purchasing stock. SumTracker warehouse quantities and reservations must be reconciled before placing an order."]);
+  }
   return <div className="mt-3 border-t border-sand-100 pt-3">
     <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-sand-400">How the recommendation is calculated</div>
     <div className="space-y-2">{rows.map(([label, value]) => <div key={label} className="text-xs sm:flex sm:gap-2"><span className="block shrink-0 font-medium text-sand-500 sm:w-40">{label}</span><span className="text-sand-700 tabular-nums">{value}</span></div>)}</div>

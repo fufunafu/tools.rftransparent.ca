@@ -348,7 +348,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
                 <span className="inline-flex items-center gap-1">Status<ColumnHint>
                   <span className="block"><strong>Reorder + Montreal transfer</strong> - A shortage occurs before a new supplier order can arrive, and more stock is needed for the following coverage period.</span>
                   <span className="block mt-1"><strong>Montreal transfer</strong> - A shortage occurs before a new supplier order can arrive. Confirmed incoming stock covers the later period, so only a bridge transfer is suggested.</span>
-                  <span className="block mt-1"><strong>Reorder now</strong> - Dated supply is insufficient for demand during the lead time and the following coverage target. The suggestion accounts for any bridge transfer separately.</span>
+                  <span className="block mt-1"><strong>Reorder now</strong> - Dated supply is insufficient for demand during the lead time and the following coverage target. Unconfirmed bridge transfers do not reduce the China recommendation.</span>
                   <span className="block mt-1"><strong>OK</strong> - sufficient cover and inbound timing is safe.</span>
                   <span className="block mt-1"><strong>No sales data</strong> - monthly sales is 0.</span>
                 </ColumnHint>
