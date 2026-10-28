@@ -9,7 +9,12 @@ export const createCrmRecord = z.object({
   email: z.union([z.email().max(320), z.literal("")]).default(""),
   phone: z.string().trim().max(60).default(""), company: z.string().trim().max(300).default(""),
   reminderEnabled: z.boolean().default(false), reminderMinutes: z.union([z.literal(15), z.literal(60), z.literal(1440)]).default(60),
-}).refine(input => input.type !== "tasks" || input.dueAt !== null, { message: "Choose a due date for the task." });
+  // Optional extras. Without them the original create path is used unchanged.
+  ownerEmail: z.union([z.email().max(320), z.literal("")]).transform(value => value.toLowerCase()).optional(),
+  details: z.record(z.string().max(40), z.string().trim().max(120)).refine(value => Object.keys(value).length <= 10).default({}),
+  extraRelatedIds: z.array(crmId).max(4).default([]),
+}).refine(input => input.type !== "tasks" || input.dueAt !== null, { message: "Choose a due date for the task." })
+  .refine(input => input.type !== "tasks" || input.ownerEmail !== "", { message: "Choose who the task is assigned to." });
 export const updateCrmTask = z.object({
   id: crmId, version: z.number().int().positive(), status: z.enum(["open", "completed"]),
   dueAt: z.string().datetime({ offset: true }),

@@ -6,6 +6,7 @@ import { BUSINESS_TIMEZONE } from "@/lib/dates";
 import { HOME_ACTIVITIES, homeUrl, type CrmHomeData, type HomeActivity, type HomeScope } from "@/lib/crm/home-window";
 import type { CrmRecord, CrmStatus, CrmType } from "@/lib/crm/types";
 import RecordAvatar from "./RecordAvatar";
+import QuickComplete from "./QuickComplete";
 import { BUTTON, ErrorMessage, fetchJson, ownerLabel, recordTitle, stageLabel } from "./shared";
 
 const subscribe = () => () => {};
@@ -28,8 +29,8 @@ function Empty({ type, title, children }: { type: string; title: string; childre
   </div>;
 }
 
-export default function CrmHome({ email, displayName, initialHome, status, onSelect, onAdd, onNavigate }: {
-  email: string; displayName?: string; initialHome?: CrmHomeData; status?: CrmStatus;
+export default function CrmHome({ email, displayName, initialHome, status, onSelect, onAdd, onNavigate, canManage = false, onChanged }: {
+  email: string; displayName?: string; initialHome?: CrmHomeData; status?: CrmStatus; canManage?: boolean; onChanged?: () => void;
   onSelect: (id: string) => void; onAdd: (type: CrmType) => void;
   onNavigate: (tab: string, view?: string, mine?: boolean, taskStatus?: "open" | "completed") => void;
 }) {
@@ -61,7 +62,7 @@ export default function CrmHome({ email, displayName, initialHome, status, onSel
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)]">
         <Card title="Tasks" action={<button className="min-h-10 rounded-lg bg-orange-700 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-800" onClick={() => onAdd("tasks")}>+ New task</button>}>
           <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4"><div role="tablist" aria-label="Today's tasks" className="flex gap-5">{(["open", "completed"] as const).map(value => <button role="tab" aria-selected={taskView === value} key={value} onClick={() => setTaskView(value)} className={`min-h-11 border-b-2 text-sm font-medium ${taskView === value ? "border-orange-600 text-orange-800" : "border-transparent text-slate-500"}`}>{value === "open" ? "Open" : "Completed"} <span className="ml-1 text-xs">{value === "open" ? data.tasks.openTotal : data.tasks.completedTotal}</span></button>)}</div><span className="text-xs text-slate-500">Due today</span></div>
-          {data.tasks[taskView].length ? <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 px-4">{data.tasks[taskView].map(record => <button onClick={() => open(record)} key={record.id} className="flex w-full items-center gap-3 py-3 text-left hover:bg-slate-50"><span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${taskView === "completed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}><Icon type="tasks" /></span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-cyan-800">{recordTitle(record)}</span><span className="mt-1 block text-xs capitalize text-slate-500">{ownerLabel(record.owner_email)}</span></span><span className="shrink-0 text-xs text-slate-500">{time(record.effective_due_at)}</span></button>)}</div> : <Empty type="tasks" title={taskView === "open" ? "You have no open tasks due today" : "No completed tasks due today"}>{taskView === "open" ? "Schedule a follow-up or review upcoming tasks." : "Completed tasks with today's due date appear here."}</Empty>}
+          {data.tasks[taskView].length ? <div className="max-h-60 overflow-y-auto divide-y divide-slate-100 px-4">{data.tasks[taskView].map(record => <div key={`${record.id}:${record.version}`} className="flex w-full items-center gap-3 py-3 hover:bg-slate-50"><QuickComplete record={record} email={email} canManage={canManage} onChanged={() => { void mutate(); onChanged?.(); }} /><button onClick={() => open(record)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="min-w-0 flex-1"><span className={`block truncate text-sm font-semibold ${taskView === "completed" ? "text-slate-500 line-through" : "text-cyan-800"}`}>{recordTitle(record)}</span><span className="mt-1 block text-xs capitalize text-slate-500">{ownerLabel(record.owner_email)}</span></span><span className="shrink-0 text-xs text-slate-500">{time(record.effective_due_at)}</span></button></div>)}</div> : <Empty type="tasks" title={taskView === "open" ? "You have no open tasks due today" : "No completed tasks due today"}>{taskView === "open" ? "Schedule a follow-up or review upcoming tasks." : "Completed tasks with today's due date appear here."}</Empty>}
           <button className="mt-auto min-h-11 w-full border-t border-slate-100 px-4 text-left text-sm font-semibold text-cyan-800 hover:bg-slate-50" onClick={() => onNavigate("tasks", "today", mine, taskView)}>View all of today&apos;s {taskView} tasks →</button>
         </Card>
         <Card title="Meetings" action={<button className="min-h-10 text-sm font-semibold text-cyan-800 hover:underline" onClick={() => onAdd("meetings")}>+ Log meeting</button>}>

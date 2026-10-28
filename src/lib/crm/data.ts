@@ -11,7 +11,21 @@ import { FOLLOWUP_FILTERS } from "./directory-workflows";
 export const SUMMARY_COLUMNS = "id,object_type,source,portal_id,hubspot_id,title,summary,owner_email,occurred_at,effective_due_at,effective_task_status,archived,version,created_by_email,reminder_enabled,reminder_minutes,view_fields,local_fields";
 export const FOLLOWUP_COLUMNS = "last_contacted_at,next_task_id,next_task_title,next_task_due_at,open_task_count,followup_checked_at";
 
+/** The PostgREST filter used by every CRM text search. */
+export function crmSearchFilter(search: string) {
+  const value = quotePostgrestValue(`%${search.replace(/[%_\\]/g, "\\$&")}%`);
+  return `title.ilike.${value},summary.ilike.${value},local_fields->>title.ilike.${value},local_fields->>email.ilike.${value},local_fields->>phone.ilike.${value},local_fields->>company.ilike.${value},search_document.wfts(simple).${quotePostgrestValue(search)}`;
+}
+
 export async function listCrmRecords(params: URLSearchParams, email: string): Promise<CrmPage> {
+  const { query, page } = buildCrmListQuery(params, email);
+  const result = await query.order("id").range(page * 50, page * 50 + 49);
+  if (result.error) throw new Error("CRM search unavailable");
+  return { records: (result.data as unknown as CrmRecord[]).map(effectiveRecord), total: result.count ?? 0, page };
+}
+
+/** Validated, filtered and ordered list query. Callers choose the range. */
+export function buildCrmListQuery(params: URLSearchParams, email: string) {
   const page = Number(params.get("page") ?? 0);
   const type = params.get("type") ?? "contacts";
   const search = params.get("q")?.trim() ?? "";
@@ -33,10 +47,7 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
   else if (type === "activities") query = query.in("object_type", ["calls", "meetings", "emails", "notes", "tasks"]);
   else if (type !== "all") query = query.eq("object_type", type);
   query = query.eq("archived", params.get("archived") === "true");
-  if (search && !related) {
-    const value = quotePostgrestValue(`%${search.replace(/[%_\\]/g, "\\$&")}%`);
-    query = query.or(`title.ilike.${value},summary.ilike.${value},local_fields->>title.ilike.${value},local_fields->>email.ilike.${value},local_fields->>phone.ilike.${value},local_fields->>company.ilike.${value},search_document.wfts(simple).${quotePostgrestValue(search)}`);
-  }
+  if (search && !related) query = query.or(crmSearchFilter(search));
   if (params.get("mine") === "true") query = query.eq("owner_email", email);
   if (directoryQuery) {
     for (const field of DIRECTORY_FIELDS) {
@@ -73,9 +84,7 @@ export async function listCrmRecords(params: URLSearchParams, email: string): Pr
     query = query.order("effective_due_at", { ascending: view === "upcoming" || view === "today", nullsFirst: false });
   } else if (directoryQuery?.sort.startsWith("name_")) query = query.order("directory_name", { ascending: directoryQuery.sort === "name_asc", nullsFirst: false });
   else query = query.order("occurred_at", { ascending: directoryQuery?.sort === "oldest", nullsFirst: false });
-  const result = await query.order("id").range(page * 50, page * 50 + 49);
-  if (result.error) throw new Error("CRM search unavailable");
-  return { records: (result.data as unknown as CrmRecord[]).map(effectiveRecord), total: result.count ?? 0, page };
+  return { query, page };
 }
 
 export async function getCrmRecord(id: string, view: CrmRecordView = "full"): Promise<CrmRecord> {
