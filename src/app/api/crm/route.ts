@@ -5,6 +5,7 @@ import { getCrmRecord, getCrmStatus, listCrmRecords } from "@/lib/crm/data";
 import { CrmInputError, createCrmRecord, readCrmJson, updateCrmTask, editCrmContact } from "@/lib/crm/input";
 import { canAccessCrm } from "@/lib/crm/access";
 import { CRM_RECORD_VIEWS, type CrmRecordView } from "@/lib/crm/types";
+import { getCrmDirectoryOptions } from "@/lib/crm/directory-data";
 
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
@@ -33,6 +34,7 @@ export async function GET(request: Request) {
   try {
     const params = new URL(request.url).searchParams;
     if (params.get("statusOnly") === "true") return json(await getCrmStatus());
+    if (params.get("filtersOnly") === "true") return json(await getCrmDirectoryOptions(params));
     if (params.has("id")) {
       const view = (params.get("view") ?? "full") as CrmRecordView;
       if (!CRM_RECORD_VIEWS.includes(view)) throw new CrmInputError("Invalid record view");

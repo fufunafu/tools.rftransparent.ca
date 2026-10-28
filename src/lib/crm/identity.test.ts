@@ -26,6 +26,12 @@ describe("CRM matching identities", () => {
     expect(record.properties).toEqual(properties);
     expect(projectCrmRecord({ ...record, archived: true }).identities).toEqual([]);
   });
+  it("keeps location in compact display fields without copying the source blob", () => {
+    const properties = packProperties({ country: "CA", state: "Ontario", city: "Toronto", private_source_field: "retained" });
+    const result = projectCrmRecord({ object_type: "companies", properties });
+    expect(result.view_fields).toMatchObject({ country: "Canada", region: "Ontario", city: "Toronto" });
+    expect(result.view_fields).not.toHaveProperty("private_source_field");
+  });
   it("deduplicates attachment references but retains distinct recording URLs for review", () => {
     const result = projectCrmRecord({ object_type: "calls", source: "hubspot", portal_id: "1", properties: { hs_attachment_ids: "1;2;1;bad", hs_call_recording_url: "https://unverified.example/recording" } });
     expect(result.assets).toHaveLength(3);

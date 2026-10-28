@@ -10,6 +10,14 @@ Home is the default CRM screen. It shows the viewer's local-day meetings and tas
 
 Home preloads compact database summaries on the server and refreshes every minute. Full email bodies, original fields, and history load only after a record is opened. The feed does not claim email-open tracking or a calendar connection. Existing task forms and record workspaces handle creation, completion, and follow-up. The main sections are Home, Contacts, Companies, and Tasks. Activity remains on Home, and reminder delivery history is inside Tasks. Duplicate matching, unlinked activity matching, and attachment migration are under the collapsed HubSpot connection settings. Deals and Tickets are absent from navigation and relationship panels; their imported source records remain preserved.
 
+## Contact and company filters
+
+Both directories support searchable, multiple-choice filters for owner, lifecycle stage, country, state/province, and city. Values within one field are combined with OR; different fields, search, source, and the existing views are combined with AND. Unassigned and missing values are selectable. Filter chips can be removed individually. Changing a filter returns to the first page, and result counts come from the full database. Sorting supports newest, oldest, and name in either direction. Companies show domain, phone, location, owner, and lifecycle stage.
+
+Apply `20261027230000_crm_directory_filters.sql` after the workflow migrations. Its compact view and option function are service-only. The application checks the existing CRM department access before reading either. Options load when a filter is opened and include the whole directory, with separate active and archived scopes. Source fields and history are excluded from directory responses.
+
+Before publishing, requeue contact and company projections that lack `country`, `region`, or `city`, then run the documented indexing-only CLI with the new projection code. Verify every directory record has all three keys, including explicit blanks. The projection groups clear country aliases and expands state/province codes only when the country is known. It never infers a missing country from a city. Original properties and local edits remain intact. For a recovery, the previous application can continue using `crm_records`; the additive view and indexes can remain installed.
+
 ## Connection
 
 Configure `HUBSPOT_ACCESS_TOKEN` with a read-only HubSpot service key and set `HUBSPOT_PORTAL_ID` to the intended account. Keep the token in private server environment variables, never in source control or a public environment variable. A live account-info check prevents importing from a different account.

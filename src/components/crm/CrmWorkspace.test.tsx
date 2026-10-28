@@ -54,3 +54,38 @@ it("keeps reminder delivery history within Tasks instead of a separate navigatio
   expect(container.querySelector("nav")?.textContent).not.toContain("reminders");
   expect(container.textContent).toContain("Task reminders and delivery history");
 });
+
+it("combines owner and location filters on the server, resets pagination, and clears individual filters", async () => {
+  const options = { owner: [{ value: "rep@example.com", label: "rep@example.com", count: 75 }, { value: "", label: "", count: 12 }], stage: [{ value: "customer", label: "customer", count: 20 }], country: [], region: [], city: [{ value: "ottawa", label: "Ottawa", count: 18 }] };
+  const fetcher = vi.fn(async (url: string) => {
+    const params = new URL(url, "https://tools.example").searchParams;
+    return Response.json(params.has("filtersOnly") ? options : { records: [{ ...initialPage.records[0], title: params.has("city") ? "Ottawa result" : "Owner result" }], total: params.has("city") ? 3 : 75, page: Number(params.get("page")) || 0 });
+  });
+  vi.stubGlobal("fetch", fetcher);
+  await act(async () => root.render(<CrmWorkspace initialTab="contacts" email="viewer@example.com" canManage={false} initialPage={{ ...initialPage, total: 75 }} initialStatus={initialStatus} />));
+  const button = (text: string) => [...container.querySelectorAll("button")].find(button => button.textContent?.trim() === text)!;
+  await act(async () => button("Next").click());
+  expect(fetcher.mock.calls.at(-1)?.[0]).toContain("page=1");
+  const owner = container.querySelector('[aria-label="Contact filters"] button') as HTMLButtonElement;
+  await act(async () => owner.click());
+  expect(fetcher.mock.calls.at(-1)?.[0]).toContain("filtersOnly=true&type=contacts");
+  await act(async () => (container.querySelector('[role="dialog"] input[type="checkbox"]') as HTMLInputElement).click());
+  let request = new URL(fetcher.mock.calls.at(-1)![0], "https://tools.example");
+  expect(request.searchParams.get("owner")).toBe("rep@example.com");
+  expect(request.searchParams.get("page")).toBe("0");
+  await act(async () => button("Done").click());
+  const city = [...container.querySelectorAll('[aria-label="Contact filters"] button')].find(item => item.textContent?.startsWith("City")) as HTMLButtonElement;
+  await act(async () => city.click());
+  await act(async () => (container.querySelector('[role="dialog"] input[type="checkbox"]') as HTMLInputElement).click());
+  request = new URL(fetcher.mock.calls.at(-1)![0], "https://tools.example");
+  expect(request.searchParams.getAll("owner")).toEqual(["rep@example.com"]);
+  expect(request.searchParams.getAll("city")).toEqual(["ottawa"]);
+  expect(container.textContent).toContain("3 matches");
+  expect(container.textContent).toContain("Ottawa result");
+  await act(async () => (container.querySelector('[aria-label^="Remove owner filter"]') as HTMLButtonElement).click());
+  request = new URL(fetcher.mock.calls.at(-1)![0], "https://tools.example");
+  expect(request.searchParams.has("owner")).toBe(false);
+  expect(request.searchParams.get("city")).toBe("ottawa");
+  await act(async () => button("Clear all filters").click());
+  expect(container.querySelector('[aria-label="Active filters"]')).toBeNull();
+});

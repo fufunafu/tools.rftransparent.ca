@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ user: vi.fn(), manage: vi.fn(), access: vi.fn(), record: vi.fn(), rpc: vi.fn(), list: vi.fn(), status: vi.fn() }));
+const mocks = vi.hoisted(() => ({ user: vi.fn(), manage: vi.fn(), access: vi.fn(), record: vi.fn(), rpc: vi.fn(), list: vi.fn(), status: vi.fn(), options: vi.fn() }));
+vi.mock("@/lib/crm/directory-data", () => ({ getCrmDirectoryOptions: mocks.options }));
 vi.mock("@/lib/crm/access", () => ({ canAccessCrm: mocks.access }));
 vi.mock("@/lib/admin-auth", () => ({ getAuthenticatedUser: mocks.user, isManagementUser: mocks.manage }));
 vi.mock("@/lib/supabase", () => ({ getSupabase: () => ({ rpc: mocks.rpc }) }));
@@ -12,6 +13,16 @@ const task = { id: "hubspot:40088916:tasks:11", version: 1, status: "completed",
 beforeEach(() => { vi.resetAllMocks(); mocks.user.mockResolvedValue({ email: "rep@example.com" }); mocks.manage.mockResolvedValue(false); mocks.access.mockResolvedValue(true); mocks.rpc.mockResolvedValue({ data: "tools:123", error: null }); });
 
 describe("CRM routes", () => {
+  it("authorizes filter metadata before querying and keeps it out of public caches", async () => {
+    mocks.options.mockResolvedValue({ owner: [] });
+    const request = new Request("https://tools.rftransparent.ca/api/crm?filtersOnly=true&type=companies");
+    const response = await GET(request);
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ owner: [] });
+    expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    expect(mocks.options.mock.calls[0][0].get("type")).toBe("companies");
+    mocks.options.mockClear(); mocks.user.mockResolvedValue(null);
+    expect((await GET(request)).status).toBe(401); expect(mocks.options).not.toHaveBeenCalled();
+  });
   it.each(["detail", "fields", "history"])("authorizes and forwards the on-demand %s view", async view => {
     mocks.record.mockResolvedValue({ id: task.id });
     const response = await GET(new Request(`https://tools.rftransparent.ca/api/crm?id=${task.id}&view=${view}`));
