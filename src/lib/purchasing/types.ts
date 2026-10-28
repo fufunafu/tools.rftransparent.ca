@@ -76,6 +76,8 @@ export interface ProductWithMetrics {
 
 export interface ForecastPoint {
   date: string;
+  // Exact point within a forecast day, in UTC milliseconds, when needed.
+  timestamp?: number;
   inventory: number;
   event?: "today" | "arrival" | "stockout" | "horizon";
   po_number?: string;

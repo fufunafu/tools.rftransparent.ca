@@ -74,7 +74,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
   const products = data?.products ?? initialProducts;
   const settings = data?.settings ?? initialSettings;
 
-  const [category, setCategory] = useState<Category | "all">("all");
+  const [category, setCategory] = useState<Category | "all">("glass");
   const [height, setHeight] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("sort_order");
@@ -238,7 +238,7 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
 
   return (
     <div className="space-y-4">
-      <PurchasingPageHeader title="Stock overview" description="See what is available, what is arriving, and which products need attention. Select a product to inspect its forecast." actions={<>
+      <PurchasingPageHeader title="Stock overview" description="See what is available, what is arriving, and which products need attention. Choose View graph to inspect a product's inventory forecast." actions={<>
           <button type="button" onClick={() => setShowAddDialog(true)}
             className="rounded-lg border border-sand-300 bg-white px-3 py-2 text-sm font-medium hover:bg-sand-50">Add product</button>
           <Link href="/warehouse/purchasing/reorder" className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent/90">Plan an order</Link>
@@ -371,7 +371,19 @@ export default function InventoryTable({ initialProducts, initialForecasts, sett
           <tbody className="divide-y divide-sand-100">
             {visible.map((p) => (
               <tr key={p.id} className={savingId === p.id ? "bg-amber-50/40" : "hover:bg-sand-50/60"}>
-                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3"><button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View forecast for ${p.sku}`} className="text-left hover:text-accent"><span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span><span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>{(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm ETA: {p.planning!.unconfirmed_inbound} inbound units</span>}</button><span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span></td>
+                <td className="sticky left-0 z-10 min-w-36 bg-white md:min-w-48 px-3 py-3">
+                  <button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View forecast for ${p.sku}`} className="text-left hover:text-accent">
+                    <span className="block font-mono text-xs font-semibold text-accent">{p.sku}</span>
+                    <span className="mt-1 block max-w-60 text-xs text-sand-600">{p.name.replaceAll("\u2014", "-")}</span>
+                    {(p.planning?.unconfirmed_inbound ?? 0) > 0 && <span className="mt-1 block text-[10px] text-amber-700">Confirm ETA: {p.planning!.unconfirmed_inbound} inbound units</span>}
+                  </button>
+                  <button type="button" onClick={() => setForecastSku(p.id)} aria-label={`View graph for ${p.sku}`}
+                    className="mt-2 flex min-h-8 items-center gap-1.5 rounded-md border border-sand-200 bg-sand-50 px-2 py-1 text-xs font-medium text-accent hover:border-accent hover:bg-white">
+                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" className="h-4 w-4"><path d="M3 3v14h14M5 12l4-4 3 2 5-6" /></svg>
+                    View graph
+                  </button>
+                  <span className={"mt-1.5 block text-[10px] font-medium md:hidden " + (p.sop_label.includes("montreal") ? "text-orange-700" : "text-sand-500")}>{SOP_LABEL_DISPLAY[p.sop_label]}</span>
+                </td>
                 <EditableCell sku={p.sku} value={p.current_inventory}
                   onSave={(v) => saveField(p.id, "current_inventory", v)} saving={savingId === p.id} />
                 <td className="hidden px-3 py-2 text-right text-sand-500 md:table-cell">{p.inbound > 0 ? fmtNum(p.inbound, 0) : "-"}</td>

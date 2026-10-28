@@ -2,11 +2,16 @@
 import { act, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ProductWithMetrics, PurchasingSettings, PurchaseOrderWithRollup } from "@/lib/purchasing/types";
+import type { InventoryForecast, ProductWithMetrics, PurchasingSettings, PurchaseOrderWithRollup } from "@/lib/purchasing/types";
 
 const { push, mutate } = vi.hoisted(() => ({ push: vi.fn(), mutate: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push, refresh: vi.fn() }) }));
-vi.mock("next/dynamic", () => ({ default: () => () => null }));
+vi.mock("next/dynamic", () => ({ default: () => ({ product, forecast, onClose }: {
+  product: ProductWithMetrics; forecast: InventoryForecast | null; onClose: () => void;
+}) => <div role="dialog" aria-label={`Inventory graph for ${product.sku}`}>
+  <output>{forecast?.product_id}: {forecast?.projected_stockout_date}</output>
+  <button onClick={onClose}>Close graph</button>
+</div> }));
 vi.mock("swr", () => ({ default: (_key: string, options?: { fallbackData?: unknown }) => ({ data: options?.fallbackData, mutate }) }));
 import ReorderTable from "./ReorderTable";
 import InventoryTable from "./InventoryTable";
@@ -86,12 +91,31 @@ it("rejects a cleared stock input while allowing an explicitly entered zero", as
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ id: "panel", current_inventory: 0 });
 });
 
-it("shows products across both categories initially and does not nest column-toggle buttons inside sort buttons", async () => {
+it("defaults inventory to glass while keeping all products and hardware accessible", async () => {
   await render(<InventoryTable initialProducts={products} initialForecasts={{}} settings={settings} />);
-  expect(container.textContent).toContain("G40-36"); expect(container.textContent).toContain("SP-BL");
+  expect(container.textContent).toContain("G40-36"); expect(container.textContent).not.toContain("SP-BL");
+  expect(button("Glass").getAttribute("aria-pressed")).toBe("true");
   expect(container.querySelector("button button")).toBeNull();
-  await click(button("Glass")); expect(container.textContent).not.toContain("SP-BL");
+  expect(container.querySelector('[aria-label="View graph for G40-36"]')?.textContent).toContain("View graph");
+  await click(button("All products")); expect(container.textContent).toContain("SP-BL"); expect(container.textContent).toContain("G40-36");
   await click(button("Hardware")); expect(container.textContent).toContain("SP-BL");
+  expect(container.textContent).not.toContain("G40-36");
+});
+
+it("opens and closes the selected product's graph from its visible button without changing inventory", async () => {
+  const forecasts: Record<string, InventoryForecast> = {
+    panel: { product_id: "panel", days_until_stockout: 10, projected_stockout_date: "2026-11-06", timeline: [] },
+    spigot: { product_id: "spigot", days_until_stockout: 20, projected_stockout_date: "2026-11-16", timeline: [] },
+  };
+  await render(<InventoryTable initialProducts={products} initialForecasts={forecasts} settings={settings} />);
+  await click(container.querySelector<HTMLButtonElement>('[aria-label="View graph for G40-36"]')!);
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain("panel: 2026-11-06");
+  await click(button("Close graph"));
+  expect(container.querySelector('[role="dialog"]')).toBeNull();
+  await click(button("Hardware"));
+  await click(container.querySelector<HTMLButtonElement>('[aria-label="View graph for SP-BL"]')!);
+  expect(container.querySelector('[role="dialog"]')?.textContent).toContain("spigot: 2026-11-16");
+  expect(fetchMock).not.toHaveBeenCalled();
 });
 
 it("searches purchase orders and calculates filter counts from matching orders", async () => {

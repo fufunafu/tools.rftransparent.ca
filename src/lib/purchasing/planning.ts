@@ -32,10 +32,16 @@ export function buildForecast(productId: string, startInventory: number, baseMon
     stock += incoming.reduce((sum, a) => sum + a.qty, 0);
     for (const a of incoming) timeline.push({ date, inventory: stock, event: "arrival", po_number: a.po_number, qty: a.qty });
     const demand = dailyDemand(date, baseMonthly, seasonality);
+    const beforeDemand = stock;
     stock = Math.max(0, stock - demand);
-    if (stockout === null && stock <= EPSILON && demand > EPSILON) {
-      stockout = date;
-      timeline.push({ date, inventory: 0, event: "stockout" });
+    if (stock <= EPSILON && demand > EPSILON && (stockout === null || beforeDemand > EPSILON)) {
+      const firstStockout = stockout === null;
+      if (firstStockout) stockout = date;
+      // Place depletion at its actual position within the day. Every later
+      // depletion needs an anchor too, otherwise the line slopes through days
+      // when stock is already zero after a partial replenishment.
+      timeline.push({ date, timestamp: Date.parse(`${date}T00:00:00Z`) + Math.min(1, beforeDemand / demand) * DAY_MS,
+        inventory: 0, ...(firstStockout ? { event: "stockout" as const } : {}) });
     }
     // Demand has a constant daily rate inside each calendar month. These
     // anchors retain that exact slope and each arrival without a second model.
