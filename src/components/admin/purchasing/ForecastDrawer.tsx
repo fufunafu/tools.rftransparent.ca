@@ -95,7 +95,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
             {forecast?.projected_stockout_date ? (
               <div>
                 <div className="text-[11px] text-sand-400 uppercase tracking-wider font-medium">Projected stockout</div>
-                <div className="text-2xl font-semibold text-red-700 tabular-nums">
+                <div className={"text-2xl font-semibold tabular-nums " + ((forecast.days_until_stockout ?? 365) < settings.lead_time_days ? "text-red-700" : "text-sand-900")}>
                   {fmtDate(forecast.projected_stockout_date)}
                 </div>
                 <div className="text-sand-600 text-xs mt-0.5">
@@ -175,7 +175,7 @@ export default function ForecastDrawer({ product, forecast, settings, onClose }:
                     <XAxis dataKey="t" type="number" scale="time" domain={xDomain}
                       tick={{ fontSize: 11 }}
                       minTickGap={50}
-                      tickFormatter={(ms) => new Date(ms).toLocaleDateString("en-CA", { month: "short", day: "numeric" })} />
+                      tickFormatter={(ms) => new Date(ms).toLocaleDateString("en-CA", { timeZone: "UTC", month: "short", day: "numeric" })} />
                     <YAxis tick={{ fontSize: 11 }} />
                     <Tooltip labelFormatter={(ms) => fmtDate(isoFromMs(ms as number))}
                       formatter={(v) => [Number(v).toLocaleString("en-CA", { maximumFractionDigits: 0 }), "units"]} />
