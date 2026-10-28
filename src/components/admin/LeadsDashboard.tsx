@@ -67,6 +67,29 @@ function formatDateTime(iso: string): string {
   });
 }
 
+function callStatusLabel(lead: Lead): string {
+  if (lead.call_status !== "called") return CALL_STATUS_LABELS[lead.call_status];
+  if (lead.call_status_source === "manual") return "Called · manual";
+  return lead.last_call_at ? "Called" : "Called · unverified";
+}
+
+function LeadCallAttribution({ lead }: { lead: Lead }) {
+  return <div className="mt-1 space-y-1 text-xs text-sand-600">
+    {lead.last_call_at && <div>
+      <div className="break-words">Phone record: {lead.last_called_by || "Caller not recorded"}</div>
+      <div className="text-sand-400">{formatDateTime(lead.last_call_at)}</div>
+    </div>}
+    {lead.call_status_source === "manual" ? <div>
+      <div className="break-words">Manually marked {CALL_STATUS_LABELS[lead.call_status].toLowerCase()} by {lead.call_status_changed_by || "employee not recorded"}</div>
+      {lead.call_status_changed_at && <div className="text-sand-400">{formatDateTime(lead.call_status_changed_at)}</div>}
+    </div> : !lead.last_call_at && lead.call_status !== "not_called" && <div>
+      <div>{lead.call_status_source ? "Status updated automatically" : "Who marked this: not recorded"}</div>
+      {lead.call_status_changed_at && <div className="text-sand-400">{formatDateTime(lead.call_status_changed_at)}</div>}
+    </div>}
+    {!lead.last_call_at && lead.call_status !== "not_called" && <div className="text-amber-700">No linked phone record</div>}
+  </div>;
+}
+
 function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
@@ -592,7 +615,7 @@ function LeadDetailPanel({
                   </span>
                 ) : lead.outcome !== "not_applicable" && (
                   <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${CALL_BADGE[lead.call_status]}`}>
-                    {CALL_STATUS_LABELS[lead.call_status]}
+                    {callStatusLabel(lead)}
                   </span>
                 )}
                 {(lead.duplicate_count ?? 1) > 1 && (
@@ -606,6 +629,7 @@ function LeadDetailPanel({
                   </span>
                 )}
               </div>
+              <LeadCallAttribution lead={lead} />
             </div>
             <button
               type="button"
@@ -1222,7 +1246,7 @@ export default function LeadsDashboard({ initialLeads, initialNow, initialBounds
               {lead.phone && <div className="mt-1 flex items-center gap-2 text-xs"><a href={`tel:${lead.phone.replace(/[^+\d]/g, "")}`} className="text-blue-700">{lead.phone}</a><button aria-label={`Copy phone for ${lead.name || lead.phone}`} onClick={() => void copy(lead.phone!, "Phone")} className="text-[10px] text-sand-500">Copy</button></div>}
             </td>
             <td className="px-3 py-3"><div className="break-words text-xs text-sand-700">{isOpenLead(lead) ? lead.next_action || (hasUnansweredReply(lead) ? "Reply to prospect" : lead.call_status === "not_called" ? "Make first contact" : "Set the next action") : "Closed"}</div><div className={`mt-1 text-xs ${isFollowUpDue(lead, now) ? "font-medium text-amber-700" : "text-sand-500"}`}>{isOpenLead(lead) ? lead.next_follow_up_at ? `${isFollowUpDue(lead, now) ? "Due: " : "Follow up: "}${formatDateTime(lead.next_follow_up_at)}` : "No follow-up scheduled" : ""}</div><div className="mt-1 break-words text-xs text-sand-500">{lead.assigned_to || "Unassigned"}</div><button onClick={() => setSelectedLeadId(lead.id)} className="mt-1 text-xs text-blue-700">Assign / schedule</button></td>
-            <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : CALL_STATUS_LABELS[lead.call_status]}</span>{lead.last_call_at && <div className="mt-1 text-xs text-sand-600">{formatDateTime(lead.last_call_at)}<div className="break-words text-sand-400">{lead.last_called_by || "Staff not recorded"}</div></div>}<details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
+            <td className="px-3 py-3"><span className={`inline-block rounded-full border px-2 py-0.5 text-xs ${CALL_BADGE[lead.call_status]}`}>{needsPhone(lead) ? "No phone" : callStatusLabel(lead)}</span><LeadCallAttribution lead={lead} /><details className="mt-2 text-[10px] text-sand-500"><summary className="cursor-pointer">First response times</summary><div className="mt-1"><LeadResponseSummary lead={lead} /></div></details></td>
             <td className="px-3 py-3">{lead.quote_number ? <><span className="font-medium">{lead.quote_number}</span>{lead.quote_amount != null && <div className="text-xs text-sand-600">{formatCADWhole(Number(lead.quote_amount))}</div>}<div className="mt-1 text-[11px] text-sand-500">{lead.quote_sent_at ? `Sent ${formatDateTime(lead.quote_sent_at)}` : "Send date not recorded"}</div></> : <span className="text-xs text-sand-400">No quote recorded</span>}</td>
             <td className="px-3 py-3"><span className={`inline-block rounded-full px-2 py-0.5 text-xs ${OUTCOME_BADGE[lead.outcome]}`}>{OUTCOME_LABELS[lead.outcome] || "New"}</span></td>
           </tr>)}</tbody></table>{count < visible.length && <LoadMoreRows shown={count} total={visible.length} onLoadMore={showMore} />}

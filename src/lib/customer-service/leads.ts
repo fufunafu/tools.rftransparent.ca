@@ -59,6 +59,9 @@ export interface Lead {
   raw_payload: Record<string, unknown>;
   submitted_at: string;
   call_status: CallStatus;
+  call_status_source?: "manual" | "phone_sync" | "system" | null;
+  call_status_changed_by?: string | null;
+  call_status_changed_at?: string | null;
   outcome: Outcome;
   quote_number: string | null;
   quote_amount: string | number | null;

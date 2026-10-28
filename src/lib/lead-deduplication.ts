@@ -170,6 +170,10 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
     ? callGroup.find((lead) => lead.last_call_at === latestCallAt)
     : undefined;
 
+  const mergedCallStatus = bestCallStatus(callGroup);
+  const statusLead = callGroup.filter(lead => lead.call_status === mergedCallStatus)
+    .sort((a, b) => (Date.parse(b.call_status_changed_at ?? "") || 0) - (Date.parse(a.call_status_changed_at ?? "") || 0))[0];
+
   return {
     ...canonical,
     source: workflowChronological[0].source,
@@ -187,7 +191,10 @@ function mergeGroup(group: Lead[]): ConsolidatedLead {
         ? false
         : null,
     submitted_at: workflowChronological[0].submitted_at,
-    call_status: bestCallStatus(callGroup),
+    call_status: mergedCallStatus,
+    call_status_source: statusLead?.call_status_source ?? null,
+    call_status_changed_by: statusLead?.call_status_changed_by ?? null,
+    call_status_changed_at: statusLead?.call_status_changed_at ?? null,
     outcome: bestOutcome(workflowGroup),
     quote_number: quoteLead?.quote_number ?? canonical.quote_number,
     quote_draft_id: quoteLead?.quote_draft_id ?? canonical.quote_draft_id,
