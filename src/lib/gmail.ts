@@ -370,3 +370,105 @@ export async function readGmailConversation(inbox: GmailInbox, messageId: string
       automatic:Boolean(header('Auto-Submitted') && header('Auto-Submitted').toLowerCase()!=='no') || /^(bulk|list|junk)$/i.test(header('Precedence'))};
   });
 }
+
+export interface GmailMessageWithBody {
+  id: string;
+  threadId: string;
+  from: string;
+  subject: string;
+  receivedAt: string; // ISO timestamp
+  body: string; // Plain text; HTML-only messages are converted to text.
+}
+
+type GmailPart = {
+  mimeType?: string;
+  body?: { data?: string };
+  parts?: GmailPart[];
+  headers?: { name: string; value: string }[];
+};
+
+function partText(part: GmailPart, mimeType: "text/plain" | "text/html"): string {
+  if (part.mimeType === mimeType && part.body?.data) {
+    return Buffer.from(part.body.data, "base64url").toString("utf8");
+  }
+  for (const child of part.parts ?? []) {
+    const text = partText(child, mimeType);
+    if (text) return text;
+  }
+  return "";
+}
+
+function htmlToText(html: string): string {
+  return html
+    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>|<\/(p|div|tr|li|h\d)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * List messages matching a query with their plain-text bodies, oldest first.
+ * Includes every inbox tab (Gmail search covers Social and Promotions) but
+ * never spam or trash.
+ */
+export async function readGmailMessages(
+  inbox: GmailInbox,
+  query: string,
+  maxResults = 100,
+): Promise<GmailMessageWithBody[]> {
+  const accessToken = await getAccessToken(await getRefreshToken(inbox));
+  if ((await getGmailProfileEmail(accessToken)).toLowerCase() !== inbox.email.toLowerCase()) {
+    throw new Error("Gmail account mismatch");
+  }
+  const headers = { Authorization: `Bearer ${accessToken}` };
+
+  const messageIds: { id: string }[] = [];
+  let pageToken: string | undefined;
+  while (messageIds.length < maxResults) {
+    const params = new URLSearchParams({
+      q: query,
+      maxResults: String(Math.min(maxResults - messageIds.length, 100)),
+    });
+    if (pageToken) params.set("pageToken", pageToken);
+    const res = await fetch(`${GMAIL_API}/messages?${params}`, { headers, cache: "no-store" });
+    if (!res.ok) {
+      const body = await res.text();
+      throw new Error(`Gmail list failed: ${res.status} ${body}`);
+    }
+    const data = await res.json();
+    if (data.messages) messageIds.push(...data.messages);
+    pageToken = data.nextPageToken;
+    if (!pageToken) break;
+  }
+
+  const messages: GmailMessageWithBody[] = [];
+  for (let i = 0; i < messageIds.length; i += 10) {
+    const batch = messageIds.slice(i, i + 10);
+    const results = await Promise.all(
+      batch.map(async ({ id }) => {
+        const res = await fetch(`${GMAIL_API}/messages/${id}?format=full`, { headers, cache: "no-store" });
+        if (!res.ok) throw new Error(`Gmail message read failed: ${res.status}`);
+        const msg: { id: string; threadId: string; internalDate: string; payload: GmailPart } = await res.json();
+        const getHeader = (name: string) =>
+          msg.payload.headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? "";
+        const plain = partText(msg.payload, "text/plain");
+        return {
+          id: msg.id,
+          threadId: msg.threadId,
+          from: getHeader("From"),
+          subject: getHeader("Subject"),
+          receivedAt: new Date(Number(msg.internalDate)).toISOString(),
+          body: (plain || htmlToText(partText(msg.payload, "text/html"))).slice(0, 20000),
+        };
+      }),
+    );
+    messages.push(...results);
+  }
+
+  return messages.sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+}
