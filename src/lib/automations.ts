@@ -135,6 +135,18 @@ export const AUTOMATION_JOBS: AutomationJob[] = [
     scheduleDetail: "Scheduler starts at 12:00 UTC",
   },
   {
+    slug: "ingest-email-leads",
+    label: "Email form leads",
+    description: "Adds Shopify contact form submissions (glass-railings.com, Glass Fence Direct, GRS) and Judge.me product questions from info@glassrailingstore.com to the Leads page.",
+    kind: "sync",
+    result: "New website leads and new-lead alerts to info@glass-railing.com",
+    staleAfterHours: 2,
+    cron: "*/15 * * * *",
+    schedule: "Every 15 minutes",
+    scheduleDetail: "Reads the last 3 days of form notifications; already imported emails are skipped",
+    sendsEmail: "New-lead alerts to info@glass-railing.com",
+  },
+  {
     slug: "sync-pipeline",
     label: "Shopify pipeline mirror",
     description: "Incrementally copies changed Shopify orders and quotes into RF Tools.",
