@@ -27,9 +27,13 @@ export default function LibraryFrame() {
   const frame = useRef<HTMLIFrameElement>(null);
   /* The src it is born with, and only that. Feeding the current slug back into
      `src` on every render is what made moving between the library's pages load
-     the whole file again. */
-  const born = useRef<string | null>(null);
-  if (born.current === null) born.current = librarySrc(slug);
+     the whole file again.
+
+     useRef's argument is read on the first render and ignored afterwards,
+     which is exactly the behaviour wanted here. Written this way rather than
+     as a null ref filled in during the render: a ref must not be written to
+     while rendering, and `string | null` is not what an iframe's src accepts. */
+  const born = useRef(librarySrc(slug));
   const loaded = useRef(false);
   const waiting = useRef<string | null>(null);
 
@@ -45,4 +49,50 @@ export default function LibraryFrame() {
      the library already listens for it: hashchange runs its router.
 
      `replace` rather than assigning to `hash`, so the Back button still leaves
-     the
+     the library instead of walking backwards through the pages inside it while
+     the rail on the left goes on claiming you are somewhere else. */
+  const show = useCallback((want: string) => {
+    const win = frame.current?.contentWindow;
+    if (!win || !loaded.current) {
+      waiting.current = want;
+      return;
+    }
+    try {
+      const at = win.location;
+      if ((at.hash || "") === want) return;
+      at.replace(at.pathname + at.search + want);
+    } catch {
+      // Not ready to be spoken to yet. The load handler tries again.
+      waiting.current = want;
+    }
+  }, []);
+
+  useEffect(() => {
+    show(libraryHash(slug));
+  }, [slug, show]);
+
+  const onLoad = useCallback(() => {
+    loaded.current = true;
+    const want = waiting.current;
+    waiting.current = null;
+    if (want !== null) show(want);
+  }, [show]);
+
+  return (
+    // The negative margins cancel the padding the shell puts around every page.
+    // A framed application supplies its own margins; left inside the shell's,
+    // it would sit in a box with two sets of white space around it.
+    <div className="-mx-4 -mt-4 -mb-28 md:-m-8">
+      <iframe
+        ref={frame}
+        src={born.current}
+        onLoad={onLoad}
+        title="Image Library"
+        // Same-origin, so this is the default allowlist rather than a widening
+        // of it: named because the copy buttons inside depend on it.
+        allow="clipboard-write; clipboard-read"
+        className="block w-full border-0 h-[calc(100dvh-3.5rem)] md:h-dvh"
+      />
+    </div>
+  );
+}
