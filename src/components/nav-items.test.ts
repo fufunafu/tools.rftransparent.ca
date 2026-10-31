@@ -9,7 +9,7 @@ import {
   type NavItem,
   type ViewerAccess,
 } from "@/components/nav-items";
-import { LIBRARY_PAGES, librarySrc } from "@/lib/library-pages";
+import { LIBRARY_PAGES, libraryHash, librarySrc } from "@/lib/library-pages";
 
 function visibleItems(viewer: ViewerAccess): NavItem[] {
   return [...NAV_ITEMS, SETTINGS_ITEM]
@@ -133,6 +133,19 @@ describe("the framed image library", () => {
     // lands there rather than on a blank page.
     expect(librarySrc("photos")).toBe("/library.html?chrome=off");
     expect(librarySrc("nonsense")).toBe("/library.html?chrome=off");
+  });
+
+  // Moving between the library's pages is a fragment inside a file that is
+  // already loaded, not a new iframe. An empty string would leave the fragment
+  // that is already there, so the photo library has to be asked for by name.
+  it("names every page as a fragment, the photo library included", () => {
+    expect(libraryHash("shows")).toBe("#/trade-shows");
+    expect(libraryHash("vault")).toBe("#/passwords");
+    expect(libraryHash("photos")).toBe("#/");
+    expect(libraryHash("nonsense")).toBe("#/");
+    for (const slug of Object.keys(LIBRARY_PAGES)) {
+      expect(libraryHash(slug), slug).toMatch(/^#\//);
+    }
   });
 
   it("captions the clusters without turning one into a destination", () => {

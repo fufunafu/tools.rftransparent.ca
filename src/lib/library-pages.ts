@@ -41,3 +41,14 @@ export function librarySrc(slug: string): string {
   // part of the fragment and chrome=off is never read.
   return `/library.html?chrome=off${page ? `#/${page}` : ""}`;
 }
+
+/** The address inside the already-loaded file, for moving between its pages
+ *  without reloading it.
+ *
+ *  "#/" rather than "" for the photo library: an empty string leaves whatever
+ *  fragment is already there, so the move would not happen at all. The library
+ *  reads "#/" as home and tidies the address itself. */
+export function libraryHash(slug: string): string {
+  const page = LIBRARY_PAGES[slug] ?? "";
+  return page ? `#/${page}` : "#/";
+}
