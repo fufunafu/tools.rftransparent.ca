@@ -1,7 +1,8 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
-import { librarySrc } from "@/lib/library-pages";
+import { libraryHash, librarySrc } from "@/lib/library-pages";
 
 /* The library is a separate application: one static file in public/, with its
    own state, its own storage and its own sign-in. It is not going to become a
@@ -22,22 +23,26 @@ import { librarySrc } from "@/lib/library-pages";
 
 export default function LibraryFrame() {
   const pathname = usePathname();
-  const src = librarySrc(pathname.split("/")[2] ?? "");
+  const slug = pathname.split("/")[2] ?? "";
+  const frame = useRef<HTMLIFrameElement>(null);
+  /* The src it is born with, and only that. Feeding the current slug back into
+     `src` on every render is what made moving between the library's pages load
+     the whole file again. */
+  const born = useRef<string | null>(null);
+  if (born.current === null) born.current = librarySrc(slug);
+  const loaded = useRef(false);
+  const waiting = useRef<string | null>(null);
 
-  return (
-    // The negative margins cancel the padding the shell puts around every page.
-    // A framed application supplies its own margins; left inside the shell's,
-    // it would sit in a box with two sets of white space around it.
-    <div className="-mx-4 -mt-4 -mb-28 md:-m-8">
-      <iframe
-        key={src}
-        src={src}
-        title="Image Library"
-        // Same-origin, so this is the default allowlist rather than a widening
-        // of it: named because the copy buttons inside depend on it.
-        allow="clipboard-write; clipboard-read"
-        className="block w-full border-0 h-[calc(100dvh-3.5rem)] md:h-dvh"
-      />
-    </div>
-  );
-}
+  /* Moving between the library's pages is a fragment, not a new document.
+
+     It used to be `key={src}`: every move threw the iframe away and fetched two
+     megabytes again, and since the file draws the photo library before it reads
+     the address, you watched the photo library for a second or two on the way
+     to the page you had asked for. None of that was visible from this
+     component, which is why it lasted as long as it did.
+
+     A fragment move keeps the page, its session and its scroll position, and
+     the library already listens for it: hashchange runs its router.
+
+     `replace` rather than assigning to `hash`, so the Back button still leaves
+     the
